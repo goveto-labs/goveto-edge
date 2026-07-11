@@ -10,6 +10,8 @@ import (
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 	_ "github.com/darkweak/souin/plugins/caddy"
 
+	_ "goveto-edge/caddy/cacheheaders"
+	_ "goveto-edge/caddy/cachematch"
 	"goveto-edge/internal/edgeagent"
 )
 

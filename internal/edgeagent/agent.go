@@ -46,6 +46,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	agentlog.SetSink(agentLogSink{queue: a.logs})
 	a.configs.SetAgentHost(identity.NodeID)
+	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
+		return fmt.Errorf("apply node cache config: %w", err)
+	}
 	auth := newAuthenticator(identity, filepath.Join(a.dataDir, "nonces.json"))
 	setAgentHTTPHandler(newAgentServer(identity, a.configs, a.nodeConfigs, a.logs, auth))
 	if err := a.configs.Restore(); err != nil {

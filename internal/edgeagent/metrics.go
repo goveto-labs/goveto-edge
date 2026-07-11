@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
+
+	"goveto-edge/internal/edgeprotocol"
 
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
@@ -14,12 +17,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
-type NodeConfig struct {
-	CacheDirectory      string `json:"cache_directory"`
-	AutoMaxSize         bool   `json:"auto_max_size"`
-	MaxSizeBytes        uint64 `json:"max_size_bytes"`
-	MaxDiskUsagePercent int    `json:"max_disk_usage_percent"`
-}
+type NodeConfig = edgeprotocol.NodeCacheConfig
 
 type NodeConfigStore struct {
 	mu    sync.RWMutex
@@ -72,7 +70,54 @@ func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigSto
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			appendMetrics(queue, configs.Get())
+			config := configs.Get()
+			trimCache(config)
+			appendMetrics(queue, config)
+		}
+	}
+}
+
+func cacheLimit(config NodeConfig) uint64 {
+	if !config.AutoMaxSize {
+		return config.MaxSizeBytes
+	}
+	usage, err := disk.Usage(config.CacheDirectory)
+	if err != nil || usage == nil {
+		return 0
+	}
+	return usage.Total * uint64(config.MaxDiskUsagePercent) / 100
+}
+
+func trimCache(config NodeConfig) {
+	limit := cacheLimit(config)
+	if limit == 0 {
+		return
+	}
+	type cacheFile struct {
+		path     string
+		size     int64
+		modified time.Time
+	}
+	files := make([]cacheFile, 0)
+	var total uint64
+	_ = filepath.Walk(config.CacheDirectory, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info == nil || !info.Mode().IsRegular() {
+			return nil
+		}
+		total += uint64(info.Size())
+		files = append(files, cacheFile{path: path, size: info.Size(), modified: info.ModTime()})
+		return nil
+	})
+	if total <= limit {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) })
+	for _, file := range files {
+		if total <= limit {
+			break
+		}
+		if os.Remove(file.path) == nil {
+			total -= uint64(file.size)
 		}
 	}
 }

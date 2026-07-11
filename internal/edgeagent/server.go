@@ -105,6 +105,10 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			writeError(w, http.StatusInternalServerError, "persist node config")
 			return
 		}
+		if err := configs.SetNodeConfig(nodeConfigs.Get()); err != nil {
+			writeError(w, http.StatusInternalServerError, "apply node cache config")
+			return
+		}
 		writeJSON(w, http.StatusOK, nodeConfigs.Get())
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
@@ -113,6 +117,7 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			"status":         "ok",
 			"config_version": configs.ConfigVersion(),
 			"site_versions":  configs.SiteVersions(),
+			"cache_config":   nodeConfigs.Get(),
 		})
 	})
 	return auth.wrap(mux)

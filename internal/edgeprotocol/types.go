@@ -49,6 +49,13 @@ type OriginConfig struct {
 	Weight     int    `json:"weight,omitempty"`
 }
 
+type NodeCacheConfig struct {
+	CacheDirectory      string `json:"cache_directory"`
+	AutoMaxSize         bool   `json:"auto_max_size"`
+	MaxSizeBytes        uint64 `json:"max_size_bytes"`
+	MaxDiskUsagePercent int    `json:"max_disk_usage_percent"`
+}
+
 func (c SiteConfig) Validate() error {
 	if c.Disabled {
 		if c.SiteID == "" || c.Version == 0 {

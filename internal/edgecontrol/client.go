@@ -75,6 +75,26 @@ func (c *Client) PurgeSite(ctx context.Context, purge edgeprotocol.PurgeRequest)
 	return nil
 }
 
+func (c *Client) PushNodeCacheConfig(ctx context.Context, config edgeprotocol.NodeCacheConfig) error {
+	body, err := json.Marshal(config)
+	if err != nil {
+		return err
+	}
+	request, err := c.request(ctx, http.MethodPut, "/v1/node/config", body)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("agent rejected node cache config: %s", response.Status)
+	}
+	return nil
+}
+
 // PullLogs continuously long-polls the agent. Records are acknowledged only
 // after consume returns successfully, so transient control-plane failures do
 // not lose data.

@@ -54,7 +54,7 @@ func main() {
 	go purgeService.Run(ctx)
 	installQueue := node.NewInstallQueue(redisClient, 0)
 	go node.NewInstallWorker(orm, installQueue).Run(ctx)
-	go node.NewLifecycle(orm, 45*time.Second).Run(ctx)
+	go node.NewLifecycle(orm, credentialCipher, 45*time.Second).Run(ctx)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),

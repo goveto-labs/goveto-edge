@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"reflect"
 	"time"
 
+	"goveto-edge/internal/edgecontrol"
+	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/query"
 )
 
 type Lifecycle struct {
 	db           *client.Client
 	offlineAfter time.Duration
 	http         *http.Client
+	cipher       *CredentialCipher
 }
 
 type healthTarget struct {
@@ -21,8 +26,8 @@ type healthTarget struct {
 	Address string `json:"address"`
 }
 
-func NewLifecycle(db *client.Client, offlineAfter time.Duration) *Lifecycle {
-	return &Lifecycle{db: db, offlineAfter: offlineAfter, http: &http.Client{Timeout: 5 * time.Second}}
+func NewLifecycle(db *client.Client, cipher *CredentialCipher, offlineAfter time.Duration) *Lifecycle {
+	return &Lifecycle{db: db, cipher: cipher, offlineAfter: offlineAfter, http: &http.Client{Timeout: 5 * time.Second}}
 }
 func (l *Lifecycle) Run(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
@@ -55,7 +60,8 @@ func (l *Lifecycle) poll(ctx context.Context) {
 			continue
 		}
 		var health struct {
-			NodeID string `json:"node_id"`
+			NodeID      string                       `json:"node_id"`
+			CacheConfig edgeprotocol.NodeCacheConfig `json:"cache_config"`
 		}
 		decodeErr := json.NewDecoder(response.Body).Decode(&health)
 		response.Body.Close()
@@ -63,8 +69,32 @@ func (l *Lifecycle) poll(ctx context.Context) {
 			continue
 		}
 		_, _ = l.db.RawExec(ctx, `UPDATE nodes SET status = 'ONLINE', heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`, target.NodeID)
+		l.reconcileCacheConfig(ctx, target, health.CacheConfig)
 	}
 	l.markOffline(ctx)
+}
+
+func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarget, current edgeprotocol.NodeCacheConfig) {
+	stored, err := l.db.NodeCacheConfig.FindUnique(ctx, query.NodeCacheConfig.NodeId.Equals(target.NodeID))
+	if err != nil {
+		return
+	}
+	desired := edgeprotocol.NodeCacheConfig{CacheDirectory: stored.CacheDir, AutoMaxSize: stored.AutoMaxSize, MaxDiskUsagePercent: stored.MaxDiskUsagePercent}
+	if stored.MaxSizeBytes != nil {
+		desired.MaxSizeBytes = uint64(*stored.MaxSizeBytes)
+	}
+	if reflect.DeepEqual(current, desired) {
+		return
+	}
+	credential, err := l.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(target.NodeID))
+	if err != nil {
+		return
+	}
+	key, err := l.cipher.Decrypt(credential.CommunicationKeyEncrypted)
+	if err != nil {
+		return
+	}
+	_ = edgecontrol.New("http://"+net.JoinHostPort(target.Address, "80"), target.NodeID, key).PushNodeCacheConfig(ctx, desired)
 }
 func (l *Lifecycle) markOffline(ctx context.Context) {
 	_, _ = l.db.RawExec(ctx, `UPDATE nodes SET status = 'OFFLINE', updated_at = NOW()

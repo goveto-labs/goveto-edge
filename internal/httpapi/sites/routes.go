@@ -37,6 +37,8 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 }
 
 func create(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	cachepolicy "goveto-edge/internal/policy"
+
 	"goveto-edge/caddy/agentlog"
 )
 
@@ -117,7 +119,7 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Scheduler = "ip_hash"
 	config.Origins[0].HostHeader = "origin.internal"
-	config.Cache = map[string]any{"ttl": "60s"}
+	config.Cache = enabledCachePolicy(t)
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "550e8400-e29b-41d4-a716-446655440000")
 	if err != nil {
 		t.Fatal(err)
@@ -226,7 +228,7 @@ func TestMixedOriginProtocolsRejected(t *testing.T) {
 
 func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
 	config := validHTTPConfig(t)
-	config.Cache = map[string]any{"ttl": "1m"}
+	config.Cache = enabledCachePolicy(t)
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
 	if err != nil {
 		t.Fatal(err)
@@ -259,6 +261,21 @@ func validHTTPConfig(t *testing.T) SiteConfig {
 		},
 		Origins: []OriginConfig{{Protocol: "http", Address: "origin:80"}},
 	}
+}
+
+func enabledCachePolicy(t *testing.T) map[string]any {
+	t.Helper()
+	policy := cachepolicy.DefaultCachePolicy()
+	policy.Enabled = true
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err = json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
 }
 
 func validHTTPSConfig(t *testing.T) SiteConfig {
