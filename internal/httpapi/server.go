@@ -36,7 +36,7 @@ func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *au
 	certificates.Register(e, orm)
 	nodes.Register(e, orm, installQueue, credentialCipher)
 	publishapi.Register(e, orm, publishService)
-	sites.Register(e, orm)
+	sites.Register(e, orm, publishService)
 
 	return e
 }

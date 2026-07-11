@@ -14,6 +14,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -32,13 +33,13 @@ type createRequest struct {
 	Origins        []originInput `json:"origins"`
 }
 
-func Register(e *echo.Echo, db *client.Client) {
-	e.POST("/api/v1/clusters/:cluster_id/sites", create(db), auth.RequireAuth, clusteraccess.Require(db))
+func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service) {
+	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 }
 
-func create(db *client.Client) echo.HandlerFunc {
+func create(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input createRequest
 		if err := c.Bind(&input); err != nil {
@@ -105,7 +106,13 @@ func create(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, map[string]any{"id": siteID, "name": input.Name, "status": model.SiteStatusACTIVE})
+		response := map[string]any{"id": siteID, "name": input.Name, "status": model.SiteStatusACTIVE}
+		if job, publishErr := publishService.Enqueue(ctx, siteID); publishErr == nil {
+			response["publish_job"] = job
+		} else {
+			response["publish_error"] = publishErr.Error()
+		}
+		return c.JSON(http.StatusCreated, response)
 	}
 }
 

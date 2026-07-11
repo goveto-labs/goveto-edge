@@ -27,8 +27,6 @@ type Service struct {
 	concurrency int
 }
 
-var ErrPublishInProgress = errors.New("site already has an active publish job")
-
 func New(db *client.Client, cipher *node.CredentialCipher) *Service {
 	return &Service{db: db, cipher: cipher, concurrency: 8}
 }
@@ -40,16 +38,17 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 		if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", siteID); err != nil {
 			return err
 		}
-		if count, err := tx.PublishJob.Count(ctx, query.PublishJob.SiteId.Equals(siteID), query.PublishJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING)); err != nil {
-			return err
-		} else if count > 0 {
-			return ErrPublishInProgress
-		}
 		site, err := tx.Site.FindUnique(ctx, query.Site.Id.Equals(siteID))
 		if err != nil {
 			return err
 		}
+		pending, pendingErr := tx.PublishJob.Query().Where(query.PublishJob.SiteId.Equals(siteID), query.PublishJob.Status.Equals(model.JobStatusPENDING)).OrderBy(query.PublishJob.CreatedAt.Desc()).First(ctx)
 		version := site.Version + 1
+		if pendingErr == nil {
+			version = pending.Version
+		} else if latest, latestErr := tx.ConfigVersion.Query().Where(query.ConfigVersion.SiteId.Equals(siteID)).OrderBy(query.ConfigVersion.Version.Desc()).First(ctx); latestErr == nil && latest.Version >= version {
+			version = latest.Version + 1
+		}
 		config, targets, err := s.buildWith(tx, ctx, site, uint64(version))
 		if err != nil {
 			return err
@@ -63,6 +62,13 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 			return err
 		}
 		hash := sha256.Sum256(configJSON)
+		if pendingErr == nil {
+			if _, err = tx.ConfigVersion.Update().Where(query.ConfigVersion.SiteId.Equals(siteID), query.ConfigVersion.Version.Equals(version), query.ConfigVersion.Status.Equals(model.ConfigStatusDRAFT)).Set(query.ConfigVersion.ConfigJson.Set(configJSON), query.ConfigVersion.Hash.Set(hex.EncodeToString(hash[:]))).DoMany(ctx); err != nil {
+				return err
+			}
+			job, err = tx.PublishJob.Update().Where(query.PublishJob.Id.Equals(pending.Id), query.PublishJob.Status.Equals(model.JobStatusPENDING)).Set(query.PublishJob.Targets.Set(targetJSON)).Do(ctx)
+			return err
+		}
 		if _, err = tx.ConfigVersion.Create().Set(query.ConfigVersion.SiteId.Set(siteID), query.ConfigVersion.Version.Set(version), query.ConfigVersion.ConfigJson.Set(configJSON), query.ConfigVersion.Hash.Set(hex.EncodeToString(hash[:])), query.ConfigVersion.Status.Set(model.ConfigStatusDRAFT)).Do(ctx); err != nil {
 			return err
 		}

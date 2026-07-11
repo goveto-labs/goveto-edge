@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -40,7 +41,7 @@ func getListener(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func updateListener(db *client.Client) echo.HandlerFunc {
+func updateListener(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
@@ -116,7 +117,13 @@ func updateListener(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, updated)
+		response := map[string]any{"listener": updated}
+		if job, publishErr := publishService.Enqueue(c.Request().Context(), c.Param("site_id")); publishErr == nil {
+			response["publish_job"] = job
+		} else {
+			response["publish_error"] = publishErr.Error()
+		}
+		return c.JSON(http.StatusOK, response)
 	}
 }
 
