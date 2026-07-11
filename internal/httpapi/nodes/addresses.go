@@ -1,12 +1,13 @@
 package nodes
 
 import (
-	"github.com/labstack/echo/v5"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 	"net"
 	"net/http"
 	"strings"
+
+	"github.com/labstack/echo/v5"
 )
 
 type addAddressRequest struct {

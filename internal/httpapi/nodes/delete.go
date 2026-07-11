@@ -1,11 +1,12 @@
 package nodes
 
 import (
-	"github.com/labstack/echo/v5"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 	"net/http"
+
+	"github.com/labstack/echo/v5"
 )
 
 func deleteNode(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc {
