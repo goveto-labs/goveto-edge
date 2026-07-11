@@ -38,7 +38,6 @@ type UserQuery struct {
 	Role         userRoleField
 	Status       userStatusField
 	TotpSecret   userTotpSecretField
-	TotpEnabled  userTotpEnabledField
 	LastLoginAt  userLastLoginAtField
 	CreatedAt    userCreatedAtField
 	UpdatedAt    userUpdatedAtField
@@ -54,7 +53,6 @@ const UserNameColumn = "name"
 const UserRoleColumn = "role"
 const UserStatusColumn = "status"
 const UserTotpSecretColumn = "totp_secret"
-const UserTotpEnabledColumn = "totp_enabled"
 const UserLastLoginAtColumn = "last_login_at"
 const UserCreatedAtColumn = "created_at"
 const UserUpdatedAtColumn = "updated_at"
@@ -68,7 +66,6 @@ var User = UserQuery{
 	Role:         userRoleField{},
 	Status:       userStatusField{},
 	TotpSecret:   userTotpSecretField{},
-	TotpEnabled:  userTotpEnabledField{},
 	LastLoginAt:  userLastLoginAtField{},
 	CreatedAt:    userCreatedAtField{},
 	UpdatedAt:    userUpdatedAtField{},
@@ -572,52 +569,6 @@ func (userTotpSecretField) Desc() UserOrderByClause {
 	return UserOrderByClause{Field: "totp_secret", Direction: "DESC"}
 }
 
-// TotpEnabledField provides query operations for the totpEnabled field.
-type userTotpEnabledField struct{}
-
-// Equals creates an equality condition.
-func (userTotpEnabledField) Equals(v bool) UserWhereClause {
-	return UserWhereClause{Field: "totp_enabled", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (userTotpEnabledField) Not(v bool) UserWhereClause {
-	return UserWhereClause{Field: "totp_enabled", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (userTotpEnabledField) In(vals ...bool) UserWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return UserWhereClause{Field: "totp_enabled", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (userTotpEnabledField) NotIn(vals ...bool) UserWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return UserWhereClause{Field: "totp_enabled", Operator: "NOT IN", Value: iVals}
-}
-
-// Set creates a set operation for create/update.
-func (userTotpEnabledField) Set(v bool) UserSetClause {
-	return UserSetClause{Field: "totp_enabled", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (userTotpEnabledField) Asc() UserOrderByClause {
-	return UserOrderByClause{Field: "totp_enabled", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (userTotpEnabledField) Desc() UserOrderByClause {
-	return UserOrderByClause{Field: "totp_enabled", Direction: "DESC"}
-}
-
 // LastLoginAtField provides query operations for the lastLoginAt field.
 type userLastLoginAtField struct{}
 
@@ -882,7 +833,6 @@ type UserCreateInput struct {
 	Role         model.UserRole
 	Status       model.UserStatus
 	TotpSecret   **string
-	TotpEnabled  bool
 	LastLoginAt  **time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
@@ -892,7 +842,7 @@ type UserCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d UserCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecret, d.TotpEnabled, d.LastLoginAt, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecret, d.LastLoginAt, d.CreatedAt, d.UpdatedAt}
 }
 
 // UserCreateNestedInput supports nested creates and connects.

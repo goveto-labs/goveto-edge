@@ -224,7 +224,6 @@ query.PostAuthorIdColumn
   - `Role` ()
   - `Status` ()
   - `Totpsecret` (String, optional)
-  - `Totpenabled` (Boolean)
   - `Lastloginat` (DateTime, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)

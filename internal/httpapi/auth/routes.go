@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+	"github.com/pquerna/otp/totp"
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/password"
@@ -20,6 +21,7 @@ import (
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Code     string `json:"code"`
 }
 
 type userResponse struct {
@@ -58,6 +60,14 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		}
 		if user.Status != model.UserStatusACTIVE || !password.Verify(user.PasswordHash, input.Password) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
+		}
+		if user.TotpSecret != nil && strings.TrimSpace(*user.TotpSecret) != "" {
+			if input.Code == "" {
+				return echo.NewHTTPError(http.StatusUnauthorized, "totp code is required")
+			}
+			if !totp.Validate(strings.TrimSpace(input.Code), strings.TrimSpace(*user.TotpSecret)) {
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid totp code")
+			}
 		}
 
 		token, err := sessions.Create(c.Request().Context(), user.Id)

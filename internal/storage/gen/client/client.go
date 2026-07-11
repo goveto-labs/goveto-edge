@@ -8212,14 +8212,14 @@ func (b UserCreateManyBuilder) DoReturning(ctx context.Context) ([]model.User, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"})
+		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("User.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.User
-			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("User.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -8246,7 +8246,7 @@ func (b UserCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"}
+		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -8455,7 +8455,7 @@ func (b UserDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple User records.
 func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption) ([]model.User, error) {
 	cfg := query.ApplyUserOptions(opts)
-	q := "SELECT id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at FROM users"
 	argIdx := 0
 	where, args := buildUserWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -8482,7 +8482,7 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 	var results []model.User
 	for rows.Next() {
 		var item model.User
-		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -8507,14 +8507,14 @@ func (a UserActions) FindFirst(ctx context.Context, opts ...query.UserQueryOptio
 func (a UserActions) FindUnique(ctx context.Context, where query.UserWhereClause) (*model.User, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, []query.UserWhereClause{where}, &argIdx)
-	q := "SELECT id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at FROM users"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.User
-	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -8539,10 +8539,10 @@ func (a UserActions) CreateOne(ctx context.Context, sets ...query.UserSetClause)
 	q := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -8561,7 +8561,7 @@ func (a UserActions) CreateMany(ctx context.Context, data []query.UserCreateInpu
 }
 
 func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"}
+	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -8617,10 +8617,10 @@ func (a UserActions) UpdateOne(ctx context.Context, where query.UserWhereClause,
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -8703,10 +8703,10 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -8727,10 +8727,10 @@ func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause)
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

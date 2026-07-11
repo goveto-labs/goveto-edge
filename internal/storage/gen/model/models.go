@@ -130,7 +130,6 @@ type User struct {
 	Role         UserRole       `db:"role" json:"role"`
 	Status       UserStatus     `db:"status" json:"status"`
 	TotpSecret   *string        `db:"totp_secret" json:"totpSecret"`
-	TotpEnabled  bool           `db:"totp_enabled" json:"totpEnabled"`
 	LastLoginAt  *time.Time     `db:"last_login_at" json:"lastLoginAt"`
 	CreatedAt    time.Time      `db:"created_at" json:"createdAt"`
 	UpdatedAt    time.Time      `db:"updated_at" json:"updatedAt"`

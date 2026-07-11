@@ -206,7 +206,6 @@ model User {
   role         UserRole      @default(VIEWER)
   status       UserStatus    @default(ACTIVE)
   totpSecret   String?       @map("totp_secret")
-  totpEnabled  Boolean       @default(false) @map("totp_enabled")
   lastLoginAt  DateTime?     @map("last_login_at")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
