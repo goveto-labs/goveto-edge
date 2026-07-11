@@ -47,14 +47,17 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.Name = strings.TrimSpace(input.Name)
 		if input.Name == "" || len(input.Domains) == 0 || len(input.Origins) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "name, domains and origins are required")
 		}
+
 		domains, err := normalizeDomains(input.Domains)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+
 		for index := range input.Origins {
 			address, err := normalizeOrigin(input.Origins[index].Protocol, input.Origins[index].Address)
 			if err != nil {
@@ -65,6 +68,7 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				input.Origins[index].Weight = 1
 			}
 		}
+
 		ctx := c.Request().Context()
 		for _, certificateID := range input.CertificateIDs {
 			certificate, err := db.Certificate.FindUnique(ctx, query.Certificate.Id.Equals(certificateID))
@@ -72,34 +76,75 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				return echo.NewHTTPError(http.StatusBadRequest, "certificate does not belong to cluster")
 			}
 		}
+
 		siteID, poolID := uuid.NewString(), uuid.NewString()
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			emptyHeaders := json.RawMessage(`{}`)
-			if _, err := tx.OriginPool.Create().Set(query.OriginPool.Id.Set(poolID), query.OriginPool.ClusterId.Set(c.Param("cluster_id")), query.OriginPool.Name.Set(input.Name), query.OriginPool.Headers.Set(emptyHeaders)).Do(ctx); err != nil {
+			if _, err := tx.OriginPool.Create().
+				Set(
+					query.OriginPool.Id.Set(poolID),
+					query.OriginPool.ClusterId.Set(c.Param("cluster_id")),
+					query.OriginPool.Name.Set(input.Name),
+					query.OriginPool.Headers.Set(emptyHeaders),
+				).
+				Do(ctx); err != nil {
 				return err
 			}
+
 			for _, origin := range input.Origins {
-				sets := []query.OriginBackendSetClause{query.OriginBackend.OriginPoolId.Set(poolID), query.OriginBackend.Protocol.Set(origin.Protocol), query.OriginBackend.Address.Set(origin.Address), query.OriginBackend.Weight.Set(origin.Weight)}
+				sets := []query.OriginBackendSetClause{
+					query.OriginBackend.OriginPoolId.Set(poolID),
+					query.OriginBackend.Protocol.Set(origin.Protocol),
+					query.OriginBackend.Address.Set(origin.Address),
+					query.OriginBackend.Weight.Set(origin.Weight),
+				}
 				if strings.TrimSpace(origin.HostHeader) != "" {
-					sets = append(sets, query.OriginBackend.HostHeader.Set(strings.TrimSpace(origin.HostHeader)))
+					sets = append(sets, query.OriginBackend.HostHeader.Set(
+						strings.TrimSpace(origin.HostHeader),
+					))
 				}
 				if _, err := tx.OriginBackend.Create().Set(sets...).Do(ctx); err != nil {
 					return err
 				}
 			}
-			if _, err := tx.Site.Create().Set(query.Site.Id.Set(siteID), query.Site.ClusterId.Set(c.Param("cluster_id")), query.Site.CreatorId.Set(auth.CurrentUID(c)), query.Site.Name.Set(input.Name), query.Site.Status.Set(model.SiteStatusACTIVE), query.Site.OriginPoolId.Set(poolID)).Do(ctx); err != nil {
+
+			if _, err := tx.Site.Create().
+				Set(
+					query.Site.Id.Set(siteID),
+					query.Site.ClusterId.Set(c.Param("cluster_id")),
+					query.Site.CreatorId.Set(auth.CurrentUID(c)),
+					query.Site.Name.Set(input.Name),
+					query.Site.Status.Set(model.SiteStatusACTIVE),
+					query.Site.OriginPoolId.Set(poolID),
+				).
+				Do(ctx); err != nil {
 				return err
 			}
-			if _, err := tx.SiteListenerConfig.Create().Set(query.SiteListenerConfig.SiteId.Set(siteID)).Do(ctx); err != nil {
+
+			if _, err := tx.SiteListenerConfig.Create().
+				Set(query.SiteListenerConfig.SiteId.Set(siteID)).
+				Do(ctx); err != nil {
 				return err
 			}
+
 			for _, domain := range domains {
-				if _, err := tx.SiteDomain.Create().Set(query.SiteDomain.SiteId.Set(siteID), query.SiteDomain.Hostname.Set(domain)).Do(ctx); err != nil {
+				if _, err := tx.SiteDomain.Create().
+					Set(
+						query.SiteDomain.SiteId.Set(siteID),
+						query.SiteDomain.Hostname.Set(domain),
+					).
+					Do(ctx); err != nil {
 					return err
 				}
 			}
+
 			for _, certificateID := range input.CertificateIDs {
-				if _, err := tx.SiteCertificate.Create().Set(query.SiteCertificate.SiteId.Set(siteID), query.SiteCertificate.CertificateId.Set(certificateID)).Do(ctx); err != nil {
+				if _, err := tx.SiteCertificate.Create().
+					Set(
+						query.SiteCertificate.SiteId.Set(siteID),
+						query.SiteCertificate.CertificateId.Set(certificateID),
+					).
+					Do(ctx); err != nil {
 					return err
 				}
 			}
@@ -108,6 +153,7 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		if err != nil {
 			return err
 		}
+
 		response := map[string]any{"id": siteID, "name": input.Name, "status": model.SiteStatusACTIVE}
 		if job, publishErr := publishService.Enqueue(ctx, siteID); publishErr == nil {
 			response["publish_job"] = job
@@ -146,6 +192,7 @@ func normalizeOrigin(protocol model.OriginProtocol, value string) (string, error
 		}
 		return net.JoinHostPort(host, port), nil
 	}
+
 	port := "80"
 	if protocol == model.OriginProtocolHTTPS {
 		port = "443"
@@ -156,6 +203,7 @@ func normalizeOrigin(protocol model.OriginProtocol, value string) (string, error
 	if strings.Contains(value, ":") {
 		return "", fmt.Errorf("invalid origin address %q", value)
 	}
+
 	host, err := idna.Lookup.ToASCII(value)
 	if err != nil || host == "" {
 		return "", fmt.Errorf("invalid origin address %q", value)

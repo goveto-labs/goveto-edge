@@ -28,6 +28,7 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if !owner {
 			return echo.NewHTTPError(http.StatusForbidden, "only the cluster owner can add members")
 		}
+
 		var input addMemberRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -38,12 +39,23 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if input.Permission != model.ClusterPermissionOPERATOR {
 			return echo.NewHTTPError(http.StatusBadRequest, "only OPERATOR permission can be assigned")
 		}
-		if _, err := db.User.FindUnique(c.Request().Context(), query.User.Id.Equals(input.UserID)); errors.Is(err, sql.ErrNoRows) {
+
+		if _, err := db.User.FindUnique(
+			c.Request().Context(),
+			query.User.Id.Equals(input.UserID),
+		); errors.Is(err, sql.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusBadRequest, "user not found")
 		} else if err != nil {
 			return err
 		}
-		item, err := db.ClusterMember.Create().Set(query.ClusterMember.ClusterId.Set(c.Param("cluster_id")), query.ClusterMember.UserId.Set(input.UserID), query.ClusterMember.Permission.Set(input.Permission)).Do(c.Request().Context())
+
+		item, err := db.ClusterMember.Create().
+			Set(
+				query.ClusterMember.ClusterId.Set(c.Param("cluster_id")),
+				query.ClusterMember.UserId.Set(input.UserID),
+				query.ClusterMember.Permission.Set(input.Permission),
+			).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}

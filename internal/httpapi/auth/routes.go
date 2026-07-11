@@ -46,21 +46,26 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 		if input.Email == "" || input.Password == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "email and password are required")
 		}
 
-		user, err := db.User.Query().Where(query.User.Email.Equals(input.Email)).First(c.Request().Context())
+		user, err := db.User.Query().
+			Where(query.User.Email.Equals(input.Email)).
+			First(c.Request().Context())
 		if err != nil {
 			if errors.Is(err, sql.ErrNoRows) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
 			}
 			return err
 		}
+
 		if user.Status != model.UserStatusACTIVE || !password.Verify(user.PasswordHash, input.Password) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
 		}
+
 		if user.TotpSecret != nil && strings.TrimSpace(*user.TotpSecret) != "" {
 			if input.Code == "" {
 				return echo.NewHTTPError(http.StatusUnauthorized, "totp code is required")
@@ -74,8 +79,15 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "session storage unavailable")
 		}
+
 		sessions.SetCookie(c, token)
-		return c.JSON(http.StatusOK, userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status})
+		return c.JSON(http.StatusOK, userResponse{
+			ID:     user.Id,
+			Email:  user.Email,
+			Name:   user.Name,
+			Role:   user.Role,
+			Status: user.Status,
+		})
 	}
 }
 

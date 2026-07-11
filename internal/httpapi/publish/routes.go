@@ -52,6 +52,7 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	if err != nil {
 		return nil, err
 	}
+
 	count := clusterPublishCounts{}
 	if len(counts) != 0 {
 		count = counts[0]
@@ -64,10 +65,12 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	if err != nil {
 		return nil, err
 	}
+
 	recent := make([]map[string]any, 0, len(jobs))
 	for i := range jobs {
 		recent = append(recent, jobDetails(&jobs[i]))
 	}
+
 	active := count.Pending+count.Running > 0
 	state := "idle"
 	if count.Failed > 0 {
@@ -76,10 +79,15 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	if active {
 		state = "syncing"
 	}
+
 	return map[string]any{
-		"state": state, "has_active_tasks": active, "has_failed_tasks": count.Failed > 0,
-		"pending_count": count.Pending, "running_count": count.Running, "failed_count": count.Failed,
-		"recent_tasks": recent,
+		"state":            state,
+		"has_active_tasks": active,
+		"has_failed_tasks": count.Failed > 0,
+		"pending_count":    count.Pending,
+		"running_count":    count.Running,
+		"failed_count":     count.Failed,
+		"recent_tasks":     recent,
 	}, nil
 }
 
@@ -97,12 +105,14 @@ func clusterEvents(db *client.Client) echo.HandlerFunc {
 		heartbeat := time.NewTicker(15 * time.Second)
 		defer poll.Stop()
 		defer heartbeat.Stop()
+
 		var previous []byte
 		sendSnapshot := func() error {
 			snapshot, err := loadClusterStatus(ctx, db, c.Param("cluster_id"))
 			if err != nil {
 				return writeSSE(response, "error", map[string]string{"error": err.Error()})
 			}
+
 			encoded, err := json.Marshal(snapshot)
 			if err != nil {
 				return err
@@ -110,12 +120,15 @@ func clusterEvents(db *client.Client) echo.HandlerFunc {
 			if bytes.Equal(previous, encoded) {
 				return nil
 			}
+
 			previous = append(previous[:0], encoded...)
 			return writeSSEBytes(response, "sync_status", encoded)
 		}
+
 		if err := sendSnapshot(); err != nil {
 			return nil
 		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -155,6 +168,7 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 		if err != nil || site.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "site not found")
 		}
+
 		job, err := service.Enqueue(c.Request().Context(), site.Id)
 		if err != nil {
 			return err
@@ -170,6 +184,7 @@ func getJob(db *client.Client) echo.HandlerFunc {
 		if err != nil || site.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "site not found")
 		}
+
 		job, err := db.PublishJob.FindUnique(ctx, query.PublishJob.Id.Equals(c.Param("job_id")))
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "publish job not found")
@@ -185,10 +200,16 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		if err != nil || site.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "site not found")
 		}
-		jobs, err := db.PublishJob.Query().Where(query.PublishJob.SiteId.Equals(site.Id)).OrderBy(query.PublishJob.CreatedAt.Desc()).Take(50).Do(ctx)
+
+		jobs, err := db.PublishJob.Query().
+			Where(query.PublishJob.SiteId.Equals(site.Id)).
+			OrderBy(query.PublishJob.CreatedAt.Desc()).
+			Take(50).
+			Do(ctx)
 		if err != nil {
 			return err
 		}
+
 		result := make([]map[string]any, 0, len(jobs))
 		for i := range jobs {
 			result = append(result, jobDetails(&jobs[i]))
@@ -198,7 +219,14 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 }
 
 func jobDetails(job *model.PublishJob) map[string]any {
-	result := map[string]any{"id": job.Id, "site_id": job.SiteId, "version": job.Version, "status": job.Status, "created_at": job.CreatedAt, "updated_at": job.UpdatedAt}
+	result := map[string]any{
+		"id":         job.Id,
+		"site_id":    job.SiteId,
+		"version":    job.Version,
+		"status":     job.Status,
+		"created_at": job.CreatedAt,
+		"updated_at": job.UpdatedAt,
+	}
 	if job.ResultJson != nil && len(*job.ResultJson) != 0 {
 		var details any
 		if json.Unmarshal(*job.ResultJson, &details) == nil {

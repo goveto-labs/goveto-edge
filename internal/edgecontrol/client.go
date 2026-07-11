@@ -21,7 +21,12 @@ type Client struct {
 }
 
 func New(baseURL, nodeID, communicationKey string) *Client {
-	return &Client{baseURL: strings.TrimRight(baseURL, "/"), nodeID: nodeID, key: communicationKey, http: &http.Client{Timeout: 75 * time.Second}}
+	return &Client{
+		baseURL: strings.TrimRight(baseURL, "/"),
+		nodeID:  nodeID,
+		key:     communicationKey,
+		http:    &http.Client{Timeout: 75 * time.Second},
+	}
 }
 
 type ApplySiteResult struct {
@@ -36,18 +41,22 @@ func (c *Client) PushSiteConfig(ctx context.Context, config edgeprotocol.SiteCon
 	if err != nil {
 		return ApplySiteResult{}, err
 	}
+
 	request, err := c.request(ctx, http.MethodPut, "/v1/sites/"+config.SiteID+"/config", body)
 	if err != nil {
 		return ApplySiteResult{}, err
 	}
+
 	response, err := c.http.Do(request)
 	if err != nil {
 		return ApplySiteResult{}, err
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		return ApplySiteResult{}, fmt.Errorf("agent rejected site config: %s", response.Status)
 	}
+
 	var result ApplySiteResult
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		return ApplySiteResult{}, fmt.Errorf("decode apply site response: %w", err)
@@ -60,15 +69,18 @@ func (c *Client) PurgeSite(ctx context.Context, purge edgeprotocol.PurgeRequest)
 	if err != nil {
 		return err
 	}
+
 	request, err := c.request(ctx, http.MethodPost, "/v1/sites/"+purge.SiteID+"/purge", body)
 	if err != nil {
 		return err
 	}
+
 	response, err := c.http.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("agent rejected cache purge: %s", response.Status)
 	}
@@ -80,15 +92,18 @@ func (c *Client) PushNodeCacheConfig(ctx context.Context, config edgeprotocol.No
 	if err != nil {
 		return err
 	}
+
 	request, err := c.request(ctx, http.MethodPut, "/v1/node/config", body)
 	if err != nil {
 		return err
 	}
+
 	response, err := c.http.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusOK {
 		return fmt.Errorf("agent rejected node cache config: %s", response.Status)
 	}
@@ -103,10 +118,12 @@ func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []e
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+
 		request, err := c.request(ctx, http.MethodGet, "/v1/logs/pull?wait=60&limit=2000", nil)
 		if err != nil {
 			return err
 		}
+
 		response, err := c.http.Do(request)
 		if err != nil {
 			if err := retryDelay(ctx); err != nil {
@@ -114,11 +131,13 @@ func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []e
 			}
 			continue
 		}
+
 		var payload struct {
 			Records []edgeprotocol.LogRecord `json:"records"`
 		}
 		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
 		response.Body.Close()
+
 		if response.StatusCode == http.StatusUnauthorized {
 			return fmt.Errorf("pull agent logs: unauthorized")
 		}
@@ -131,6 +150,7 @@ func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []e
 			}
 			continue
 		}
+
 		if len(payload.Records) == 0 {
 			continue
 		}
@@ -160,11 +180,13 @@ func (c *Client) ack(ctx context.Context, through uint64) error {
 	if err != nil {
 		return err
 	}
+
 	response, err := c.http.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
+
 	if response.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("ack agent logs: %s", response.Status)
 	}
@@ -176,18 +198,23 @@ func (c *Client) request(ctx context.Context, method, path string, body []byte) 
 	if err != nil {
 		return nil, err
 	}
+
 	request.Host = c.nodeID
 	timestamp := time.Now().UTC().Format(time.RFC3339)
 	nonce, err := newNonce()
 	if err != nil {
 		return nil, err
 	}
+
 	contentHash := edgeprotocol.ContentHash(body)
 	request.Header.Set(edgeprotocol.HeaderNodeID, c.nodeID)
 	request.Header.Set(edgeprotocol.HeaderTimestamp, timestamp)
 	request.Header.Set(edgeprotocol.HeaderNonce, nonce)
 	request.Header.Set(edgeprotocol.HeaderContentHash, contentHash)
-	request.Header.Set(edgeprotocol.HeaderSignature, edgeprotocol.Sign(c.key, method, c.nodeID, request.URL.RequestURI(), timestamp, nonce, contentHash))
+	request.Header.Set(
+		edgeprotocol.HeaderSignature,
+		edgeprotocol.Sign(c.key, method, c.nodeID, request.URL.RequestURI(), timestamp, nonce, contentHash),
+	)
 	request.Header.Set("Content-Type", "application/json")
 	return request, nil
 }

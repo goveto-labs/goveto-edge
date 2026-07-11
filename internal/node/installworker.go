@@ -42,15 +42,26 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 	if err != nil || payload == nil {
 		return
 	}
-	claimed, err := w.db.Node.Update().Where(query.Node.Id.Equals(payload.NodeID), query.Node.Status.Equals(model.NodeStatusPENDING)).Set(query.Node.Status.Set(model.NodeStatusINSTALLING)).DoMany(ctx)
+
+	claimed, err := w.db.Node.Update().
+		Where(
+			query.Node.Id.Equals(payload.NodeID),
+			query.Node.Status.Equals(model.NodeStatusPENDING),
+		).
+		Set(query.Node.Status.Set(model.NodeStatusINSTALLING)).
+		DoMany(ctx)
 	if err == nil && claimed == 0 {
 		return
 	}
+
 	if err == nil {
 		err = w.install(ctx, *payload)
 	}
 	if err != nil {
-		_, _ = w.db.Node.Update().Where(query.Node.Id.Equals(payload.NodeID)).Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).DoMany(ctx)
+		_, _ = w.db.Node.Update().
+			Where(query.Node.Id.Equals(payload.NodeID)).
+			Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).
+			DoMany(ctx)
 	}
 }
 func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) error {
@@ -71,21 +82,33 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 		}
 		auth = append(auth, ssh.PublicKeys(signer))
 	}
-	config := &ssh.ClientConfig{User: payload.SSH.User, Auth: auth, HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 20 * time.Second}
+
+	config := &ssh.ClientConfig{
+		User:            payload.SSH.User,
+		Auth:            auth,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         20 * time.Second,
+	}
 	connection, err := ssh.Dial("tcp", net.JoinHostPort(payload.SSH.EntryIP, fmt.Sprint(payload.SSH.Port)), config)
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
+
 	arch, err := remoteArchitecture(connection)
 	if err != nil {
 		return err
 	}
+
 	binary, err := staticassets.AgentBinary(arch)
 	if err != nil {
 		return err
 	}
-	identity, _ := json.Marshal(map[string]string{"node_id": payload.NodeID, "communication_key": payload.CommunicationKey})
+
+	identity, _ := json.Marshal(map[string]string{
+		"node_id":           payload.NodeID,
+		"communication_key": payload.CommunicationKey,
+	})
 	unit := `[Unit]
 Description=Goveto Edge Agent
 After=network-online.target
@@ -96,6 +119,7 @@ RestartSec=3
 [Install]
 WantedBy=multi-user.target
 	`
+
 	if err := upload(connection, "/tmp/goveto-edge-agent", binary, 0755); err != nil {
 		return err
 	}
@@ -105,6 +129,7 @@ WantedBy=multi-user.target
 	if err := upload(connection, "/tmp/goveto-edge-agent.service", []byte(unit), 0644); err != nil {
 		return err
 	}
+
 	script := `set -eu
 sudo install -d -m 0700 /opt/goveto-edge/agent
 sudo install -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
@@ -113,11 +138,13 @@ sudo install -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-e
 sudo systemctl daemon-reload
 sudo systemctl enable --now goveto-edge-agent
 `
+
 	session, err := connection.NewSession()
 	if err != nil {
 		return err
 	}
 	defer session.Close()
+
 	done := make(chan error, 1)
 	go func() { done <- session.Run("sh -c " + shellQuote(script)) }()
 	select {
@@ -136,6 +163,7 @@ func remoteArchitecture(connection *ssh.Client) (string, error) {
 		return "", err
 	}
 	defer session.Close()
+
 	output, err := session.Output("uname -m")
 	if err != nil {
 		return "", err
@@ -161,13 +189,21 @@ func upload(connection *ssh.Client, path string, content []byte, mode uint32) er
 		return err
 	}
 	defer session.Close()
+
 	stdin, err := session.StdinPipe()
 	if err != nil {
 		return err
 	}
+
 	copyDone := make(chan error, 1)
-	go func() { defer stdin.Close(); _, err := io.Copy(stdin, bytes.NewReader(content)); copyDone <- err }()
-	if err := session.Run(fmt.Sprintf("umask 077; cat > %s; chmod %04o %s", shellQuote(path), mode, shellQuote(path))); err != nil {
+	go func() {
+		defer stdin.Close()
+		_, err := io.Copy(stdin, bytes.NewReader(content))
+		copyDone <- err
+	}()
+
+	cmd := fmt.Sprintf("umask 077; cat > %s; chmod %04o %s", shellQuote(path), mode, shellQuote(path))
+	if err := session.Run(cmd); err != nil {
 		return err
 	}
 	return <-copyDone

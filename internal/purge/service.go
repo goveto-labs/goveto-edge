@@ -34,7 +34,12 @@ func (s *Service) Enqueue(ctx context.Context, siteID string, purgeType model.Pu
 	if err := request.Validate(); err != nil {
 		return nil, err
 	}
-	sets := []query.PurgeJobSetClause{query.PurgeJob.SiteId.Set(siteID), query.PurgeJob.Type.Set(purgeType), query.PurgeJob.Status.Set(model.JobStatusPENDING)}
+
+	sets := []query.PurgeJobSetClause{
+		query.PurgeJob.SiteId.Set(siteID),
+		query.PurgeJob.Type.Set(purgeType),
+		query.PurgeJob.Status.Set(model.JobStatusPENDING),
+	}
 	if value != nil {
 		sets = append(sets, query.PurgeJob.Value.Set(*value))
 	}
@@ -77,15 +82,18 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) {
 		s.finish(ctx, job.Id, nil, err)
 		return
 	}
+
 	targets, err := s.targets(ctx, site.ClusterId)
 	if err != nil {
 		s.finish(ctx, job.Id, nil, err)
 		return
 	}
+
 	request := edgeprotocol.PurgeRequest{SiteID: site.Id, Type: string(job.Type)}
 	if job.Value != nil {
 		request.Values = []string{*job.Value}
 	}
+
 	results := make([]Result, len(targets))
 	semaphore := make(chan struct{}, s.concurrency)
 	var wg sync.WaitGroup
@@ -101,7 +109,12 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) {
 				results[i] = Result{NodeID: item.NodeID, Error: ctx.Err().Error()}
 				return
 			}
-			err := edgecontrol.New("http://"+net.JoinHostPort(item.Address, "80"), item.NodeID, item.Key).PurgeSite(ctx, request)
+
+			err := edgecontrol.New(
+				"http://"+net.JoinHostPort(item.Address, "80"),
+				item.NodeID,
+				item.Key,
+			).PurgeSite(ctx, request)
 			results[i] = Result{NodeID: item.NodeID, Success: err == nil}
 			if err != nil {
 				results[i].Error = err.Error()
@@ -109,6 +122,7 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) {
 		}()
 	}
 	wg.Wait()
+
 	for _, result := range results {
 		if !result.Success {
 			s.finish(ctx, job.Id, results, errors.New("one or more nodes failed cache invalidation"))
@@ -119,29 +133,41 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) {
 }
 
 func (s *Service) targets(ctx context.Context, clusterID string) ([]target, error) {
-	nodes, err := s.db.Node.Query().Where(query.Node.ClusterId.Equals(clusterID)).Do(ctx)
+	nodes, err := s.db.Node.Query().
+		Where(query.Node.ClusterId.Equals(clusterID)).
+		Do(ctx)
 	if err != nil {
 		return nil, err
 	}
+
 	result := make([]target, 0, len(nodes))
 	for _, n := range nodes {
 		if n.Status == model.NodeStatusDISABLED {
 			continue
 		}
-		address, err := s.db.NodeAddress.Query().Where(query.NodeAddress.NodeId.Equals(n.Id), query.NodeAddress.Primary.Equals(true)).First(ctx)
+
+		address, err := s.db.NodeAddress.Query().
+			Where(
+				query.NodeAddress.NodeId.Equals(n.Id),
+				query.NodeAddress.Primary.Equals(true),
+			).
+			First(ctx)
 		if err != nil {
 			return nil, err
 		}
+
 		credential, err := s.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
 		if err != nil {
 			return nil, err
 		}
+
 		key, err := s.cipher.Decrypt(credential.CommunicationKeyEncrypted)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, target{NodeID: n.Id, Address: address.Address, Key: key})
 	}
+
 	if len(result) == 0 {
 		return nil, errors.New("cluster has no purgeable nodes")
 	}
@@ -155,6 +181,13 @@ func (s *Service) finish(ctx context.Context, id string, results []Result, execu
 		status = model.JobStatusFAILED
 		message = executionErr.Error()
 	}
+
 	payload, _ := json.Marshal(map[string]any{"results": results, "error": message})
-	_, _ = s.db.PurgeJob.Update().Where(query.PurgeJob.Id.Equals(id)).Set(query.PurgeJob.Status.Set(status), query.PurgeJob.ResultJson.Set(payload)).Do(ctx)
+	_, _ = s.db.PurgeJob.Update().
+		Where(query.PurgeJob.Id.Equals(id)).
+		Set(
+			query.PurgeJob.Status.Set(status),
+			query.PurgeJob.ResultJson.Set(payload),
+		).
+		Do(ctx)
 }

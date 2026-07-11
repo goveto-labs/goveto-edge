@@ -17,6 +17,7 @@ import (
 
 func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *NodeConfigStore, logs *LogQueue, auth *authenticator) http.Handler {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("PUT /v1/sites/{site_id}/config", func(w http.ResponseWriter, r *http.Request) {
 		var config SiteConfig
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&config); err != nil {
@@ -31,8 +32,14 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"site_id": config.SiteID, "version": config.Version, "applied": true, "config_version": configs.ConfigVersion()})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"site_id":        config.SiteID,
+			"version":        config.Version,
+			"applied":        true,
+			"config_version": configs.ConfigVersion(),
+		})
 	})
+
 	mux.HandleFunc("POST /v1/sites/{site_id}/purge", func(w http.ResponseWriter, r *http.Request) {
 		var input edgeprotocol.PurgeRequest
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&input); err != nil {
@@ -51,19 +58,26 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			writeError(w, http.StatusBadGateway, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"site_id": input.SiteID, "type": input.Type, "purged": true})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"site_id": input.SiteID,
+			"type":    input.Type,
+			"purged":  true,
+		})
 	})
+
 	mux.HandleFunc("GET /v1/logs/pull", func(w http.ResponseWriter, r *http.Request) {
 		wait := parseDurationSeconds(r.URL.Query().Get("wait"), 45*time.Second, 60*time.Second)
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		if limit < 1 || limit > 5000 {
 			limit = 1000
 		}
+
 		batch, err := logs.Batch(limit)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "read log queue")
 			return
 		}
+
 		if len(batch) == 0 {
 			timer := time.NewTimer(wait)
 			defer timer.Stop()
@@ -73,14 +87,20 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			case <-logs.Wait():
 			case <-timer.C:
 			}
+
 			batch, err = logs.Batch(limit)
 			if err != nil {
 				writeError(w, http.StatusInternalServerError, "read log queue")
 				return
 			}
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"node_id": identity.NodeID, "records": batch})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"node_id": identity.NodeID,
+			"records": batch,
+		})
 	})
+
 	mux.HandleFunc("POST /v1/logs/ack", func(w http.ResponseWriter, r *http.Request) {
 		var input struct {
 			Through uint64 `json:"through"`
@@ -95,6 +115,7 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+
 	mux.HandleFunc("PUT /v1/node/config", func(w http.ResponseWriter, r *http.Request) {
 		var config NodeConfig
 		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
@@ -111,6 +132,7 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 		}
 		writeJSON(w, http.StatusOK, nodeConfigs.Get())
 	})
+
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"node_id":        identity.NodeID,
@@ -120,6 +142,7 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			"cache_config":   nodeConfigs.Get(),
 		})
 	})
+
 	return auth.wrap(mux)
 }
 
@@ -142,27 +165,49 @@ func (a *authenticator) wrap(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
+
 		host := r.Host
 		if parsedHost, _, err := net.SplitHostPort(r.Host); err == nil {
 			host = parsedHost
 		}
-		timestampText, nonce := r.Header.Get(edgeprotocol.HeaderTimestamp), r.Header.Get(edgeprotocol.HeaderNonce)
+
+		timestampText := r.Header.Get(edgeprotocol.HeaderTimestamp)
+		nonce := r.Header.Get(edgeprotocol.HeaderNonce)
 		timestamp, err := time.Parse(time.RFC3339, timestampText)
-		if err != nil || time.Since(timestamp) > 5*time.Minute || time.Until(timestamp) > 5*time.Minute || nonce == "" {
+		if err != nil ||
+			time.Since(timestamp) > 5*time.Minute ||
+			time.Until(timestamp) > 5*time.Minute ||
+			nonce == "" {
 			writeError(w, http.StatusUnauthorized, "invalid or replayed request signature")
 			return
 		}
+
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "request body too large")
 			return
 		}
+
 		r.Body = io.NopCloser(bytes.NewReader(body))
 		contentHash := edgeprotocol.ContentHash(body)
-		if host != a.identity.NodeID || r.Header.Get(edgeprotocol.HeaderNodeID) != a.identity.NodeID || r.Header.Get(edgeprotocol.HeaderContentHash) != contentHash || !edgeprotocol.Verify(a.identity.CommunicationKey, r.Header.Get(edgeprotocol.HeaderSignature), r.Method, host, r.URL.RequestURI(), timestampText, nonce, contentHash) || !a.acceptNonce(nonce, time.Now()) {
+		if host != a.identity.NodeID ||
+			r.Header.Get(edgeprotocol.HeaderNodeID) != a.identity.NodeID ||
+			r.Header.Get(edgeprotocol.HeaderContentHash) != contentHash ||
+			!edgeprotocol.Verify(
+				a.identity.CommunicationKey,
+				r.Header.Get(edgeprotocol.HeaderSignature),
+				r.Method,
+				host,
+				r.URL.RequestURI(),
+				timestampText,
+				nonce,
+				contentHash,
+			) ||
+			!a.acceptNonce(nonce, time.Now()) {
 			writeError(w, http.StatusUnauthorized, "invalid node credentials")
 			return
 		}
+
 		next.ServeHTTP(w, r)
 	})
 }
@@ -171,12 +216,15 @@ func (a *authenticator) acceptNonce(nonce string, now time.Time) bool {
 	if nonce == "" {
 		return false
 	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
 	a.pruneNoncesLocked(now)
 	if _, exists := a.nonces[nonce]; exists {
 		return false
 	}
+
 	a.nonces[nonce] = now.Add(5 * time.Minute)
 	if err := a.persistNoncesLocked(); err != nil {
 		delete(a.nonces, nonce)
@@ -197,14 +245,17 @@ func (a *authenticator) loadNonces() {
 	if a.path == "" {
 		return
 	}
+
 	data, err := os.ReadFile(a.path)
 	if err != nil {
 		return
 	}
+
 	var stored map[string]time.Time
 	if err := json.Unmarshal(data, &stored); err != nil {
 		return
 	}
+
 	now := time.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -222,10 +273,12 @@ func (a *authenticator) persistNoncesLocked() error {
 	if err := os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
 		return err
 	}
+
 	data, err := json.Marshal(a.nonces)
 	if err != nil {
 		return err
 	}
+
 	temporary := a.path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0600); err != nil {
 		return err

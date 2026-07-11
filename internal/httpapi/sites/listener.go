@@ -33,7 +33,11 @@ func getListener(db *client.Client) echo.HandlerFunc {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
 		}
-		config, err := db.SiteListenerConfig.FindUnique(c.Request().Context(), query.SiteListenerConfig.SiteId.Equals(c.Param("site_id")))
+
+		config, err := db.SiteListenerConfig.FindUnique(
+			c.Request().Context(),
+			query.SiteListenerConfig.SiteId.Equals(c.Param("site_id")),
+		)
 		if err != nil {
 			return err
 		}
@@ -46,14 +50,20 @@ func updateListener(db *client.Client, publishService *publisher.Service) echo.H
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
 		}
-		current, err := db.SiteListenerConfig.FindUnique(c.Request().Context(), query.SiteListenerConfig.SiteId.Equals(c.Param("site_id")))
+
+		current, err := db.SiteListenerConfig.FindUnique(
+			c.Request().Context(),
+			query.SiteListenerConfig.SiteId.Equals(c.Param("site_id")),
+		)
 		if err != nil {
 			return err
 		}
+
 		var input listenerUpdateRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		sets := make([]query.SiteListenerConfigSetClause, 0, 13)
 		if input.HTTPEnabled != nil {
 			current.HttpEnabled = *input.HTTPEnabled
@@ -107,16 +117,22 @@ func updateListener(db *client.Client, publishService *publisher.Service) echo.H
 			current.OcspStaplingEnabled = *input.OCSPStaplingEnabled
 			sets = append(sets, query.SiteListenerConfig.OcspStaplingEnabled.Set(*input.OCSPStaplingEnabled))
 		}
+
 		if len(sets) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "no settings supplied")
 		}
 		if err := validateListener(current); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		updated, err := db.SiteListenerConfig.Update().Where(query.SiteListenerConfig.SiteId.Equals(c.Param("site_id"))).Set(sets...).Do(c.Request().Context())
+
+		updated, err := db.SiteListenerConfig.Update().
+			Where(query.SiteListenerConfig.SiteId.Equals(c.Param("site_id"))).
+			Set(sets...).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
+
 		response := map[string]any{"listener": updated}
 		if job, publishErr := publishService.Enqueue(c.Request().Context(), c.Param("site_id")); publishErr == nil {
 			response["publish_job"] = job
@@ -145,13 +161,15 @@ func validateListener(config *model.SiteListenerConfig) error {
 	if config.RedirectHttpToHttps && (!config.HttpEnabled || !config.HttpsEnabled) {
 		return fmt.Errorf("HTTP to HTTPS redirect requires both HTTP and HTTPS")
 	}
-	if (config.Http2Enabled || config.Http3Enabled || config.HstsEnabled || config.OcspStaplingEnabled) && !config.HttpsEnabled {
+	if (config.Http2Enabled || config.Http3Enabled || config.HstsEnabled || config.OcspStaplingEnabled) &&
+		!config.HttpsEnabled {
 		return fmt.Errorf("HTTP/2, HTTP/3, HSTS and OCSP require HTTPS")
 	}
 	if config.HstsMaxAge < 0 {
 		return fmt.Errorf("HSTS max age cannot be negative")
 	}
-	if config.HstsPreload && (!config.HstsEnabled || !config.HstsIncludeSubdomains || config.HstsMaxAge < 31536000) {
+	if config.HstsPreload &&
+		(!config.HstsEnabled || !config.HstsIncludeSubdomains || config.HstsMaxAge < 31536000) {
 		return fmt.Errorf("HSTS preload requires HSTS, includeSubdomains and max age of at least 31536000")
 	}
 	if config.TlsMinVersion != model.TLSMinVersionTLS1_2 && config.TlsMinVersion != model.TLSMinVersionTLS1_3 {

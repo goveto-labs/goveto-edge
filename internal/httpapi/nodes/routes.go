@@ -36,10 +36,12 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.ClusterID = c.Param("cluster_id")
 		if err := input.Validate(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+
 		ctx := c.Request().Context()
 		if err := validateReferences(ctx, db, input); err != nil {
 			return err
@@ -50,10 +52,12 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		if err != nil {
 			return err
 		}
+
 		encryptedCommunicationKey, err := cipher.Encrypt(communicationKey)
 		if err != nil {
 			return err
 		}
+
 		if err := db.Tx(ctx, func(tx *client.Client) error {
 			sets := []query.NodeSetClause{
 				query.Node.Id.Set(nodeID),
@@ -67,29 +71,42 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			if input.RegionID != nil {
 				sets = append(sets, query.Node.RegionId.Set(*input.RegionID))
 			}
+
 			if _, err := tx.Node.Create().Set(sets...).Do(ctx); err != nil {
 				return err
 			}
-			if _, err := tx.NodeCacheConfig.Create().Set(query.NodeCacheConfig.NodeId.Set(nodeID)).Do(ctx); err != nil {
+			if _, err := tx.NodeCacheConfig.Create().
+				Set(query.NodeCacheConfig.NodeId.Set(nodeID)).
+				Do(ctx); err != nil {
 				return err
 			}
-			if _, err := tx.NodeCredential.Create().Set(query.NodeCredential.NodeId.Set(nodeID), query.NodeCredential.CommunicationKeyEncrypted.Set(encryptedCommunicationKey)).Do(ctx); err != nil {
+			if _, err := tx.NodeCredential.Create().
+				Set(
+					query.NodeCredential.NodeId.Set(nodeID),
+					query.NodeCredential.CommunicationKeyEncrypted.Set(encryptedCommunicationKey),
+				).
+				Do(ctx); err != nil {
 				return err
 			}
+
 			for index, address := range input.Addresses {
-				if _, err := tx.NodeAddress.Create().Set(
-					query.NodeAddress.NodeId.Set(nodeID),
-					query.NodeAddress.Address.Set(address),
-					query.NodeAddress.Primary.Set(index == 0),
-				).Do(ctx); err != nil {
+				if _, err := tx.NodeAddress.Create().
+					Set(
+						query.NodeAddress.NodeId.Set(nodeID),
+						query.NodeAddress.Address.Set(address),
+						query.NodeAddress.Primary.Set(index == 0),
+					).
+					Do(ctx); err != nil {
 					return err
 				}
 			}
 			for _, lineID := range input.DNSLineIDs {
-				if _, err := tx.NodeDNSLine.Create().Set(
-					query.NodeDNSLine.NodeId.Set(nodeID),
-					query.NodeDNSLine.DnsLineId.Set(lineID),
-				).Do(ctx); err != nil {
+				if _, err := tx.NodeDNSLine.Create().
+					Set(
+						query.NodeDNSLine.NodeId.Set(nodeID),
+						query.NodeDNSLine.DnsLineId.Set(lineID),
+					).
+					Do(ctx); err != nil {
 					return err
 				}
 			}
@@ -97,8 +114,16 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		}); err != nil {
 			return err
 		}
-		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID, CommunicationKey: communicationKey, SSH: input.SSH}); err != nil {
-			_, _ = db.Node.Update().Where(query.Node.Id.Equals(nodeID)).Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).DoMany(ctx)
+
+		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{
+			NodeID:           nodeID,
+			CommunicationKey: communicationKey,
+			SSH:              input.SSH,
+		}); err != nil {
+			_, _ = db.Node.Update().
+				Where(query.Node.Id.Equals(nodeID)).
+				Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).
+				DoMany(ctx)
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
@@ -121,18 +146,21 @@ func validateReferences(ctx context.Context, db *client.Client, input nodedomain
 		}
 		return err
 	}
+
 	if input.GroupID != nil {
 		group, err := db.ClusterGroup.FindUnique(ctx, query.ClusterGroup.Id.Equals(*input.GroupID))
 		if err != nil || group.ClusterId != input.ClusterID {
 			return echo.NewHTTPError(http.StatusBadRequest, "group does not belong to cluster")
 		}
 	}
+
 	if input.RegionID != nil {
 		region, err := db.ClusterRegion.FindUnique(ctx, query.ClusterRegion.Id.Equals(*input.RegionID))
 		if err != nil || region.ClusterId != input.ClusterID {
 			return echo.NewHTTPError(http.StatusBadRequest, "region does not belong to cluster")
 		}
 	}
+
 	seen := make(map[string]struct{}, len(input.DNSLineIDs))
 	for _, lineID := range input.DNSLineIDs {
 		if _, exists := seen[lineID]; exists {

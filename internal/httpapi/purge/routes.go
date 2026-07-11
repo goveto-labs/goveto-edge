@@ -31,6 +31,7 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+
 		var input request
 		if err = c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -39,6 +40,7 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 			value := strings.TrimSpace(*input.Value)
 			input.Value = &value
 		}
+
 		job, err := service.Enqueue(c.Request().Context(), site.Id, input.Type, input.Value)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -53,10 +55,16 @@ func list(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		jobs, err := db.PurgeJob.Query().Where(query.PurgeJob.SiteId.Equals(site.Id)).OrderBy(query.PurgeJob.CreatedAt.Desc()).Take(50).Do(c.Request().Context())
+
+		jobs, err := db.PurgeJob.Query().
+			Where(query.PurgeJob.SiteId.Equals(site.Id)).
+			OrderBy(query.PurgeJob.CreatedAt.Desc()).
+			Take(50).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
+
 		result := make([]map[string]any, 0, len(jobs))
 		for i := range jobs {
 			result = append(result, details(&jobs[i]))
@@ -70,6 +78,7 @@ func get(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+
 		job, err := db.PurgeJob.FindUnique(c.Request().Context(), query.PurgeJob.Id.Equals(c.Param("job_id")))
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "purge job not found")
@@ -85,7 +94,15 @@ func siteInCluster(c *echo.Context, db *client.Client) (*model.Site, error) {
 	return site, nil
 }
 func details(job *model.PurgeJob) map[string]any {
-	result := map[string]any{"id": job.Id, "site_id": job.SiteId, "type": job.Type, "value": job.Value, "status": job.Status, "created_at": job.CreatedAt, "updated_at": job.UpdatedAt}
+	result := map[string]any{
+		"id":         job.Id,
+		"site_id":    job.SiteId,
+		"type":       job.Type,
+		"value":      job.Value,
+		"status":     job.Status,
+		"created_at": job.CreatedAt,
+		"updated_at": job.UpdatedAt,
+	}
 	if job.ResultJson != nil {
 		var value any
 		if json.Unmarshal(*job.ResultJson, &value) == nil {

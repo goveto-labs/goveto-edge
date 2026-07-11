@@ -48,12 +48,23 @@ type CacheConditionRule struct {
 
 func DefaultCachePolicy() CachePolicy {
 	return CachePolicy{
-		ResponseHeaders:    CacheHeaders{XCache: true, Age: true},
-		Stale:              CacheStale{Enabled: true, IfErrorSeconds: 86400},
-		TTL:                CacheTTL{DefaultSeconds: 300, Status: map[string]int{"200": 300, "301": 3600, "404": 60}},
+		ResponseHeaders: CacheHeaders{XCache: true, Age: true},
+		Stale:           CacheStale{Enabled: true, IfErrorSeconds: 86400},
+		TTL: CacheTTL{
+			DefaultSeconds: 300,
+			Status:         map[string]int{"200": 300, "301": 3600, "404": 60},
+		},
 		VaryHeaders:        []string{"Accept-Encoding"},
 		SurrogateKeyHeader: "Surrogate-Key",
-		Conditions:         CacheConditions{GroupOperator: "OR", Groups: []CacheConditionGroup{{Operator: "OR", Rules: []CacheConditionRule{{Type: "ALL"}}}}},
+		Conditions: CacheConditions{
+			GroupOperator: "OR",
+			Groups: []CacheConditionGroup{
+				{
+					Operator: "OR",
+					Rules:    []CacheConditionRule{{Type: "ALL"}},
+				},
+			},
+		},
 	}
 }
 
@@ -65,17 +76,20 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 	if !booleanOperator(p.Conditions.GroupOperator) {
 		return errors.New("conditions.group_operator must be AND or OR")
 	}
+
 	if p.TTL.DefaultSeconds < 1 || p.TTL.DefaultSeconds > 31536000 {
 		return errors.New("ttl.default_seconds must be between 1 and 31536000")
 	}
 	if p.Stale.Enabled && (p.Stale.IfErrorSeconds < 1 || p.Stale.IfErrorSeconds > 31536000) {
 		return errors.New("stale.if_error_seconds must be between 1 and 31536000")
 	}
+
 	for status, ttl := range p.TTL.Status {
 		if !regexp.MustCompile(`^[1-5][0-9][0-9]$`).MatchString(status) || ttl < 1 || ttl > 31536000 {
 			return fmt.Errorf("invalid TTL for status %q", status)
 		}
 	}
+
 	seenHeaders := map[string]struct{}{}
 	for i, header := range p.VaryHeaders {
 		header = http.CanonicalHeaderKey(strings.TrimSpace(header))
@@ -89,6 +103,7 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 		p.VaryHeaders[i] = header
 	}
 	sort.Strings(p.VaryHeaders)
+
 	p.SurrogateKeyHeader = http.CanonicalHeaderKey(strings.TrimSpace(p.SurrogateKeyHeader))
 	if p.SurrogateKeyHeader == "" {
 		p.SurrogateKeyHeader = "Surrogate-Key"
@@ -96,9 +111,11 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 	if p.SurrogateKeyHeader != "Surrogate-Key" {
 		return errors.New("surrogate_key_header must be Surrogate-Key")
 	}
+
 	if len(p.Conditions.Groups) == 0 || len(p.Conditions.Groups) > 16 {
 		return errors.New("conditions must contain between 1 and 16 groups")
 	}
+
 	all := false
 	for gi := range p.Conditions.Groups {
 		group := &p.Conditions.Groups[gi]
@@ -109,6 +126,7 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 		if len(group.Rules) == 0 || len(group.Rules) > 32 {
 			return fmt.Errorf("conditions.groups[%d] must contain between 1 and 32 rules", gi)
 		}
+
 		for ri := range group.Rules {
 			rule := &group.Rules[ri]
 			rule.Type = strings.ToUpper(strings.TrimSpace(rule.Type))
@@ -123,7 +141,10 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 					return fmt.Errorf("extension rule %d/%d requires values", gi, ri)
 				}
 				for i := range rule.Values {
-					rule.Values[i] = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(rule.Values[i])), ".")
+					rule.Values[i] = strings.TrimPrefix(
+						strings.ToLower(strings.TrimSpace(rule.Values[i])),
+						".",
+					)
 					if !regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`).MatchString(rule.Values[i]) {
 						return fmt.Errorf("invalid extension %q", rule.Values[i])
 					}

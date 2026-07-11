@@ -18,7 +18,11 @@ func getCacheConfig(db *client.Client) echo.HandlerFunc {
 		if err := ensureNodeInCluster(c, db); err != nil {
 			return err
 		}
-		config, err := db.NodeCacheConfig.FindUnique(c.Request().Context(), query.NodeCacheConfig.NodeId.Equals(c.Param("node_id")))
+
+		config, err := db.NodeCacheConfig.FindUnique(
+			c.Request().Context(),
+			query.NodeCacheConfig.NodeId.Equals(c.Param("node_id")),
+		)
 		if err != nil {
 			return err
 		}
@@ -31,10 +35,12 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 		if err := ensureNodeInCluster(c, db); err != nil {
 			return err
 		}
+
 		var input edgeprotocol.NodeCacheConfig
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.CacheDirectory = strings.TrimSpace(input.CacheDirectory)
 		if input.CacheDirectory == "" || !strings.HasPrefix(input.CacheDirectory, "/") {
 			return echo.NewHTTPError(http.StatusBadRequest, "cache_directory must be an absolute path")
@@ -45,24 +51,45 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 		if !input.AutoMaxSize && input.MaxSizeBytes == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "max_size_bytes is required when auto_max_size is false")
 		}
+
 		ctx, nodeID := c.Request().Context(), c.Param("node_id")
-		sets := []query.NodeCacheConfigSetClause{query.NodeCacheConfig.CacheDir.Set(input.CacheDirectory), query.NodeCacheConfig.AutoMaxSize.Set(input.AutoMaxSize), query.NodeCacheConfig.MaxDiskUsagePercent.Set(input.MaxDiskUsagePercent)}
+		sets := []query.NodeCacheConfigSetClause{
+			query.NodeCacheConfig.CacheDir.Set(input.CacheDirectory),
+			query.NodeCacheConfig.AutoMaxSize.Set(input.AutoMaxSize),
+			query.NodeCacheConfig.MaxDiskUsagePercent.Set(input.MaxDiskUsagePercent),
+		}
 		if input.AutoMaxSize {
 			sets = append(sets, query.NodeCacheConfig.MaxSizeBytes.SetNull())
 		} else {
 			sets = append(sets, query.NodeCacheConfig.MaxSizeBytes.Set(int64(input.MaxSizeBytes)))
 		}
-		updated, err := db.NodeCacheConfig.Update().Where(query.NodeCacheConfig.NodeId.Equals(nodeID)).Set(sets...).Do(ctx)
+
+		updated, err := db.NodeCacheConfig.Update().
+			Where(query.NodeCacheConfig.NodeId.Equals(nodeID)).
+			Set(sets...).
+			Do(ctx)
 		if err != nil {
 			return err
 		}
+
 		response := map[string]any{"cache_config": updated, "synced": false}
-		address, addressErr := db.NodeAddress.Query().Where(query.NodeAddress.NodeId.Equals(nodeID), query.NodeAddress.Primary.Equals(true)).First(ctx)
-		credential, credentialErr := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(nodeID))
+		address, addressErr := db.NodeAddress.Query().
+			Where(
+				query.NodeAddress.NodeId.Equals(nodeID),
+				query.NodeAddress.Primary.Equals(true),
+			).
+			First(ctx)
+		credential, credentialErr := db.NodeCredential.FindUnique(
+			ctx, query.NodeCredential.NodeId.Equals(nodeID),
+		)
 		if addressErr == nil && credentialErr == nil {
 			key, decryptErr := cipher.Decrypt(credential.CommunicationKeyEncrypted)
 			if decryptErr == nil {
-				syncErr := edgecontrol.New("http://"+net.JoinHostPort(address.Address, "80"), nodeID, key).PushNodeCacheConfig(ctx, input)
+				syncErr := edgecontrol.New(
+					"http://"+net.JoinHostPort(address.Address, "80"),
+					nodeID,
+					key,
+				).PushNodeCacheConfig(ctx, input)
 				if syncErr == nil {
 					response["synced"] = true
 				} else {

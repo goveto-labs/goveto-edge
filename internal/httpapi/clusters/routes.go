@@ -29,7 +29,10 @@ func Register(e *echo.Echo, db *client.Client) {
 
 func listDNSLines(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		items, err := db.DNSLine.Query().Where(query.DNSLine.ClusterId.Equals(c.Param("cluster_id"))).OrderBy(query.DNSLine.Name.Asc()).Do(c.Request().Context())
+		items, err := db.DNSLine.Query().
+			Where(query.DNSLine.ClusterId.Equals(c.Param("cluster_id"))).
+			OrderBy(query.DNSLine.Name.Asc()).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -39,7 +42,10 @@ func listDNSLines(db *client.Client) echo.HandlerFunc {
 
 func listGroups(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		items, err := db.ClusterGroup.Query().Where(query.ClusterGroup.ClusterId.Equals(c.Param("cluster_id"))).OrderBy(query.ClusterGroup.Name.Asc()).Do(c.Request().Context())
+		items, err := db.ClusterGroup.Query().
+			Where(query.ClusterGroup.ClusterId.Equals(c.Param("cluster_id"))).
+			OrderBy(query.ClusterGroup.Name.Asc()).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -53,11 +59,18 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.Name = strings.TrimSpace(input.Name)
 		if input.Name == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 		}
-		item, err := db.ClusterGroup.Create().Set(query.ClusterGroup.ClusterId.Set(c.Param("cluster_id")), query.ClusterGroup.Name.Set(input.Name)).Do(c.Request().Context())
+
+		item, err := db.ClusterGroup.Create().
+			Set(
+				query.ClusterGroup.ClusterId.Set(c.Param("cluster_id")),
+				query.ClusterGroup.Name.Set(input.Name),
+			).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -67,7 +80,10 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 
 func listRegions(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		items, err := db.ClusterRegion.Query().Where(query.ClusterRegion.ClusterId.Equals(c.Param("cluster_id"))).OrderBy(query.ClusterRegion.Name.Asc()).Do(c.Request().Context())
+		items, err := db.ClusterRegion.Query().
+			Where(query.ClusterRegion.ClusterId.Equals(c.Param("cluster_id"))).
+			OrderBy(query.ClusterRegion.Name.Asc()).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -81,11 +97,18 @@ func createRegion(db *client.Client) echo.HandlerFunc {
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
+
 		input.Name = strings.TrimSpace(input.Name)
 		if input.Name == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 		}
-		item, err := db.ClusterRegion.Create().Set(query.ClusterRegion.ClusterId.Set(c.Param("cluster_id")), query.ClusterRegion.Name.Set(input.Name)).Do(c.Request().Context())
+
+		item, err := db.ClusterRegion.Create().
+			Set(
+				query.ClusterRegion.ClusterId.Set(c.Param("cluster_id")),
+				query.ClusterRegion.Name.Set(input.Name),
+			).
+			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
