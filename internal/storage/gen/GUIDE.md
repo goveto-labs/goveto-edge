@@ -223,6 +223,20 @@ query.PostAuthorIdColumn
   - `Primary` (Boolean)
   - `Createdat` (DateTime)
 
+### NodeCacheConfig
+
+- Client handle: `c.NodeCacheConfig`
+- Query namespace: `query.NodeCacheConfig`
+- Fields:
+  - `Id` (String, id)
+  - `Nodeid` (String, unique)
+  - `Cachedir` (String)
+  - `Automaxsize` (Boolean)
+  - `Maxsizebytes` (BigInt, optional)
+  - `Maxdiskusagepercent` (Int)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### NodeDNSLine
 
 - Client handle: `c.NodeDNSLine`

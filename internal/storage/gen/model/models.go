@@ -117,21 +117,22 @@ type DynamicSetting struct {
 
 // Node represents the Node model.
 type Node struct {
-	Id          string         `db:"id" json:"id"`
-	ClusterId   string         `db:"cluster_id" json:"clusterId"`
-	GroupId     *string        `db:"group_id" json:"groupId"`
-	RegionId    *string        `db:"region_id" json:"regionId"`
-	Name        string         `db:"name" json:"name"`
-	Version     *string        `db:"version" json:"version"`
-	HeartbeatAt *time.Time     `db:"heartbeat_at" json:"heartbeatAt"`
-	Status      NodeStatus     `db:"status" json:"status"`
-	CreatedAt   time.Time      `db:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time      `db:"updated_at" json:"updatedAt"`
-	Cluster     *Cluster       `db:"-" json:"cluster,omitempty"`
-	Group       *ClusterGroup  `db:"-" json:"group,omitempty"`
-	Region      *ClusterRegion `db:"-" json:"region,omitempty"`
-	Addresses   []*NodeAddress `db:"-" json:"addresses,omitempty"`
-	DnsLines    []*NodeDNSLine `db:"-" json:"dnsLines,omitempty"`
+	Id          string           `db:"id" json:"id"`
+	ClusterId   string           `db:"cluster_id" json:"clusterId"`
+	GroupId     *string          `db:"group_id" json:"groupId"`
+	RegionId    *string          `db:"region_id" json:"regionId"`
+	Name        string           `db:"name" json:"name"`
+	Version     *string          `db:"version" json:"version"`
+	HeartbeatAt *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	Status      NodeStatus       `db:"status" json:"status"`
+	CreatedAt   time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt   time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster     *Cluster         `db:"-" json:"cluster,omitempty"`
+	Group       *ClusterGroup    `db:"-" json:"group,omitempty"`
+	Region      *ClusterRegion   `db:"-" json:"region,omitempty"`
+	Addresses   []*NodeAddress   `db:"-" json:"addresses,omitempty"`
+	DnsLines    []*NodeDNSLine   `db:"-" json:"dnsLines,omitempty"`
+	CacheConfig *NodeCacheConfig `db:"-" json:"cacheConfig,omitempty"`
 }
 
 // NodeAddress represents the NodeAddress model.
@@ -142,6 +143,19 @@ type NodeAddress struct {
 	Primary   bool      `db:"primary" json:"primary"`
 	CreatedAt time.Time `db:"created_at" json:"createdAt"`
 	Node      *Node     `db:"-" json:"node,omitempty"`
+}
+
+// NodeCacheConfig represents the NodeCacheConfig model.
+type NodeCacheConfig struct {
+	Id                  string    `db:"id" json:"id"`
+	NodeId              string    `db:"node_id" json:"nodeId"`
+	CacheDir            string    `db:"cache_dir" json:"cacheDir"`
+	AutoMaxSize         bool      `db:"auto_max_size" json:"autoMaxSize"`
+	MaxSizeBytes        *int64    `db:"max_size_bytes" json:"maxSizeBytes"`
+	MaxDiskUsagePercent int       `db:"max_disk_usage_percent" json:"maxDiskUsagePercent"`
+	CreatedAt           time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt           time.Time `db:"updated_at" json:"updatedAt"`
+	Node                *Node     `db:"-" json:"node,omitempty"`
 }
 
 // NodeDNSLine represents the NodeDNSLine model.

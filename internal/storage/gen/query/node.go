@@ -46,6 +46,7 @@ type NodeQuery struct {
 	Region      nodeRegionRelation
 	Addresses   nodeAddressesRelation
 	DnsLines    nodeDnsLinesRelation
+	CacheConfig nodeCacheConfigRelation
 }
 
 const NodeTable = "nodes"
@@ -77,6 +78,7 @@ var Node = NodeQuery{
 	Region:      nodeRegionRelation{},
 	Addresses:   nodeAddressesRelation{},
 	DnsLines:    nodeDnsLinesRelation{},
+	CacheConfig: nodeCacheConfigRelation{},
 }
 
 // NodeWhereClause represents a WHERE condition for Node.
@@ -858,6 +860,14 @@ func (nodeDnsLinesRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "dnsLines"}
 }
 
+// CacheConfigRelation provides relation query helpers for cacheConfig.
+type nodeCacheConfigRelation struct{}
+
+// Fetch creates an include clause to fetch related cacheConfig.
+func (nodeCacheConfigRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "cacheConfig"}
+}
+
 // NodeSetClause represents a field set operation for create/update.
 type NodeSetClause struct {
 	Field string
@@ -906,6 +916,7 @@ type NodeCreateInput struct {
 	Region      *ClusterRegionCreateNestedInput
 	Addresses   *NodeAddressCreateNestedInput
 	DnsLines    *NodeDNSLineCreateNestedInput
+	CacheConfig *NodeCacheConfigCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

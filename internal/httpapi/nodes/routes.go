@@ -59,6 +59,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 			if _, err := tx.Node.Create().Set(sets...).Do(ctx); err != nil {
 				return err
 			}
+			if _, err := tx.NodeCacheConfig.Create().Set(query.NodeCacheConfig.NodeId.Set(nodeID)).Do(ctx); err != nil {
+				return err
+			}
 			for index, address := range input.Addresses {
 				if _, err := tx.NodeAddress.Create().Set(
 					query.NodeAddress.NodeId.Set(nodeID),

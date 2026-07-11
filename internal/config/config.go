@@ -19,6 +19,7 @@ type Config struct {
 	ShutdownTimeout       time.Duration
 	DatabaseURL           string
 	RedisURL              string
+	ClickHouseDSN         string
 	SessionCookieName     string
 	SessionTTL            time.Duration
 	SessionCookieSecure   bool
@@ -52,6 +53,7 @@ func Load() (Config, error) {
 		ShutdownTimeout:       shutdownTimeout,
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
 		RedisURL:              os.Getenv("REDIS_URL"),
+		ClickHouseDSN:         os.Getenv("CLICKHOUSE_DSN"),
 		SessionCookieName:     envString("SESSION_COOKIE_NAME", "goveto_session"),
 		SessionCookieSecure:   envBool("SESSION_COOKIE_SECURE", false),
 	}

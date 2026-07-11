@@ -35,6 +35,7 @@ type Client struct {
 	DynamicSetting     DynamicSettingActions
 	Node               NodeActions
 	NodeAddress        NodeAddressActions
+	NodeCacheConfig    NodeCacheConfigActions
 	NodeDNSLine        NodeDNSLineActions
 	OriginBackend      OriginBackendActions
 	OriginPool         OriginPoolActions
@@ -66,6 +67,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.DynamicSetting = DynamicSettingActions{client: c}
 	c.Node = NodeActions{client: c}
 	c.NodeAddress = NodeAddressActions{client: c}
+	c.NodeCacheConfig = NodeCacheConfigActions{client: c}
 	c.NodeDNSLine = NodeDNSLineActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
@@ -246,6 +248,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
 	txClient.NodeAddress = NodeAddressActions{client: txClient}
+	txClient.NodeCacheConfig = NodeCacheConfigActions{client: txClient}
 	txClient.NodeDNSLine = NodeDNSLineActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
@@ -9753,6 +9756,870 @@ func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts .
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("NodeAddress.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildNodeCacheConfigWhere recursively builds a WHERE clause string and arguments.
+func buildNodeCacheConfigWhere(c *Client, wheres []query.NodeCacheConfigWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeCacheConfigWhereClause); ok {
+				sub, subArgs := buildNodeCacheConfigWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeCacheConfigWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeCacheConfigWhere(c, []query.NodeCacheConfigWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeCacheConfigWhereClause); ok {
+				sub, subArgs := buildNodeCacheConfigWhere(c, []query.NodeCacheConfigWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeCacheConfigActions provides database operations for the NodeCacheConfig model.
+type NodeCacheConfigActions struct {
+	client *Client
+}
+
+// NodeCacheConfigCreateBuilder builds a NodeCacheConfig create operation incrementally.
+type NodeCacheConfigCreateBuilder struct {
+	action NodeCacheConfigActions
+	sets   []query.NodeCacheConfigSetClause
+}
+
+// Create starts a staged NodeCacheConfig create operation.
+func (a NodeCacheConfigActions) Create() NodeCacheConfigCreateBuilder {
+	return NodeCacheConfigCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeCacheConfigCreateBuilder) Set(sets ...query.NodeCacheConfigSetClause) NodeCacheConfigCreateBuilder {
+	next := NodeCacheConfigCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeCacheConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeCacheConfigCreateBuilder) Do(ctx context.Context) (*model.NodeCacheConfig, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeCacheConfigCreateManyBuilder builds a bulk NodeCacheConfig insert operation.
+type NodeCacheConfigCreateManyBuilder struct {
+	action            NodeCacheConfigActions
+	data              []query.NodeCacheConfigCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeCacheConfig insert operation.
+func (a NodeCacheConfigActions) BulkCreate(data []query.NodeCacheConfigCreateInput) NodeCacheConfigCreateManyBuilder {
+	return NodeCacheConfigCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeCacheConfigCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeCacheConfigCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeCacheConfigCreateManyBuilder) Returning(columns ...string) NodeCacheConfigCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeCacheConfigCreateManyBuilder) BatchSize(n int) NodeCacheConfigCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeCacheConfigCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeCacheConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeCacheConfig.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeCacheConfig.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeCacheConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeCacheConfig, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeCacheConfig
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeCacheConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeCacheConfig
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeCacheConfigCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeCacheConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeCacheConfigQueryBuilder builds a NodeCacheConfig query incrementally.
+type NodeCacheConfigQueryBuilder struct {
+	action NodeCacheConfigActions
+	opts   []query.NodeCacheConfigQueryOption
+}
+
+// Query starts a staged NodeCacheConfig query.
+func (a NodeCacheConfigActions) Query() NodeCacheConfigQueryBuilder {
+	return NodeCacheConfigQueryBuilder{action: a}
+}
+
+func (b NodeCacheConfigQueryBuilder) withOptions(opts ...query.NodeCacheConfigQueryOption) NodeCacheConfigQueryBuilder {
+	next := NodeCacheConfigQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeCacheConfigQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeCacheConfigQueryBuilder) Where(clauses ...query.NodeCacheConfigWhereClause) NodeCacheConfigQueryBuilder {
+	opts := make([]query.NodeCacheConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeCacheConfigQueryBuilder) OrderBy(clause query.NodeCacheConfigOrderByClause) NodeCacheConfigQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeCacheConfigQueryBuilder) Include(clauses ...query.NodeCacheConfigIncludeClause) NodeCacheConfigQueryBuilder {
+	opts := make([]query.NodeCacheConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeCacheConfigQueryBuilder) Take(n int) NodeCacheConfigQueryBuilder {
+	return b.withOptions(query.NodeCacheConfigTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeCacheConfigQueryBuilder) Skip(n int) NodeCacheConfigQueryBuilder {
+	return b.withOptions(query.NodeCacheConfigSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeCacheConfigQueryBuilder) Do(ctx context.Context) ([]model.NodeCacheConfig, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeCacheConfigQueryBuilder) First(ctx context.Context) (*model.NodeCacheConfig, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeCacheConfigQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeCacheConfigOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeCacheConfigUpdateBuilder builds a NodeCacheConfig update operation incrementally.
+type NodeCacheConfigUpdateBuilder struct {
+	action NodeCacheConfigActions
+	wheres []query.NodeCacheConfigWhereClause
+	sets   []query.NodeCacheConfigSetClause
+}
+
+// Update starts a staged NodeCacheConfig update operation.
+func (a NodeCacheConfigActions) Update() NodeCacheConfigUpdateBuilder {
+	return NodeCacheConfigUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeCacheConfigUpdateBuilder) Where(clauses ...query.NodeCacheConfigWhereClause) NodeCacheConfigUpdateBuilder {
+	next := NodeCacheConfigUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeCacheConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeCacheConfigSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeCacheConfigUpdateBuilder) Set(sets ...query.NodeCacheConfigSetClause) NodeCacheConfigUpdateBuilder {
+	next := NodeCacheConfigUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeCacheConfigWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeCacheConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeCacheConfigUpdateBuilder) combinedWhere() (query.NodeCacheConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeCacheConfigWhereClause{}, fmt.Errorf("NodeCacheConfig.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeCacheConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeCacheConfigUpdateBuilder) Do(ctx context.Context) (*model.NodeCacheConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeCacheConfigUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeCacheConfigDeleteBuilder builds a NodeCacheConfig delete operation incrementally.
+type NodeCacheConfigDeleteBuilder struct {
+	action NodeCacheConfigActions
+	wheres []query.NodeCacheConfigWhereClause
+}
+
+// Delete starts a staged NodeCacheConfig delete operation.
+func (a NodeCacheConfigActions) Delete() NodeCacheConfigDeleteBuilder {
+	return NodeCacheConfigDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeCacheConfigDeleteBuilder) Where(clauses ...query.NodeCacheConfigWhereClause) NodeCacheConfigDeleteBuilder {
+	next := NodeCacheConfigDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeCacheConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeCacheConfigDeleteBuilder) combinedWhere() (query.NodeCacheConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeCacheConfigWhereClause{}, fmt.Errorf("NodeCacheConfig.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeCacheConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeCacheConfigDeleteBuilder) Do(ctx context.Context) (*model.NodeCacheConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeCacheConfigDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeCacheConfig records.
+func (a NodeCacheConfigActions) FindMany(ctx context.Context, opts ...query.NodeCacheConfigQueryOption) ([]model.NodeCacheConfig, error) {
+	cfg := query.ApplyNodeCacheConfigOptions(opts)
+	q := "SELECT id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at FROM node_cache_configs"
+	argIdx := 0
+	where, args := buildNodeCacheConfigWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeCacheConfig
+	for rows.Next() {
+		var item model.NodeCacheConfig
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeCacheConfig record.
+func (a NodeCacheConfigActions) FindFirst(ctx context.Context, opts ...query.NodeCacheConfigQueryOption) (*model.NodeCacheConfig, error) {
+	opts = append(opts, query.NodeCacheConfigTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeCacheConfig record by unique constraint.
+func (a NodeCacheConfigActions) FindUnique(ctx context.Context, where query.NodeCacheConfigWhereClause) (*model.NodeCacheConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
+	q := "SELECT id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at FROM node_cache_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeCacheConfig
+	if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeCacheConfig.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeCacheConfig record.
+func (a NodeCacheConfigActions) CreateOne(ctx context.Context, sets ...query.NodeCacheConfigSetClause) (*model.NodeCacheConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeCacheConfig.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeCacheConfig
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeCacheConfig records.
+func (a NodeCacheConfigActions) CreateMany(ctx context.Context, data []query.NodeCacheConfigCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeCacheConfigActions) buildNodeCacheConfigCreateManySQL(data []query.NodeCacheConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeCacheConfig record matching the where clause.
+func (a NodeCacheConfigActions) UpdateOne(ctx context.Context, where query.NodeCacheConfigWhereClause, sets ...query.NodeCacheConfigSetClause) (*model.NodeCacheConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeCacheConfig.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_cache_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeCacheConfig
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeCacheConfig.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeCacheConfig records matching the where clauses.
+func (a NodeCacheConfigActions) UpdateMany(ctx context.Context, wheres []query.NodeCacheConfigWhereClause, sets ...query.NodeCacheConfigSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeCacheConfig.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_cache_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeCacheConfig.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeCacheConfig record.
+func (a NodeCacheConfigActions) UpsertOne(ctx context.Context, where query.NodeCacheConfigWhereClause, create []query.NodeCacheConfigSetClause, update []query.NodeCacheConfigSetClause) (*model.NodeCacheConfig, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeCacheConfig.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeCacheConfig
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeCacheConfig record matching the where clause.
+func (a NodeCacheConfigActions) DeleteOne(ctx context.Context, where query.NodeCacheConfigWhereClause) (*model.NodeCacheConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_cache_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeCacheConfig
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeCacheConfig.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeCacheConfig records matching the where clauses.
+func (a NodeCacheConfigActions) DeleteMany(ctx context.Context, wheres ...query.NodeCacheConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_cache_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeCacheConfig.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeCacheConfig records matching the where clauses.
+func (a NodeCacheConfigActions) Count(ctx context.Context, wheres ...query.NodeCacheConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_cache_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeCacheConfig.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeCacheConfig.
+func (a NodeCacheConfigActions) Aggregate(ctx context.Context, opts ...query.NodeCacheConfigAggregateOption) (*query.NodeCacheConfigAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_cache_configs", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeCacheConfigAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeCacheConfig.
+func (a NodeCacheConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeCacheConfigAggregateOption) ([]query.NodeCacheConfigGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_cache_configs GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeCacheConfig.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeCacheConfigGroupByResult
+	for rows.Next() {
+		r := query.NodeCacheConfigGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeCacheConfig.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
