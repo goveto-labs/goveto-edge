@@ -117,22 +117,24 @@ type DynamicSetting struct {
 
 // Node represents the Node model.
 type Node struct {
-	Id          string           `db:"id" json:"id"`
-	ClusterId   string           `db:"cluster_id" json:"clusterId"`
-	GroupId     *string          `db:"group_id" json:"groupId"`
-	RegionId    *string          `db:"region_id" json:"regionId"`
-	Name        string           `db:"name" json:"name"`
-	Version     *string          `db:"version" json:"version"`
-	HeartbeatAt *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
-	Status      NodeStatus       `db:"status" json:"status"`
-	CreatedAt   time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time        `db:"updated_at" json:"updatedAt"`
-	Cluster     *Cluster         `db:"-" json:"cluster,omitempty"`
-	Group       *ClusterGroup    `db:"-" json:"group,omitempty"`
-	Region      *ClusterRegion   `db:"-" json:"region,omitempty"`
-	Addresses   []*NodeAddress   `db:"-" json:"addresses,omitempty"`
-	DnsLines    []*NodeDNSLine   `db:"-" json:"dnsLines,omitempty"`
-	CacheConfig *NodeCacheConfig `db:"-" json:"cacheConfig,omitempty"`
+	Id               string           `db:"id" json:"id"`
+	ClusterId        string           `db:"cluster_id" json:"clusterId"`
+	GroupId          *string          `db:"group_id" json:"groupId"`
+	RegionId         *string          `db:"region_id" json:"regionId"`
+	Name             string           `db:"name" json:"name"`
+	CommunicationKey string           `db:"communication_key" json:"communicationKey"`
+	ConfigVersion    int64            `db:"config_version" json:"configVersion"`
+	Version          *string          `db:"version" json:"version"`
+	HeartbeatAt      *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	Status           NodeStatus       `db:"status" json:"status"`
+	CreatedAt        time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt        time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster          *Cluster         `db:"-" json:"cluster,omitempty"`
+	Group            *ClusterGroup    `db:"-" json:"group,omitempty"`
+	Region           *ClusterRegion   `db:"-" json:"region,omitempty"`
+	Addresses        []*NodeAddress   `db:"-" json:"addresses,omitempty"`
+	DnsLines         []*NodeDNSLine   `db:"-" json:"dnsLines,omitempty"`
+	CacheConfig      *NodeCacheConfig `db:"-" json:"cacheConfig,omitempty"`
 }
 
 // NodeAddress represents the NodeAddress model.

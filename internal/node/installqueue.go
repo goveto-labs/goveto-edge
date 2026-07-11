@@ -20,7 +20,7 @@ func NewInstallQueue(client *redis.Client, ttl time.Duration) *InstallQueue {
 	return &InstallQueue{redis: client, ttl: ttl}
 }
 
-func (q *InstallQueue) Enqueue(ctx context.Context, nodeID string, input SSHInstallInput) error {
+func (q *InstallQueue) Enqueue(ctx context.Context, nodeID string, input InstallPayload) error {
 	payload, err := json.Marshal(input)
 	if err != nil {
 		return fmt.Errorf("encode SSH install input: %w", err)

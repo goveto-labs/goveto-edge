@@ -245,21 +245,6 @@ func (nodeCacheConfigNodeIdField) NotIn(vals ...string) NodeCacheConfigWhereClau
 	return NodeCacheConfigWhereClause{Field: "node_id", Operator: "NOT IN", Value: iVals}
 }
 
-// Contains creates a LIKE '%v%' condition.
-func (nodeCacheConfigNodeIdField) Contains(v string) NodeCacheConfigWhereClause {
-	return NodeCacheConfigWhereClause{Field: "node_id", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeCacheConfigNodeIdField) StartsWith(v string) NodeCacheConfigWhereClause {
-	return NodeCacheConfigWhereClause{Field: "node_id", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeCacheConfigNodeIdField) EndsWith(v string) NodeCacheConfigWhereClause {
-	return NodeCacheConfigWhereClause{Field: "node_id", Operator: "ENDS_WITH", Value: v}
-}
-
 // Set creates a set operation for create/update.
 func (nodeCacheConfigNodeIdField) Set(v string) NodeCacheConfigSetClause {
 	return NodeCacheConfigSetClause{Field: "node_id", Value: v}

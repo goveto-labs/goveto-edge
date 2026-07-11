@@ -164,21 +164,6 @@ func (nodeDNSLineNodeIdField) NotIn(vals ...string) NodeDNSLineWhereClause {
 	return NodeDNSLineWhereClause{Field: "node_id", Operator: "NOT IN", Value: iVals}
 }
 
-// Contains creates a LIKE '%v%' condition.
-func (nodeDNSLineNodeIdField) Contains(v string) NodeDNSLineWhereClause {
-	return NodeDNSLineWhereClause{Field: "node_id", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeDNSLineNodeIdField) StartsWith(v string) NodeDNSLineWhereClause {
-	return NodeDNSLineWhereClause{Field: "node_id", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeDNSLineNodeIdField) EndsWith(v string) NodeDNSLineWhereClause {
-	return NodeDNSLineWhereClause{Field: "node_id", Operator: "ENDS_WITH", Value: v}
-}
-
 // Set creates a set operation for create/update.
 func (nodeDNSLineNodeIdField) Set(v string) NodeDNSLineSetClause {
 	return NodeDNSLineSetClause{Field: "node_id", Value: v}

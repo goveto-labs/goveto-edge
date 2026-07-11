@@ -30,6 +30,12 @@ type SSHInstallInput struct {
 	Passphrase    string `json:"passphrase,omitempty"`
 }
 
+type InstallPayload struct {
+	NodeID           string          `json:"node_id"`
+	CommunicationKey string          `json:"communication_key"`
+	SSH              SSHInstallInput `json:"ssh"`
+}
+
 func (i *CreateInput) Validate() error {
 	i.Name = strings.TrimSpace(i.Name)
 	if i.ClusterID == "" || i.Name == "" {

@@ -3,7 +3,9 @@ package nodes
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"errors"
 	"net/http"
 
@@ -40,7 +42,11 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 		}
 
 		nodeID := uuid.NewString()
-		if err := queue.Enqueue(ctx, nodeID, input.SSH); err != nil {
+		communicationKey, err := newCommunicationKey()
+		if err != nil {
+			return err
+		}
+		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID, CommunicationKey: communicationKey, SSH: input.SSH}); err != nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 		if err := db.Tx(ctx, func(tx *client.Client) error {
@@ -48,6 +54,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 				query.Node.Id.Set(nodeID),
 				query.Node.ClusterId.Set(input.ClusterID),
 				query.Node.Name.Set(input.Name),
+				query.Node.CommunicationKey.Set(communicationKey),
 				query.Node.Status.Set(model.NodeStatusPENDING),
 			}
 			if input.GroupID != nil {
@@ -87,6 +94,14 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 
 		return c.JSON(http.StatusAccepted, map[string]any{"id": nodeID, "status": model.NodeStatusPENDING})
 	}
+}
+
+func newCommunicationKey() (string, error) {
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func validateReferences(ctx context.Context, db *client.Client, input nodedomain.CreateInput) error {

@@ -236,21 +236,6 @@ func (nodeAddressNodeIdField) NotIn(vals ...string) NodeAddressWhereClause {
 	return NodeAddressWhereClause{Field: "node_id", Operator: "NOT IN", Value: iVals}
 }
 
-// Contains creates a LIKE '%v%' condition.
-func (nodeAddressNodeIdField) Contains(v string) NodeAddressWhereClause {
-	return NodeAddressWhereClause{Field: "node_id", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeAddressNodeIdField) StartsWith(v string) NodeAddressWhereClause {
-	return NodeAddressWhereClause{Field: "node_id", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeAddressNodeIdField) EndsWith(v string) NodeAddressWhereClause {
-	return NodeAddressWhereClause{Field: "node_id", Operator: "ENDS_WITH", Value: v}
-}
-
 // Set creates a set operation for create/update.
 func (nodeAddressNodeIdField) Set(v string) NodeAddressSetClause {
 	return NodeAddressSetClause{Field: "node_id", Value: v}

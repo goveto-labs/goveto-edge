@@ -213,22 +213,24 @@ model DynamicSetting {
 }
 
 model Node {
-  id          String           @id @default(uuid())
-  clusterId   String           @map("cluster_id")
-  groupId     String?          @map("group_id")
-  regionId    String?          @map("region_id")
-  name        String
-  version     String?
-  heartbeatAt DateTime?        @map("heartbeat_at")
-  status      NodeStatus       @default(PENDING)
-  createdAt   DateTime         @default(now()) @map("created_at")
-  updatedAt   DateTime         @updatedAt @map("updated_at")
-  cluster     Cluster          @relation(fields: [clusterId], references: [id])
-  group       ClusterGroup?    @relation(fields: [groupId], references: [id])
-  region      ClusterRegion?   @relation(fields: [regionId], references: [id])
-  addresses   NodeAddress[]
-  dnsLines    NodeDNSLine[]
-  cacheConfig NodeCacheConfig?
+  id               UUID             @id @default(uuid())
+  clusterId        String           @map("cluster_id")
+  groupId          String?          @map("group_id")
+  regionId         String?          @map("region_id")
+  name             String
+  communicationKey String           @map("communication_key")
+  configVersion    BigInt           @default(0) @map("config_version")
+  version          String?
+  heartbeatAt      DateTime?        @map("heartbeat_at")
+  status           NodeStatus       @default(PENDING)
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  cluster          Cluster          @relation(fields: [clusterId], references: [id])
+  group            ClusterGroup?    @relation(fields: [groupId], references: [id])
+  region           ClusterRegion?   @relation(fields: [regionId], references: [id])
+  addresses        NodeAddress[]
+  dnsLines         NodeDNSLine[]
+  cacheConfig      NodeCacheConfig?
 
   @@unique([clusterId, name])
   @@index([clusterId, status])
@@ -240,7 +242,7 @@ model Node {
 
 model NodeAddress {
   id        String   @id @default(uuid())
-  nodeId    String   @map("node_id")
+  nodeId    UUID     @map("node_id")
   address   String   @unique
   primary   Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
@@ -252,7 +254,7 @@ model NodeAddress {
 
 model NodeCacheConfig {
   id                  String   @id @default(uuid())
-  nodeId              String   @unique @map("node_id")
+  nodeId              UUID     @unique @map("node_id")
   cacheDir            String   @default("/opt/goveto-edge/cache") @map("cache_dir")
   autoMaxSize         Boolean  @default(true) @map("auto_max_size")
   maxSizeBytes        BigInt?  @map("max_size_bytes")
@@ -265,7 +267,7 @@ model NodeCacheConfig {
 }
 
 model NodeDNSLine {
-  nodeId    String  @map("node_id")
+  nodeId    UUID    @map("node_id")
   dnsLineId String  @map("dns_line_id")
   node      Node    @relation(fields: [nodeId], references: [id])
   dnsLine   DNSLine @relation(fields: [dnsLineId], references: [id])

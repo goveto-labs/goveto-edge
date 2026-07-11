@@ -201,11 +201,13 @@ query.PostAuthorIdColumn
 - Client handle: `c.Node`
 - Query namespace: `query.Node`
 - Fields:
-  - `Id` (String, id)
+  - `Id` (UUID, id)
   - `Clusterid` (String)
   - `Groupid` (String, optional)
   - `Regionid` (String, optional)
   - `Name` (String)
+  - `Communicationkey` (String)
+  - `Configversion` (BigInt)
   - `Version` (String, optional)
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
@@ -218,7 +220,7 @@ query.PostAuthorIdColumn
 - Query namespace: `query.NodeAddress`
 - Fields:
   - `Id` (String, id)
-  - `Nodeid` (String)
+  - `Nodeid` (UUID)
   - `Address` (String, unique)
   - `Primary` (Boolean)
   - `Createdat` (DateTime)
@@ -229,7 +231,7 @@ query.PostAuthorIdColumn
 - Query namespace: `query.NodeCacheConfig`
 - Fields:
   - `Id` (String, id)
-  - `Nodeid` (String, unique)
+  - `Nodeid` (UUID, unique)
   - `Cachedir` (String)
   - `Automaxsize` (Boolean)
   - `Maxsizebytes` (BigInt, optional)
@@ -242,7 +244,7 @@ query.PostAuthorIdColumn
 - Client handle: `c.NodeDNSLine`
 - Query namespace: `query.NodeDNSLine`
 - Fields:
-  - `Nodeid` (String)
+  - `Nodeid` (UUID)
   - `Dnslineid` (String)
 
 ### OriginBackend
