@@ -33,6 +33,26 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"site_id": config.SiteID, "version": config.Version, "applied": true, "config_version": configs.ConfigVersion()})
 	})
+	mux.HandleFunc("POST /v1/sites/{site_id}/purge", func(w http.ResponseWriter, r *http.Request) {
+		var input edgeprotocol.PurgeRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&input); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid purge payload")
+			return
+		}
+		if input.SiteID != r.PathValue("site_id") {
+			writeError(w, http.StatusBadRequest, "site id mismatch")
+			return
+		}
+		if err := input.Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := configs.Purge(r.Context(), input); err != nil {
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"site_id": input.SiteID, "type": input.Type, "purged": true})
+	})
 	mux.HandleFunc("GET /v1/logs/pull", func(w http.ResponseWriter, r *http.Request) {
 		wait := parseDurationSeconds(r.URL.Query().Get("wait"), 45*time.Second, 60*time.Second)
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))

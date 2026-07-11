@@ -55,6 +55,26 @@ func (c *Client) PushSiteConfig(ctx context.Context, config edgeprotocol.SiteCon
 	return result, nil
 }
 
+func (c *Client) PurgeSite(ctx context.Context, purge edgeprotocol.PurgeRequest) error {
+	body, err := json.Marshal(purge)
+	if err != nil {
+		return err
+	}
+	request, err := c.request(ctx, http.MethodPost, "/v1/sites/"+purge.SiteID+"/purge", body)
+	if err != nil {
+		return err
+	}
+	response, err := c.http.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("agent rejected cache purge: %s", response.Status)
+	}
+	return nil
+}
+
 // PullLogs continuously long-polls the agent. Records are acknowledged only
 // after consume returns successfully, so transient control-plane failures do
 // not lose data.

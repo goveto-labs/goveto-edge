@@ -98,3 +98,33 @@ type LogRecord struct {
 	CreatedAt time.Time       `json:"created_at"`
 	Payload   json.RawMessage `json:"payload"`
 }
+
+type PurgeRequest struct {
+	SiteID string   `json:"site_id"`
+	Type   string   `json:"type"`
+	Values []string `json:"values,omitempty"`
+}
+
+func (p PurgeRequest) Validate() error {
+	if p.SiteID == "" {
+		return errors.New("site_id is required")
+	}
+	switch p.Type {
+	case "URL", "PREFIX", "TAG":
+		if len(p.Values) == 0 {
+			return errors.New("purge values are required")
+		}
+		for _, value := range p.Values {
+			if strings.TrimSpace(value) == "" {
+				return errors.New("purge values cannot be empty")
+			}
+		}
+	case "ALL":
+		if len(p.Values) != 0 {
+			return errors.New("ALL purge does not accept values")
+		}
+	default:
+		return errors.New("invalid purge type")
+	}
+	return nil
+}

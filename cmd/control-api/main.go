@@ -14,6 +14,7 @@ import (
 	"goveto-edge/internal/httpapi"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
+	"goveto-edge/internal/purge"
 	"goveto-edge/internal/storage"
 )
 
@@ -48,10 +49,12 @@ func main() {
 	}
 	publishService := publisher.New(orm, credentialCipher)
 	go publishService.Run(ctx)
+	purgeService := purge.New(orm, credentialCipher)
+	go purgeService.Run(ctx)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db, orm, redisClient, sessions, credentialCipher, publishService),
+		Handler:           httpapi.New(db, orm, redisClient, sessions, credentialCipher, publishService, purgeService),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 

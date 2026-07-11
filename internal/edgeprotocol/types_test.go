@@ -83,3 +83,23 @@ func TestSiteConfigValidateMixedOrigins(t *testing.T) {
 		t.Fatal("expected mixed origin rejection")
 	}
 }
+
+func TestPurgeRequestValidate(t *testing.T) {
+	valid := []PurgeRequest{
+		{SiteID: "site", Type: "URL", Values: []string{"/index.html"}},
+		{SiteID: "site", Type: "PREFIX", Values: []string{"/assets/"}},
+		{SiteID: "site", Type: "TAG", Values: []string{"product-42"}},
+		{SiteID: "site", Type: "ALL"},
+	}
+	for _, request := range valid {
+		if err := request.Validate(); err != nil {
+			t.Fatalf("Validate(%+v): %v", request, err)
+		}
+	}
+	invalid := []PurgeRequest{{Type: "ALL"}, {SiteID: "site", Type: "URL"}, {SiteID: "site", Type: "ALL", Values: []string{"unexpected"}}, {SiteID: "site", Type: "UNKNOWN"}}
+	for _, request := range invalid {
+		if err := request.Validate(); err == nil {
+			t.Fatalf("Validate(%+v) unexpectedly succeeded", request)
+		}
+	}
+}

@@ -1,9 +1,14 @@
 package edgeagent
 
 import (
+	"bytes"
+	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,6 +18,8 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
+
+	"goveto-edge/internal/edgeprotocol"
 )
 
 type ConfigManager struct {
@@ -128,6 +135,76 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
 
+func (m *ConfigManager) Purge(ctx context.Context, purge edgeprotocol.PurgeRequest) error {
+	m.mu.Lock()
+	site, ok := m.sites[purge.SiteID]
+	listen := m.agentListen
+	m.mu.Unlock()
+	if !ok || site.Disabled {
+		return errors.New("site config is not active")
+	}
+	if site.Cache == nil {
+		return errors.New("site cache is not enabled")
+	}
+	if len(site.Domains) == 0 {
+		return errors.New("site has no domain")
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("invalid agent listen address: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	scheme := "http"
+	if !site.Listener.HTTPEnabled {
+		scheme, port = "https", strconv.Itoa(site.Listener.HTTPSPort)
+	}
+	endpoint := scheme + "://" + net.JoinHostPort(host, port) + "/__goveto/cache/" + purge.SiteID
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}}
+	var request *http.Request
+	if purge.Type == "ALL" {
+		request, err = http.NewRequestWithContext(ctx, "PURGE", endpoint+"/flush", nil)
+	} else {
+		kind := map[string]string{"URL": "uri", "PREFIX": "uri-prefix", "TAG": "group"}[purge.Type]
+		values := append([]string(nil), purge.Values...)
+		if purge.Type != "TAG" {
+			for i, value := range values {
+				if strings.HasPrefix(value, "/") {
+					values[i] = site.Domains[0] + value
+				}
+			}
+		}
+		payload := map[string]any{"type": kind, "purge": true}
+		if purge.Type == "TAG" {
+			payload["groups"] = values
+		} else {
+			payload["selectors"] = values
+		}
+		body, marshalErr := json.Marshal(payload)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		request, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if request != nil {
+			request.Header.Set("Content-Type", "application/json")
+		}
+	}
+	if err != nil {
+		return err
+	}
+	request.Host = site.Domains[0]
+	response, err := client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return fmt.Errorf("cache purge rejected: %s", response.Status)
+	}
+	return nil
+}
+
 func persistSites(path string, sites map[string]SiteConfig) error {
 	if path == "" {
 		return nil
@@ -200,6 +277,17 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 		if site.Cache != nil {
 			cache := cloneMap(site.Cache)
 			cache["handler"] = "cache"
+			configuration, _ := cache["Configuration"].(map[string]any)
+			if configuration == nil {
+				configuration = map[string]any{}
+			}
+			api, _ := configuration["API"].(map[string]any)
+			if api == nil {
+				api = map[string]any{}
+			}
+			api["souin"] = map[string]any{"enable": true, "basepath": "/__goveto/cache/" + id}
+			configuration["API"] = api
+			cache["Configuration"] = configuration
 			handlers = append(handlers, cache)
 		}
 		upstreams := make([]any, 0, len(site.Origins))

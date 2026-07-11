@@ -224,6 +224,19 @@ func TestMixedOriginProtocolsRejected(t *testing.T) {
 	}
 }
 
+func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Cache = map[string]any{"ttl": "1m"}
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"basepath":"/__goveto/cache/`+config.SiteID+`"`) || !strings.Contains(text, `"enable":true`) {
+		t.Fatalf("site-scoped Souin purge API missing from config: %s", text)
+	}
+}
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
