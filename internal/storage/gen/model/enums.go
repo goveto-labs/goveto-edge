@@ -151,6 +151,22 @@ func ValidSiteStatusValues() []SiteStatus {
 	}
 }
 
+// TLSMinVersion represents the TLSMinVersion enum type.
+type TLSMinVersion string
+
+const (
+	TLSMinVersionTLS1_2 TLSMinVersion = "TLS1_2"
+	TLSMinVersionTLS1_3 TLSMinVersion = "TLS1_3"
+)
+
+// ValidTLSMinVersionValues returns all valid values for the TLSMinVersion enum.
+func ValidTLSMinVersionValues() []TLSMinVersion {
+	return []TLSMinVersion{
+		TLSMinVersionTLS1_2,
+		TLSMinVersionTLS1_3,
+	}
+}
+
 // UserRole represents the UserRole enum type.
 type UserRole string
 

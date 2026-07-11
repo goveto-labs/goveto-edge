@@ -60,6 +60,11 @@ enum SiteStatus {
   DISABLED
 }
 
+enum TLSMinVersion {
+  TLS1_2
+  TLS1_3
+}
+
 enum UserRole {
   ADMIN
   OPERATOR
@@ -334,22 +339,23 @@ model PurgeJob {
 }
 
 model Site {
-  id             String            @id @default(uuid())
-  clusterId      String            @map("cluster_id")
-  creatorId      String            @map("creator_id")
+  id             String              @id @default(uuid())
+  clusterId      String              @map("cluster_id")
+  creatorId      String              @map("creator_id")
   name           String
-  status         SiteStatus        @default(ACTIVE)
-  originPoolId   String            @map("origin_pool_id")
-  policyId       String?           @map("policy_id")
-  version        BigInt            @default(1)
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
-  cluster        Cluster           @relation(fields: [clusterId], references: [id])
-  creator        User              @relation(fields: [creatorId], references: [id])
-  originPool     OriginPool        @relation(fields: [originPoolId], references: [id])
-  policy         Policy?           @relation(fields: [policyId], references: [id])
+  status         SiteStatus          @default(ACTIVE)
+  originPoolId   String              @map("origin_pool_id")
+  policyId       String?             @map("policy_id")
+  version        BigInt              @default(1)
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  cluster        Cluster             @relation(fields: [clusterId], references: [id])
+  creator        User                @relation(fields: [creatorId], references: [id])
+  originPool     OriginPool          @relation(fields: [originPoolId], references: [id])
+  policy         Policy?             @relation(fields: [policyId], references: [id])
   domains        SiteDomain[]
   certificates   SiteCertificate[]
+  listenerConfig SiteListenerConfig?
   configVersions ConfigVersion[]
   publishJobs    PublishJob[]
   purgeJobs      PurgeJob[]
@@ -382,6 +388,29 @@ model SiteDomain {
 
   @@index([siteId])
   @@map("site_domains")
+}
+
+model SiteListenerConfig {
+  id                    String        @id @default(uuid())
+  siteId                String        @unique @map("site_id")
+  httpEnabled           Boolean       @default(true) @map("http_enabled")
+  httpPort              Int           @default(80) @map("http_port")
+  redirectHttpToHttps   Boolean       @default(true) @map("redirect_http_to_https")
+  httpsEnabled          Boolean       @default(true) @map("https_enabled")
+  httpsPort             Int           @default(443) @map("https_port")
+  http2Enabled          Boolean       @default(true) @map("http2_enabled")
+  http3Enabled          Boolean       @default(true) @map("http3_enabled")
+  tlsMinVersion         TLSMinVersion @default(TLS1_2) @map("tls_min_version")
+  hstsEnabled           Boolean       @default(false) @map("hsts_enabled")
+  hstsMaxAge            Int           @default(31536000) @map("hsts_max_age")
+  hstsIncludeSubdomains Boolean       @default(false) @map("hsts_include_subdomains")
+  hstsPreload           Boolean       @default(false) @map("hsts_preload")
+  ocspStaplingEnabled   Boolean       @default(true) @map("ocsp_stapling_enabled")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+  site                  Site          @relation(fields: [siteId], references: [id])
+
+  @@map("site_listener_configs")
 }
 
 model User {

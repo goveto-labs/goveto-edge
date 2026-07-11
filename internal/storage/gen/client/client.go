@@ -21,31 +21,32 @@ type querier interface {
 
 // Client is the main entry point for database operations.
 type Client struct {
-	db              *sql.DB
-	executor        querier
-	dialect         string
-	AuditLog        AuditLogActions
-	Certificate     CertificateActions
-	Cluster         ClusterActions
-	ClusterGroup    ClusterGroupActions
-	ClusterMember   ClusterMemberActions
-	ClusterRegion   ClusterRegionActions
-	ConfigVersion   ConfigVersionActions
-	DNSLine         DNSLineActions
-	DynamicSetting  DynamicSettingActions
-	Node            NodeActions
-	NodeAddress     NodeAddressActions
-	NodeDNSLine     NodeDNSLineActions
-	OriginBackend   OriginBackendActions
-	OriginPool      OriginPoolActions
-	Policy          PolicyActions
-	PublishJob      PublishJobActions
-	PurgeJob        PurgeJobActions
-	Site            SiteActions
-	SiteCertificate SiteCertificateActions
-	SiteDomain      SiteDomainActions
-	User            UserActions
-	UserSession     UserSessionActions
+	db                 *sql.DB
+	executor           querier
+	dialect            string
+	AuditLog           AuditLogActions
+	Certificate        CertificateActions
+	Cluster            ClusterActions
+	ClusterGroup       ClusterGroupActions
+	ClusterMember      ClusterMemberActions
+	ClusterRegion      ClusterRegionActions
+	ConfigVersion      ConfigVersionActions
+	DNSLine            DNSLineActions
+	DynamicSetting     DynamicSettingActions
+	Node               NodeActions
+	NodeAddress        NodeAddressActions
+	NodeDNSLine        NodeDNSLineActions
+	OriginBackend      OriginBackendActions
+	OriginPool         OriginPoolActions
+	Policy             PolicyActions
+	PublishJob         PublishJobActions
+	PurgeJob           PurgeJobActions
+	Site               SiteActions
+	SiteCertificate    SiteCertificateActions
+	SiteDomain         SiteDomainActions
+	SiteListenerConfig SiteListenerConfigActions
+	User               UserActions
+	UserSession        UserSessionActions
 }
 
 // New creates a new Client from a database connection.
@@ -74,6 +75,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.Site = SiteActions{client: c}
 	c.SiteCertificate = SiteCertificateActions{client: c}
 	c.SiteDomain = SiteDomainActions{client: c}
+	c.SiteListenerConfig = SiteListenerConfigActions{client: c}
 	c.User = UserActions{client: c}
 	c.UserSession = UserSessionActions{client: c}
 	return c
@@ -253,6 +255,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.Site = SiteActions{client: txClient}
 	txClient.SiteCertificate = SiteCertificateActions{client: txClient}
 	txClient.SiteDomain = SiteDomainActions{client: txClient}
+	txClient.SiteListenerConfig = SiteListenerConfigActions{client: txClient}
 	txClient.User = UserActions{client: txClient}
 	txClient.UserSession = UserSessionActions{client: txClient}
 
@@ -17526,6 +17529,870 @@ func (a SiteDomainActions) GroupBy(ctx context.Context, fields []string, opts ..
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("SiteDomain.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildSiteListenerConfigWhere recursively builds a WHERE clause string and arguments.
+func buildSiteListenerConfigWhere(c *Client, wheres []query.SiteListenerConfigWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.SiteListenerConfigWhereClause); ok {
+				sub, subArgs := buildSiteListenerConfigWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.SiteListenerConfigWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildSiteListenerConfigWhere(c, []query.SiteListenerConfigWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.SiteListenerConfigWhereClause); ok {
+				sub, subArgs := buildSiteListenerConfigWhere(c, []query.SiteListenerConfigWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// SiteListenerConfigActions provides database operations for the SiteListenerConfig model.
+type SiteListenerConfigActions struct {
+	client *Client
+}
+
+// SiteListenerConfigCreateBuilder builds a SiteListenerConfig create operation incrementally.
+type SiteListenerConfigCreateBuilder struct {
+	action SiteListenerConfigActions
+	sets   []query.SiteListenerConfigSetClause
+}
+
+// Create starts a staged SiteListenerConfig create operation.
+func (a SiteListenerConfigActions) Create() SiteListenerConfigCreateBuilder {
+	return SiteListenerConfigCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b SiteListenerConfigCreateBuilder) Set(sets ...query.SiteListenerConfigSetClause) SiteListenerConfigCreateBuilder {
+	next := SiteListenerConfigCreateBuilder{
+		action: b.action,
+		sets:   make([]query.SiteListenerConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b SiteListenerConfigCreateBuilder) Do(ctx context.Context) (*model.SiteListenerConfig, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// SiteListenerConfigCreateManyBuilder builds a bulk SiteListenerConfig insert operation.
+type SiteListenerConfigCreateManyBuilder struct {
+	action            SiteListenerConfigActions
+	data              []query.SiteListenerConfigCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk SiteListenerConfig insert operation.
+func (a SiteListenerConfigActions) BulkCreate(data []query.SiteListenerConfigCreateInput) SiteListenerConfigCreateManyBuilder {
+	return SiteListenerConfigCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b SiteListenerConfigCreateManyBuilder) OnConflictDoNothing(columns ...string) SiteListenerConfigCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b SiteListenerConfigCreateManyBuilder) Returning(columns ...string) SiteListenerConfigCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b SiteListenerConfigCreateManyBuilder) BatchSize(n int) SiteListenerConfigCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b SiteListenerConfigCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteListenerConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("SiteListenerConfig.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("SiteListenerConfig.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b SiteListenerConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]model.SiteListenerConfig, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.SiteListenerConfig
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteListenerConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "http_enabled", "http_port", "redirect_http_to_https", "https_enabled", "https_port", "http2_enabled", "http3_enabled", "tls_min_version", "hsts_enabled", "hsts_max_age", "hsts_include_subdomains", "hsts_preload", "ocsp_stapling_enabled", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.SiteListenerConfig
+			if err := rows.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b SiteListenerConfigCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "site_id", "http_enabled", "http_port", "redirect_http_to_https", "https_enabled", "https_port", "http2_enabled", "http3_enabled", "tls_min_version", "hsts_enabled", "hsts_max_age", "hsts_include_subdomains", "hsts_preload", "ocsp_stapling_enabled", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteListenerConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// SiteListenerConfigQueryBuilder builds a SiteListenerConfig query incrementally.
+type SiteListenerConfigQueryBuilder struct {
+	action SiteListenerConfigActions
+	opts   []query.SiteListenerConfigQueryOption
+}
+
+// Query starts a staged SiteListenerConfig query.
+func (a SiteListenerConfigActions) Query() SiteListenerConfigQueryBuilder {
+	return SiteListenerConfigQueryBuilder{action: a}
+}
+
+func (b SiteListenerConfigQueryBuilder) withOptions(opts ...query.SiteListenerConfigQueryOption) SiteListenerConfigQueryBuilder {
+	next := SiteListenerConfigQueryBuilder{
+		action: b.action,
+		opts:   make([]query.SiteListenerConfigQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b SiteListenerConfigQueryBuilder) Where(clauses ...query.SiteListenerConfigWhereClause) SiteListenerConfigQueryBuilder {
+	opts := make([]query.SiteListenerConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b SiteListenerConfigQueryBuilder) OrderBy(clause query.SiteListenerConfigOrderByClause) SiteListenerConfigQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b SiteListenerConfigQueryBuilder) Include(clauses ...query.SiteListenerConfigIncludeClause) SiteListenerConfigQueryBuilder {
+	opts := make([]query.SiteListenerConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b SiteListenerConfigQueryBuilder) Take(n int) SiteListenerConfigQueryBuilder {
+	return b.withOptions(query.SiteListenerConfigTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b SiteListenerConfigQueryBuilder) Skip(n int) SiteListenerConfigQueryBuilder {
+	return b.withOptions(query.SiteListenerConfigSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b SiteListenerConfigQueryBuilder) Do(ctx context.Context) ([]model.SiteListenerConfig, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b SiteListenerConfigQueryBuilder) First(ctx context.Context) (*model.SiteListenerConfig, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b SiteListenerConfigQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplySiteListenerConfigOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// SiteListenerConfigUpdateBuilder builds a SiteListenerConfig update operation incrementally.
+type SiteListenerConfigUpdateBuilder struct {
+	action SiteListenerConfigActions
+	wheres []query.SiteListenerConfigWhereClause
+	sets   []query.SiteListenerConfigSetClause
+}
+
+// Update starts a staged SiteListenerConfig update operation.
+func (a SiteListenerConfigActions) Update() SiteListenerConfigUpdateBuilder {
+	return SiteListenerConfigUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b SiteListenerConfigUpdateBuilder) Where(clauses ...query.SiteListenerConfigWhereClause) SiteListenerConfigUpdateBuilder {
+	next := SiteListenerConfigUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.SiteListenerConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.SiteListenerConfigSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b SiteListenerConfigUpdateBuilder) Set(sets ...query.SiteListenerConfigSetClause) SiteListenerConfigUpdateBuilder {
+	next := SiteListenerConfigUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.SiteListenerConfigWhereClause(nil), b.wheres...),
+		sets:   make([]query.SiteListenerConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b SiteListenerConfigUpdateBuilder) combinedWhere() (query.SiteListenerConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteListenerConfigWhereClause{}, fmt.Errorf("SiteListenerConfig.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteListenerConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b SiteListenerConfigUpdateBuilder) Do(ctx context.Context) (*model.SiteListenerConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b SiteListenerConfigUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// SiteListenerConfigDeleteBuilder builds a SiteListenerConfig delete operation incrementally.
+type SiteListenerConfigDeleteBuilder struct {
+	action SiteListenerConfigActions
+	wheres []query.SiteListenerConfigWhereClause
+}
+
+// Delete starts a staged SiteListenerConfig delete operation.
+func (a SiteListenerConfigActions) Delete() SiteListenerConfigDeleteBuilder {
+	return SiteListenerConfigDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b SiteListenerConfigDeleteBuilder) Where(clauses ...query.SiteListenerConfigWhereClause) SiteListenerConfigDeleteBuilder {
+	next := SiteListenerConfigDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.SiteListenerConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b SiteListenerConfigDeleteBuilder) combinedWhere() (query.SiteListenerConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteListenerConfigWhereClause{}, fmt.Errorf("SiteListenerConfig.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteListenerConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b SiteListenerConfigDeleteBuilder) Do(ctx context.Context) (*model.SiteListenerConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b SiteListenerConfigDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple SiteListenerConfig records.
+func (a SiteListenerConfigActions) FindMany(ctx context.Context, opts ...query.SiteListenerConfigQueryOption) ([]model.SiteListenerConfig, error) {
+	cfg := query.ApplySiteListenerConfigOptions(opts)
+	q := "SELECT id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at FROM site_listener_configs"
+	argIdx := 0
+	where, args := buildSiteListenerConfigWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.SiteListenerConfig
+	for rows.Next() {
+		var item model.SiteListenerConfig
+		if err := rows.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching SiteListenerConfig record.
+func (a SiteListenerConfigActions) FindFirst(ctx context.Context, opts ...query.SiteListenerConfigQueryOption) (*model.SiteListenerConfig, error) {
+	opts = append(opts, query.SiteListenerConfigTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single SiteListenerConfig record by unique constraint.
+func (a SiteListenerConfigActions) FindUnique(ctx context.Context, where query.SiteListenerConfigWhereClause) (*model.SiteListenerConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
+	q := "SELECT id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at FROM site_listener_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.SiteListenerConfig
+	if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SiteListenerConfig.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single SiteListenerConfig record.
+func (a SiteListenerConfigActions) CreateOne(ctx context.Context, sets ...query.SiteListenerConfigSetClause) (*model.SiteListenerConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteListenerConfig.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.SiteListenerConfig
+		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple SiteListenerConfig records.
+func (a SiteListenerConfigActions) CreateMany(ctx context.Context, data []query.SiteListenerConfigCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a SiteListenerConfigActions) buildSiteListenerConfigCreateManySQL(data []query.SiteListenerConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "site_id", "http_enabled", "http_port", "redirect_http_to_https", "https_enabled", "https_port", "http2_enabled", "http3_enabled", "tls_min_version", "hsts_enabled", "hsts_max_age", "hsts_include_subdomains", "hsts_preload", "ocsp_stapling_enabled", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single SiteListenerConfig record matching the where clause.
+func (a SiteListenerConfigActions) UpdateOne(ctx context.Context, where query.SiteListenerConfigWhereClause, sets ...query.SiteListenerConfigSetClause) (*model.SiteListenerConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteListenerConfig.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_listener_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteListenerConfig
+		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteListenerConfig.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple SiteListenerConfig records matching the where clauses.
+func (a SiteListenerConfigActions) UpdateMany(ctx context.Context, wheres []query.SiteListenerConfigWhereClause, sets ...query.SiteListenerConfigSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("SiteListenerConfig.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_listener_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteListenerConfig.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single SiteListenerConfig record.
+func (a SiteListenerConfigActions) UpsertOne(ctx context.Context, where query.SiteListenerConfigWhereClause, create []query.SiteListenerConfigSetClause, update []query.SiteListenerConfigSetClause) (*model.SiteListenerConfig, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("SiteListenerConfig.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteListenerConfig
+		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single SiteListenerConfig record matching the where clause.
+func (a SiteListenerConfigActions) DeleteOne(ctx context.Context, where query.SiteListenerConfigWhereClause) (*model.SiteListenerConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
+	q := "DELETE FROM site_listener_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteListenerConfig
+		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteListenerConfig.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple SiteListenerConfig records matching the where clauses.
+func (a SiteListenerConfigActions) DeleteMany(ctx context.Context, wheres ...query.SiteListenerConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM site_listener_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteListenerConfig.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of SiteListenerConfig records matching the where clauses.
+func (a SiteListenerConfigActions) Count(ctx context.Context, wheres ...query.SiteListenerConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM site_listener_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("SiteListenerConfig.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for SiteListenerConfig.
+func (a SiteListenerConfigActions) Aggregate(ctx context.Context, opts ...query.SiteListenerConfigAggregateOption) (*query.SiteListenerConfigAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_listener_configs", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.SiteListenerConfigAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on SiteListenerConfig.
+func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteListenerConfigAggregateOption) ([]query.SiteListenerConfigGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_listener_configs GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("SiteListenerConfig.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.SiteListenerConfigGroupByResult
+	for rows.Next() {
+		r := query.SiteListenerConfigGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("SiteListenerConfig.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

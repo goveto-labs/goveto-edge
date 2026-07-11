@@ -47,6 +47,7 @@ type SiteQuery struct {
 	Policy         sitePolicyRelation
 	Domains        siteDomainsRelation
 	Certificates   siteCertificatesRelation
+	ListenerConfig siteListenerConfigRelation
 	ConfigVersions siteConfigVersionsRelation
 	PublishJobs    sitePublishJobsRelation
 	PurgeJobs      sitePurgeJobsRelation
@@ -82,6 +83,7 @@ var Site = SiteQuery{
 	Policy:         sitePolicyRelation{},
 	Domains:        siteDomainsRelation{},
 	Certificates:   siteCertificatesRelation{},
+	ListenerConfig: siteListenerConfigRelation{},
 	ConfigVersions: siteConfigVersionsRelation{},
 	PublishJobs:    sitePublishJobsRelation{},
 	PurgeJobs:      sitePurgeJobsRelation{},
@@ -844,6 +846,14 @@ func (siteCertificatesRelation) Fetch() SiteIncludeClause {
 	return SiteIncludeClause{Relation: "certificates"}
 }
 
+// ListenerConfigRelation provides relation query helpers for listenerConfig.
+type siteListenerConfigRelation struct{}
+
+// Fetch creates an include clause to fetch related listenerConfig.
+func (siteListenerConfigRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "listenerConfig"}
+}
+
 // ConfigVersionsRelation provides relation query helpers for configVersions.
 type siteConfigVersionsRelation struct{}
 
@@ -917,6 +927,7 @@ type SiteCreateInput struct {
 	Policy         *PolicyCreateNestedInput
 	Domains        *SiteDomainCreateNestedInput
 	Certificates   *SiteCertificateCreateNestedInput
+	ListenerConfig *SiteListenerConfigCreateNestedInput
 	ConfigVersions *ConfigVersionCreateNestedInput
 	PublishJobs    *PublishJobCreateNestedInput
 	PurgeJobs      *PurgeJobCreateNestedInput

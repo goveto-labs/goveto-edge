@@ -221,25 +221,26 @@ type PurgeJob struct {
 
 // Site represents the Site model.
 type Site struct {
-	Id             string             `db:"id" json:"id"`
-	ClusterId      string             `db:"cluster_id" json:"clusterId"`
-	CreatorId      string             `db:"creator_id" json:"creatorId"`
-	Name           string             `db:"name" json:"name"`
-	Status         SiteStatus         `db:"status" json:"status"`
-	OriginPoolId   string             `db:"origin_pool_id" json:"originPoolId"`
-	PolicyId       *string            `db:"policy_id" json:"policyId"`
-	Version        int64              `db:"version" json:"version"`
-	CreatedAt      time.Time          `db:"created_at" json:"createdAt"`
-	UpdatedAt      time.Time          `db:"updated_at" json:"updatedAt"`
-	Cluster        *Cluster           `db:"-" json:"cluster,omitempty"`
-	Creator        *User              `db:"-" json:"creator,omitempty"`
-	OriginPool     *OriginPool        `db:"-" json:"originPool,omitempty"`
-	Policy         *Policy            `db:"-" json:"policy,omitempty"`
-	Domains        []*SiteDomain      `db:"-" json:"domains,omitempty"`
-	Certificates   []*SiteCertificate `db:"-" json:"certificates,omitempty"`
-	ConfigVersions []*ConfigVersion   `db:"-" json:"configVersions,omitempty"`
-	PublishJobs    []*PublishJob      `db:"-" json:"publishJobs,omitempty"`
-	PurgeJobs      []*PurgeJob        `db:"-" json:"purgeJobs,omitempty"`
+	Id             string              `db:"id" json:"id"`
+	ClusterId      string              `db:"cluster_id" json:"clusterId"`
+	CreatorId      string              `db:"creator_id" json:"creatorId"`
+	Name           string              `db:"name" json:"name"`
+	Status         SiteStatus          `db:"status" json:"status"`
+	OriginPoolId   string              `db:"origin_pool_id" json:"originPoolId"`
+	PolicyId       *string             `db:"policy_id" json:"policyId"`
+	Version        int64               `db:"version" json:"version"`
+	CreatedAt      time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt      time.Time           `db:"updated_at" json:"updatedAt"`
+	Cluster        *Cluster            `db:"-" json:"cluster,omitempty"`
+	Creator        *User               `db:"-" json:"creator,omitempty"`
+	OriginPool     *OriginPool         `db:"-" json:"originPool,omitempty"`
+	Policy         *Policy             `db:"-" json:"policy,omitempty"`
+	Domains        []*SiteDomain       `db:"-" json:"domains,omitempty"`
+	Certificates   []*SiteCertificate  `db:"-" json:"certificates,omitempty"`
+	ListenerConfig *SiteListenerConfig `db:"-" json:"listenerConfig,omitempty"`
+	ConfigVersions []*ConfigVersion    `db:"-" json:"configVersions,omitempty"`
+	PublishJobs    []*PublishJob       `db:"-" json:"publishJobs,omitempty"`
+	PurgeJobs      []*PurgeJob         `db:"-" json:"purgeJobs,omitempty"`
 }
 
 // SiteCertificate represents the SiteCertificate model.
@@ -257,6 +258,28 @@ type SiteDomain struct {
 	Hostname  string    `db:"hostname" json:"hostname"`
 	CreatedAt time.Time `db:"created_at" json:"createdAt"`
 	Site      *Site     `db:"-" json:"site,omitempty"`
+}
+
+// SiteListenerConfig represents the SiteListenerConfig model.
+type SiteListenerConfig struct {
+	Id                    string        `db:"id" json:"id"`
+	SiteId                string        `db:"site_id" json:"siteId"`
+	HttpEnabled           bool          `db:"http_enabled" json:"httpEnabled"`
+	HttpPort              int           `db:"http_port" json:"httpPort"`
+	RedirectHttpToHttps   bool          `db:"redirect_http_to_https" json:"redirectHttpToHttps"`
+	HttpsEnabled          bool          `db:"https_enabled" json:"httpsEnabled"`
+	HttpsPort             int           `db:"https_port" json:"httpsPort"`
+	Http2Enabled          bool          `db:"http2_enabled" json:"http2Enabled"`
+	Http3Enabled          bool          `db:"http3_enabled" json:"http3Enabled"`
+	TlsMinVersion         TLSMinVersion `db:"tls_min_version" json:"tlsMinVersion"`
+	HstsEnabled           bool          `db:"hsts_enabled" json:"hstsEnabled"`
+	HstsMaxAge            int           `db:"hsts_max_age" json:"hstsMaxAge"`
+	HstsIncludeSubdomains bool          `db:"hsts_include_subdomains" json:"hstsIncludeSubdomains"`
+	HstsPreload           bool          `db:"hsts_preload" json:"hstsPreload"`
+	OcspStaplingEnabled   bool          `db:"ocsp_stapling_enabled" json:"ocspStaplingEnabled"`
+	CreatedAt             time.Time     `db:"created_at" json:"createdAt"`
+	UpdatedAt             time.Time     `db:"updated_at" json:"updatedAt"`
+	Site                  *Site         `db:"-" json:"site,omitempty"`
 }
 
 // User represents the User model.

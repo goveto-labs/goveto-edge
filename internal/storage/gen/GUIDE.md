@@ -335,6 +335,29 @@ query.PostAuthorIdColumn
   - `Hostname` (String, unique)
   - `Createdat` (DateTime)
 
+### SiteListenerConfig
+
+- Client handle: `c.SiteListenerConfig`
+- Query namespace: `query.SiteListenerConfig`
+- Fields:
+  - `Id` (String, id)
+  - `Siteid` (String, unique)
+  - `Httpenabled` (Boolean)
+  - `Httpport` (Int)
+  - `Redirecthttptohttps` (Boolean)
+  - `Httpsenabled` (Boolean)
+  - `Httpsport` (Int)
+  - `Http2enabled` (Boolean)
+  - `Http3enabled` (Boolean)
+  - `Tlsminversion` ()
+  - `Hstsenabled` (Boolean)
+  - `Hstsmaxage` (Int)
+  - `Hstsincludesubdomains` (Boolean)
+  - `Hstspreload` (Boolean)
+  - `Ocspstaplingenabled` (Boolean)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### User
 
 - Client handle: `c.User`

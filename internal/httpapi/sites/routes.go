@@ -34,6 +34,8 @@ type createRequest struct {
 
 func Register(e *echo.Echo, db *client.Client) {
 	e.POST("/api/v1/clusters/:cluster_id/sites", create(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db), auth.RequireAuth, clusteraccess.Require(db))
 }
 
 func create(db *client.Client) echo.HandlerFunc {
@@ -83,6 +85,9 @@ func create(db *client.Client) echo.HandlerFunc {
 				}
 			}
 			if _, err := tx.Site.Create().Set(query.Site.Id.Set(siteID), query.Site.ClusterId.Set(c.Param("cluster_id")), query.Site.CreatorId.Set(auth.CurrentUID(c)), query.Site.Name.Set(input.Name), query.Site.Status.Set(model.SiteStatusACTIVE), query.Site.OriginPoolId.Set(poolID)).Do(ctx); err != nil {
+				return err
+			}
+			if _, err := tx.SiteListenerConfig.Create().Set(query.SiteListenerConfig.SiteId.Set(siteID)).Do(ctx); err != nil {
 				return err
 			}
 			for _, domain := range domains {
