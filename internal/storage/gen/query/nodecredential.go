@@ -26,20 +26,20 @@ func ApplyNodeCredentialOptions(opts []NodeCredentialQueryOption) NodeCredential
 
 // NodeCredentialQuery is the namespace for NodeCredential query operations.
 type NodeCredentialQuery struct {
-	NodeId           nodeCredentialNodeIdField
-	CommunicationKey nodeCredentialCommunicationKeyField
-	Node             nodeCredentialNodeRelation
+	NodeId                    nodeCredentialNodeIdField
+	CommunicationKeyEncrypted nodeCredentialCommunicationKeyEncryptedField
+	Node                      nodeCredentialNodeRelation
 }
 
 const NodeCredentialTable = "node_credentials"
 const NodeCredentialNodeIdColumn = "node_id"
-const NodeCredentialCommunicationKeyColumn = "communication_key"
+const NodeCredentialCommunicationKeyEncryptedColumn = "communication_key_encrypted"
 
 // NodeCredentialQuery provides query building methods for the NodeCredential model.
 var NodeCredential = NodeCredentialQuery{
-	NodeId:           nodeCredentialNodeIdField{},
-	CommunicationKey: nodeCredentialCommunicationKeyField{},
-	Node:             nodeCredentialNodeRelation{},
+	NodeId:                    nodeCredentialNodeIdField{},
+	CommunicationKeyEncrypted: nodeCredentialCommunicationKeyEncryptedField{},
+	Node:                      nodeCredentialNodeRelation{},
 }
 
 // NodeCredentialWhereClause represents a WHERE condition for NodeCredential.
@@ -177,65 +177,65 @@ func (nodeCredentialNodeIdField) Desc() NodeCredentialOrderByClause {
 	return NodeCredentialOrderByClause{Field: "node_id", Direction: "DESC"}
 }
 
-// CommunicationKeyField provides query operations for the communicationKey field.
-type nodeCredentialCommunicationKeyField struct{}
+// CommunicationKeyEncryptedField provides query operations for the communicationKeyEncrypted field.
+type nodeCredentialCommunicationKeyEncryptedField struct{}
 
 // Equals creates an equality condition.
-func (nodeCredentialCommunicationKeyField) Equals(v string) NodeCredentialWhereClause {
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "=", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) Equals(v string) NodeCredentialWhereClause {
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (nodeCredentialCommunicationKeyField) Not(v string) NodeCredentialWhereClause {
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "!=", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) Not(v string) NodeCredentialWhereClause {
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (nodeCredentialCommunicationKeyField) In(vals ...string) NodeCredentialWhereClause {
+func (nodeCredentialCommunicationKeyEncryptedField) In(vals ...string) NodeCredentialWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "IN", Value: iVals}
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "IN", Value: iVals}
 }
 
 // NotIn creates a NOT IN condition.
-func (nodeCredentialCommunicationKeyField) NotIn(vals ...string) NodeCredentialWhereClause {
+func (nodeCredentialCommunicationKeyEncryptedField) NotIn(vals ...string) NodeCredentialWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "NOT IN", Value: iVals}
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "NOT IN", Value: iVals}
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (nodeCredentialCommunicationKeyField) Contains(v string) NodeCredentialWhereClause {
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "CONTAINS", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) Contains(v string) NodeCredentialWhereClause {
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (nodeCredentialCommunicationKeyField) StartsWith(v string) NodeCredentialWhereClause {
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "STARTS_WITH", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) StartsWith(v string) NodeCredentialWhereClause {
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (nodeCredentialCommunicationKeyField) EndsWith(v string) NodeCredentialWhereClause {
-	return NodeCredentialWhereClause{Field: "communication_key", Operator: "ENDS_WITH", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) EndsWith(v string) NodeCredentialWhereClause {
+	return NodeCredentialWhereClause{Field: "communication_key_encrypted", Operator: "ENDS_WITH", Value: v}
 }
 
 // Set creates a set operation for create/update.
-func (nodeCredentialCommunicationKeyField) Set(v string) NodeCredentialSetClause {
-	return NodeCredentialSetClause{Field: "communication_key", Value: v}
+func (nodeCredentialCommunicationKeyEncryptedField) Set(v string) NodeCredentialSetClause {
+	return NodeCredentialSetClause{Field: "communication_key_encrypted", Value: v}
 }
 
 // Asc returns an ascending order clause for this field.
-func (nodeCredentialCommunicationKeyField) Asc() NodeCredentialOrderByClause {
-	return NodeCredentialOrderByClause{Field: "communication_key", Direction: "ASC"}
+func (nodeCredentialCommunicationKeyEncryptedField) Asc() NodeCredentialOrderByClause {
+	return NodeCredentialOrderByClause{Field: "communication_key_encrypted", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (nodeCredentialCommunicationKeyField) Desc() NodeCredentialOrderByClause {
-	return NodeCredentialOrderByClause{Field: "communication_key", Direction: "DESC"}
+func (nodeCredentialCommunicationKeyEncryptedField) Desc() NodeCredentialOrderByClause {
+	return NodeCredentialOrderByClause{Field: "communication_key_encrypted", Direction: "DESC"}
 }
 
 // NodeRelation provides relation query helpers for node.
@@ -279,14 +279,14 @@ type NodeCredentialGroupByResult struct {
 
 // NodeCredentialCreateInput holds data for creating a NodeCredential record.
 type NodeCredentialCreateInput struct {
-	NodeId           string
-	CommunicationKey string
-	Node             *NodeCreateNestedInput
+	NodeId                    string
+	CommunicationKeyEncrypted string
+	Node                      *NodeCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCredentialCreateInput) ScalarValues() []any {
-	return []any{d.NodeId, d.CommunicationKey}
+	return []any{d.NodeId, d.CommunicationKeyEncrypted}
 }
 
 // NodeCredentialCreateNestedInput supports nested creates and connects.

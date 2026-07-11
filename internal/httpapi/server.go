@@ -15,13 +15,15 @@ import (
 	"goveto-edge/internal/httpapi/clusters"
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/nodes"
+	publishapi "goveto-edge/internal/httpapi/publish"
 	"goveto-edge/internal/httpapi/sites"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 )
 
-func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *auth.SessionStore) *echo.Echo {
+func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *auth.SessionStore, credentialCipher *node.CredentialCipher, publishService *publisher.Service) *echo.Echo {
 	e := echo.New()
 	e.Use(sessions.Session)
 	settingStore := settings.New(orm)
@@ -32,7 +34,8 @@ func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *au
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm)
 	certificates.Register(e, orm)
-	nodes.Register(e, orm, installQueue)
+	nodes.Register(e, orm, installQueue, credentialCipher)
+	publishapi.Register(e, orm, publishService)
 	sites.Register(e, orm)
 
 	return e

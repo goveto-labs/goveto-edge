@@ -37,7 +37,7 @@ func TestApplySitePersistenceFailureDoesNotAdvanceVersion(t *testing.T) {
 	if first == nil || second == nil {
 		t.Fatal("expected persistence failures")
 	}
-	if !strings.Contains(first.Error(), "persist site config") {
+	if !strings.Contains(first.Error(), "persist pending site config") {
 		t.Fatalf("expected persist failure, got %v", first)
 	}
 	if strings.Contains(second.Error(), "version is not newer") {

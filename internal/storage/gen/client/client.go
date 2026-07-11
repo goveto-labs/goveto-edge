@@ -21,34 +21,35 @@ type querier interface {
 
 // Client is the main entry point for database operations.
 type Client struct {
-	db                 *sql.DB
-	executor           querier
-	dialect            string
-	AuditLog           AuditLogActions
-	Certificate        CertificateActions
-	Cluster            ClusterActions
-	ClusterGroup       ClusterGroupActions
-	ClusterMember      ClusterMemberActions
-	ClusterRegion      ClusterRegionActions
-	ConfigVersion      ConfigVersionActions
-	DNSLine            DNSLineActions
-	DynamicSetting     DynamicSettingActions
-	Node               NodeActions
-	NodeAddress        NodeAddressActions
-	NodeCacheConfig    NodeCacheConfigActions
-	NodeCredential     NodeCredentialActions
-	NodeDNSLine        NodeDNSLineActions
-	OriginBackend      OriginBackendActions
-	OriginPool         OriginPoolActions
-	Policy             PolicyActions
-	PublishJob         PublishJobActions
-	PurgeJob           PurgeJobActions
-	Site               SiteActions
-	SiteCertificate    SiteCertificateActions
-	SiteDomain         SiteDomainActions
-	SiteListenerConfig SiteListenerConfigActions
-	User               UserActions
-	UserSession        UserSessionActions
+	db                    *sql.DB
+	executor              querier
+	dialect               string
+	AuditLog              AuditLogActions
+	Certificate           CertificateActions
+	Cluster               ClusterActions
+	ClusterGroup          ClusterGroupActions
+	ClusterMember         ClusterMemberActions
+	ClusterRegion         ClusterRegionActions
+	ConfigVersion         ConfigVersionActions
+	DNSLine               DNSLineActions
+	DynamicSetting        DynamicSettingActions
+	Node                  NodeActions
+	NodeAddress           NodeAddressActions
+	NodeCacheConfig       NodeCacheConfigActions
+	NodeCredential        NodeCredentialActions
+	NodeDNSLine           NodeDNSLineActions
+	NodeSiteConfigVersion NodeSiteConfigVersionActions
+	OriginBackend         OriginBackendActions
+	OriginPool            OriginPoolActions
+	Policy                PolicyActions
+	PublishJob            PublishJobActions
+	PurgeJob              PurgeJobActions
+	Site                  SiteActions
+	SiteCertificate       SiteCertificateActions
+	SiteDomain            SiteDomainActions
+	SiteListenerConfig    SiteListenerConfigActions
+	User                  UserActions
+	UserSession           UserSessionActions
 }
 
 // New creates a new Client from a database connection.
@@ -71,6 +72,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.NodeCacheConfig = NodeCacheConfigActions{client: c}
 	c.NodeCredential = NodeCredentialActions{client: c}
 	c.NodeDNSLine = NodeDNSLineActions{client: c}
+	c.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
 	c.Policy = PolicyActions{client: c}
@@ -253,6 +255,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.NodeCacheConfig = NodeCacheConfigActions{client: txClient}
 	txClient.NodeCredential = NodeCredentialActions{client: txClient}
 	txClient.NodeDNSLine = NodeDNSLineActions{client: txClient}
+	txClient.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
 	txClient.Policy = PolicyActions{client: txClient}
@@ -8254,14 +8257,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "config_version", "version", "heartbeat_at", "status", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -8288,7 +8291,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "config_version", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -8497,7 +8500,7 @@ func (b NodeDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Node records.
 func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption) ([]model.Node, error) {
 	cfg := query.ApplyNodeOptions(opts)
-	q := "SELECT id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
 	argIdx := 0
 	where, args := buildNodeWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -8524,7 +8527,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -8549,14 +8552,14 @@ func (a NodeActions) FindFirst(ctx context.Context, opts ...query.NodeQueryOptio
 func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause) (*model.Node, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, []query.NodeWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -8581,10 +8584,10 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 	q := fmt.Sprintf("INSERT INTO nodes (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -8603,7 +8606,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "config_version", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -8659,10 +8662,10 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -8745,10 +8748,10 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -8769,10 +8772,10 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, config_version, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.ConfigVersion, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -10846,14 +10849,14 @@ func (b NodeCredentialCreateManyBuilder) DoReturning(ctx context.Context) ([]mod
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "communication_key"})
+		q, args := b.action.buildNodeCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "communication_key_encrypted"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("NodeCredential.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.NodeCredential
-			if err := rows.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+			if err := rows.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("NodeCredential.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -10880,7 +10883,7 @@ func (b NodeCredentialCreateManyBuilder) DoReturningValues(ctx context.Context) 
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"node_id", "communication_key"}
+		returningColumns = []string{"node_id", "communication_key_encrypted"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -11089,7 +11092,7 @@ func (b NodeCredentialDeleteBuilder) DoMany(ctx context.Context) (int64, error) 
 // FindMany retrieves multiple NodeCredential records.
 func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeCredentialQueryOption) ([]model.NodeCredential, error) {
 	cfg := query.ApplyNodeCredentialOptions(opts)
-	q := "SELECT node_id, communication_key FROM node_credentials"
+	q := "SELECT node_id, communication_key_encrypted FROM node_credentials"
 	argIdx := 0
 	where, args := buildNodeCredentialWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -11116,7 +11119,7 @@ func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeC
 	var results []model.NodeCredential
 	for rows.Next() {
 		var item model.NodeCredential
-		if err := rows.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+		if err := rows.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 			return nil, fmt.Errorf("NodeCredential.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -11141,14 +11144,14 @@ func (a NodeCredentialActions) FindFirst(ctx context.Context, opts ...query.Node
 func (a NodeCredentialActions) FindUnique(ctx context.Context, where query.NodeCredentialWhereClause) (*model.NodeCredential, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCredentialWhere(a.client, []query.NodeCredentialWhereClause{where}, &argIdx)
-	q := "SELECT node_id, communication_key FROM node_credentials"
+	q := "SELECT node_id, communication_key_encrypted FROM node_credentials"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.NodeCredential
-	if err := row.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+	if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -11173,10 +11176,10 @@ func (a NodeCredentialActions) CreateOne(ctx context.Context, sets ...query.Node
 	q := fmt.Sprintf("INSERT INTO node_credentials (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key"
+		q += " RETURNING node_id, communication_key_encrypted"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 			return nil, fmt.Errorf("NodeCredential.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -11195,7 +11198,7 @@ func (a NodeCredentialActions) CreateMany(ctx context.Context, data []query.Node
 }
 
 func (a NodeCredentialActions) buildNodeCredentialCreateManySQL(data []query.NodeCredentialCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"node_id", "communication_key"}
+	cols := []string{"node_id", "communication_key_encrypted"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -11251,10 +11254,10 @@ func (a NodeCredentialActions) UpdateOne(ctx context.Context, where query.NodeCr
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key"
+		q += " RETURNING node_id, communication_key_encrypted"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -11337,10 +11340,10 @@ func (a NodeCredentialActions) UpsertOne(ctx context.Context, where query.NodeCr
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key"
+		q += " RETURNING node_id, communication_key_encrypted"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 			return nil, fmt.Errorf("NodeCredential.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -11361,10 +11364,10 @@ func (a NodeCredentialActions) DeleteOne(ctx context.Context, where query.NodeCr
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key"
+		q += " RETURNING node_id, communication_key_encrypted"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKey); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -12351,6 +12354,870 @@ func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts .
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("NodeDNSLine.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildNodeSiteConfigVersionWhere recursively builds a WHERE clause string and arguments.
+func buildNodeSiteConfigVersionWhere(c *Client, wheres []query.NodeSiteConfigVersionWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeSiteConfigVersionWhereClause); ok {
+				sub, subArgs := buildNodeSiteConfigVersionWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeSiteConfigVersionWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeSiteConfigVersionWhere(c, []query.NodeSiteConfigVersionWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeSiteConfigVersionWhereClause); ok {
+				sub, subArgs := buildNodeSiteConfigVersionWhere(c, []query.NodeSiteConfigVersionWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeSiteConfigVersionActions provides database operations for the NodeSiteConfigVersion model.
+type NodeSiteConfigVersionActions struct {
+	client *Client
+}
+
+// NodeSiteConfigVersionCreateBuilder builds a NodeSiteConfigVersion create operation incrementally.
+type NodeSiteConfigVersionCreateBuilder struct {
+	action NodeSiteConfigVersionActions
+	sets   []query.NodeSiteConfigVersionSetClause
+}
+
+// Create starts a staged NodeSiteConfigVersion create operation.
+func (a NodeSiteConfigVersionActions) Create() NodeSiteConfigVersionCreateBuilder {
+	return NodeSiteConfigVersionCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeSiteConfigVersionCreateBuilder) Set(sets ...query.NodeSiteConfigVersionSetClause) NodeSiteConfigVersionCreateBuilder {
+	next := NodeSiteConfigVersionCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeSiteConfigVersionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeSiteConfigVersionCreateBuilder) Do(ctx context.Context) (*model.NodeSiteConfigVersion, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeSiteConfigVersionCreateManyBuilder builds a bulk NodeSiteConfigVersion insert operation.
+type NodeSiteConfigVersionCreateManyBuilder struct {
+	action            NodeSiteConfigVersionActions
+	data              []query.NodeSiteConfigVersionCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeSiteConfigVersion insert operation.
+func (a NodeSiteConfigVersionActions) BulkCreate(data []query.NodeSiteConfigVersionCreateInput) NodeSiteConfigVersionCreateManyBuilder {
+	return NodeSiteConfigVersionCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeSiteConfigVersionCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeSiteConfigVersionCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeSiteConfigVersionCreateManyBuilder) Returning(columns ...string) NodeSiteConfigVersionCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeSiteConfigVersionCreateManyBuilder) BatchSize(n int) NodeSiteConfigVersionCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeSiteConfigVersionCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSiteConfigVersionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeSiteConfigVersion.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeSiteConfigVersion.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeSiteConfigVersionCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeSiteConfigVersion, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeSiteConfigVersion
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSiteConfigVersionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "site_id", "version", "status", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeSiteConfigVersion
+			if err := rows.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeSiteConfigVersionCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"node_id", "site_id", "version", "status", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSiteConfigVersionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeSiteConfigVersionQueryBuilder builds a NodeSiteConfigVersion query incrementally.
+type NodeSiteConfigVersionQueryBuilder struct {
+	action NodeSiteConfigVersionActions
+	opts   []query.NodeSiteConfigVersionQueryOption
+}
+
+// Query starts a staged NodeSiteConfigVersion query.
+func (a NodeSiteConfigVersionActions) Query() NodeSiteConfigVersionQueryBuilder {
+	return NodeSiteConfigVersionQueryBuilder{action: a}
+}
+
+func (b NodeSiteConfigVersionQueryBuilder) withOptions(opts ...query.NodeSiteConfigVersionQueryOption) NodeSiteConfigVersionQueryBuilder {
+	next := NodeSiteConfigVersionQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeSiteConfigVersionQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeSiteConfigVersionQueryBuilder) Where(clauses ...query.NodeSiteConfigVersionWhereClause) NodeSiteConfigVersionQueryBuilder {
+	opts := make([]query.NodeSiteConfigVersionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeSiteConfigVersionQueryBuilder) OrderBy(clause query.NodeSiteConfigVersionOrderByClause) NodeSiteConfigVersionQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeSiteConfigVersionQueryBuilder) Include(clauses ...query.NodeSiteConfigVersionIncludeClause) NodeSiteConfigVersionQueryBuilder {
+	opts := make([]query.NodeSiteConfigVersionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeSiteConfigVersionQueryBuilder) Take(n int) NodeSiteConfigVersionQueryBuilder {
+	return b.withOptions(query.NodeSiteConfigVersionTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeSiteConfigVersionQueryBuilder) Skip(n int) NodeSiteConfigVersionQueryBuilder {
+	return b.withOptions(query.NodeSiteConfigVersionSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeSiteConfigVersionQueryBuilder) Do(ctx context.Context) ([]model.NodeSiteConfigVersion, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeSiteConfigVersionQueryBuilder) First(ctx context.Context) (*model.NodeSiteConfigVersion, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeSiteConfigVersionQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeSiteConfigVersionOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeSiteConfigVersionUpdateBuilder builds a NodeSiteConfigVersion update operation incrementally.
+type NodeSiteConfigVersionUpdateBuilder struct {
+	action NodeSiteConfigVersionActions
+	wheres []query.NodeSiteConfigVersionWhereClause
+	sets   []query.NodeSiteConfigVersionSetClause
+}
+
+// Update starts a staged NodeSiteConfigVersion update operation.
+func (a NodeSiteConfigVersionActions) Update() NodeSiteConfigVersionUpdateBuilder {
+	return NodeSiteConfigVersionUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeSiteConfigVersionUpdateBuilder) Where(clauses ...query.NodeSiteConfigVersionWhereClause) NodeSiteConfigVersionUpdateBuilder {
+	next := NodeSiteConfigVersionUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeSiteConfigVersionWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeSiteConfigVersionSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeSiteConfigVersionUpdateBuilder) Set(sets ...query.NodeSiteConfigVersionSetClause) NodeSiteConfigVersionUpdateBuilder {
+	next := NodeSiteConfigVersionUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeSiteConfigVersionWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeSiteConfigVersionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeSiteConfigVersionUpdateBuilder) combinedWhere() (query.NodeSiteConfigVersionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeSiteConfigVersionWhereClause{}, fmt.Errorf("NodeSiteConfigVersion.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeSiteConfigVersion.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeSiteConfigVersionUpdateBuilder) Do(ctx context.Context) (*model.NodeSiteConfigVersion, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeSiteConfigVersionUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeSiteConfigVersionDeleteBuilder builds a NodeSiteConfigVersion delete operation incrementally.
+type NodeSiteConfigVersionDeleteBuilder struct {
+	action NodeSiteConfigVersionActions
+	wheres []query.NodeSiteConfigVersionWhereClause
+}
+
+// Delete starts a staged NodeSiteConfigVersion delete operation.
+func (a NodeSiteConfigVersionActions) Delete() NodeSiteConfigVersionDeleteBuilder {
+	return NodeSiteConfigVersionDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeSiteConfigVersionDeleteBuilder) Where(clauses ...query.NodeSiteConfigVersionWhereClause) NodeSiteConfigVersionDeleteBuilder {
+	next := NodeSiteConfigVersionDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeSiteConfigVersionWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeSiteConfigVersionDeleteBuilder) combinedWhere() (query.NodeSiteConfigVersionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeSiteConfigVersionWhereClause{}, fmt.Errorf("NodeSiteConfigVersion.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeSiteConfigVersion.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeSiteConfigVersionDeleteBuilder) Do(ctx context.Context) (*model.NodeSiteConfigVersion, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeSiteConfigVersionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeSiteConfigVersion records.
+func (a NodeSiteConfigVersionActions) FindMany(ctx context.Context, opts ...query.NodeSiteConfigVersionQueryOption) ([]model.NodeSiteConfigVersion, error) {
+	cfg := query.ApplyNodeSiteConfigVersionOptions(opts)
+	q := "SELECT node_id, site_id, version, status, updated_at FROM node_site_config_versions"
+	argIdx := 0
+	where, args := buildNodeSiteConfigVersionWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeSiteConfigVersion
+	for rows.Next() {
+		var item model.NodeSiteConfigVersion
+		if err := rows.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeSiteConfigVersion record.
+func (a NodeSiteConfigVersionActions) FindFirst(ctx context.Context, opts ...query.NodeSiteConfigVersionQueryOption) (*model.NodeSiteConfigVersion, error) {
+	opts = append(opts, query.NodeSiteConfigVersionTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeSiteConfigVersion record by unique constraint.
+func (a NodeSiteConfigVersionActions) FindUnique(ctx context.Context, where query.NodeSiteConfigVersionWhereClause) (*model.NodeSiteConfigVersion, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
+	q := "SELECT node_id, site_id, version, status, updated_at FROM node_site_config_versions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeSiteConfigVersion
+	if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeSiteConfigVersion.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeSiteConfigVersion record.
+func (a NodeSiteConfigVersionActions) CreateOne(ctx context.Context, sets ...query.NodeSiteConfigVersionSetClause) (*model.NodeSiteConfigVersion, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, site_id, version, status, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeSiteConfigVersion
+		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeSiteConfigVersion records.
+func (a NodeSiteConfigVersionActions) CreateMany(ctx context.Context, data []query.NodeSiteConfigVersionCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeSiteConfigVersionActions) buildNodeSiteConfigVersionCreateManySQL(data []query.NodeSiteConfigVersionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"node_id", "site_id", "version", "status", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeSiteConfigVersion record matching the where clause.
+func (a NodeSiteConfigVersionActions) UpdateOne(ctx context.Context, where query.NodeSiteConfigVersionWhereClause, sets ...query.NodeSiteConfigVersionSetClause) (*model.NodeSiteConfigVersion, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_site_config_versions SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, site_id, version, status, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSiteConfigVersion
+		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeSiteConfigVersion.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeSiteConfigVersion records matching the where clauses.
+func (a NodeSiteConfigVersionActions) UpdateMany(ctx context.Context, wheres []query.NodeSiteConfigVersionWhereClause, sets ...query.NodeSiteConfigVersionSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeSiteConfigVersion.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_site_config_versions SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeSiteConfigVersion.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeSiteConfigVersion record.
+func (a NodeSiteConfigVersionActions) UpsertOne(ctx context.Context, where query.NodeSiteConfigVersionWhereClause, create []query.NodeSiteConfigVersionSetClause, update []query.NodeSiteConfigVersionSetClause) (*model.NodeSiteConfigVersion, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, site_id, version, status, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSiteConfigVersion
+		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeSiteConfigVersion record matching the where clause.
+func (a NodeSiteConfigVersionActions) DeleteOne(ctx context.Context, where query.NodeSiteConfigVersionWhereClause) (*model.NodeSiteConfigVersion, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_site_config_versions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, site_id, version, status, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSiteConfigVersion
+		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeSiteConfigVersion.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeSiteConfigVersion records matching the where clauses.
+func (a NodeSiteConfigVersionActions) DeleteMany(ctx context.Context, wheres ...query.NodeSiteConfigVersionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_site_config_versions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeSiteConfigVersion.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeSiteConfigVersion records matching the where clauses.
+func (a NodeSiteConfigVersionActions) Count(ctx context.Context, wheres ...query.NodeSiteConfigVersionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_site_config_versions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeSiteConfigVersion.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeSiteConfigVersion.
+func (a NodeSiteConfigVersionActions) Aggregate(ctx context.Context, opts ...query.NodeSiteConfigVersionAggregateOption) (*query.NodeSiteConfigVersionAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_site_config_versions", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeSiteConfigVersionAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeSiteConfigVersion.
+func (a NodeSiteConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeSiteConfigVersionAggregateOption) ([]query.NodeSiteConfigVersionGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_site_config_versions GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSiteConfigVersion.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeSiteConfigVersionGroupByResult
+	for rows.Next() {
+		r := query.NodeSiteConfigVersionGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeSiteConfigVersion.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -13438,14 +14305,14 @@ func (b OriginPoolCreateManyBuilder) DoReturning(ctx context.Context) ([]model.O
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"})
+		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.OriginPool
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -13472,7 +14339,7 @@ func (b OriginPoolCreateManyBuilder) DoReturningValues(ctx context.Context) ([]m
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -13681,7 +14548,7 @@ func (b OriginPoolDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple OriginPool records.
 func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoolQueryOption) ([]model.OriginPool, error) {
 	cfg := query.ApplyOriginPoolOptions(opts)
-	q := "SELECT id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
 	argIdx := 0
 	where, args := buildOriginPoolWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -13708,7 +14575,7 @@ func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoo
 	var results []model.OriginPool
 	for rows.Next() {
 		var item model.OriginPool
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -13733,14 +14600,14 @@ func (a OriginPoolActions) FindFirst(ctx context.Context, opts ...query.OriginPo
 func (a OriginPoolActions) FindUnique(ctx context.Context, where query.OriginPoolWhereClause) (*model.OriginPool, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, []query.OriginPoolWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.OriginPool
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -13765,10 +14632,10 @@ func (a OriginPoolActions) CreateOne(ctx context.Context, sets ...query.OriginPo
 	q := fmt.Sprintf("INSERT INTO origin_pools (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -13787,7 +14654,7 @@ func (a OriginPoolActions) CreateMany(ctx context.Context, data []query.OriginPo
 }
 
 func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -13843,10 +14710,10 @@ func (a OriginPoolActions) UpdateOne(ctx context.Context, where query.OriginPool
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -13929,10 +14796,10 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -13953,10 +14820,10 @@ func (a OriginPoolActions) DeleteOne(ctx context.Context, where query.OriginPool
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

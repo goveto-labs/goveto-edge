@@ -117,24 +117,24 @@ type DynamicSetting struct {
 
 // Node represents the Node model.
 type Node struct {
-	Id            string           `db:"id" json:"id"`
-	ClusterId     string           `db:"cluster_id" json:"clusterId"`
-	GroupId       *string          `db:"group_id" json:"groupId"`
-	RegionId      *string          `db:"region_id" json:"regionId"`
-	Name          string           `db:"name" json:"name"`
-	ConfigVersion int64            `db:"config_version" json:"configVersion"`
-	Version       *string          `db:"version" json:"version"`
-	HeartbeatAt   *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
-	Status        NodeStatus       `db:"status" json:"status"`
-	CreatedAt     time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt     time.Time        `db:"updated_at" json:"updatedAt"`
-	Cluster       *Cluster         `db:"-" json:"cluster,omitempty"`
-	Group         *ClusterGroup    `db:"-" json:"group,omitempty"`
-	Region        *ClusterRegion   `db:"-" json:"region,omitempty"`
-	Addresses     []*NodeAddress   `db:"-" json:"addresses,omitempty"`
-	DnsLines      []*NodeDNSLine   `db:"-" json:"dnsLines,omitempty"`
-	CacheConfig   *NodeCacheConfig `db:"-" json:"cacheConfig,omitempty"`
-	Credential    *NodeCredential  `db:"-" json:"credential,omitempty"`
+	Id                 string                   `db:"id" json:"id"`
+	ClusterId          string                   `db:"cluster_id" json:"clusterId"`
+	GroupId            *string                  `db:"group_id" json:"groupId"`
+	RegionId           *string                  `db:"region_id" json:"regionId"`
+	Name               string                   `db:"name" json:"name"`
+	Version            *string                  `db:"version" json:"version"`
+	HeartbeatAt        *time.Time               `db:"heartbeat_at" json:"heartbeatAt"`
+	Status             NodeStatus               `db:"status" json:"status"`
+	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
+	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
+	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`
+	Group              *ClusterGroup            `db:"-" json:"group,omitempty"`
+	Region             *ClusterRegion           `db:"-" json:"region,omitempty"`
+	Addresses          []*NodeAddress           `db:"-" json:"addresses,omitempty"`
+	DnsLines           []*NodeDNSLine           `db:"-" json:"dnsLines,omitempty"`
+	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
+	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
+	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }
 
 // NodeAddress represents the NodeAddress model.
@@ -162,9 +162,9 @@ type NodeCacheConfig struct {
 
 // NodeCredential represents the NodeCredential model.
 type NodeCredential struct {
-	NodeId           string `db:"node_id" json:"nodeId"`
-	CommunicationKey string `db:"communication_key" json:"-"`
-	Node             *Node  `db:"-" json:"node,omitempty"`
+	NodeId                    string `db:"node_id" json:"nodeId"`
+	CommunicationKeyEncrypted string `db:"communication_key_encrypted" json:"communicationKeyEncrypted"`
+	Node                      *Node  `db:"-" json:"node,omitempty"`
 }
 
 // NodeDNSLine represents the NodeDNSLine model.
@@ -173,6 +173,17 @@ type NodeDNSLine struct {
 	DnsLineId string   `db:"dns_line_id" json:"dnsLineId"`
 	Node      *Node    `db:"-" json:"node,omitempty"`
 	DnsLine   *DNSLine `db:"-" json:"dnsLine,omitempty"`
+}
+
+// NodeSiteConfigVersion represents the NodeSiteConfigVersion model.
+type NodeSiteConfigVersion struct {
+	NodeId    string       `db:"node_id" json:"nodeId"`
+	SiteId    string       `db:"site_id" json:"siteId"`
+	Version   int64        `db:"version" json:"version"`
+	Status    ConfigStatus `db:"status" json:"status"`
+	UpdatedAt time.Time    `db:"updated_at" json:"updatedAt"`
+	Node      *Node        `db:"-" json:"node,omitempty"`
+	Site      *Site        `db:"-" json:"site,omitempty"`
 }
 
 // OriginBackend represents the OriginBackend model.
@@ -193,6 +204,7 @@ type OriginPool struct {
 	Id        string           `db:"id" json:"id"`
 	ClusterId string           `db:"cluster_id" json:"clusterId"`
 	Name      string           `db:"name" json:"name"`
+	Scheduler string           `db:"scheduler" json:"scheduler"`
 	HealthUri string           `db:"health_uri" json:"healthUri"`
 	Timeout   int              `db:"timeout" json:"timeout"`
 	Headers   json.RawMessage  `db:"headers" json:"headers"`
@@ -244,26 +256,27 @@ type PurgeJob struct {
 
 // Site represents the Site model.
 type Site struct {
-	Id             string              `db:"id" json:"id"`
-	ClusterId      string              `db:"cluster_id" json:"clusterId"`
-	CreatorId      string              `db:"creator_id" json:"creatorId"`
-	Name           string              `db:"name" json:"name"`
-	Status         SiteStatus          `db:"status" json:"status"`
-	OriginPoolId   string              `db:"origin_pool_id" json:"originPoolId"`
-	PolicyId       *string             `db:"policy_id" json:"policyId"`
-	Version        int64               `db:"version" json:"version"`
-	CreatedAt      time.Time           `db:"created_at" json:"createdAt"`
-	UpdatedAt      time.Time           `db:"updated_at" json:"updatedAt"`
-	Cluster        *Cluster            `db:"-" json:"cluster,omitempty"`
-	Creator        *User               `db:"-" json:"creator,omitempty"`
-	OriginPool     *OriginPool         `db:"-" json:"originPool,omitempty"`
-	Policy         *Policy             `db:"-" json:"policy,omitempty"`
-	Domains        []*SiteDomain       `db:"-" json:"domains,omitempty"`
-	Certificates   []*SiteCertificate  `db:"-" json:"certificates,omitempty"`
-	ListenerConfig *SiteListenerConfig `db:"-" json:"listenerConfig,omitempty"`
-	ConfigVersions []*ConfigVersion    `db:"-" json:"configVersions,omitempty"`
-	PublishJobs    []*PublishJob       `db:"-" json:"publishJobs,omitempty"`
-	PurgeJobs      []*PurgeJob         `db:"-" json:"purgeJobs,omitempty"`
+	Id                 string                   `db:"id" json:"id"`
+	ClusterId          string                   `db:"cluster_id" json:"clusterId"`
+	CreatorId          string                   `db:"creator_id" json:"creatorId"`
+	Name               string                   `db:"name" json:"name"`
+	Status             SiteStatus               `db:"status" json:"status"`
+	OriginPoolId       string                   `db:"origin_pool_id" json:"originPoolId"`
+	PolicyId           *string                  `db:"policy_id" json:"policyId"`
+	Version            int64                    `db:"version" json:"version"`
+	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
+	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
+	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`
+	Creator            *User                    `db:"-" json:"creator,omitempty"`
+	OriginPool         *OriginPool              `db:"-" json:"originPool,omitempty"`
+	Policy             *Policy                  `db:"-" json:"policy,omitempty"`
+	Domains            []*SiteDomain            `db:"-" json:"domains,omitempty"`
+	Certificates       []*SiteCertificate       `db:"-" json:"certificates,omitempty"`
+	ListenerConfig     *SiteListenerConfig      `db:"-" json:"listenerConfig,omitempty"`
+	NodeConfigVersions []*NodeSiteConfigVersion `db:"-" json:"nodeConfigVersions,omitempty"`
+	ConfigVersions     []*ConfigVersion         `db:"-" json:"configVersions,omitempty"`
+	PublishJobs        []*PublishJob            `db:"-" json:"publishJobs,omitempty"`
+	PurgeJobs          []*PurgeJob              `db:"-" json:"purgeJobs,omitempty"`
 }
 
 // SiteCertificate represents the SiteCertificate model.

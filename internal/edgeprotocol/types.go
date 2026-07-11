@@ -12,6 +12,7 @@ import (
 type SiteConfig struct {
 	SiteID       string              `json:"site_id"`
 	Version      uint64              `json:"version"`
+	Disabled     bool                `json:"disabled,omitempty"`
 	Domains      []string            `json:"domains"`
 	Listener     ListenerConfig      `json:"listener"`
 	Certificates []CertificateConfig `json:"certificates"`
@@ -49,6 +50,12 @@ type OriginConfig struct {
 }
 
 func (c SiteConfig) Validate() error {
+	if c.Disabled {
+		if c.SiteID == "" || c.Version == 0 {
+			return errors.New("site_id and version are required")
+		}
+		return nil
+	}
 	if c.SiteID == "" || c.Version == 0 || len(c.Domains) == 0 || len(c.Origins) == 0 {
 		return errors.New("site_id, version, domains and origins are required")
 	}

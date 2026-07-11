@@ -213,24 +213,24 @@ model DynamicSetting {
 }
 
 model Node {
-  id            UUID             @id @default(uuid())
-  clusterId     String           @map("cluster_id")
-  groupId       String?          @map("group_id")
-  regionId      String?          @map("region_id")
-  name          String
-  configVersion BigInt           @default(0) @map("config_version")
-  version       String?
-  heartbeatAt   DateTime?        @map("heartbeat_at")
-  status        NodeStatus       @default(PENDING)
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
-  cluster       Cluster          @relation(fields: [clusterId], references: [id])
-  group         ClusterGroup?    @relation(fields: [groupId], references: [id])
-  region        ClusterRegion?   @relation(fields: [regionId], references: [id])
-  addresses     NodeAddress[]
-  dnsLines      NodeDNSLine[]
-  cacheConfig   NodeCacheConfig?
-  credential    NodeCredential?
+  id                 UUID                    @id @default(uuid())
+  clusterId          String                  @map("cluster_id")
+  groupId            String?                 @map("group_id")
+  regionId           String?                 @map("region_id")
+  name               String
+  version            String?
+  heartbeatAt        DateTime?               @map("heartbeat_at")
+  status             NodeStatus              @default(PENDING)
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  cluster            Cluster                 @relation(fields: [clusterId], references: [id])
+  group              ClusterGroup?           @relation(fields: [groupId], references: [id])
+  region             ClusterRegion?          @relation(fields: [regionId], references: [id])
+  addresses          NodeAddress[]
+  dnsLines           NodeDNSLine[]
+  cacheConfig        NodeCacheConfig?
+  credential         NodeCredential?
+  siteConfigVersions NodeSiteConfigVersion[]
 
   @@unique([clusterId, name])
   @@index([clusterId, status])
@@ -267,9 +267,9 @@ model NodeCacheConfig {
 }
 
 model NodeCredential {
-  nodeId           UUID   @id @map("node_id")
-  communicationKey String @map("communication_key")
-  node             Node   @relation(fields: [nodeId], references: [id])
+  nodeId                    UUID   @id @map("node_id")
+  communicationKeyEncrypted String @map("communication_key_encrypted")
+  node                      Node   @relation(fields: [nodeId], references: [id])
 
   @@map("node_credentials")
 }
@@ -283,6 +283,20 @@ model NodeDNSLine {
   @@id([nodeId, dnsLineId])
   @@index([dnsLineId])
   @@map("node_dns_lines")
+}
+
+model NodeSiteConfigVersion {
+  nodeId    UUID         @map("node_id")
+  siteId    String       @map("site_id")
+  version   BigInt
+  status    ConfigStatus @default(PUBLISHED)
+  updatedAt DateTime     @updatedAt @map("updated_at")
+  node      Node         @relation(fields: [nodeId], references: [id])
+  site      Site         @relation(fields: [siteId], references: [id])
+
+  @@id([nodeId, siteId])
+  @@index([siteId, status])
+  @@map("node_site_config_versions")
 }
 
 model OriginBackend {
@@ -304,6 +318,7 @@ model OriginPool {
   id        String          @id @default(uuid())
   clusterId String          @map("cluster_id")
   name      String
+  scheduler String          @default("round_robin")
   healthUri String          @default("/health") @map("health_uri")
   timeout   Int             @default(10000)
   headers   Json
@@ -364,26 +379,27 @@ model PurgeJob {
 }
 
 model Site {
-  id             String              @id @default(uuid())
-  clusterId      String              @map("cluster_id")
-  creatorId      String              @map("creator_id")
-  name           String
-  status         SiteStatus          @default(ACTIVE)
-  originPoolId   String              @map("origin_pool_id")
-  policyId       String?             @map("policy_id")
-  version        BigInt              @default(1)
-  createdAt      DateTime            @default(now()) @map("created_at")
-  updatedAt      DateTime            @updatedAt @map("updated_at")
-  cluster        Cluster             @relation(fields: [clusterId], references: [id])
-  creator        User                @relation(fields: [creatorId], references: [id])
-  originPool     OriginPool          @relation(fields: [originPoolId], references: [id])
-  policy         Policy?             @relation(fields: [policyId], references: [id])
-  domains        SiteDomain[]
-  certificates   SiteCertificate[]
-  listenerConfig SiteListenerConfig?
-  configVersions ConfigVersion[]
-  publishJobs    PublishJob[]
-  purgeJobs      PurgeJob[]
+  id                 String                  @id @default(uuid())
+  clusterId          String                  @map("cluster_id")
+  creatorId          String                  @map("creator_id")
+  name               String
+  status             SiteStatus              @default(ACTIVE)
+  originPoolId       String                  @map("origin_pool_id")
+  policyId           String?                 @map("policy_id")
+  version            BigInt                  @default(1)
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  cluster            Cluster                 @relation(fields: [clusterId], references: [id])
+  creator            User                    @relation(fields: [creatorId], references: [id])
+  originPool         OriginPool              @relation(fields: [originPoolId], references: [id])
+  policy             Policy?                 @relation(fields: [policyId], references: [id])
+  domains            SiteDomain[]
+  certificates       SiteCertificate[]
+  listenerConfig     SiteListenerConfig?
+  nodeConfigVersions NodeSiteConfigVersion[]
+  configVersions     ConfigVersion[]
+  publishJobs        PublishJob[]
+  purgeJobs          PurgeJob[]
 
   @@unique([clusterId, name])
   @@index([clusterId, status])

@@ -31,24 +31,24 @@ func ApplyNodeOptions(opts []NodeQueryOption) NodeQueryConfig {
 
 // NodeQuery is the namespace for Node query operations.
 type NodeQuery struct {
-	Id            nodeIdField
-	ClusterId     nodeClusterIdField
-	GroupId       nodeGroupIdField
-	RegionId      nodeRegionIdField
-	Name          nodeNameField
-	ConfigVersion nodeConfigVersionField
-	Version       nodeVersionField
-	HeartbeatAt   nodeHeartbeatAtField
-	Status        nodeStatusField
-	CreatedAt     nodeCreatedAtField
-	UpdatedAt     nodeUpdatedAtField
-	Cluster       nodeClusterRelation
-	Group         nodeGroupRelation
-	Region        nodeRegionRelation
-	Addresses     nodeAddressesRelation
-	DnsLines      nodeDnsLinesRelation
-	CacheConfig   nodeCacheConfigRelation
-	Credential    nodeCredentialRelation
+	Id                 nodeIdField
+	ClusterId          nodeClusterIdField
+	GroupId            nodeGroupIdField
+	RegionId           nodeRegionIdField
+	Name               nodeNameField
+	Version            nodeVersionField
+	HeartbeatAt        nodeHeartbeatAtField
+	Status             nodeStatusField
+	CreatedAt          nodeCreatedAtField
+	UpdatedAt          nodeUpdatedAtField
+	Cluster            nodeClusterRelation
+	Group              nodeGroupRelation
+	Region             nodeRegionRelation
+	Addresses          nodeAddressesRelation
+	DnsLines           nodeDnsLinesRelation
+	CacheConfig        nodeCacheConfigRelation
+	Credential         nodeCredentialRelation
+	SiteConfigVersions nodeSiteConfigVersionsRelation
 }
 
 const NodeTable = "nodes"
@@ -57,7 +57,6 @@ const NodeClusterIdColumn = "cluster_id"
 const NodeGroupIdColumn = "group_id"
 const NodeRegionIdColumn = "region_id"
 const NodeNameColumn = "name"
-const NodeConfigVersionColumn = "config_version"
 const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
 const NodeStatusColumn = "status"
@@ -66,24 +65,24 @@ const NodeUpdatedAtColumn = "updated_at"
 
 // NodeQuery provides query building methods for the Node model.
 var Node = NodeQuery{
-	Id:            nodeIdField{},
-	ClusterId:     nodeClusterIdField{},
-	GroupId:       nodeGroupIdField{},
-	RegionId:      nodeRegionIdField{},
-	Name:          nodeNameField{},
-	ConfigVersion: nodeConfigVersionField{},
-	Version:       nodeVersionField{},
-	HeartbeatAt:   nodeHeartbeatAtField{},
-	Status:        nodeStatusField{},
-	CreatedAt:     nodeCreatedAtField{},
-	UpdatedAt:     nodeUpdatedAtField{},
-	Cluster:       nodeClusterRelation{},
-	Group:         nodeGroupRelation{},
-	Region:        nodeRegionRelation{},
-	Addresses:     nodeAddressesRelation{},
-	DnsLines:      nodeDnsLinesRelation{},
-	CacheConfig:   nodeCacheConfigRelation{},
-	Credential:    nodeCredentialRelation{},
+	Id:                 nodeIdField{},
+	ClusterId:          nodeClusterIdField{},
+	GroupId:            nodeGroupIdField{},
+	RegionId:           nodeRegionIdField{},
+	Name:               nodeNameField{},
+	Version:            nodeVersionField{},
+	HeartbeatAt:        nodeHeartbeatAtField{},
+	Status:             nodeStatusField{},
+	CreatedAt:          nodeCreatedAtField{},
+	UpdatedAt:          nodeUpdatedAtField{},
+	Cluster:            nodeClusterRelation{},
+	Group:              nodeGroupRelation{},
+	Region:             nodeRegionRelation{},
+	Addresses:          nodeAddressesRelation{},
+	DnsLines:           nodeDnsLinesRelation{},
+	CacheConfig:        nodeCacheConfigRelation{},
+	Credential:         nodeCredentialRelation{},
+	SiteConfigVersions: nodeSiteConfigVersionsRelation{},
 }
 
 // NodeWhereClause represents a WHERE condition for Node.
@@ -485,72 +484,6 @@ func (nodeNameField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "name", Direction: "DESC"}
 }
 
-// ConfigVersionField provides query operations for the configVersion field.
-type nodeConfigVersionField struct{}
-
-// Equals creates an equality condition.
-func (nodeConfigVersionField) Equals(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (nodeConfigVersionField) Not(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (nodeConfigVersionField) In(vals ...int64) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "config_version", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (nodeConfigVersionField) NotIn(vals ...int64) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "config_version", Operator: "NOT IN", Value: iVals}
-}
-
-// Lt creates a less-than condition.
-func (nodeConfigVersionField) Lt(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: "<", Value: v}
-}
-
-// Lte creates a less-than-or-equal condition.
-func (nodeConfigVersionField) Lte(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: "<=", Value: v}
-}
-
-// Gt creates a greater-than condition.
-func (nodeConfigVersionField) Gt(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: ">", Value: v}
-}
-
-// Gte creates a greater-than-or-equal condition.
-func (nodeConfigVersionField) Gte(v int64) NodeWhereClause {
-	return NodeWhereClause{Field: "config_version", Operator: ">=", Value: v}
-}
-
-// Set creates a set operation for create/update.
-func (nodeConfigVersionField) Set(v int64) NodeSetClause {
-	return NodeSetClause{Field: "config_version", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (nodeConfigVersionField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "config_version", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (nodeConfigVersionField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "config_version", Direction: "DESC"}
-}
-
 // VersionField provides query operations for the version field.
 type nodeVersionField struct{}
 
@@ -932,6 +865,14 @@ func (nodeCredentialRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "credential"}
 }
 
+// SiteConfigVersionsRelation provides relation query helpers for siteConfigVersions.
+type nodeSiteConfigVersionsRelation struct{}
+
+// Fetch creates an include clause to fetch related siteConfigVersions.
+func (nodeSiteConfigVersionsRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "siteConfigVersions"}
+}
+
 // NodeSetClause represents a field set operation for create/update.
 type NodeSetClause struct {
 	Field string
@@ -965,29 +906,29 @@ type NodeGroupByResult struct {
 
 // NodeCreateInput holds data for creating a Node record.
 type NodeCreateInput struct {
-	Id            string
-	ClusterId     string
-	GroupId       **string
-	RegionId      **string
-	Name          string
-	ConfigVersion int64
-	Version       **string
-	HeartbeatAt   **time.Time
-	Status        model.NodeStatus
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Cluster       *ClusterCreateNestedInput
-	Group         *ClusterGroupCreateNestedInput
-	Region        *ClusterRegionCreateNestedInput
-	Addresses     *NodeAddressCreateNestedInput
-	DnsLines      *NodeDNSLineCreateNestedInput
-	CacheConfig   *NodeCacheConfigCreateNestedInput
-	Credential    *NodeCredentialCreateNestedInput
+	Id                 string
+	ClusterId          string
+	GroupId            **string
+	RegionId           **string
+	Name               string
+	Version            **string
+	HeartbeatAt        **time.Time
+	Status             model.NodeStatus
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Cluster            *ClusterCreateNestedInput
+	Group              *ClusterGroupCreateNestedInput
+	Region             *ClusterRegionCreateNestedInput
+	Addresses          *NodeAddressCreateNestedInput
+	DnsLines           *NodeDNSLineCreateNestedInput
+	CacheConfig        *NodeCacheConfigCreateNestedInput
+	Credential         *NodeCredentialCreateNestedInput
+	SiteConfigVersions *NodeSiteConfigVersionCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.ConfigVersion, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

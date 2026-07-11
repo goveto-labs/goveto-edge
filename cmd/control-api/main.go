@@ -12,6 +12,8 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/httpapi"
+	"goveto-edge/internal/node"
+	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage"
 )
 
@@ -39,10 +41,17 @@ func main() {
 	}
 	defer redisClient.Close()
 	sessions := auth.NewSessionStore(redisClient, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
+	credentialCipher, err := node.NewCredentialCipher(cfg.NodeCredentialMasterKey)
+	if err != nil {
+		slog.Error("initialize node credential encryption", "error", err)
+		os.Exit(1)
+	}
+	publishService := publisher.New(orm, credentialCipher)
+	go publishService.Run(ctx)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db, orm, redisClient, sessions),
+		Handler:           httpapi.New(db, orm, redisClient, sessions, credentialCipher, publishService),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 

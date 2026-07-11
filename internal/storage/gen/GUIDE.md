@@ -206,7 +206,6 @@ query.PostAuthorIdColumn
   - `Groupid` (String, optional)
   - `Regionid` (String, optional)
   - `Name` (String)
-  - `Configversion` (BigInt)
   - `Version` (String, optional)
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
@@ -244,7 +243,7 @@ query.PostAuthorIdColumn
 - Query namespace: `query.NodeCredential`
 - Fields:
   - `Nodeid` (UUID, id)
-  - `Communicationkey` (String)
+  - `Communicationkeyencrypted` (String)
 
 ### NodeDNSLine
 
@@ -253,6 +252,17 @@ query.PostAuthorIdColumn
 - Fields:
   - `Nodeid` (UUID)
   - `Dnslineid` (String)
+
+### NodeSiteConfigVersion
+
+- Client handle: `c.NodeSiteConfigVersion`
+- Query namespace: `query.NodeSiteConfigVersion`
+- Fields:
+  - `Nodeid` (UUID)
+  - `Siteid` (String)
+  - `Version` (BigInt)
+  - `Status` ()
+  - `Updatedat` (DateTime)
 
 ### OriginBackend
 
@@ -276,6 +286,7 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Clusterid` (String)
   - `Name` (String)
+  - `Scheduler` (String)
   - `Healthuri` (String)
   - `Timeout` (Int)
   - `Headers` (Json)

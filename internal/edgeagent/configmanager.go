@@ -78,32 +78,29 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	if err != nil {
 		return fmt.Errorf("render previous site config: %w", err)
 	}
-	m.sites[config.SiteID] = config
-	encoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost)
+	candidate := cloneSites(m.sites)
+	candidate[config.SiteID] = config
+	encoded, err := renderCaddyConfig(candidate, m.agentListen, m.agentHost)
 	if err != nil {
-		m.restoreSiteLocked(config.SiteID, previous, existed)
 		return fmt.Errorf("render site config: %w", err)
 	}
+	pending := m.path + ".pending"
+	if err := persistSites(pending, candidate); err != nil {
+		return fmt.Errorf("persist pending site config: %w", err)
+	}
 	if err := caddy.Load(encoded, true); err != nil {
-		m.restoreSiteLocked(config.SiteID, previous, existed)
+		_ = os.Remove(pending)
 		return fmt.Errorf("apply site config: %w", err)
 	}
-	if err := m.persistLocked(); err != nil {
-		m.restoreSiteLocked(config.SiteID, previous, existed)
+	if err := os.Rename(pending, m.path); err != nil {
 		if rollbackErr := caddy.Load(previousEncoded, true); rollbackErr != nil {
-			return fmt.Errorf("persist site config: %w; restore caddy config: %v", err, rollbackErr)
+			return fmt.Errorf("promote site config: %w; restore caddy config: %v", err, rollbackErr)
 		}
-		return fmt.Errorf("persist site config: %w", err)
+		_ = os.Remove(pending)
+		return fmt.Errorf("promote site config: %w", err)
 	}
+	m.sites = candidate
 	return nil
-}
-
-func (m *ConfigManager) restoreSiteLocked(siteID string, previous SiteConfig, existed bool) {
-	if existed {
-		m.sites[siteID] = previous
-		return
-	}
-	delete(m.sites, siteID)
 }
 
 // ConfigVersion is the highest applied site config version on this node.
@@ -131,22 +128,30 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
 
-func (m *ConfigManager) persistLocked() error {
-	if m.path == "" {
+func persistSites(path string, sites map[string]SiteConfig) error {
+	if path == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(m.path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	data, err := json.Marshal(m.sites)
+	data, err := json.Marshal(sites)
 	if err != nil {
 		return err
 	}
-	temporary := m.path + ".tmp"
+	temporary := path + ".tmp"
 	if err := os.WriteFile(temporary, data, 0600); err != nil {
 		return err
 	}
-	return os.Rename(temporary, m.path)
+	return os.Rename(temporary, path)
+}
+
+func cloneSites(source map[string]SiteConfig) map[string]SiteConfig {
+	target := make(map[string]SiteConfig, len(source))
+	for id, config := range source {
+		target[id] = config
+	}
+	return target
 }
 
 func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost string) ([]byte, error) {
@@ -162,6 +167,9 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 	policies, certificates := make([]any, 0), make([]any, 0)
 	for _, id := range ids {
 		site := sites[id]
+		if site.Disabled {
+			continue
+		}
 		listener := site.Listener
 		if listener.HTTPEnabled {
 			listeners[":"+strconv.Itoa(listener.HTTPPort)] = struct{}{}

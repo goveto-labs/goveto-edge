@@ -12,17 +12,18 @@ import (
 )
 
 type Config struct {
-	AppEnv                string
-	HTTPHost              string
-	HTTPPort              int
-	HTTPReadHeaderTimeout time.Duration
-	ShutdownTimeout       time.Duration
-	DatabaseURL           string
-	RedisURL              string
-	ClickHouseDSN         string
-	SessionCookieName     string
-	SessionTTL            time.Duration
-	SessionCookieSecure   bool
+	AppEnv                  string
+	HTTPHost                string
+	HTTPPort                int
+	HTTPReadHeaderTimeout   time.Duration
+	ShutdownTimeout         time.Duration
+	DatabaseURL             string
+	RedisURL                string
+	ClickHouseDSN           string
+	NodeCredentialMasterKey string
+	SessionCookieName       string
+	SessionTTL              time.Duration
+	SessionCookieSecure     bool
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -46,16 +47,17 @@ func Load() (Config, error) {
 	}
 
 	cfg := Config{
-		AppEnv:                envString("APP_ENV", "development"),
-		HTTPHost:              envString("HTTP_HOST", "0.0.0.0"),
-		HTTPPort:              port,
-		HTTPReadHeaderTimeout: readHeaderTimeout,
-		ShutdownTimeout:       shutdownTimeout,
-		DatabaseURL:           os.Getenv("DATABASE_URL"),
-		RedisURL:              os.Getenv("REDIS_URL"),
-		ClickHouseDSN:         os.Getenv("CLICKHOUSE_DSN"),
-		SessionCookieName:     envString("SESSION_COOKIE_NAME", "goveto_session"),
-		SessionCookieSecure:   envBool("SESSION_COOKIE_SECURE", false),
+		AppEnv:                  envString("APP_ENV", "development"),
+		HTTPHost:                envString("HTTP_HOST", "0.0.0.0"),
+		HTTPPort:                port,
+		HTTPReadHeaderTimeout:   readHeaderTimeout,
+		ShutdownTimeout:         shutdownTimeout,
+		DatabaseURL:             os.Getenv("DATABASE_URL"),
+		RedisURL:                os.Getenv("REDIS_URL"),
+		ClickHouseDSN:           os.Getenv("CLICKHOUSE_DSN"),
+		NodeCredentialMasterKey: os.Getenv("NODE_CREDENTIAL_MASTER_KEY"),
+		SessionCookieName:       envString("SESSION_COOKIE_NAME", "goveto_session"),
+		SessionCookieSecure:     envBool("SESSION_COOKIE_SECURE", false),
 	}
 	cfg.SessionTTL, err = envDuration("SESSION_TTL", 24*time.Hour)
 	if err != nil {
@@ -66,6 +68,9 @@ func Load() (Config, error) {
 	}
 	if cfg.RedisURL == "" {
 		return Config{}, errors.New("REDIS_URL is required")
+	}
+	if cfg.NodeCredentialMasterKey == "" {
+		return Config{}, errors.New("NODE_CREDENTIAL_MASTER_KEY is required")
 	}
 	if cfg.HTTPPort < 1 || cfg.HTTPPort > 65535 {
 		return Config{}, fmt.Errorf("HTTP_PORT must be between 1 and 65535")

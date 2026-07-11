@@ -31,26 +31,27 @@ func ApplySiteOptions(opts []SiteQueryOption) SiteQueryConfig {
 
 // SiteQuery is the namespace for Site query operations.
 type SiteQuery struct {
-	Id             siteIdField
-	ClusterId      siteClusterIdField
-	CreatorId      siteCreatorIdField
-	Name           siteNameField
-	Status         siteStatusField
-	OriginPoolId   siteOriginPoolIdField
-	PolicyId       sitePolicyIdField
-	Version        siteVersionField
-	CreatedAt      siteCreatedAtField
-	UpdatedAt      siteUpdatedAtField
-	Cluster        siteClusterRelation
-	Creator        siteCreatorRelation
-	OriginPool     siteOriginPoolRelation
-	Policy         sitePolicyRelation
-	Domains        siteDomainsRelation
-	Certificates   siteCertificatesRelation
-	ListenerConfig siteListenerConfigRelation
-	ConfigVersions siteConfigVersionsRelation
-	PublishJobs    sitePublishJobsRelation
-	PurgeJobs      sitePurgeJobsRelation
+	Id                 siteIdField
+	ClusterId          siteClusterIdField
+	CreatorId          siteCreatorIdField
+	Name               siteNameField
+	Status             siteStatusField
+	OriginPoolId       siteOriginPoolIdField
+	PolicyId           sitePolicyIdField
+	Version            siteVersionField
+	CreatedAt          siteCreatedAtField
+	UpdatedAt          siteUpdatedAtField
+	Cluster            siteClusterRelation
+	Creator            siteCreatorRelation
+	OriginPool         siteOriginPoolRelation
+	Policy             sitePolicyRelation
+	Domains            siteDomainsRelation
+	Certificates       siteCertificatesRelation
+	ListenerConfig     siteListenerConfigRelation
+	NodeConfigVersions siteNodeConfigVersionsRelation
+	ConfigVersions     siteConfigVersionsRelation
+	PublishJobs        sitePublishJobsRelation
+	PurgeJobs          sitePurgeJobsRelation
 }
 
 const SiteTable = "sites"
@@ -67,26 +68,27 @@ const SiteUpdatedAtColumn = "updated_at"
 
 // SiteQuery provides query building methods for the Site model.
 var Site = SiteQuery{
-	Id:             siteIdField{},
-	ClusterId:      siteClusterIdField{},
-	CreatorId:      siteCreatorIdField{},
-	Name:           siteNameField{},
-	Status:         siteStatusField{},
-	OriginPoolId:   siteOriginPoolIdField{},
-	PolicyId:       sitePolicyIdField{},
-	Version:        siteVersionField{},
-	CreatedAt:      siteCreatedAtField{},
-	UpdatedAt:      siteUpdatedAtField{},
-	Cluster:        siteClusterRelation{},
-	Creator:        siteCreatorRelation{},
-	OriginPool:     siteOriginPoolRelation{},
-	Policy:         sitePolicyRelation{},
-	Domains:        siteDomainsRelation{},
-	Certificates:   siteCertificatesRelation{},
-	ListenerConfig: siteListenerConfigRelation{},
-	ConfigVersions: siteConfigVersionsRelation{},
-	PublishJobs:    sitePublishJobsRelation{},
-	PurgeJobs:      sitePurgeJobsRelation{},
+	Id:                 siteIdField{},
+	ClusterId:          siteClusterIdField{},
+	CreatorId:          siteCreatorIdField{},
+	Name:               siteNameField{},
+	Status:             siteStatusField{},
+	OriginPoolId:       siteOriginPoolIdField{},
+	PolicyId:           sitePolicyIdField{},
+	Version:            siteVersionField{},
+	CreatedAt:          siteCreatedAtField{},
+	UpdatedAt:          siteUpdatedAtField{},
+	Cluster:            siteClusterRelation{},
+	Creator:            siteCreatorRelation{},
+	OriginPool:         siteOriginPoolRelation{},
+	Policy:             sitePolicyRelation{},
+	Domains:            siteDomainsRelation{},
+	Certificates:       siteCertificatesRelation{},
+	ListenerConfig:     siteListenerConfigRelation{},
+	NodeConfigVersions: siteNodeConfigVersionsRelation{},
+	ConfigVersions:     siteConfigVersionsRelation{},
+	PublishJobs:        sitePublishJobsRelation{},
+	PurgeJobs:          sitePurgeJobsRelation{},
 }
 
 // SiteWhereClause represents a WHERE condition for Site.
@@ -854,6 +856,14 @@ func (siteListenerConfigRelation) Fetch() SiteIncludeClause {
 	return SiteIncludeClause{Relation: "listenerConfig"}
 }
 
+// NodeConfigVersionsRelation provides relation query helpers for nodeConfigVersions.
+type siteNodeConfigVersionsRelation struct{}
+
+// Fetch creates an include clause to fetch related nodeConfigVersions.
+func (siteNodeConfigVersionsRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "nodeConfigVersions"}
+}
+
 // ConfigVersionsRelation provides relation query helpers for configVersions.
 type siteConfigVersionsRelation struct{}
 
@@ -911,26 +921,27 @@ type SiteGroupByResult struct {
 
 // SiteCreateInput holds data for creating a Site record.
 type SiteCreateInput struct {
-	Id             string
-	ClusterId      string
-	CreatorId      string
-	Name           string
-	Status         model.SiteStatus
-	OriginPoolId   string
-	PolicyId       **string
-	Version        int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	Cluster        *ClusterCreateNestedInput
-	Creator        *UserCreateNestedInput
-	OriginPool     *OriginPoolCreateNestedInput
-	Policy         *PolicyCreateNestedInput
-	Domains        *SiteDomainCreateNestedInput
-	Certificates   *SiteCertificateCreateNestedInput
-	ListenerConfig *SiteListenerConfigCreateNestedInput
-	ConfigVersions *ConfigVersionCreateNestedInput
-	PublishJobs    *PublishJobCreateNestedInput
-	PurgeJobs      *PurgeJobCreateNestedInput
+	Id                 string
+	ClusterId          string
+	CreatorId          string
+	Name               string
+	Status             model.SiteStatus
+	OriginPoolId       string
+	PolicyId           **string
+	Version            int64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Cluster            *ClusterCreateNestedInput
+	Creator            *UserCreateNestedInput
+	OriginPool         *OriginPoolCreateNestedInput
+	Policy             *PolicyCreateNestedInput
+	Domains            *SiteDomainCreateNestedInput
+	Certificates       *SiteCertificateCreateNestedInput
+	ListenerConfig     *SiteListenerConfigCreateNestedInput
+	NodeConfigVersions *NodeSiteConfigVersionCreateNestedInput
+	ConfigVersions     *ConfigVersionCreateNestedInput
+	PublishJobs        *PublishJobCreateNestedInput
+	PurgeJobs          *PurgeJobCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

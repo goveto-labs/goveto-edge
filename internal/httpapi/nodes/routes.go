@@ -20,13 +20,13 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
-func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue) {
-	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue), authn.RequireAuth, clusteraccess.Require(db))
+func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher) {
+	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue), authn.RequireAuth, clusteraccess.Require(db))
 }
 
-func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc {
+func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nodedomain.CreateInput
 		if err := c.Bind(&input); err != nil {
@@ -43,6 +43,10 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 
 		nodeID := uuid.NewString()
 		communicationKey, err := newCommunicationKey()
+		if err != nil {
+			return err
+		}
+		encryptedCommunicationKey, err := cipher.Encrypt(communicationKey)
 		if err != nil {
 			return err
 		}
@@ -65,7 +69,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 			if _, err := tx.NodeCacheConfig.Create().Set(query.NodeCacheConfig.NodeId.Set(nodeID)).Do(ctx); err != nil {
 				return err
 			}
-			if _, err := tx.NodeCredential.Create().Set(query.NodeCredential.NodeId.Set(nodeID), query.NodeCredential.CommunicationKey.Set(communicationKey)).Do(ctx); err != nil {
+			if _, err := tx.NodeCredential.Create().Set(query.NodeCredential.NodeId.Set(nodeID), query.NodeCredential.CommunicationKeyEncrypted.Set(encryptedCommunicationKey)).Do(ctx); err != nil {
 				return err
 			}
 			for index, address := range input.Addresses {

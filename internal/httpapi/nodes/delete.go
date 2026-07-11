@@ -18,6 +18,9 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerF
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
 		if err := db.Tx(ctx, func(tx *client.Client) error {
+			if _, err := tx.NodeSiteConfigVersion.Delete().Where(query.NodeSiteConfigVersion.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
+				return err
+			}
 			if _, err := tx.NodeCredential.Delete().Where(query.NodeCredential.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
 				return err
 			}
