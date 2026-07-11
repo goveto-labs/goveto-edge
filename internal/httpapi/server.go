@@ -3,25 +3,33 @@ package httpapi
 
 import (
 	"database/sql"
+	"time"
 
 	"github.com/labstack/echo/v5"
+	"github.com/redis/go-redis/v9"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	authapi "goveto-edge/internal/httpapi/auth"
+	"goveto-edge/internal/httpapi/clusters"
 	"goveto-edge/internal/httpapi/health"
+	"goveto-edge/internal/httpapi/nodes"
+	"goveto-edge/internal/node"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 )
 
-func New(db *sql.DB, orm *client.Client, sessions *auth.SessionStore) *echo.Echo {
+func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *auth.SessionStore) *echo.Echo {
 	e := echo.New()
 	e.Use(sessions.Session)
 	settingStore := settings.New(orm)
 	captchaVerifier := captcha.New()
+	installQueue := node.NewInstallQueue(redisClient, 15*time.Minute)
 
 	health.Register(e, db)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
+	clusters.Register(e, orm)
+	nodes.Register(e, orm, installQueue)
 
 	return e
 }

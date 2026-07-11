@@ -42,7 +42,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db, orm, sessions),
+		Handler:           httpapi.New(db, orm, redisClient, sessions),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 
