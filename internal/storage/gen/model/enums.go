@@ -47,16 +47,22 @@ func ValidJobStatusValues() []JobStatus {
 type NodeStatus string
 
 const (
-	NodeStatusONLINE   NodeStatus = "ONLINE"
-	NodeStatusOFFLINE  NodeStatus = "OFFLINE"
-	NodeStatusDISABLED NodeStatus = "DISABLED"
+	NodeStatusPENDING        NodeStatus = "PENDING"
+	NodeStatusINSTALLING     NodeStatus = "INSTALLING"
+	NodeStatusONLINE         NodeStatus = "ONLINE"
+	NodeStatusOFFLINE        NodeStatus = "OFFLINE"
+	NodeStatusINSTALL_FAILED NodeStatus = "INSTALL_FAILED"
+	NodeStatusDISABLED       NodeStatus = "DISABLED"
 )
 
 // ValidNodeStatusValues returns all valid values for the NodeStatus enum.
 func ValidNodeStatusValues() []NodeStatus {
 	return []NodeStatus{
+		NodeStatusPENDING,
+		NodeStatusINSTALLING,
 		NodeStatusONLINE,
 		NodeStatusOFFLINE,
+		NodeStatusINSTALL_FAILED,
 		NodeStatusDISABLED,
 	}
 }
@@ -94,6 +100,22 @@ func ValidPurgeTypeValues() []PurgeType {
 		PurgeTypePREFIX,
 		PurgeTypeTAG,
 		PurgeTypeALL,
+	}
+}
+
+// SSHAuthType represents the SSHAuthType enum type.
+type SSHAuthType string
+
+const (
+	SSHAuthTypePASSWORD    SSHAuthType = "PASSWORD"
+	SSHAuthTypePRIVATE_KEY SSHAuthType = "PRIVATE_KEY"
+)
+
+// ValidSSHAuthTypeValues returns all valid values for the SSHAuthType enum.
+func ValidSSHAuthTypeValues() []SSHAuthType {
+	return []SSHAuthType{
+		SSHAuthTypePASSWORD,
+		SSHAuthTypePRIVATE_KEY,
 	}
 }
 

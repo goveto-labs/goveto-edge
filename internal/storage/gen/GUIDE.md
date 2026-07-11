@@ -104,6 +104,38 @@ query.PostAuthorIdColumn
   - `Afterjson` (Json, optional)
   - `Createdat` (DateTime)
 
+### Cluster
+
+- Client handle: `c.Cluster`
+- Query namespace: `query.Cluster`
+- Fields:
+  - `Id` (String, id)
+  - `Name` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### ClusterGroup
+
+- Client handle: `c.ClusterGroup`
+- Query namespace: `query.ClusterGroup`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### ClusterRegion
+
+- Client handle: `c.ClusterRegion`
+- Query namespace: `query.ClusterRegion`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### ConfigVersion
 
 - Client handle: `c.ConfigVersion`
@@ -116,6 +148,17 @@ query.PostAuthorIdColumn
   - `Hash` (String)
   - `Status` ()
   - `Createdat` (DateTime)
+
+### DNSLine
+
+- Client handle: `c.DNSLine`
+- Query namespace: `query.DNSLine`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
 
 ### DynamicSetting
 
@@ -133,13 +176,34 @@ query.PostAuthorIdColumn
 - Query namespace: `query.Node`
 - Fields:
   - `Id` (String, id)
-  - `Region` (String)
-  - `Address` (String, unique)
-  - `Version` (String)
+  - `Clusterid` (String)
+  - `Groupid` (String, optional)
+  - `Regionid` (String, optional)
+  - `Name` (String)
+  - `Version` (String, optional)
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
+
+### NodeAddress
+
+- Client handle: `c.NodeAddress`
+- Query namespace: `query.NodeAddress`
+- Fields:
+  - `Id` (String, id)
+  - `Nodeid` (String)
+  - `Address` (String, unique)
+  - `Primary` (Boolean)
+  - `Createdat` (DateTime)
+
+### NodeDNSLine
+
+- Client handle: `c.NodeDNSLine`
+- Query namespace: `query.NodeDNSLine`
+- Fields:
+  - `Nodeid` (String)
+  - `Dnslineid` (String)
 
 ### OriginPool
 

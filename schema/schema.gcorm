@@ -25,8 +25,11 @@ enum JobStatus {
 }
 
 enum NodeStatus {
+  PENDING
+  INSTALLING
   ONLINE
   OFFLINE
+  INSTALL_FAILED
   DISABLED
 }
 
@@ -40,6 +43,11 @@ enum PurgeType {
   PREFIX
   TAG
   ALL
+}
+
+enum SSHAuthType {
+  PASSWORD
+  PRIVATE_KEY
 }
 
 enum SiteStatus {
@@ -75,6 +83,48 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model Cluster {
+  id        String          @id @default(uuid())
+  name      String
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  nodes     Node[]
+  groups    ClusterGroup[]
+  regions   ClusterRegion[]
+  dnsLines  DNSLine[]
+
+  @@unique([name])
+  @@map("clusters")
+}
+
+model ClusterGroup {
+  id        String   @id @default(uuid())
+  clusterId String   @map("cluster_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  cluster   Cluster  @relation(fields: [clusterId], references: [id])
+  nodes     Node[]
+
+  @@unique([clusterId, name])
+  @@index([clusterId])
+  @@map("node_groups")
+}
+
+model ClusterRegion {
+  id        String   @id @default(uuid())
+  clusterId String   @map("cluster_id")
+  name      String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  cluster   Cluster  @relation(fields: [clusterId], references: [id])
+  nodes     Node[]
+
+  @@unique([clusterId, name])
+  @@index([clusterId])
+  @@map("node_regions")
+}
+
 model ConfigVersion {
   id         String       @id @default(uuid())
   siteId     String       @map("site_id")
@@ -91,6 +141,20 @@ model ConfigVersion {
   @@map("config_versions")
 }
 
+model DNSLine {
+  id        String        @id
+  clusterId String        @map("cluster_id")
+  name      String
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+  cluster   Cluster       @relation(fields: [clusterId], references: [id])
+  nodes     NodeDNSLine[]
+
+  @@unique([clusterId, name])
+  @@index([clusterId])
+  @@map("dns_lines")
+}
+
 model DynamicSetting {
   key         String   @id
   valueJson   Json     @map("value_json")
@@ -101,18 +165,51 @@ model DynamicSetting {
 }
 
 model Node {
-  id          String     @id @default(uuid())
-  region      String
-  address     String     @unique
-  version     String
-  heartbeatAt DateTime?  @map("heartbeat_at")
-  status      NodeStatus @default(OFFLINE)
-  createdAt   DateTime   @default(now()) @map("created_at")
-  updatedAt   DateTime   @updatedAt @map("updated_at")
+  id          String         @id @default(uuid())
+  clusterId   String         @map("cluster_id")
+  groupId     String?        @map("group_id")
+  regionId    String?        @map("region_id")
+  name        String
+  version     String?
+  heartbeatAt DateTime?      @map("heartbeat_at")
+  status      NodeStatus     @default(PENDING)
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  cluster     Cluster        @relation(fields: [clusterId], references: [id])
+  group       ClusterGroup?  @relation(fields: [groupId], references: [id])
+  region      ClusterRegion? @relation(fields: [regionId], references: [id])
+  addresses   NodeAddress[]
+  dnsLines    NodeDNSLine[]
 
-  @@index([region, status])
+  @@unique([clusterId, name])
+  @@index([clusterId, status])
+  @@index([groupId, status])
+  @@index([regionId, status])
   @@index([heartbeatAt])
   @@map("nodes")
+}
+
+model NodeAddress {
+  id        String   @id @default(uuid())
+  nodeId    String   @map("node_id")
+  address   String   @unique
+  primary   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+  node      Node     @relation(fields: [nodeId], references: [id])
+
+  @@index([nodeId])
+  @@map("node_addresses")
+}
+
+model NodeDNSLine {
+  nodeId    String  @map("node_id")
+  dnsLineId String  @map("dns_line_id")
+  node      Node    @relation(fields: [nodeId], references: [id])
+  dnsLine   DNSLine @relation(fields: [dnsLineId], references: [id])
+
+  @@id([nodeId, dnsLineId])
+  @@index([dnsLineId])
+  @@map("node_dns_lines")
 }
 
 model OriginPool {

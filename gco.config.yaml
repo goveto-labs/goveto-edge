@@ -1,5 +1,0 @@
-schemaRoots:
-  - schema
-migrationDir: migrations
-format:
-  indentWidth: 2

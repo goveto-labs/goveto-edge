@@ -32,19 +32,28 @@ func ApplyNodeOptions(opts []NodeQueryOption) NodeQueryConfig {
 // NodeQuery is the namespace for Node query operations.
 type NodeQuery struct {
 	Id          nodeIdField
-	Region      nodeRegionField
-	Address     nodeAddressField
+	ClusterId   nodeClusterIdField
+	GroupId     nodeGroupIdField
+	RegionId    nodeRegionIdField
+	Name        nodeNameField
 	Version     nodeVersionField
 	HeartbeatAt nodeHeartbeatAtField
 	Status      nodeStatusField
 	CreatedAt   nodeCreatedAtField
 	UpdatedAt   nodeUpdatedAtField
+	Cluster     nodeClusterRelation
+	Group       nodeGroupRelation
+	Region      nodeRegionRelation
+	Addresses   nodeAddressesRelation
+	DnsLines    nodeDnsLinesRelation
 }
 
 const NodeTable = "nodes"
 const NodeIdColumn = "id"
-const NodeRegionColumn = "region"
-const NodeAddressColumn = "address"
+const NodeClusterIdColumn = "cluster_id"
+const NodeGroupIdColumn = "group_id"
+const NodeRegionIdColumn = "region_id"
+const NodeNameColumn = "name"
 const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
 const NodeStatusColumn = "status"
@@ -54,13 +63,20 @@ const NodeUpdatedAtColumn = "updated_at"
 // NodeQuery provides query building methods for the Node model.
 var Node = NodeQuery{
 	Id:          nodeIdField{},
-	Region:      nodeRegionField{},
-	Address:     nodeAddressField{},
+	ClusterId:   nodeClusterIdField{},
+	GroupId:     nodeGroupIdField{},
+	RegionId:    nodeRegionIdField{},
+	Name:        nodeNameField{},
 	Version:     nodeVersionField{},
 	HeartbeatAt: nodeHeartbeatAtField{},
 	Status:      nodeStatusField{},
 	CreatedAt:   nodeCreatedAtField{},
 	UpdatedAt:   nodeUpdatedAtField{},
+	Cluster:     nodeClusterRelation{},
+	Group:       nodeGroupRelation{},
+	Region:      nodeRegionRelation{},
+	Addresses:   nodeAddressesRelation{},
+	DnsLines:    nodeDnsLinesRelation{},
 }
 
 // NodeWhereClause represents a WHERE condition for Node.
@@ -213,143 +229,285 @@ func (nodeIdField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "id", Direction: "DESC"}
 }
 
-// RegionField provides query operations for the region field.
-type nodeRegionField struct{}
+// ClusterIdField provides query operations for the clusterId field.
+type nodeClusterIdField struct{}
 
 // Equals creates an equality condition.
-func (nodeRegionField) Equals(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region", Operator: "=", Value: v}
+func (nodeClusterIdField) Equals(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "cluster_id", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (nodeRegionField) Not(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region", Operator: "!=", Value: v}
+func (nodeClusterIdField) Not(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "cluster_id", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (nodeRegionField) In(vals ...string) NodeWhereClause {
+func (nodeClusterIdField) In(vals ...string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeWhereClause{Field: "region", Operator: "IN", Value: iVals}
+	return NodeWhereClause{Field: "cluster_id", Operator: "IN", Value: iVals}
 }
 
 // NotIn creates a NOT IN condition.
-func (nodeRegionField) NotIn(vals ...string) NodeWhereClause {
+func (nodeClusterIdField) NotIn(vals ...string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeWhereClause{Field: "region", Operator: "NOT IN", Value: iVals}
+	return NodeWhereClause{Field: "cluster_id", Operator: "NOT IN", Value: iVals}
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (nodeRegionField) Contains(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region", Operator: "CONTAINS", Value: v}
+func (nodeClusterIdField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "cluster_id", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (nodeRegionField) StartsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region", Operator: "STARTS_WITH", Value: v}
+func (nodeClusterIdField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "cluster_id", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (nodeRegionField) EndsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region", Operator: "ENDS_WITH", Value: v}
+func (nodeClusterIdField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "cluster_id", Operator: "ENDS_WITH", Value: v}
 }
 
 // Set creates a set operation for create/update.
-func (nodeRegionField) Set(v string) NodeSetClause {
-	return NodeSetClause{Field: "region", Value: v}
+func (nodeClusterIdField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "cluster_id", Value: v}
 }
 
 // Asc returns an ascending order clause for this field.
-func (nodeRegionField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "region", Direction: "ASC"}
+func (nodeClusterIdField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "cluster_id", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (nodeRegionField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "region", Direction: "DESC"}
+func (nodeClusterIdField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "cluster_id", Direction: "DESC"}
 }
 
-// AddressField provides query operations for the address field.
-type nodeAddressField struct{}
+// GroupIdField provides query operations for the groupId field.
+type nodeGroupIdField struct{}
 
 // Equals creates an equality condition.
-func (nodeAddressField) Equals(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "address", Operator: "=", Value: v}
+func (nodeGroupIdField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (nodeAddressField) Not(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "address", Operator: "!=", Value: v}
+func (nodeGroupIdField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (nodeAddressField) In(vals ...string) NodeWhereClause {
+func (nodeGroupIdField) In(vals ...*string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeWhereClause{Field: "address", Operator: "IN", Value: iVals}
+	return NodeWhereClause{Field: "group_id", Operator: "IN", Value: iVals}
 }
 
 // NotIn creates a NOT IN condition.
-func (nodeAddressField) NotIn(vals ...string) NodeWhereClause {
+func (nodeGroupIdField) NotIn(vals ...*string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return NodeWhereClause{Field: "address", Operator: "NOT IN", Value: iVals}
+	return NodeWhereClause{Field: "group_id", Operator: "NOT IN", Value: iVals}
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (nodeAddressField) Contains(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "address", Operator: "CONTAINS", Value: v}
+func (nodeGroupIdField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (nodeAddressField) StartsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "address", Operator: "STARTS_WITH", Value: v}
+func (nodeGroupIdField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (nodeAddressField) EndsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "address", Operator: "ENDS_WITH", Value: v}
+func (nodeGroupIdField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeGroupIdField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "group_id", Operator: "IS NULL", Value: nil}
 }
 
 // Set creates a set operation for create/update.
-func (nodeAddressField) Set(v string) NodeSetClause {
-	return NodeSetClause{Field: "address", Value: v}
+func (nodeGroupIdField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "group_id", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeGroupIdField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "group_id", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
-func (nodeAddressField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "address", Direction: "ASC"}
+func (nodeGroupIdField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "group_id", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (nodeAddressField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "address", Direction: "DESC"}
+func (nodeGroupIdField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "group_id", Direction: "DESC"}
+}
+
+// RegionIdField provides query operations for the regionId field.
+type nodeRegionIdField struct{}
+
+// Equals creates an equality condition.
+func (nodeRegionIdField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeRegionIdField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeRegionIdField) In(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "region_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeRegionIdField) NotIn(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "region_id", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (nodeRegionIdField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (nodeRegionIdField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (nodeRegionIdField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeRegionIdField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "region_id", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeRegionIdField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "region_id", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeRegionIdField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "region_id", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeRegionIdField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "region_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeRegionIdField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "region_id", Direction: "DESC"}
+}
+
+// NameField provides query operations for the name field.
+type nodeNameField struct{}
+
+// Equals creates an equality condition.
+func (nodeNameField) Equals(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "name", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeNameField) Not(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "name", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeNameField) In(vals ...string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "name", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeNameField) NotIn(vals ...string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "name", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (nodeNameField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "name", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (nodeNameField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "name", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (nodeNameField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "name", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (nodeNameField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "name", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeNameField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "name", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeNameField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "name", Direction: "DESC"}
 }
 
 // VersionField provides query operations for the version field.
 type nodeVersionField struct{}
 
 // Equals creates an equality condition.
-func (nodeVersionField) Equals(v string) NodeWhereClause {
+func (nodeVersionField) Equals(v *string) NodeWhereClause {
 	return NodeWhereClause{Field: "version", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (nodeVersionField) Not(v string) NodeWhereClause {
+func (nodeVersionField) Not(v *string) NodeWhereClause {
 	return NodeWhereClause{Field: "version", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (nodeVersionField) In(vals ...string) NodeWhereClause {
+func (nodeVersionField) In(vals ...*string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -358,7 +516,7 @@ func (nodeVersionField) In(vals ...string) NodeWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (nodeVersionField) NotIn(vals ...string) NodeWhereClause {
+func (nodeVersionField) NotIn(vals ...*string) NodeWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -381,9 +539,19 @@ func (nodeVersionField) EndsWith(v string) NodeWhereClause {
 	return NodeWhereClause{Field: "version", Operator: "ENDS_WITH", Value: v}
 }
 
+// IsNull creates an IS NULL condition.
+func (nodeVersionField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "version", Operator: "IS NULL", Value: nil}
+}
+
 // Set creates a set operation for create/update.
 func (nodeVersionField) Set(v string) NodeSetClause {
 	return NodeSetClause{Field: "version", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeVersionField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "version", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -650,6 +818,46 @@ func (nodeUpdatedAtField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "updated_at", Direction: "DESC"}
 }
 
+// ClusterRelation provides relation query helpers for cluster.
+type nodeClusterRelation struct{}
+
+// Fetch creates an include clause to fetch related cluster.
+func (nodeClusterRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "cluster"}
+}
+
+// GroupRelation provides relation query helpers for group.
+type nodeGroupRelation struct{}
+
+// Fetch creates an include clause to fetch related group.
+func (nodeGroupRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "group"}
+}
+
+// RegionRelation provides relation query helpers for region.
+type nodeRegionRelation struct{}
+
+// Fetch creates an include clause to fetch related region.
+func (nodeRegionRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "region"}
+}
+
+// AddressesRelation provides relation query helpers for addresses.
+type nodeAddressesRelation struct{}
+
+// Fetch creates an include clause to fetch related addresses.
+func (nodeAddressesRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "addresses"}
+}
+
+// DnsLinesRelation provides relation query helpers for dnsLines.
+type nodeDnsLinesRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsLines.
+func (nodeDnsLinesRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "dnsLines"}
+}
+
 // NodeSetClause represents a field set operation for create/update.
 type NodeSetClause struct {
 	Field string
@@ -684,18 +892,25 @@ type NodeGroupByResult struct {
 // NodeCreateInput holds data for creating a Node record.
 type NodeCreateInput struct {
 	Id          string
-	Region      string
-	Address     string
-	Version     string
+	ClusterId   string
+	GroupId     **string
+	RegionId    **string
+	Name        string
+	Version     **string
 	HeartbeatAt **time.Time
 	Status      model.NodeStatus
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	Cluster     *ClusterCreateNestedInput
+	Group       *ClusterGroupCreateNestedInput
+	Region      *ClusterRegionCreateNestedInput
+	Addresses   *NodeAddressCreateNestedInput
+	DnsLines    *NodeDNSLineCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Region, d.Address, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.
@@ -706,6 +921,5 @@ type NodeCreateNestedInput struct {
 
 // NodeWhereUniqueInput identifies a unique Node record.
 type NodeWhereUniqueInput struct {
-	Id      *string
-	Address *string
+	Id *string
 }

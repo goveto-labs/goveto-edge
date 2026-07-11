@@ -25,9 +25,15 @@ type Client struct {
 	executor       querier
 	dialect        string
 	AuditLog       AuditLogActions
+	Cluster        ClusterActions
+	ClusterGroup   ClusterGroupActions
+	ClusterRegion  ClusterRegionActions
 	ConfigVersion  ConfigVersionActions
+	DNSLine        DNSLineActions
 	DynamicSetting DynamicSettingActions
 	Node           NodeActions
+	NodeAddress    NodeAddressActions
+	NodeDNSLine    NodeDNSLineActions
 	OriginPool     OriginPoolActions
 	Policy         PolicyActions
 	PublishJob     PublishJobActions
@@ -44,9 +50,15 @@ func New(db *sql.DB, opts ...Option) *Client {
 		opt(c)
 	}
 	c.AuditLog = AuditLogActions{client: c}
+	c.Cluster = ClusterActions{client: c}
+	c.ClusterGroup = ClusterGroupActions{client: c}
+	c.ClusterRegion = ClusterRegionActions{client: c}
 	c.ConfigVersion = ConfigVersionActions{client: c}
+	c.DNSLine = DNSLineActions{client: c}
 	c.DynamicSetting = DynamicSettingActions{client: c}
 	c.Node = NodeActions{client: c}
+	c.NodeAddress = NodeAddressActions{client: c}
+	c.NodeDNSLine = NodeDNSLineActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
 	c.Policy = PolicyActions{client: c}
 	c.PublishJob = PublishJobActions{client: c}
@@ -212,9 +224,15 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 
 	txClient := &Client{db: c.db, executor: sqlTx, dialect: c.dialect}
 	txClient.AuditLog = AuditLogActions{client: txClient}
+	txClient.Cluster = ClusterActions{client: txClient}
+	txClient.ClusterGroup = ClusterGroupActions{client: txClient}
+	txClient.ClusterRegion = ClusterRegionActions{client: txClient}
 	txClient.ConfigVersion = ConfigVersionActions{client: txClient}
+	txClient.DNSLine = DNSLineActions{client: txClient}
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
+	txClient.NodeAddress = NodeAddressActions{client: txClient}
+	txClient.NodeDNSLine = NodeDNSLineActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
 	txClient.Policy = PolicyActions{client: txClient}
 	txClient.PublishJob = PublishJobActions{client: txClient}
@@ -1101,6 +1119,2598 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 	return results, rows.Err()
 }
 
+// buildClusterWhere recursively builds a WHERE clause string and arguments.
+func buildClusterWhere(c *Client, wheres []query.ClusterWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ClusterWhereClause); ok {
+				sub, subArgs := buildClusterWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ClusterWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildClusterWhere(c, []query.ClusterWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ClusterWhereClause); ok {
+				sub, subArgs := buildClusterWhere(c, []query.ClusterWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ClusterActions provides database operations for the Cluster model.
+type ClusterActions struct {
+	client *Client
+}
+
+// ClusterCreateBuilder builds a Cluster create operation incrementally.
+type ClusterCreateBuilder struct {
+	action ClusterActions
+	sets   []query.ClusterSetClause
+}
+
+// Create starts a staged Cluster create operation.
+func (a ClusterActions) Create() ClusterCreateBuilder {
+	return ClusterCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ClusterCreateBuilder) Set(sets ...query.ClusterSetClause) ClusterCreateBuilder {
+	next := ClusterCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ClusterSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ClusterCreateBuilder) Do(ctx context.Context) (*model.Cluster, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ClusterCreateManyBuilder builds a bulk Cluster insert operation.
+type ClusterCreateManyBuilder struct {
+	action            ClusterActions
+	data              []query.ClusterCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk Cluster insert operation.
+func (a ClusterActions) BulkCreate(data []query.ClusterCreateInput) ClusterCreateManyBuilder {
+	return ClusterCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ClusterCreateManyBuilder) OnConflictDoNothing(columns ...string) ClusterCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ClusterCreateManyBuilder) Returning(columns ...string) ClusterCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ClusterCreateManyBuilder) BatchSize(n int) ClusterCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ClusterCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("Cluster.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("Cluster.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ClusterCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Cluster, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.Cluster
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.Cluster
+			if err := rows.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ClusterCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("Cluster.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "name", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ClusterQueryBuilder builds a Cluster query incrementally.
+type ClusterQueryBuilder struct {
+	action ClusterActions
+	opts   []query.ClusterQueryOption
+}
+
+// Query starts a staged Cluster query.
+func (a ClusterActions) Query() ClusterQueryBuilder {
+	return ClusterQueryBuilder{action: a}
+}
+
+func (b ClusterQueryBuilder) withOptions(opts ...query.ClusterQueryOption) ClusterQueryBuilder {
+	next := ClusterQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ClusterQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ClusterQueryBuilder) Where(clauses ...query.ClusterWhereClause) ClusterQueryBuilder {
+	opts := make([]query.ClusterQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ClusterQueryBuilder) OrderBy(clause query.ClusterOrderByClause) ClusterQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ClusterQueryBuilder) Include(clauses ...query.ClusterIncludeClause) ClusterQueryBuilder {
+	opts := make([]query.ClusterQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ClusterQueryBuilder) Take(n int) ClusterQueryBuilder {
+	return b.withOptions(query.ClusterTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ClusterQueryBuilder) Skip(n int) ClusterQueryBuilder {
+	return b.withOptions(query.ClusterSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ClusterQueryBuilder) Do(ctx context.Context) ([]model.Cluster, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ClusterQueryBuilder) First(ctx context.Context) (*model.Cluster, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ClusterQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyClusterOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ClusterUpdateBuilder builds a Cluster update operation incrementally.
+type ClusterUpdateBuilder struct {
+	action ClusterActions
+	wheres []query.ClusterWhereClause
+	sets   []query.ClusterSetClause
+}
+
+// Update starts a staged Cluster update operation.
+func (a ClusterActions) Update() ClusterUpdateBuilder {
+	return ClusterUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ClusterUpdateBuilder) Where(clauses ...query.ClusterWhereClause) ClusterUpdateBuilder {
+	next := ClusterUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ClusterSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ClusterUpdateBuilder) Set(sets ...query.ClusterSetClause) ClusterUpdateBuilder {
+	next := ClusterUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ClusterWhereClause(nil), b.wheres...),
+		sets:   make([]query.ClusterSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ClusterUpdateBuilder) combinedWhere() (query.ClusterWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterWhereClause{}, fmt.Errorf("Cluster.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.Cluster.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ClusterUpdateBuilder) Do(ctx context.Context) (*model.Cluster, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ClusterUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ClusterDeleteBuilder builds a Cluster delete operation incrementally.
+type ClusterDeleteBuilder struct {
+	action ClusterActions
+	wheres []query.ClusterWhereClause
+}
+
+// Delete starts a staged Cluster delete operation.
+func (a ClusterActions) Delete() ClusterDeleteBuilder {
+	return ClusterDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ClusterDeleteBuilder) Where(clauses ...query.ClusterWhereClause) ClusterDeleteBuilder {
+	next := ClusterDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ClusterDeleteBuilder) combinedWhere() (query.ClusterWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterWhereClause{}, fmt.Errorf("Cluster.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.Cluster.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ClusterDeleteBuilder) Do(ctx context.Context) (*model.Cluster, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ClusterDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple Cluster records.
+func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQueryOption) ([]model.Cluster, error) {
+	cfg := query.ApplyClusterOptions(opts)
+	q := "SELECT id, name, created_at, updated_at FROM clusters"
+	argIdx := 0
+	where, args := buildClusterWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.Cluster
+	for rows.Next() {
+		var item model.Cluster
+		if err := rows.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Cluster.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching Cluster record.
+func (a ClusterActions) FindFirst(ctx context.Context, opts ...query.ClusterQueryOption) (*model.Cluster, error) {
+	opts = append(opts, query.ClusterTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single Cluster record by unique constraint.
+func (a ClusterActions) FindUnique(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
+	q := "SELECT id, name, created_at, updated_at FROM clusters"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.Cluster
+	if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Cluster.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single Cluster record.
+func (a ClusterActions) CreateOne(ctx context.Context, sets ...query.ClusterSetClause) (*model.Cluster, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("Cluster.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.Cluster
+		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Cluster.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple Cluster records.
+func (a ClusterActions) CreateMany(ctx context.Context, data []query.ClusterCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "name", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single Cluster record matching the where clause.
+func (a ClusterActions) UpdateOne(ctx context.Context, where query.ClusterWhereClause, sets ...query.ClusterSetClause) (*model.Cluster, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("Cluster.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE clusters SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Cluster
+		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("Cluster.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple Cluster records matching the where clauses.
+func (a ClusterActions) UpdateMany(ctx context.Context, wheres []query.ClusterWhereClause, sets ...query.ClusterSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("Cluster.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE clusters SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("Cluster.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single Cluster record.
+func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereClause, create []query.ClusterSetClause, update []query.ClusterSetClause) (*model.Cluster, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("Cluster.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Cluster
+		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Cluster.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single Cluster record matching the where clause.
+func (a ClusterActions) DeleteOne(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
+	q := "DELETE FROM clusters"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Cluster
+		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("Cluster.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple Cluster records matching the where clauses.
+func (a ClusterActions) DeleteMany(ctx context.Context, wheres ...query.ClusterWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM clusters"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("Cluster.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of Cluster records matching the where clauses.
+func (a ClusterActions) Count(ctx context.Context, wheres ...query.ClusterWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM clusters"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("Cluster.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for Cluster.
+func (a ClusterActions) Aggregate(ctx context.Context, opts ...query.ClusterAggregateOption) (*query.ClusterAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM clusters", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ClusterAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("Cluster.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on Cluster.
+func (a ClusterActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterAggregateOption) ([]query.ClusterGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM clusters GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("Cluster.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ClusterGroupByResult
+	for rows.Next() {
+		r := query.ClusterGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("Cluster.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildClusterGroupWhere recursively builds a WHERE clause string and arguments.
+func buildClusterGroupWhere(c *Client, wheres []query.ClusterGroupWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ClusterGroupWhereClause); ok {
+				sub, subArgs := buildClusterGroupWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ClusterGroupWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildClusterGroupWhere(c, []query.ClusterGroupWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ClusterGroupWhereClause); ok {
+				sub, subArgs := buildClusterGroupWhere(c, []query.ClusterGroupWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ClusterGroupActions provides database operations for the ClusterGroup model.
+type ClusterGroupActions struct {
+	client *Client
+}
+
+// ClusterGroupCreateBuilder builds a ClusterGroup create operation incrementally.
+type ClusterGroupCreateBuilder struct {
+	action ClusterGroupActions
+	sets   []query.ClusterGroupSetClause
+}
+
+// Create starts a staged ClusterGroup create operation.
+func (a ClusterGroupActions) Create() ClusterGroupCreateBuilder {
+	return ClusterGroupCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ClusterGroupCreateBuilder) Set(sets ...query.ClusterGroupSetClause) ClusterGroupCreateBuilder {
+	next := ClusterGroupCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ClusterGroupSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ClusterGroupCreateBuilder) Do(ctx context.Context) (*model.ClusterGroup, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ClusterGroupCreateManyBuilder builds a bulk ClusterGroup insert operation.
+type ClusterGroupCreateManyBuilder struct {
+	action            ClusterGroupActions
+	data              []query.ClusterGroupCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ClusterGroup insert operation.
+func (a ClusterGroupActions) BulkCreate(data []query.ClusterGroupCreateInput) ClusterGroupCreateManyBuilder {
+	return ClusterGroupCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ClusterGroupCreateManyBuilder) OnConflictDoNothing(columns ...string) ClusterGroupCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ClusterGroupCreateManyBuilder) Returning(columns ...string) ClusterGroupCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ClusterGroupCreateManyBuilder) BatchSize(n int) ClusterGroupCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ClusterGroupCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterGroupCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ClusterGroup.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ClusterGroup.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ClusterGroupCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ClusterGroup, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ClusterGroup
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterGroupCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ClusterGroup
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ClusterGroupCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterGroupCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ClusterGroup.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ClusterGroupQueryBuilder builds a ClusterGroup query incrementally.
+type ClusterGroupQueryBuilder struct {
+	action ClusterGroupActions
+	opts   []query.ClusterGroupQueryOption
+}
+
+// Query starts a staged ClusterGroup query.
+func (a ClusterGroupActions) Query() ClusterGroupQueryBuilder {
+	return ClusterGroupQueryBuilder{action: a}
+}
+
+func (b ClusterGroupQueryBuilder) withOptions(opts ...query.ClusterGroupQueryOption) ClusterGroupQueryBuilder {
+	next := ClusterGroupQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ClusterGroupQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ClusterGroupQueryBuilder) Where(clauses ...query.ClusterGroupWhereClause) ClusterGroupQueryBuilder {
+	opts := make([]query.ClusterGroupQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ClusterGroupQueryBuilder) OrderBy(clause query.ClusterGroupOrderByClause) ClusterGroupQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ClusterGroupQueryBuilder) Include(clauses ...query.ClusterGroupIncludeClause) ClusterGroupQueryBuilder {
+	opts := make([]query.ClusterGroupQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ClusterGroupQueryBuilder) Take(n int) ClusterGroupQueryBuilder {
+	return b.withOptions(query.ClusterGroupTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ClusterGroupQueryBuilder) Skip(n int) ClusterGroupQueryBuilder {
+	return b.withOptions(query.ClusterGroupSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ClusterGroupQueryBuilder) Do(ctx context.Context) ([]model.ClusterGroup, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ClusterGroupQueryBuilder) First(ctx context.Context) (*model.ClusterGroup, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ClusterGroupQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyClusterGroupOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ClusterGroupUpdateBuilder builds a ClusterGroup update operation incrementally.
+type ClusterGroupUpdateBuilder struct {
+	action ClusterGroupActions
+	wheres []query.ClusterGroupWhereClause
+	sets   []query.ClusterGroupSetClause
+}
+
+// Update starts a staged ClusterGroup update operation.
+func (a ClusterGroupActions) Update() ClusterGroupUpdateBuilder {
+	return ClusterGroupUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ClusterGroupUpdateBuilder) Where(clauses ...query.ClusterGroupWhereClause) ClusterGroupUpdateBuilder {
+	next := ClusterGroupUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterGroupWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ClusterGroupSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ClusterGroupUpdateBuilder) Set(sets ...query.ClusterGroupSetClause) ClusterGroupUpdateBuilder {
+	next := ClusterGroupUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ClusterGroupWhereClause(nil), b.wheres...),
+		sets:   make([]query.ClusterGroupSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ClusterGroupUpdateBuilder) combinedWhere() (query.ClusterGroupWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterGroupWhereClause{}, fmt.Errorf("ClusterGroup.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterGroup.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ClusterGroupUpdateBuilder) Do(ctx context.Context) (*model.ClusterGroup, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ClusterGroupUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ClusterGroupDeleteBuilder builds a ClusterGroup delete operation incrementally.
+type ClusterGroupDeleteBuilder struct {
+	action ClusterGroupActions
+	wheres []query.ClusterGroupWhereClause
+}
+
+// Delete starts a staged ClusterGroup delete operation.
+func (a ClusterGroupActions) Delete() ClusterGroupDeleteBuilder {
+	return ClusterGroupDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ClusterGroupDeleteBuilder) Where(clauses ...query.ClusterGroupWhereClause) ClusterGroupDeleteBuilder {
+	next := ClusterGroupDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterGroupWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ClusterGroupDeleteBuilder) combinedWhere() (query.ClusterGroupWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterGroupWhereClause{}, fmt.Errorf("ClusterGroup.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterGroup.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ClusterGroupDeleteBuilder) Do(ctx context.Context) (*model.ClusterGroup, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ClusterGroupDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ClusterGroup records.
+func (a ClusterGroupActions) FindMany(ctx context.Context, opts ...query.ClusterGroupQueryOption) ([]model.ClusterGroup, error) {
+	cfg := query.ApplyClusterGroupOptions(opts)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_groups"
+	argIdx := 0
+	where, args := buildClusterGroupWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ClusterGroup
+	for rows.Next() {
+		var item model.ClusterGroup
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterGroup.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ClusterGroup record.
+func (a ClusterGroupActions) FindFirst(ctx context.Context, opts ...query.ClusterGroupQueryOption) (*model.ClusterGroup, error) {
+	opts = append(opts, query.ClusterGroupTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ClusterGroup record by unique constraint.
+func (a ClusterGroupActions) FindUnique(ctx context.Context, where query.ClusterGroupWhereClause) (*model.ClusterGroup, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_groups"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ClusterGroup
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ClusterGroup.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ClusterGroup record.
+func (a ClusterGroupActions) CreateOne(ctx context.Context, sets ...query.ClusterGroupSetClause) (*model.ClusterGroup, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterGroup.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ClusterGroup
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterGroup.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ClusterGroup records.
+func (a ClusterGroupActions) CreateMany(ctx context.Context, data []query.ClusterGroupCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ClusterGroupActions) buildClusterGroupCreateManySQL(data []query.ClusterGroupCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ClusterGroup record matching the where clause.
+func (a ClusterGroupActions) UpdateOne(ctx context.Context, where query.ClusterGroupWhereClause, sets ...query.ClusterGroupSetClause) (*model.ClusterGroup, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterGroup.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_groups SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterGroup
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterGroup.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ClusterGroup records matching the where clauses.
+func (a ClusterGroupActions) UpdateMany(ctx context.Context, wheres []query.ClusterGroupWhereClause, sets ...query.ClusterGroupSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ClusterGroup.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterGroupWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_groups SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterGroup.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ClusterGroup record.
+func (a ClusterGroupActions) UpsertOne(ctx context.Context, where query.ClusterGroupWhereClause, create []query.ClusterGroupSetClause, update []query.ClusterGroupSetClause) (*model.ClusterGroup, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ClusterGroup.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterGroup
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterGroup.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ClusterGroup record matching the where clause.
+func (a ClusterGroupActions) DeleteOne(ctx context.Context, where query.ClusterGroupWhereClause) (*model.ClusterGroup, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_groups"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterGroup
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterGroup.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ClusterGroup records matching the where clauses.
+func (a ClusterGroupActions) DeleteMany(ctx context.Context, wheres ...query.ClusterGroupWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterGroupWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_groups"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterGroup.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ClusterGroup records matching the where clauses.
+func (a ClusterGroupActions) Count(ctx context.Context, wheres ...query.ClusterGroupWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterGroupWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_groups"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ClusterGroup.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ClusterGroup.
+func (a ClusterGroupActions) Aggregate(ctx context.Context, opts ...query.ClusterGroupAggregateOption) (*query.ClusterGroupAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_groups", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ClusterGroupAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ClusterGroup.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ClusterGroup.
+func (a ClusterGroupActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterGroupAggregateOption) ([]query.ClusterGroupGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_groups GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterGroup.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ClusterGroupGroupByResult
+	for rows.Next() {
+		r := query.ClusterGroupGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ClusterGroup.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildClusterRegionWhere recursively builds a WHERE clause string and arguments.
+func buildClusterRegionWhere(c *Client, wheres []query.ClusterRegionWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ClusterRegionWhereClause); ok {
+				sub, subArgs := buildClusterRegionWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ClusterRegionWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildClusterRegionWhere(c, []query.ClusterRegionWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ClusterRegionWhereClause); ok {
+				sub, subArgs := buildClusterRegionWhere(c, []query.ClusterRegionWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ClusterRegionActions provides database operations for the ClusterRegion model.
+type ClusterRegionActions struct {
+	client *Client
+}
+
+// ClusterRegionCreateBuilder builds a ClusterRegion create operation incrementally.
+type ClusterRegionCreateBuilder struct {
+	action ClusterRegionActions
+	sets   []query.ClusterRegionSetClause
+}
+
+// Create starts a staged ClusterRegion create operation.
+func (a ClusterRegionActions) Create() ClusterRegionCreateBuilder {
+	return ClusterRegionCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ClusterRegionCreateBuilder) Set(sets ...query.ClusterRegionSetClause) ClusterRegionCreateBuilder {
+	next := ClusterRegionCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ClusterRegionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ClusterRegionCreateBuilder) Do(ctx context.Context) (*model.ClusterRegion, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ClusterRegionCreateManyBuilder builds a bulk ClusterRegion insert operation.
+type ClusterRegionCreateManyBuilder struct {
+	action            ClusterRegionActions
+	data              []query.ClusterRegionCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ClusterRegion insert operation.
+func (a ClusterRegionActions) BulkCreate(data []query.ClusterRegionCreateInput) ClusterRegionCreateManyBuilder {
+	return ClusterRegionCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ClusterRegionCreateManyBuilder) OnConflictDoNothing(columns ...string) ClusterRegionCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ClusterRegionCreateManyBuilder) Returning(columns ...string) ClusterRegionCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ClusterRegionCreateManyBuilder) BatchSize(n int) ClusterRegionCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ClusterRegionCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterRegionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ClusterRegion.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ClusterRegion.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ClusterRegionCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ClusterRegion, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ClusterRegion
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterRegionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ClusterRegion
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ClusterRegionCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterRegionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ClusterRegion.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ClusterRegionQueryBuilder builds a ClusterRegion query incrementally.
+type ClusterRegionQueryBuilder struct {
+	action ClusterRegionActions
+	opts   []query.ClusterRegionQueryOption
+}
+
+// Query starts a staged ClusterRegion query.
+func (a ClusterRegionActions) Query() ClusterRegionQueryBuilder {
+	return ClusterRegionQueryBuilder{action: a}
+}
+
+func (b ClusterRegionQueryBuilder) withOptions(opts ...query.ClusterRegionQueryOption) ClusterRegionQueryBuilder {
+	next := ClusterRegionQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ClusterRegionQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ClusterRegionQueryBuilder) Where(clauses ...query.ClusterRegionWhereClause) ClusterRegionQueryBuilder {
+	opts := make([]query.ClusterRegionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ClusterRegionQueryBuilder) OrderBy(clause query.ClusterRegionOrderByClause) ClusterRegionQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ClusterRegionQueryBuilder) Include(clauses ...query.ClusterRegionIncludeClause) ClusterRegionQueryBuilder {
+	opts := make([]query.ClusterRegionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ClusterRegionQueryBuilder) Take(n int) ClusterRegionQueryBuilder {
+	return b.withOptions(query.ClusterRegionTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ClusterRegionQueryBuilder) Skip(n int) ClusterRegionQueryBuilder {
+	return b.withOptions(query.ClusterRegionSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ClusterRegionQueryBuilder) Do(ctx context.Context) ([]model.ClusterRegion, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ClusterRegionQueryBuilder) First(ctx context.Context) (*model.ClusterRegion, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ClusterRegionQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyClusterRegionOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ClusterRegionUpdateBuilder builds a ClusterRegion update operation incrementally.
+type ClusterRegionUpdateBuilder struct {
+	action ClusterRegionActions
+	wheres []query.ClusterRegionWhereClause
+	sets   []query.ClusterRegionSetClause
+}
+
+// Update starts a staged ClusterRegion update operation.
+func (a ClusterRegionActions) Update() ClusterRegionUpdateBuilder {
+	return ClusterRegionUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ClusterRegionUpdateBuilder) Where(clauses ...query.ClusterRegionWhereClause) ClusterRegionUpdateBuilder {
+	next := ClusterRegionUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterRegionWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ClusterRegionSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ClusterRegionUpdateBuilder) Set(sets ...query.ClusterRegionSetClause) ClusterRegionUpdateBuilder {
+	next := ClusterRegionUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ClusterRegionWhereClause(nil), b.wheres...),
+		sets:   make([]query.ClusterRegionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ClusterRegionUpdateBuilder) combinedWhere() (query.ClusterRegionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterRegionWhereClause{}, fmt.Errorf("ClusterRegion.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterRegion.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ClusterRegionUpdateBuilder) Do(ctx context.Context) (*model.ClusterRegion, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ClusterRegionUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ClusterRegionDeleteBuilder builds a ClusterRegion delete operation incrementally.
+type ClusterRegionDeleteBuilder struct {
+	action ClusterRegionActions
+	wheres []query.ClusterRegionWhereClause
+}
+
+// Delete starts a staged ClusterRegion delete operation.
+func (a ClusterRegionActions) Delete() ClusterRegionDeleteBuilder {
+	return ClusterRegionDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ClusterRegionDeleteBuilder) Where(clauses ...query.ClusterRegionWhereClause) ClusterRegionDeleteBuilder {
+	next := ClusterRegionDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterRegionWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ClusterRegionDeleteBuilder) combinedWhere() (query.ClusterRegionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterRegionWhereClause{}, fmt.Errorf("ClusterRegion.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterRegion.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ClusterRegionDeleteBuilder) Do(ctx context.Context) (*model.ClusterRegion, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ClusterRegionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ClusterRegion records.
+func (a ClusterRegionActions) FindMany(ctx context.Context, opts ...query.ClusterRegionQueryOption) ([]model.ClusterRegion, error) {
+	cfg := query.ApplyClusterRegionOptions(opts)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_regions"
+	argIdx := 0
+	where, args := buildClusterRegionWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ClusterRegion
+	for rows.Next() {
+		var item model.ClusterRegion
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterRegion.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ClusterRegion record.
+func (a ClusterRegionActions) FindFirst(ctx context.Context, opts ...query.ClusterRegionQueryOption) (*model.ClusterRegion, error) {
+	opts = append(opts, query.ClusterRegionTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ClusterRegion record by unique constraint.
+func (a ClusterRegionActions) FindUnique(ctx context.Context, where query.ClusterRegionWhereClause) (*model.ClusterRegion, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_regions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ClusterRegion
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ClusterRegion.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ClusterRegion record.
+func (a ClusterRegionActions) CreateOne(ctx context.Context, sets ...query.ClusterRegionSetClause) (*model.ClusterRegion, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterRegion.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ClusterRegion
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterRegion.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ClusterRegion records.
+func (a ClusterRegionActions) CreateMany(ctx context.Context, data []query.ClusterRegionCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ClusterRegionActions) buildClusterRegionCreateManySQL(data []query.ClusterRegionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ClusterRegion record matching the where clause.
+func (a ClusterRegionActions) UpdateOne(ctx context.Context, where query.ClusterRegionWhereClause, sets ...query.ClusterRegionSetClause) (*model.ClusterRegion, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterRegion.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_regions SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterRegion
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterRegion.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ClusterRegion records matching the where clauses.
+func (a ClusterRegionActions) UpdateMany(ctx context.Context, wheres []query.ClusterRegionWhereClause, sets ...query.ClusterRegionSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ClusterRegion.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterRegionWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_regions SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterRegion.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ClusterRegion record.
+func (a ClusterRegionActions) UpsertOne(ctx context.Context, where query.ClusterRegionWhereClause, create []query.ClusterRegionSetClause, update []query.ClusterRegionSetClause) (*model.ClusterRegion, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ClusterRegion.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterRegion
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterRegion.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ClusterRegion record matching the where clause.
+func (a ClusterRegionActions) DeleteOne(ctx context.Context, where query.ClusterRegionWhereClause) (*model.ClusterRegion, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_regions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterRegion
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterRegion.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ClusterRegion records matching the where clauses.
+func (a ClusterRegionActions) DeleteMany(ctx context.Context, wheres ...query.ClusterRegionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterRegionWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_regions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterRegion.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ClusterRegion records matching the where clauses.
+func (a ClusterRegionActions) Count(ctx context.Context, wheres ...query.ClusterRegionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterRegionWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_regions"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ClusterRegion.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ClusterRegion.
+func (a ClusterRegionActions) Aggregate(ctx context.Context, opts ...query.ClusterRegionAggregateOption) (*query.ClusterRegionAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_regions", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ClusterRegionAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ClusterRegion.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ClusterRegion.
+func (a ClusterRegionActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterRegionAggregateOption) ([]query.ClusterRegionGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_regions GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterRegion.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ClusterRegionGroupByResult
+	for rows.Next() {
+		r := query.ClusterRegionGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ClusterRegion.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // buildConfigVersionWhere recursively builds a WHERE clause string and arguments.
 func buildConfigVersionWhere(c *Client, wheres []query.ConfigVersionWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -1941,6 +4551,870 @@ func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("ConfigVersion.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildDNSLineWhere recursively builds a WHERE clause string and arguments.
+func buildDNSLineWhere(c *Client, wheres []query.DNSLineWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DNSLineWhereClause); ok {
+				sub, subArgs := buildDNSLineWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DNSLineWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDNSLineWhere(c, []query.DNSLineWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DNSLineWhereClause); ok {
+				sub, subArgs := buildDNSLineWhere(c, []query.DNSLineWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DNSLineActions provides database operations for the DNSLine model.
+type DNSLineActions struct {
+	client *Client
+}
+
+// DNSLineCreateBuilder builds a DNSLine create operation incrementally.
+type DNSLineCreateBuilder struct {
+	action DNSLineActions
+	sets   []query.DNSLineSetClause
+}
+
+// Create starts a staged DNSLine create operation.
+func (a DNSLineActions) Create() DNSLineCreateBuilder {
+	return DNSLineCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DNSLineCreateBuilder) Set(sets ...query.DNSLineSetClause) DNSLineCreateBuilder {
+	next := DNSLineCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DNSLineSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DNSLineCreateBuilder) Do(ctx context.Context) (*model.DNSLine, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DNSLineCreateManyBuilder builds a bulk DNSLine insert operation.
+type DNSLineCreateManyBuilder struct {
+	action            DNSLineActions
+	data              []query.DNSLineCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DNSLine insert operation.
+func (a DNSLineActions) BulkCreate(data []query.DNSLineCreateInput) DNSLineCreateManyBuilder {
+	return DNSLineCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DNSLineCreateManyBuilder) OnConflictDoNothing(columns ...string) DNSLineCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DNSLineCreateManyBuilder) Returning(columns ...string) DNSLineCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DNSLineCreateManyBuilder) BatchSize(n int) DNSLineCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DNSLineCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DNSLine.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DNSLine.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DNSLineCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSLine, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DNSLine
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DNSLine
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DNSLineCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DNSLineQueryBuilder builds a DNSLine query incrementally.
+type DNSLineQueryBuilder struct {
+	action DNSLineActions
+	opts   []query.DNSLineQueryOption
+}
+
+// Query starts a staged DNSLine query.
+func (a DNSLineActions) Query() DNSLineQueryBuilder {
+	return DNSLineQueryBuilder{action: a}
+}
+
+func (b DNSLineQueryBuilder) withOptions(opts ...query.DNSLineQueryOption) DNSLineQueryBuilder {
+	next := DNSLineQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DNSLineQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DNSLineQueryBuilder) Where(clauses ...query.DNSLineWhereClause) DNSLineQueryBuilder {
+	opts := make([]query.DNSLineQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DNSLineQueryBuilder) OrderBy(clause query.DNSLineOrderByClause) DNSLineQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DNSLineQueryBuilder) Include(clauses ...query.DNSLineIncludeClause) DNSLineQueryBuilder {
+	opts := make([]query.DNSLineQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DNSLineQueryBuilder) Take(n int) DNSLineQueryBuilder {
+	return b.withOptions(query.DNSLineTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DNSLineQueryBuilder) Skip(n int) DNSLineQueryBuilder {
+	return b.withOptions(query.DNSLineSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DNSLineQueryBuilder) Do(ctx context.Context) ([]model.DNSLine, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DNSLineQueryBuilder) First(ctx context.Context) (*model.DNSLine, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DNSLineQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDNSLineOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DNSLineUpdateBuilder builds a DNSLine update operation incrementally.
+type DNSLineUpdateBuilder struct {
+	action DNSLineActions
+	wheres []query.DNSLineWhereClause
+	sets   []query.DNSLineSetClause
+}
+
+// Update starts a staged DNSLine update operation.
+func (a DNSLineActions) Update() DNSLineUpdateBuilder {
+	return DNSLineUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DNSLineUpdateBuilder) Where(clauses ...query.DNSLineWhereClause) DNSLineUpdateBuilder {
+	next := DNSLineUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DNSLineWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DNSLineSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DNSLineUpdateBuilder) Set(sets ...query.DNSLineSetClause) DNSLineUpdateBuilder {
+	next := DNSLineUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DNSLineWhereClause(nil), b.wheres...),
+		sets:   make([]query.DNSLineSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DNSLineUpdateBuilder) combinedWhere() (query.DNSLineWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSLineWhereClause{}, fmt.Errorf("DNSLine.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSLine.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DNSLineUpdateBuilder) Do(ctx context.Context) (*model.DNSLine, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DNSLineUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DNSLineDeleteBuilder builds a DNSLine delete operation incrementally.
+type DNSLineDeleteBuilder struct {
+	action DNSLineActions
+	wheres []query.DNSLineWhereClause
+}
+
+// Delete starts a staged DNSLine delete operation.
+func (a DNSLineActions) Delete() DNSLineDeleteBuilder {
+	return DNSLineDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DNSLineDeleteBuilder) Where(clauses ...query.DNSLineWhereClause) DNSLineDeleteBuilder {
+	next := DNSLineDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DNSLineWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DNSLineDeleteBuilder) combinedWhere() (query.DNSLineWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSLineWhereClause{}, fmt.Errorf("DNSLine.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSLine.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DNSLineDeleteBuilder) Do(ctx context.Context) (*model.DNSLine, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DNSLineDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DNSLine records.
+func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQueryOption) ([]model.DNSLine, error) {
+	cfg := query.ApplyDNSLineOptions(opts)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM dns_lines"
+	argIdx := 0
+	where, args := buildDNSLineWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DNSLine
+	for rows.Next() {
+		var item model.DNSLine
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSLine.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DNSLine record.
+func (a DNSLineActions) FindFirst(ctx context.Context, opts ...query.DNSLineQueryOption) (*model.DNSLine, error) {
+	opts = append(opts, query.DNSLineTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DNSLine record by unique constraint.
+func (a DNSLineActions) FindUnique(ctx context.Context, where query.DNSLineWhereClause) (*model.DNSLine, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, name, created_at, updated_at FROM dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DNSLine
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DNSLine.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DNSLine record.
+func (a DNSLineActions) CreateOne(ctx context.Context, sets ...query.DNSLineSetClause) (*model.DNSLine, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSLine.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DNSLine
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSLine.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DNSLine records.
+func (a DNSLineActions) CreateMany(ctx context.Context, data []query.DNSLineCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DNSLine record matching the where clause.
+func (a DNSLineActions) UpdateOne(ctx context.Context, where query.DNSLineWhereClause, sets ...query.DNSLineSetClause) (*model.DNSLine, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSLine.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_lines SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSLine
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSLine.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DNSLine records matching the where clauses.
+func (a DNSLineActions) UpdateMany(ctx context.Context, wheres []query.DNSLineWhereClause, sets ...query.DNSLineSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DNSLine.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSLineWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_lines SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSLine.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DNSLine record.
+func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereClause, create []query.DNSLineSetClause, update []query.DNSLineSetClause) (*model.DNSLine, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DNSLine.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSLine
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSLine.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DNSLine record matching the where clause.
+func (a DNSLineActions) DeleteOne(ctx context.Context, where query.DNSLineWhereClause) (*model.DNSLine, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
+	q := "DELETE FROM dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSLine
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSLine.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DNSLine records matching the where clauses.
+func (a DNSLineActions) DeleteMany(ctx context.Context, wheres ...query.DNSLineWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSLineWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSLine.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DNSLine records matching the where clauses.
+func (a DNSLineActions) Count(ctx context.Context, wheres ...query.DNSLineWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSLineWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DNSLine.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DNSLine.
+func (a DNSLineActions) Aggregate(ctx context.Context, opts ...query.DNSLineAggregateOption) (*query.DNSLineAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_lines", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DNSLineAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DNSLine.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DNSLine.
+func (a DNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSLineAggregateOption) ([]query.DNSLineGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_lines GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DNSLine.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DNSLineGroupByResult
+	for rows.Next() {
+		r := query.DNSLineGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DNSLine.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -3028,14 +6502,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "region", "address", "version", "heartbeat_at", "status", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -3062,7 +6536,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "region", "address", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -3271,7 +6745,7 @@ func (b NodeDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Node records.
 func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption) ([]model.Node, error) {
 	cfg := query.ApplyNodeOptions(opts)
-	q := "SELECT id, region, address, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
 	argIdx := 0
 	where, args := buildNodeWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -3298,7 +6772,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -3323,14 +6797,14 @@ func (a NodeActions) FindFirst(ctx context.Context, opts ...query.NodeQueryOptio
 func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause) (*model.Node, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, []query.NodeWhereClause{where}, &argIdx)
-	q := "SELECT id, region, address, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -3355,10 +6829,10 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 	q := fmt.Sprintf("INSERT INTO nodes (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, region, address, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -3377,7 +6851,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "region", "address", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -3433,10 +6907,10 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, region, address, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -3519,10 +6993,10 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, region, address, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -3543,10 +7017,10 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, region, address, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.Region, &item.Address, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -3669,6 +7143,1734 @@ func (a NodeActions) GroupBy(ctx context.Context, fields []string, opts ...query
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("Node.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildNodeAddressWhere recursively builds a WHERE clause string and arguments.
+func buildNodeAddressWhere(c *Client, wheres []query.NodeAddressWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeAddressWhereClause); ok {
+				sub, subArgs := buildNodeAddressWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeAddressWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeAddressWhere(c, []query.NodeAddressWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeAddressWhereClause); ok {
+				sub, subArgs := buildNodeAddressWhere(c, []query.NodeAddressWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeAddressActions provides database operations for the NodeAddress model.
+type NodeAddressActions struct {
+	client *Client
+}
+
+// NodeAddressCreateBuilder builds a NodeAddress create operation incrementally.
+type NodeAddressCreateBuilder struct {
+	action NodeAddressActions
+	sets   []query.NodeAddressSetClause
+}
+
+// Create starts a staged NodeAddress create operation.
+func (a NodeAddressActions) Create() NodeAddressCreateBuilder {
+	return NodeAddressCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeAddressCreateBuilder) Set(sets ...query.NodeAddressSetClause) NodeAddressCreateBuilder {
+	next := NodeAddressCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeAddressSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeAddressCreateBuilder) Do(ctx context.Context) (*model.NodeAddress, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeAddressCreateManyBuilder builds a bulk NodeAddress insert operation.
+type NodeAddressCreateManyBuilder struct {
+	action            NodeAddressActions
+	data              []query.NodeAddressCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeAddress insert operation.
+func (a NodeAddressActions) BulkCreate(data []query.NodeAddressCreateInput) NodeAddressCreateManyBuilder {
+	return NodeAddressCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeAddressCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeAddressCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeAddressCreateManyBuilder) Returning(columns ...string) NodeAddressCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeAddressCreateManyBuilder) BatchSize(n int) NodeAddressCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeAddressCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeAddressCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeAddress.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeAddress.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeAddressCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeAddress, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeAddress
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeAddressCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "address", "primary", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeAddress
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeAddressCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "node_id", "address", "primary", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeAddressCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeAddressQueryBuilder builds a NodeAddress query incrementally.
+type NodeAddressQueryBuilder struct {
+	action NodeAddressActions
+	opts   []query.NodeAddressQueryOption
+}
+
+// Query starts a staged NodeAddress query.
+func (a NodeAddressActions) Query() NodeAddressQueryBuilder {
+	return NodeAddressQueryBuilder{action: a}
+}
+
+func (b NodeAddressQueryBuilder) withOptions(opts ...query.NodeAddressQueryOption) NodeAddressQueryBuilder {
+	next := NodeAddressQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeAddressQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeAddressQueryBuilder) Where(clauses ...query.NodeAddressWhereClause) NodeAddressQueryBuilder {
+	opts := make([]query.NodeAddressQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeAddressQueryBuilder) OrderBy(clause query.NodeAddressOrderByClause) NodeAddressQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeAddressQueryBuilder) Include(clauses ...query.NodeAddressIncludeClause) NodeAddressQueryBuilder {
+	opts := make([]query.NodeAddressQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeAddressQueryBuilder) Take(n int) NodeAddressQueryBuilder {
+	return b.withOptions(query.NodeAddressTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeAddressQueryBuilder) Skip(n int) NodeAddressQueryBuilder {
+	return b.withOptions(query.NodeAddressSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeAddressQueryBuilder) Do(ctx context.Context) ([]model.NodeAddress, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeAddressQueryBuilder) First(ctx context.Context) (*model.NodeAddress, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeAddressQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeAddressOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeAddressUpdateBuilder builds a NodeAddress update operation incrementally.
+type NodeAddressUpdateBuilder struct {
+	action NodeAddressActions
+	wheres []query.NodeAddressWhereClause
+	sets   []query.NodeAddressSetClause
+}
+
+// Update starts a staged NodeAddress update operation.
+func (a NodeAddressActions) Update() NodeAddressUpdateBuilder {
+	return NodeAddressUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeAddressUpdateBuilder) Where(clauses ...query.NodeAddressWhereClause) NodeAddressUpdateBuilder {
+	next := NodeAddressUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeAddressWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeAddressSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeAddressUpdateBuilder) Set(sets ...query.NodeAddressSetClause) NodeAddressUpdateBuilder {
+	next := NodeAddressUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeAddressWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeAddressSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeAddressUpdateBuilder) combinedWhere() (query.NodeAddressWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeAddressWhereClause{}, fmt.Errorf("NodeAddress.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeAddress.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeAddressUpdateBuilder) Do(ctx context.Context) (*model.NodeAddress, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeAddressUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeAddressDeleteBuilder builds a NodeAddress delete operation incrementally.
+type NodeAddressDeleteBuilder struct {
+	action NodeAddressActions
+	wheres []query.NodeAddressWhereClause
+}
+
+// Delete starts a staged NodeAddress delete operation.
+func (a NodeAddressActions) Delete() NodeAddressDeleteBuilder {
+	return NodeAddressDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeAddressDeleteBuilder) Where(clauses ...query.NodeAddressWhereClause) NodeAddressDeleteBuilder {
+	next := NodeAddressDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeAddressWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeAddressDeleteBuilder) combinedWhere() (query.NodeAddressWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeAddressWhereClause{}, fmt.Errorf("NodeAddress.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeAddress.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeAddressDeleteBuilder) Do(ctx context.Context) (*model.NodeAddress, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeAddressDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeAddress records.
+func (a NodeAddressActions) FindMany(ctx context.Context, opts ...query.NodeAddressQueryOption) ([]model.NodeAddress, error) {
+	cfg := query.ApplyNodeAddressOptions(opts)
+	q := "SELECT id, node_id, address, primary, created_at FROM node_addresses"
+	argIdx := 0
+	where, args := buildNodeAddressWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeAddress
+	for rows.Next() {
+		var item model.NodeAddress
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("NodeAddress.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeAddress record.
+func (a NodeAddressActions) FindFirst(ctx context.Context, opts ...query.NodeAddressQueryOption) (*model.NodeAddress, error) {
+	opts = append(opts, query.NodeAddressTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeAddress record by unique constraint.
+func (a NodeAddressActions) FindUnique(ctx context.Context, where query.NodeAddressWhereClause) (*model.NodeAddress, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
+	q := "SELECT id, node_id, address, primary, created_at FROM node_addresses"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeAddress
+	if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeAddress.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeAddress record.
+func (a NodeAddressActions) CreateOne(ctx context.Context, sets ...query.NodeAddressSetClause) (*model.NodeAddress, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeAddress.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, address, primary, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeAddress
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("NodeAddress.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeAddress records.
+func (a NodeAddressActions) CreateMany(ctx context.Context, data []query.NodeAddressCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeAddressActions) buildNodeAddressCreateManySQL(data []query.NodeAddressCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "node_id", "address", "primary", "created_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeAddress record matching the where clause.
+func (a NodeAddressActions) UpdateOne(ctx context.Context, where query.NodeAddressWhereClause, sets ...query.NodeAddressSetClause) (*model.NodeAddress, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeAddress.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_addresses SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, address, primary, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeAddress
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeAddress.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeAddress records matching the where clauses.
+func (a NodeAddressActions) UpdateMany(ctx context.Context, wheres []query.NodeAddressWhereClause, sets ...query.NodeAddressSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeAddress.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeAddressWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_addresses SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeAddress.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeAddress record.
+func (a NodeAddressActions) UpsertOne(ctx context.Context, where query.NodeAddressWhereClause, create []query.NodeAddressSetClause, update []query.NodeAddressSetClause) (*model.NodeAddress, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeAddress.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, address, primary, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeAddress
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("NodeAddress.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeAddress record matching the where clause.
+func (a NodeAddressActions) DeleteOne(ctx context.Context, where query.NodeAddressWhereClause) (*model.NodeAddress, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_addresses"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, node_id, address, primary, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeAddress
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeAddress.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeAddress records matching the where clauses.
+func (a NodeAddressActions) DeleteMany(ctx context.Context, wheres ...query.NodeAddressWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeAddressWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_addresses"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeAddress.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeAddress records matching the where clauses.
+func (a NodeAddressActions) Count(ctx context.Context, wheres ...query.NodeAddressWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeAddressWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_addresses"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeAddress.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeAddress.
+func (a NodeAddressActions) Aggregate(ctx context.Context, opts ...query.NodeAddressAggregateOption) (*query.NodeAddressAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_addresses", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeAddressAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeAddress.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeAddress.
+func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeAddressAggregateOption) ([]query.NodeAddressGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_addresses GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeAddress.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeAddressGroupByResult
+	for rows.Next() {
+		r := query.NodeAddressGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeAddress.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildNodeDNSLineWhere recursively builds a WHERE clause string and arguments.
+func buildNodeDNSLineWhere(c *Client, wheres []query.NodeDNSLineWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeDNSLineWhereClause); ok {
+				sub, subArgs := buildNodeDNSLineWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeDNSLineWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeDNSLineWhere(c, []query.NodeDNSLineWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeDNSLineWhereClause); ok {
+				sub, subArgs := buildNodeDNSLineWhere(c, []query.NodeDNSLineWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeDNSLineActions provides database operations for the NodeDNSLine model.
+type NodeDNSLineActions struct {
+	client *Client
+}
+
+// NodeDNSLineCreateBuilder builds a NodeDNSLine create operation incrementally.
+type NodeDNSLineCreateBuilder struct {
+	action NodeDNSLineActions
+	sets   []query.NodeDNSLineSetClause
+}
+
+// Create starts a staged NodeDNSLine create operation.
+func (a NodeDNSLineActions) Create() NodeDNSLineCreateBuilder {
+	return NodeDNSLineCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeDNSLineCreateBuilder) Set(sets ...query.NodeDNSLineSetClause) NodeDNSLineCreateBuilder {
+	next := NodeDNSLineCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeDNSLineSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeDNSLineCreateBuilder) Do(ctx context.Context) (*model.NodeDNSLine, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeDNSLineCreateManyBuilder builds a bulk NodeDNSLine insert operation.
+type NodeDNSLineCreateManyBuilder struct {
+	action            NodeDNSLineActions
+	data              []query.NodeDNSLineCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeDNSLine insert operation.
+func (a NodeDNSLineActions) BulkCreate(data []query.NodeDNSLineCreateInput) NodeDNSLineCreateManyBuilder {
+	return NodeDNSLineCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeDNSLineCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeDNSLineCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeDNSLineCreateManyBuilder) Returning(columns ...string) NodeDNSLineCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeDNSLineCreateManyBuilder) BatchSize(n int) NodeDNSLineCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeDNSLineCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeDNSLine.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeDNSLine.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeDNSLineCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeDNSLine, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeDNSLine
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "dns_line_id"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeDNSLine
+			if err := rows.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeDNSLineCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"node_id", "dns_line_id"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeDNSLine.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeDNSLineQueryBuilder builds a NodeDNSLine query incrementally.
+type NodeDNSLineQueryBuilder struct {
+	action NodeDNSLineActions
+	opts   []query.NodeDNSLineQueryOption
+}
+
+// Query starts a staged NodeDNSLine query.
+func (a NodeDNSLineActions) Query() NodeDNSLineQueryBuilder {
+	return NodeDNSLineQueryBuilder{action: a}
+}
+
+func (b NodeDNSLineQueryBuilder) withOptions(opts ...query.NodeDNSLineQueryOption) NodeDNSLineQueryBuilder {
+	next := NodeDNSLineQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeDNSLineQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeDNSLineQueryBuilder) Where(clauses ...query.NodeDNSLineWhereClause) NodeDNSLineQueryBuilder {
+	opts := make([]query.NodeDNSLineQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeDNSLineQueryBuilder) OrderBy(clause query.NodeDNSLineOrderByClause) NodeDNSLineQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeDNSLineQueryBuilder) Include(clauses ...query.NodeDNSLineIncludeClause) NodeDNSLineQueryBuilder {
+	opts := make([]query.NodeDNSLineQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeDNSLineQueryBuilder) Take(n int) NodeDNSLineQueryBuilder {
+	return b.withOptions(query.NodeDNSLineTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeDNSLineQueryBuilder) Skip(n int) NodeDNSLineQueryBuilder {
+	return b.withOptions(query.NodeDNSLineSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeDNSLineQueryBuilder) Do(ctx context.Context) ([]model.NodeDNSLine, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeDNSLineQueryBuilder) First(ctx context.Context) (*model.NodeDNSLine, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeDNSLineQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeDNSLineOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeDNSLineUpdateBuilder builds a NodeDNSLine update operation incrementally.
+type NodeDNSLineUpdateBuilder struct {
+	action NodeDNSLineActions
+	wheres []query.NodeDNSLineWhereClause
+	sets   []query.NodeDNSLineSetClause
+}
+
+// Update starts a staged NodeDNSLine update operation.
+func (a NodeDNSLineActions) Update() NodeDNSLineUpdateBuilder {
+	return NodeDNSLineUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeDNSLineUpdateBuilder) Where(clauses ...query.NodeDNSLineWhereClause) NodeDNSLineUpdateBuilder {
+	next := NodeDNSLineUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeDNSLineWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeDNSLineSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeDNSLineUpdateBuilder) Set(sets ...query.NodeDNSLineSetClause) NodeDNSLineUpdateBuilder {
+	next := NodeDNSLineUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeDNSLineWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeDNSLineSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeDNSLineUpdateBuilder) combinedWhere() (query.NodeDNSLineWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeDNSLineWhereClause{}, fmt.Errorf("NodeDNSLine.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeDNSLine.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeDNSLineUpdateBuilder) Do(ctx context.Context) (*model.NodeDNSLine, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeDNSLineUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeDNSLineDeleteBuilder builds a NodeDNSLine delete operation incrementally.
+type NodeDNSLineDeleteBuilder struct {
+	action NodeDNSLineActions
+	wheres []query.NodeDNSLineWhereClause
+}
+
+// Delete starts a staged NodeDNSLine delete operation.
+func (a NodeDNSLineActions) Delete() NodeDNSLineDeleteBuilder {
+	return NodeDNSLineDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeDNSLineDeleteBuilder) Where(clauses ...query.NodeDNSLineWhereClause) NodeDNSLineDeleteBuilder {
+	next := NodeDNSLineDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeDNSLineWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeDNSLineDeleteBuilder) combinedWhere() (query.NodeDNSLineWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeDNSLineWhereClause{}, fmt.Errorf("NodeDNSLine.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeDNSLine.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeDNSLineDeleteBuilder) Do(ctx context.Context) (*model.NodeDNSLine, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeDNSLineDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeDNSLine records.
+func (a NodeDNSLineActions) FindMany(ctx context.Context, opts ...query.NodeDNSLineQueryOption) ([]model.NodeDNSLine, error) {
+	cfg := query.ApplyNodeDNSLineOptions(opts)
+	q := "SELECT node_id, dns_line_id FROM node_dns_lines"
+	argIdx := 0
+	where, args := buildNodeDNSLineWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeDNSLine
+	for rows.Next() {
+		var item model.NodeDNSLine
+		if err := rows.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeDNSLine record.
+func (a NodeDNSLineActions) FindFirst(ctx context.Context, opts ...query.NodeDNSLineQueryOption) (*model.NodeDNSLine, error) {
+	opts = append(opts, query.NodeDNSLineTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeDNSLine record by unique constraint.
+func (a NodeDNSLineActions) FindUnique(ctx context.Context, where query.NodeDNSLineWhereClause) (*model.NodeDNSLine, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
+	q := "SELECT node_id, dns_line_id FROM node_dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeDNSLine
+	if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeDNSLine.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeDNSLine record.
+func (a NodeDNSLineActions) CreateOne(ctx context.Context, sets ...query.NodeDNSLineSetClause) (*model.NodeDNSLine, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeDNSLine.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, dns_line_id"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeDNSLine
+		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeDNSLine records.
+func (a NodeDNSLineActions) CreateMany(ctx context.Context, data []query.NodeDNSLineCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeDNSLineActions) buildNodeDNSLineCreateManySQL(data []query.NodeDNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"node_id", "dns_line_id"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeDNSLine record matching the where clause.
+func (a NodeDNSLineActions) UpdateOne(ctx context.Context, where query.NodeDNSLineWhereClause, sets ...query.NodeDNSLineSetClause) (*model.NodeDNSLine, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeDNSLine.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_dns_lines SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, dns_line_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeDNSLine
+		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeDNSLine.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeDNSLine records matching the where clauses.
+func (a NodeDNSLineActions) UpdateMany(ctx context.Context, wheres []query.NodeDNSLineWhereClause, sets ...query.NodeDNSLineSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeDNSLine.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE node_dns_lines SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeDNSLine.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeDNSLine record.
+func (a NodeDNSLineActions) UpsertOne(ctx context.Context, where query.NodeDNSLineWhereClause, create []query.NodeDNSLineSetClause, update []query.NodeDNSLineSetClause) (*model.NodeDNSLine, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeDNSLine.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, dns_line_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeDNSLine
+		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeDNSLine record matching the where clause.
+func (a NodeDNSLineActions) DeleteOne(ctx context.Context, where query.NodeDNSLineWhereClause) (*model.NodeDNSLine, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
+	q := "DELETE FROM node_dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING node_id, dns_line_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeDNSLine
+		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeDNSLine.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeDNSLine records matching the where clauses.
+func (a NodeDNSLineActions) DeleteMany(ctx context.Context, wheres ...query.NodeDNSLineWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM node_dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeDNSLine.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeDNSLine records matching the where clauses.
+func (a NodeDNSLineActions) Count(ctx context.Context, wheres ...query.NodeDNSLineWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM node_dns_lines"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeDNSLine.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeDNSLine.
+func (a NodeDNSLineActions) Aggregate(ctx context.Context, opts ...query.NodeDNSLineAggregateOption) (*query.NodeDNSLineAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_dns_lines", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeDNSLineAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeDNSLine.
+func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeDNSLineAggregateOption) ([]query.NodeDNSLineGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM node_dns_lines GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeDNSLine.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeDNSLineGroupByResult
+	for rows.Next() {
+		r := query.NodeDNSLineGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeDNSLine.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

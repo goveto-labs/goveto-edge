@@ -19,6 +19,40 @@ type AuditLog struct {
 	User       *User            `db:"-" json:"user,omitempty"`
 }
 
+// Cluster represents the Cluster model.
+type Cluster struct {
+	Id        string           `db:"id" json:"id"`
+	Name      string           `db:"name" json:"name"`
+	CreatedAt time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time        `db:"updated_at" json:"updatedAt"`
+	Nodes     []*Node          `db:"-" json:"nodes,omitempty"`
+	Groups    []*ClusterGroup  `db:"-" json:"groups,omitempty"`
+	Regions   []*ClusterRegion `db:"-" json:"regions,omitempty"`
+	DnsLines  []*DNSLine       `db:"-" json:"dnsLines,omitempty"`
+}
+
+// ClusterGroup represents the ClusterGroup model.
+type ClusterGroup struct {
+	Id        string    `db:"id" json:"id"`
+	ClusterId string    `db:"cluster_id" json:"clusterId"`
+	Name      string    `db:"name" json:"name"`
+	CreatedAt time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
+	Cluster   *Cluster  `db:"-" json:"cluster,omitempty"`
+	Nodes     []*Node   `db:"-" json:"nodes,omitempty"`
+}
+
+// ClusterRegion represents the ClusterRegion model.
+type ClusterRegion struct {
+	Id        string    `db:"id" json:"id"`
+	ClusterId string    `db:"cluster_id" json:"clusterId"`
+	Name      string    `db:"name" json:"name"`
+	CreatedAt time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
+	Cluster   *Cluster  `db:"-" json:"cluster,omitempty"`
+	Nodes     []*Node   `db:"-" json:"nodes,omitempty"`
+}
+
 // ConfigVersion represents the ConfigVersion model.
 type ConfigVersion struct {
 	Id         string          `db:"id" json:"id"`
@@ -31,6 +65,17 @@ type ConfigVersion struct {
 	Site       *Site           `db:"-" json:"site,omitempty"`
 }
 
+// DNSLine represents the DNSLine model.
+type DNSLine struct {
+	Id        string         `db:"id" json:"id"`
+	ClusterId string         `db:"cluster_id" json:"clusterId"`
+	Name      string         `db:"name" json:"name"`
+	CreatedAt time.Time      `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time      `db:"updated_at" json:"updatedAt"`
+	Cluster   *Cluster       `db:"-" json:"cluster,omitempty"`
+	Nodes     []*NodeDNSLine `db:"-" json:"nodes,omitempty"`
+}
+
 // DynamicSetting represents the DynamicSetting model.
 type DynamicSetting struct {
 	Key         string          `db:"key" json:"key"`
@@ -41,14 +86,39 @@ type DynamicSetting struct {
 
 // Node represents the Node model.
 type Node struct {
-	Id          string     `db:"id" json:"id"`
-	Region      string     `db:"region" json:"region"`
-	Address     string     `db:"address" json:"address"`
-	Version     string     `db:"version" json:"version"`
-	HeartbeatAt *time.Time `db:"heartbeat_at" json:"heartbeatAt"`
-	Status      NodeStatus `db:"status" json:"status"`
-	CreatedAt   time.Time  `db:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time  `db:"updated_at" json:"updatedAt"`
+	Id          string         `db:"id" json:"id"`
+	ClusterId   string         `db:"cluster_id" json:"clusterId"`
+	GroupId     *string        `db:"group_id" json:"groupId"`
+	RegionId    *string        `db:"region_id" json:"regionId"`
+	Name        string         `db:"name" json:"name"`
+	Version     *string        `db:"version" json:"version"`
+	HeartbeatAt *time.Time     `db:"heartbeat_at" json:"heartbeatAt"`
+	Status      NodeStatus     `db:"status" json:"status"`
+	CreatedAt   time.Time      `db:"created_at" json:"createdAt"`
+	UpdatedAt   time.Time      `db:"updated_at" json:"updatedAt"`
+	Cluster     *Cluster       `db:"-" json:"cluster,omitempty"`
+	Group       *ClusterGroup  `db:"-" json:"group,omitempty"`
+	Region      *ClusterRegion `db:"-" json:"region,omitempty"`
+	Addresses   []*NodeAddress `db:"-" json:"addresses,omitempty"`
+	DnsLines    []*NodeDNSLine `db:"-" json:"dnsLines,omitempty"`
+}
+
+// NodeAddress represents the NodeAddress model.
+type NodeAddress struct {
+	Id        string    `db:"id" json:"id"`
+	NodeId    string    `db:"node_id" json:"nodeId"`
+	Address   string    `db:"address" json:"address"`
+	Primary   bool      `db:"primary" json:"primary"`
+	CreatedAt time.Time `db:"created_at" json:"createdAt"`
+	Node      *Node     `db:"-" json:"node,omitempty"`
+}
+
+// NodeDNSLine represents the NodeDNSLine model.
+type NodeDNSLine struct {
+	NodeId    string   `db:"node_id" json:"nodeId"`
+	DnsLineId string   `db:"dns_line_id" json:"dnsLineId"`
+	Node      *Node    `db:"-" json:"node,omitempty"`
+	DnsLine   *DNSLine `db:"-" json:"dnsLine,omitempty"`
 }
 
 // OriginPool represents the OriginPool model.
