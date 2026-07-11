@@ -24,24 +24,35 @@ func New(baseURL, nodeID, communicationKey string) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), nodeID: nodeID, key: communicationKey, http: &http.Client{Timeout: 75 * time.Second}}
 }
 
-func (c *Client) PushSiteConfig(ctx context.Context, config edgeprotocol.SiteConfig) error {
+type ApplySiteResult struct {
+	SiteID        string `json:"site_id"`
+	Version       uint64 `json:"version"`
+	ConfigVersion uint64 `json:"config_version"`
+	Applied       bool   `json:"applied"`
+}
+
+func (c *Client) PushSiteConfig(ctx context.Context, config edgeprotocol.SiteConfig) (ApplySiteResult, error) {
 	body, err := json.Marshal(config)
 	if err != nil {
-		return err
+		return ApplySiteResult{}, err
 	}
 	request, err := c.request(ctx, http.MethodPut, "/v1/sites/"+config.SiteID+"/config", body)
 	if err != nil {
-		return err
+		return ApplySiteResult{}, err
 	}
 	response, err := c.http.Do(request)
 	if err != nil {
-		return err
+		return ApplySiteResult{}, err
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("agent rejected site config: %s", response.Status)
+		return ApplySiteResult{}, fmt.Errorf("agent rejected site config: %s", response.Status)
 	}
-	return nil
+	var result ApplySiteResult
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		return ApplySiteResult{}, fmt.Errorf("decode apply site response: %w", err)
+	}
+	return result, nil
 }
 
 // PullLogs continuously long-polls the agent. Records are acknowledged only

@@ -22,6 +22,9 @@ func TestApplySitePersistenceFailureDoesNotAdvanceVersion(t *testing.T) {
 	if strings.Contains(second.Error(), "version is not newer") {
 		t.Fatalf("version was advanced after persistence failure: %v", second)
 	}
+	if manager.ConfigVersion() != 0 {
+		t.Fatalf("config version advanced after failure: %d", manager.ConfigVersion())
+	}
 }
 
 func TestHTTPSOriginRendersTLSTransport(t *testing.T) {

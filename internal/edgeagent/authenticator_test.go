@@ -12,7 +12,8 @@ import (
 
 func TestAuthenticatorRejectsReplay(t *testing.T) {
 	identity := Identity{NodeID: "550e8400-e29b-41d4-a716-446655440000", CommunicationKey: "secret"}
-	handler := newAuthenticator(identity).wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	path := t.TempDir() + "/nonces.json"
+	handler := newAuthenticator(identity, path).wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
 	request := signedTestRequest(identity, "nonce-1")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
@@ -24,6 +25,27 @@ func TestAuthenticatorRejectsReplay(t *testing.T) {
 	handler.ServeHTTP(replayResponse, replay)
 	if replayResponse.Code != http.StatusUnauthorized {
 		t.Fatalf("replay accepted: %d", replayResponse.Code)
+	}
+	// Restarted authenticator must still reject the persisted nonce.
+	restarted := newAuthenticator(identity, path).wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }))
+	restartReplay := signedTestRequest(identity, "nonce-1")
+	restartResponse := httptest.NewRecorder()
+	restarted.ServeHTTP(restartResponse, restartReplay)
+	if restartResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("persisted replay accepted: %d", restartResponse.Code)
+	}
+}
+
+func TestHealthBypassesAuthentication(t *testing.T) {
+	identity := Identity{NodeID: "550e8400-e29b-41d4-a716-446655440000", CommunicationKey: "secret"}
+	handler := newAuthenticator(identity, "").wrap(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "http://node/v1/health", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("health should be unauthenticated: %d", response.Code)
 	}
 }
 

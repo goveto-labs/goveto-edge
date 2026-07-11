@@ -6,6 +6,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -13,7 +15,7 @@ import (
 	"goveto-edge/internal/edgeprotocol"
 )
 
-func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *NodeConfigStore, logs *LogQueue) http.Handler {
+func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *NodeConfigStore, logs *LogQueue, auth *authenticator) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("PUT /v1/sites/{site_id}/config", func(w http.ResponseWriter, r *http.Request) {
 		var config SiteConfig
@@ -29,7 +31,7 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			writeError(w, http.StatusConflict, err.Error())
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"site_id": config.SiteID, "version": config.Version, "applied": true})
+		writeJSON(w, http.StatusOK, map[string]any{"site_id": config.SiteID, "version": config.Version, "applied": true, "config_version": configs.ConfigVersion()})
 	})
 	mux.HandleFunc("GET /v1/logs/pull", func(w http.ResponseWriter, r *http.Request) {
 		wait := parseDurationSeconds(r.URL.Query().Get("wait"), 45*time.Second, 60*time.Second)
@@ -86,23 +88,35 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 		writeJSON(w, http.StatusOK, nodeConfigs.Get())
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"node_id": identity.NodeID, "status": "ok"})
+		writeJSON(w, http.StatusOK, map[string]any{
+			"node_id":        identity.NodeID,
+			"status":         "ok",
+			"config_version": configs.ConfigVersion(),
+			"site_versions":  configs.SiteVersions(),
+		})
 	})
-	return newAuthenticator(identity).wrap(mux)
+	return auth.wrap(mux)
 }
 
 type authenticator struct {
 	identity Identity
+	path     string
 	mu       sync.Mutex
 	nonces   map[string]time.Time
 }
 
-func newAuthenticator(identity Identity) *authenticator {
-	return &authenticator{identity: identity, nonces: map[string]time.Time{}}
+func newAuthenticator(identity Identity, path string) *authenticator {
+	auth := &authenticator{identity: identity, path: path, nonces: map[string]time.Time{}}
+	auth.loadNonces()
+	return auth
 }
 
 func (a *authenticator) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
 		host := r.Host
 		if parsedHost, _, err := net.SplitHostPort(r.Host); err == nil {
 			host = parsedHost
@@ -134,16 +148,64 @@ func (a *authenticator) acceptNonce(nonce string, now time.Time) bool {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.pruneNoncesLocked(now)
+	if _, exists := a.nonces[nonce]; exists {
+		return false
+	}
+	a.nonces[nonce] = now.Add(5 * time.Minute)
+	if err := a.persistNoncesLocked(); err != nil {
+		delete(a.nonces, nonce)
+		return false
+	}
+	return true
+}
+
+func (a *authenticator) pruneNoncesLocked(now time.Time) {
 	for value, expires := range a.nonces {
 		if now.After(expires) {
 			delete(a.nonces, value)
 		}
 	}
-	if _, exists := a.nonces[nonce]; exists {
-		return false
+}
+
+func (a *authenticator) loadNonces() {
+	if a.path == "" {
+		return
 	}
-	a.nonces[nonce] = now.Add(5 * time.Minute)
-	return true
+	data, err := os.ReadFile(a.path)
+	if err != nil {
+		return
+	}
+	var stored map[string]time.Time
+	if err := json.Unmarshal(data, &stored); err != nil {
+		return
+	}
+	now := time.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for nonce, expires := range stored {
+		if now.Before(expires) {
+			a.nonces[nonce] = expires
+		}
+	}
+}
+
+func (a *authenticator) persistNoncesLocked() error {
+	if a.path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(a.path), 0700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(a.nonces)
+	if err != nil {
+		return err
+	}
+	temporary := a.path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(temporary, a.path)
 }
 
 func parseDurationSeconds(value string, fallback, maximum time.Duration) time.Duration {

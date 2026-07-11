@@ -163,7 +163,7 @@ type NodeCacheConfig struct {
 // NodeCredential represents the NodeCredential model.
 type NodeCredential struct {
 	NodeId           string `db:"node_id" json:"nodeId"`
-	CommunicationKey string `db:"communication_key" json:"communicationKey"`
+	CommunicationKey string `db:"communication_key" json:"-"`
 	Node             *Node  `db:"-" json:"node,omitempty"`
 }
 

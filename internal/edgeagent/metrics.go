@@ -63,6 +63,8 @@ func (s *NodeConfigStore) Set(value NodeConfig) error {
 func (s *NodeConfigStore) Get() NodeConfig { s.mu.RLock(); defer s.mu.RUnlock(); return s.value }
 
 func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigStore) {
+	// Warm CPU sampler so the first real sample is meaningful.
+	_, _ = cpu.Percent(0, false)
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -76,15 +78,38 @@ func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigSto
 }
 
 func appendMetrics(queue *LogQueue, config NodeConfig) {
-	cpuValues, _ := cpu.Percent(0, false)
+	cpuValues, cpuErr := cpu.Percent(0, false)
 	memory, _ := mem.VirtualMemory()
 	loads, _ := load.Avg()
-	usage, _ := disk.Usage(config.CacheDirectory)
+	usage, diskErr := disk.Usage(config.CacheDirectory)
 	maxCache := config.MaxSizeBytes
-	if config.AutoMaxSize && usage != nil {
+	if config.AutoMaxSize && usage != nil && diskErr == nil {
 		maxCache = usage.Total * uint64(config.MaxDiskUsagePercent) / 100
 	}
-	payload, _ := json.Marshal(map[string]any{"minute": time.Now().UTC().Truncate(time.Minute), "cpu_usage_percent": first(cpuValues), "memory_used_bytes": memoryUsed(memory), "memory_total_bytes": memoryTotal(memory), "load_1": loadAt(loads, 1), "load_5": loadAt(loads, 5), "load_15": loadAt(loads, 15), "cache_directory": config.CacheDirectory, "cache_used_bytes": diskUsed(usage), "cache_max_bytes": maxCache, "disk_used_bytes": diskUsed(usage), "disk_total_bytes": diskTotal(usage)})
+	payloadMap := map[string]any{
+		"minute":             time.Now().UTC().Truncate(time.Minute),
+		"cpu_usage_percent":  first(cpuValues),
+		"memory_used_bytes":  memoryUsed(memory),
+		"memory_total_bytes": memoryTotal(memory),
+		"load_1":             loadAt(loads, 1),
+		"load_5":             loadAt(loads, 5),
+		"load_15":            loadAt(loads, 15),
+		"cache_directory":    config.CacheDirectory,
+		"cache_used_bytes":   diskUsed(usage),
+		"cache_max_bytes":    maxCache,
+		"disk_used_bytes":    diskUsed(usage),
+		"disk_total_bytes":   diskTotal(usage),
+	}
+	if cpuErr != nil {
+		payloadMap["cpu_error"] = cpuErr.Error()
+	}
+	if diskErr != nil {
+		payloadMap["disk_error"] = diskErr.Error()
+		payloadMap["cache_used_bytes"] = nil
+		payloadMap["disk_used_bytes"] = nil
+		payloadMap["disk_total_bytes"] = nil
+	}
+	payload, _ := json.Marshal(payloadMap)
 	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
 }
 

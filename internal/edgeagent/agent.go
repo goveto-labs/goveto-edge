@@ -47,7 +47,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	agentlog.SetSink(agentLogSink{queue: a.logs})
 	a.configs.SetAgentHost(identity.NodeID)
-	setAgentHTTPHandler(newAgentServer(identity, a.configs, a.nodeConfigs, a.logs))
+	auth := newAuthenticator(identity, filepath.Join(a.dataDir, "nonces.json"))
+	setAgentHTTPHandler(newAgentServer(identity, a.configs, a.nodeConfigs, a.logs, auth))
 	if err := a.configs.Restore(); err != nil {
 		return fmt.Errorf("restore site configs: %w", err)
 	}

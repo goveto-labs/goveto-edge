@@ -74,37 +74,59 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	if existed && config.Version <= previous.Version {
 		return errors.New("site config version is not newer")
 	}
+	previousEncoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost)
+	if err != nil {
+		return fmt.Errorf("render previous site config: %w", err)
+	}
 	m.sites[config.SiteID] = config
 	encoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost)
 	if err != nil {
-		if existed {
-			m.sites[config.SiteID] = previous
-		} else {
-			delete(m.sites, config.SiteID)
-		}
+		m.restoreSiteLocked(config.SiteID, previous, existed)
 		return fmt.Errorf("render site config: %w", err)
 	}
+	if err := caddy.Load(encoded, true); err != nil {
+		m.restoreSiteLocked(config.SiteID, previous, existed)
+		return fmt.Errorf("apply site config: %w", err)
+	}
 	if err := m.persistLocked(); err != nil {
-		if existed {
-			m.sites[config.SiteID] = previous
-		} else {
-			delete(m.sites, config.SiteID)
+		m.restoreSiteLocked(config.SiteID, previous, existed)
+		if rollbackErr := caddy.Load(previousEncoded, true); rollbackErr != nil {
+			return fmt.Errorf("persist site config: %w; restore caddy config: %v", err, rollbackErr)
 		}
 		return fmt.Errorf("persist site config: %w", err)
 	}
-	if err := caddy.Load(encoded, true); err != nil {
-		if existed {
-			m.sites[config.SiteID] = previous
-		} else {
-			delete(m.sites, config.SiteID)
-		}
-		rollbackErr := m.persistLocked()
-		if rollbackErr != nil {
-			return fmt.Errorf("apply site config: %w; restore persisted config: %v", err, rollbackErr)
-		}
-		return fmt.Errorf("apply site config: %w", err)
-	}
 	return nil
+}
+
+func (m *ConfigManager) restoreSiteLocked(siteID string, previous SiteConfig, existed bool) {
+	if existed {
+		m.sites[siteID] = previous
+		return
+	}
+	delete(m.sites, siteID)
+}
+
+// ConfigVersion is the highest applied site config version on this node.
+func (m *ConfigManager) ConfigVersion() uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var max uint64
+	for _, site := range m.sites {
+		if site.Version > max {
+			max = site.Version
+		}
+	}
+	return max
+}
+
+func (m *ConfigManager) SiteVersions() map[string]uint64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	versions := make(map[string]uint64, len(m.sites))
+	for id, site := range m.sites {
+		versions[id] = site.Version
+	}
+	return versions
 }
 
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
