@@ -31,8 +31,7 @@ func New() *Agent {
 	}
 }
 
-// Run waits for process shutdown. Node registration, configuration polling,
-// heartbeat, and purge execution will be attached to this lifecycle later.
+// Run waits for process shutdown.
 func (a *Agent) Run(ctx context.Context) error {
 	identity, err := LoadIdentity(a.identityPath)
 	if err != nil {

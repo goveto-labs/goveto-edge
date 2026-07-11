@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
@@ -51,10 +52,13 @@ func main() {
 	go publishService.Run(ctx)
 	purgeService := purge.New(orm, credentialCipher)
 	go purgeService.Run(ctx)
+	installQueue := node.NewInstallQueue(redisClient, 0)
+	go node.NewInstallWorker(orm, installQueue).Run(ctx)
+	go node.NewLifecycle(orm, 45*time.Second).Run(ctx)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db, orm, redisClient, sessions, credentialCipher, publishService, purgeService),
+		Handler:           httpapi.New(db, orm, sessions, credentialCipher, installQueue, publishService, purgeService),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 
