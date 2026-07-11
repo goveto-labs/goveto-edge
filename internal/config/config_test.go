@@ -4,6 +4,7 @@ import "testing"
 
 func TestLoadFromEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("HTTP_PORT", "9090")
 
 	cfg, err := Load()

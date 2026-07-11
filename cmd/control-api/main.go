@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/httpapi"
 	"goveto-edge/internal/storage"
@@ -31,10 +32,17 @@ func main() {
 	}
 	defer db.Close()
 	defer orm.Close()
+	redisClient, err := storage.OpenRedis(ctx, cfg.RedisURL)
+	if err != nil {
+		slog.Error("connect redis", "error", err)
+		os.Exit(1)
+	}
+	defer redisClient.Close()
+	sessions := auth.NewSessionStore(redisClient, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db),
+		Handler:           httpapi.New(db, orm, sessions),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 

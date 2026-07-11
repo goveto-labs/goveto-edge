@@ -18,6 +18,10 @@ type Config struct {
 	HTTPReadHeaderTimeout time.Duration
 	ShutdownTimeout       time.Duration
 	DatabaseURL           string
+	RedisURL              string
+	SessionCookieName     string
+	SessionTTL            time.Duration
+	SessionCookieSecure   bool
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -47,14 +51,36 @@ func Load() (Config, error) {
 		HTTPReadHeaderTimeout: readHeaderTimeout,
 		ShutdownTimeout:       shutdownTimeout,
 		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		RedisURL:              os.Getenv("REDIS_URL"),
+		SessionCookieName:     envString("SESSION_COOKIE_NAME", "goveto_session"),
+		SessionCookieSecure:   envBool("SESSION_COOKIE_SECURE", false),
+	}
+	cfg.SessionTTL, err = envDuration("SESSION_TTL", 24*time.Hour)
+	if err != nil {
+		return Config{}, err
 	}
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
+	}
+	if cfg.RedisURL == "" {
+		return Config{}, errors.New("REDIS_URL is required")
 	}
 	if cfg.HTTPPort < 1 || cfg.HTTPPort > 65535 {
 		return Config{}, fmt.Errorf("HTTP_PORT must be between 1 and 65535")
 	}
 	return cfg, nil
+}
+
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func (c Config) HTTPAddress() string {

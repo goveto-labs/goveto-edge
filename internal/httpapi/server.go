@@ -1,27 +1,23 @@
-// Package httpapi defines the control-plane HTTP API.
+// Package httpapi assembles all control-plane HTTP API modules.
 package httpapi
 
 import (
-	"context"
 	"database/sql"
-	"net/http"
-	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"goveto-edge/internal/auth"
+	authapi "goveto-edge/internal/httpapi/auth"
+	"goveto-edge/internal/httpapi/health"
+	"goveto-edge/internal/storage/gen/client"
 )
 
-func New(db *sql.DB) *echo.Echo {
+func New(db *sql.DB, orm *client.Client, sessions *auth.SessionStore) *echo.Echo {
 	e := echo.New()
-	e.GET("/health/live", func(c *echo.Context) error {
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-	})
-	e.GET("/health/ready", func(c *echo.Context) error {
-		ctx, cancel := context.WithTimeout(c.Request().Context(), time.Second)
-		defer cancel()
-		if err := db.PingContext(ctx); err != nil {
-			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
-		}
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
-	})
+	e.Use(sessions.Session)
+
+	health.Register(e, db)
+	authapi.Register(e, orm, sessions)
+
 	return e
 }

@@ -1,0 +1,71 @@
+// Package auth registers authentication HTTP endpoints.
+package auth
+
+import (
+	"database/sql"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/labstack/echo/v5"
+	"golang.org/x/crypto/bcrypt"
+
+	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
+	"goveto-edge/internal/storage/gen/query"
+)
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type userResponse struct {
+	ID     string           `json:"id"`
+	Email  string           `json:"email"`
+	Name   string           `json:"name"`
+	Role   model.UserRole   `json:"role"`
+	Status model.UserStatus `json:"status"`
+}
+
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
+	group := e.Group("/api/v1/auth")
+	group.POST("/login", login(db, sessions))
+	group.GET("/me", me, authn.RequireAuth)
+}
+
+func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input loginRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+		if input.Email == "" || input.Password == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "email and password are required")
+		}
+
+		user, err := db.User.Query().Where(query.User.Email.Equals(input.Email)).First(c.Request().Context())
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
+			}
+			return err
+		}
+		if user.Status != model.UserStatusACTIVE || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)) != nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
+		}
+
+		token, err := sessions.Create(c.Request().Context(), user.Id)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "session storage unavailable")
+		}
+		sessions.SetCookie(c, token)
+		return c.JSON(http.StatusOK, userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status})
+	}
+}
+
+func me(c *echo.Context) error {
+	return c.JSON(http.StatusOK, map[string]string{"uid": authn.CurrentUID(c)})
+}
