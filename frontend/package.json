@@ -1,0 +1,37 @@
+{
+  "name": "vite-template",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "lint": "biome check .",
+    "format": "biome format . --write",
+    "fix": "biome check . --write",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@heroui/react": "3.2.2",
+    "@heroui/styles": "3.2.2",
+    "clsx": "2.1.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-router-dom": "6.23.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.3",
+    "@tailwindcss/postcss": "4.3.1",
+    "@tailwindcss/vite": "4.3.1",
+    "@types/node": "22.12.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "6.0.2",
+    "postcss": "8.5.15",
+    "tailwind-variants": "3.2.2",
+    "tailwindcss": "4.3.1",
+    "typescript": "5.6.3",
+    "vite": "8.0.16"
+  }
+}
