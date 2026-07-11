@@ -31,6 +31,14 @@ type ConfigVersion struct {
 	Site       *Site           `db:"-" json:"site,omitempty"`
 }
 
+// DynamicSetting represents the DynamicSetting model.
+type DynamicSetting struct {
+	Key         string          `db:"key" json:"key"`
+	ValueJson   json.RawMessage `db:"value_json" json:"valueJson"`
+	Description *string         `db:"description" json:"description"`
+	UpdatedAt   time.Time       `db:"updated_at" json:"updatedAt"`
+}
+
 // Node represents the Node model.
 type Node struct {
 	Id          string     `db:"id" json:"id"`
@@ -121,6 +129,8 @@ type User struct {
 	Name         string         `db:"name" json:"name"`
 	Role         UserRole       `db:"role" json:"role"`
 	Status       UserStatus     `db:"status" json:"status"`
+	TotpSecret   *string        `db:"totp_secret" json:"totpSecret"`
+	TotpEnabled  bool           `db:"totp_enabled" json:"totpEnabled"`
 	LastLoginAt  *time.Time     `db:"last_login_at" json:"lastLoginAt"`
 	CreatedAt    time.Time      `db:"created_at" json:"createdAt"`
 	UpdatedAt    time.Time      `db:"updated_at" json:"updatedAt"`

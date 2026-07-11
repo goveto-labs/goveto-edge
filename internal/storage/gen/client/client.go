@@ -21,19 +21,20 @@ type querier interface {
 
 // Client is the main entry point for database operations.
 type Client struct {
-	db            *sql.DB
-	executor      querier
-	dialect       string
-	AuditLog      AuditLogActions
-	ConfigVersion ConfigVersionActions
-	Node          NodeActions
-	OriginPool    OriginPoolActions
-	Policy        PolicyActions
-	PublishJob    PublishJobActions
-	PurgeJob      PurgeJobActions
-	Site          SiteActions
-	User          UserActions
-	UserSession   UserSessionActions
+	db             *sql.DB
+	executor       querier
+	dialect        string
+	AuditLog       AuditLogActions
+	ConfigVersion  ConfigVersionActions
+	DynamicSetting DynamicSettingActions
+	Node           NodeActions
+	OriginPool     OriginPoolActions
+	Policy         PolicyActions
+	PublishJob     PublishJobActions
+	PurgeJob       PurgeJobActions
+	Site           SiteActions
+	User           UserActions
+	UserSession    UserSessionActions
 }
 
 // New creates a new Client from a database connection.
@@ -44,6 +45,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	}
 	c.AuditLog = AuditLogActions{client: c}
 	c.ConfigVersion = ConfigVersionActions{client: c}
+	c.DynamicSetting = DynamicSettingActions{client: c}
 	c.Node = NodeActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
 	c.Policy = PolicyActions{client: c}
@@ -211,6 +213,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient := &Client{db: c.db, executor: sqlTx, dialect: c.dialect}
 	txClient.AuditLog = AuditLogActions{client: txClient}
 	txClient.ConfigVersion = ConfigVersionActions{client: txClient}
+	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
 	txClient.Policy = PolicyActions{client: txClient}
@@ -1938,6 +1941,870 @@ func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("ConfigVersion.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildDynamicSettingWhere recursively builds a WHERE clause string and arguments.
+func buildDynamicSettingWhere(c *Client, wheres []query.DynamicSettingWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DynamicSettingWhereClause); ok {
+				sub, subArgs := buildDynamicSettingWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DynamicSettingWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDynamicSettingWhere(c, []query.DynamicSettingWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DynamicSettingWhereClause); ok {
+				sub, subArgs := buildDynamicSettingWhere(c, []query.DynamicSettingWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DynamicSettingActions provides database operations for the DynamicSetting model.
+type DynamicSettingActions struct {
+	client *Client
+}
+
+// DynamicSettingCreateBuilder builds a DynamicSetting create operation incrementally.
+type DynamicSettingCreateBuilder struct {
+	action DynamicSettingActions
+	sets   []query.DynamicSettingSetClause
+}
+
+// Create starts a staged DynamicSetting create operation.
+func (a DynamicSettingActions) Create() DynamicSettingCreateBuilder {
+	return DynamicSettingCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DynamicSettingCreateBuilder) Set(sets ...query.DynamicSettingSetClause) DynamicSettingCreateBuilder {
+	next := DynamicSettingCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DynamicSettingSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DynamicSettingCreateBuilder) Do(ctx context.Context) (*model.DynamicSetting, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DynamicSettingCreateManyBuilder builds a bulk DynamicSetting insert operation.
+type DynamicSettingCreateManyBuilder struct {
+	action            DynamicSettingActions
+	data              []query.DynamicSettingCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DynamicSetting insert operation.
+func (a DynamicSettingActions) BulkCreate(data []query.DynamicSettingCreateInput) DynamicSettingCreateManyBuilder {
+	return DynamicSettingCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DynamicSettingCreateManyBuilder) OnConflictDoNothing(columns ...string) DynamicSettingCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DynamicSettingCreateManyBuilder) Returning(columns ...string) DynamicSettingCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DynamicSettingCreateManyBuilder) BatchSize(n int) DynamicSettingCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DynamicSettingCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDynamicSettingCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DynamicSetting.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DynamicSetting.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DynamicSettingCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DynamicSetting, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DynamicSetting
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDynamicSettingCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"key", "value_json", "description", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DynamicSetting
+			if err := rows.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DynamicSettingCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"key", "value_json", "description", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDynamicSettingCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DynamicSetting.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DynamicSettingQueryBuilder builds a DynamicSetting query incrementally.
+type DynamicSettingQueryBuilder struct {
+	action DynamicSettingActions
+	opts   []query.DynamicSettingQueryOption
+}
+
+// Query starts a staged DynamicSetting query.
+func (a DynamicSettingActions) Query() DynamicSettingQueryBuilder {
+	return DynamicSettingQueryBuilder{action: a}
+}
+
+func (b DynamicSettingQueryBuilder) withOptions(opts ...query.DynamicSettingQueryOption) DynamicSettingQueryBuilder {
+	next := DynamicSettingQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DynamicSettingQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DynamicSettingQueryBuilder) Where(clauses ...query.DynamicSettingWhereClause) DynamicSettingQueryBuilder {
+	opts := make([]query.DynamicSettingQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DynamicSettingQueryBuilder) OrderBy(clause query.DynamicSettingOrderByClause) DynamicSettingQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DynamicSettingQueryBuilder) Include(clauses ...query.DynamicSettingIncludeClause) DynamicSettingQueryBuilder {
+	opts := make([]query.DynamicSettingQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DynamicSettingQueryBuilder) Take(n int) DynamicSettingQueryBuilder {
+	return b.withOptions(query.DynamicSettingTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DynamicSettingQueryBuilder) Skip(n int) DynamicSettingQueryBuilder {
+	return b.withOptions(query.DynamicSettingSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DynamicSettingQueryBuilder) Do(ctx context.Context) ([]model.DynamicSetting, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DynamicSettingQueryBuilder) First(ctx context.Context) (*model.DynamicSetting, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DynamicSettingQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDynamicSettingOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DynamicSettingUpdateBuilder builds a DynamicSetting update operation incrementally.
+type DynamicSettingUpdateBuilder struct {
+	action DynamicSettingActions
+	wheres []query.DynamicSettingWhereClause
+	sets   []query.DynamicSettingSetClause
+}
+
+// Update starts a staged DynamicSetting update operation.
+func (a DynamicSettingActions) Update() DynamicSettingUpdateBuilder {
+	return DynamicSettingUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DynamicSettingUpdateBuilder) Where(clauses ...query.DynamicSettingWhereClause) DynamicSettingUpdateBuilder {
+	next := DynamicSettingUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DynamicSettingWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DynamicSettingSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DynamicSettingUpdateBuilder) Set(sets ...query.DynamicSettingSetClause) DynamicSettingUpdateBuilder {
+	next := DynamicSettingUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DynamicSettingWhereClause(nil), b.wheres...),
+		sets:   make([]query.DynamicSettingSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DynamicSettingUpdateBuilder) combinedWhere() (query.DynamicSettingWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DynamicSettingWhereClause{}, fmt.Errorf("DynamicSetting.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DynamicSetting.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DynamicSettingUpdateBuilder) Do(ctx context.Context) (*model.DynamicSetting, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DynamicSettingUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DynamicSettingDeleteBuilder builds a DynamicSetting delete operation incrementally.
+type DynamicSettingDeleteBuilder struct {
+	action DynamicSettingActions
+	wheres []query.DynamicSettingWhereClause
+}
+
+// Delete starts a staged DynamicSetting delete operation.
+func (a DynamicSettingActions) Delete() DynamicSettingDeleteBuilder {
+	return DynamicSettingDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DynamicSettingDeleteBuilder) Where(clauses ...query.DynamicSettingWhereClause) DynamicSettingDeleteBuilder {
+	next := DynamicSettingDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DynamicSettingWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DynamicSettingDeleteBuilder) combinedWhere() (query.DynamicSettingWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DynamicSettingWhereClause{}, fmt.Errorf("DynamicSetting.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DynamicSetting.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DynamicSettingDeleteBuilder) Do(ctx context.Context) (*model.DynamicSetting, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DynamicSettingDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DynamicSetting records.
+func (a DynamicSettingActions) FindMany(ctx context.Context, opts ...query.DynamicSettingQueryOption) ([]model.DynamicSetting, error) {
+	cfg := query.ApplyDynamicSettingOptions(opts)
+	q := "SELECT key, value_json, description, updated_at FROM dynamic_settings"
+	argIdx := 0
+	where, args := buildDynamicSettingWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DynamicSetting
+	for rows.Next() {
+		var item model.DynamicSetting
+		if err := rows.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DynamicSetting.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DynamicSetting record.
+func (a DynamicSettingActions) FindFirst(ctx context.Context, opts ...query.DynamicSettingQueryOption) (*model.DynamicSetting, error) {
+	opts = append(opts, query.DynamicSettingTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DynamicSetting record by unique constraint.
+func (a DynamicSettingActions) FindUnique(ctx context.Context, where query.DynamicSettingWhereClause) (*model.DynamicSetting, error) {
+	argIdx := 0
+	whereSQL, args := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
+	q := "SELECT key, value_json, description, updated_at FROM dynamic_settings"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DynamicSetting
+	if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DynamicSetting.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DynamicSetting record.
+func (a DynamicSettingActions) CreateOne(ctx context.Context, sets ...query.DynamicSettingSetClause) (*model.DynamicSetting, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DynamicSetting.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING key, value_json, description, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DynamicSetting
+		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DynamicSetting.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DynamicSetting records.
+func (a DynamicSettingActions) CreateMany(ctx context.Context, data []query.DynamicSettingCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DynamicSettingActions) buildDynamicSettingCreateManySQL(data []query.DynamicSettingCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"key", "value_json", "description", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DynamicSetting record matching the where clause.
+func (a DynamicSettingActions) UpdateOne(ctx context.Context, where query.DynamicSettingWhereClause, sets ...query.DynamicSettingSetClause) (*model.DynamicSetting, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DynamicSetting.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dynamic_settings SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING key, value_json, description, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DynamicSetting
+		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DynamicSetting.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DynamicSetting records matching the where clauses.
+func (a DynamicSettingActions) UpdateMany(ctx context.Context, wheres []query.DynamicSettingWhereClause, sets ...query.DynamicSettingSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DynamicSetting.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDynamicSettingWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dynamic_settings SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DynamicSetting.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DynamicSetting record.
+func (a DynamicSettingActions) UpsertOne(ctx context.Context, where query.DynamicSettingWhereClause, create []query.DynamicSettingSetClause, update []query.DynamicSettingSetClause) (*model.DynamicSetting, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DynamicSetting.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING key, value_json, description, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DynamicSetting
+		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DynamicSetting.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DynamicSetting record matching the where clause.
+func (a DynamicSettingActions) DeleteOne(ctx context.Context, where query.DynamicSettingWhereClause) (*model.DynamicSetting, error) {
+	argIdx := 0
+	whereSQL, args := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
+	q := "DELETE FROM dynamic_settings"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING key, value_json, description, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DynamicSetting
+		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DynamicSetting.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DynamicSetting records matching the where clauses.
+func (a DynamicSettingActions) DeleteMany(ctx context.Context, wheres ...query.DynamicSettingWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDynamicSettingWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM dynamic_settings"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DynamicSetting.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DynamicSetting records matching the where clauses.
+func (a DynamicSettingActions) Count(ctx context.Context, wheres ...query.DynamicSettingWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDynamicSettingWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM dynamic_settings"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DynamicSetting.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DynamicSetting.
+func (a DynamicSettingActions) Aggregate(ctx context.Context, opts ...query.DynamicSettingAggregateOption) (*query.DynamicSettingAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dynamic_settings", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DynamicSettingAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DynamicSetting.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DynamicSetting.
+func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opts ...query.DynamicSettingAggregateOption) ([]query.DynamicSettingGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dynamic_settings GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DynamicSetting.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DynamicSettingGroupByResult
+	for rows.Next() {
+		r := query.DynamicSettingGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DynamicSetting.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -7345,14 +8212,14 @@ func (b UserCreateManyBuilder) DoReturning(ctx context.Context) ([]model.User, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "last_login_at", "created_at", "updated_at"})
+		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("User.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.User
-			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("User.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -7379,7 +8246,7 @@ func (b UserCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "last_login_at", "created_at", "updated_at"}
+		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -7588,7 +8455,7 @@ func (b UserDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple User records.
 func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption) ([]model.User, error) {
 	cfg := query.ApplyUserOptions(opts)
-	q := "SELECT id, email, password_hash, name, role, status, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at FROM users"
 	argIdx := 0
 	where, args := buildUserWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -7615,7 +8482,7 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 	var results []model.User
 	for rows.Next() {
 		var item model.User
-		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -7640,14 +8507,14 @@ func (a UserActions) FindFirst(ctx context.Context, opts ...query.UserQueryOptio
 func (a UserActions) FindUnique(ctx context.Context, where query.UserWhereClause) (*model.User, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, []query.UserWhereClause{where}, &argIdx)
-	q := "SELECT id, email, password_hash, name, role, status, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at FROM users"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.User
-	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -7672,10 +8539,10 @@ func (a UserActions) CreateOne(ctx context.Context, sets ...query.UserSetClause)
 	q := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -7694,7 +8561,7 @@ func (a UserActions) CreateMany(ctx context.Context, data []query.UserCreateInpu
 }
 
 func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "email", "password_hash", "name", "role", "status", "last_login_at", "created_at", "updated_at"}
+	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_enabled", "last_login_at", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -7750,10 +8617,10 @@ func (a UserActions) UpdateOne(ctx context.Context, where query.UserWhereClause,
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -7836,10 +8703,10 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -7860,10 +8727,10 @@ func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause)
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, last_login_at, created_at, updated_at"
+		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, totp_enabled, last_login_at, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpEnabled, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

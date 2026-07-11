@@ -8,9 +8,10 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
-	"golang.org/x/crypto/bcrypt"
-
 	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/captcha"
+	"goveto-edge/internal/password"
+	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -29,9 +30,11 @@ type userResponse struct {
 	Status model.UserStatus `json:"status"`
 }
 
-func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, captchaVerifier *captcha.Verifier) {
 	group := e.Group("/api/v1/auth")
 	group.POST("/login", login(db, sessions))
+	group.POST("/register", register(db, settingStore, captchaVerifier))
+	group.GET("/registration-config", registrationConfig(settingStore))
 	group.GET("/me", me, authn.RequireAuth)
 }
 
@@ -53,7 +56,7 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 			}
 			return err
 		}
-		if user.Status != model.UserStatusACTIVE || bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)) != nil {
+		if user.Status != model.UserStatusACTIVE || !password.Verify(user.PasswordHash, input.Password) {
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
 		}
 
