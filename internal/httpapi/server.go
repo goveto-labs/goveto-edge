@@ -11,9 +11,11 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	authapi "goveto-edge/internal/httpapi/auth"
+	"goveto-edge/internal/httpapi/certificates"
 	"goveto-edge/internal/httpapi/clusters"
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/nodes"
+	"goveto-edge/internal/httpapi/sites"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -29,7 +31,9 @@ func New(db *sql.DB, orm *client.Client, redisClient *redis.Client, sessions *au
 	health.Register(e, db)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm)
+	certificates.Register(e, orm)
 	nodes.Register(e, orm, installQueue)
+	sites.Register(e, orm)
 
 	return e
 }

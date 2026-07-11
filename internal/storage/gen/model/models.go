@@ -19,16 +19,37 @@ type AuditLog struct {
 	User       *User            `db:"-" json:"user,omitempty"`
 }
 
+// Certificate represents the Certificate model.
+type Certificate struct {
+	Id            string             `db:"id" json:"id"`
+	ClusterId     string             `db:"cluster_id" json:"clusterId"`
+	Name          string             `db:"name" json:"name"`
+	CertPem       string             `db:"cert_pem" json:"certPem"`
+	PrivateKeyPem string             `db:"private_key_pem" json:"privateKeyPem"`
+	Fingerprint   string             `db:"fingerprint" json:"fingerprint"`
+	ExpiresAt     time.Time          `db:"expires_at" json:"expiresAt"`
+	CreatedAt     time.Time          `db:"created_at" json:"createdAt"`
+	UpdatedAt     time.Time          `db:"updated_at" json:"updatedAt"`
+	Cluster       *Cluster           `db:"-" json:"cluster,omitempty"`
+	Sites         []*SiteCertificate `db:"-" json:"sites,omitempty"`
+}
+
 // Cluster represents the Cluster model.
 type Cluster struct {
-	Id        string           `db:"id" json:"id"`
-	Name      string           `db:"name" json:"name"`
-	CreatedAt time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time        `db:"updated_at" json:"updatedAt"`
-	Nodes     []*Node          `db:"-" json:"nodes,omitempty"`
-	Groups    []*ClusterGroup  `db:"-" json:"groups,omitempty"`
-	Regions   []*ClusterRegion `db:"-" json:"regions,omitempty"`
-	DnsLines  []*DNSLine       `db:"-" json:"dnsLines,omitempty"`
+	Id           string           `db:"id" json:"id"`
+	CreatorId    string           `db:"creator_id" json:"creatorId"`
+	Name         string           `db:"name" json:"name"`
+	CreatedAt    time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt    time.Time        `db:"updated_at" json:"updatedAt"`
+	Creator      *User            `db:"-" json:"creator,omitempty"`
+	Members      []*ClusterMember `db:"-" json:"members,omitempty"`
+	Nodes        []*Node          `db:"-" json:"nodes,omitempty"`
+	Groups       []*ClusterGroup  `db:"-" json:"groups,omitempty"`
+	Regions      []*ClusterRegion `db:"-" json:"regions,omitempty"`
+	DnsLines     []*DNSLine       `db:"-" json:"dnsLines,omitempty"`
+	Certificates []*Certificate   `db:"-" json:"certificates,omitempty"`
+	OriginPools  []*OriginPool    `db:"-" json:"originPools,omitempty"`
+	Sites        []*Site          `db:"-" json:"sites,omitempty"`
 }
 
 // ClusterGroup represents the ClusterGroup model.
@@ -40,6 +61,16 @@ type ClusterGroup struct {
 	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
 	Cluster   *Cluster  `db:"-" json:"cluster,omitempty"`
 	Nodes     []*Node   `db:"-" json:"nodes,omitempty"`
+}
+
+// ClusterMember represents the ClusterMember model.
+type ClusterMember struct {
+	ClusterId  string            `db:"cluster_id" json:"clusterId"`
+	UserId     string            `db:"user_id" json:"userId"`
+	Permission ClusterPermission `db:"permission" json:"permission"`
+	CreatedAt  time.Time         `db:"created_at" json:"createdAt"`
+	Cluster    *Cluster          `db:"-" json:"cluster,omitempty"`
+	User       *User             `db:"-" json:"user,omitempty"`
 }
 
 // ClusterRegion represents the ClusterRegion model.
@@ -121,18 +152,32 @@ type NodeDNSLine struct {
 	DnsLine   *DNSLine `db:"-" json:"dnsLine,omitempty"`
 }
 
+// OriginBackend represents the OriginBackend model.
+type OriginBackend struct {
+	Id           string         `db:"id" json:"id"`
+	OriginPoolId string         `db:"origin_pool_id" json:"originPoolId"`
+	Protocol     OriginProtocol `db:"protocol" json:"protocol"`
+	Address      string         `db:"address" json:"address"`
+	HostHeader   *string        `db:"host_header" json:"hostHeader"`
+	Weight       int            `db:"weight" json:"weight"`
+	Enabled      bool           `db:"enabled" json:"enabled"`
+	CreatedAt    time.Time      `db:"created_at" json:"createdAt"`
+	OriginPool   *OriginPool    `db:"-" json:"originPool,omitempty"`
+}
+
 // OriginPool represents the OriginPool model.
 type OriginPool struct {
-	Id        string          `db:"id" json:"id"`
-	Name      string          `db:"name" json:"name"`
-	Protocol  OriginProtocol  `db:"protocol" json:"protocol"`
-	Backends  json.RawMessage `db:"backends" json:"backends"`
-	HealthUri string          `db:"health_uri" json:"healthUri"`
-	Timeout   int             `db:"timeout" json:"timeout"`
-	Headers   json.RawMessage `db:"headers" json:"headers"`
-	CreatedAt time.Time       `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time       `db:"updated_at" json:"updatedAt"`
-	Sites     []*Site         `db:"-" json:"sites,omitempty"`
+	Id        string           `db:"id" json:"id"`
+	ClusterId string           `db:"cluster_id" json:"clusterId"`
+	Name      string           `db:"name" json:"name"`
+	HealthUri string           `db:"health_uri" json:"healthUri"`
+	Timeout   int              `db:"timeout" json:"timeout"`
+	Headers   json.RawMessage  `db:"headers" json:"headers"`
+	CreatedAt time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster   *Cluster         `db:"-" json:"cluster,omitempty"`
+	Backends  []*OriginBackend `db:"-" json:"backends,omitempty"`
+	Sites     []*Site          `db:"-" json:"sites,omitempty"`
 }
 
 // Policy represents the Policy model.
@@ -176,35 +221,61 @@ type PurgeJob struct {
 
 // Site represents the Site model.
 type Site struct {
-	Id             string           `db:"id" json:"id"`
-	Hostname       string           `db:"hostname" json:"hostname"`
-	Status         SiteStatus       `db:"status" json:"status"`
-	OriginPoolId   string           `db:"origin_pool_id" json:"originPoolId"`
-	PolicyId       string           `db:"policy_id" json:"policyId"`
-	Version        int64            `db:"version" json:"version"`
-	CreatedAt      time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt      time.Time        `db:"updated_at" json:"updatedAt"`
-	OriginPool     *OriginPool      `db:"-" json:"originPool,omitempty"`
-	Policy         *Policy          `db:"-" json:"policy,omitempty"`
-	ConfigVersions []*ConfigVersion `db:"-" json:"configVersions,omitempty"`
-	PublishJobs    []*PublishJob    `db:"-" json:"publishJobs,omitempty"`
-	PurgeJobs      []*PurgeJob      `db:"-" json:"purgeJobs,omitempty"`
+	Id             string             `db:"id" json:"id"`
+	ClusterId      string             `db:"cluster_id" json:"clusterId"`
+	CreatorId      string             `db:"creator_id" json:"creatorId"`
+	Name           string             `db:"name" json:"name"`
+	Status         SiteStatus         `db:"status" json:"status"`
+	OriginPoolId   string             `db:"origin_pool_id" json:"originPoolId"`
+	PolicyId       *string            `db:"policy_id" json:"policyId"`
+	Version        int64              `db:"version" json:"version"`
+	CreatedAt      time.Time          `db:"created_at" json:"createdAt"`
+	UpdatedAt      time.Time          `db:"updated_at" json:"updatedAt"`
+	Cluster        *Cluster           `db:"-" json:"cluster,omitempty"`
+	Creator        *User              `db:"-" json:"creator,omitempty"`
+	OriginPool     *OriginPool        `db:"-" json:"originPool,omitempty"`
+	Policy         *Policy            `db:"-" json:"policy,omitempty"`
+	Domains        []*SiteDomain      `db:"-" json:"domains,omitempty"`
+	Certificates   []*SiteCertificate `db:"-" json:"certificates,omitempty"`
+	ConfigVersions []*ConfigVersion   `db:"-" json:"configVersions,omitempty"`
+	PublishJobs    []*PublishJob      `db:"-" json:"publishJobs,omitempty"`
+	PurgeJobs      []*PurgeJob        `db:"-" json:"purgeJobs,omitempty"`
+}
+
+// SiteCertificate represents the SiteCertificate model.
+type SiteCertificate struct {
+	SiteId        string       `db:"site_id" json:"siteId"`
+	CertificateId string       `db:"certificate_id" json:"certificateId"`
+	Site          *Site        `db:"-" json:"site,omitempty"`
+	Certificate   *Certificate `db:"-" json:"certificate,omitempty"`
+}
+
+// SiteDomain represents the SiteDomain model.
+type SiteDomain struct {
+	Id        string    `db:"id" json:"id"`
+	SiteId    string    `db:"site_id" json:"siteId"`
+	Hostname  string    `db:"hostname" json:"hostname"`
+	CreatedAt time.Time `db:"created_at" json:"createdAt"`
+	Site      *Site     `db:"-" json:"site,omitempty"`
 }
 
 // User represents the User model.
 type User struct {
-	Id           string         `db:"id" json:"id"`
-	Email        string         `db:"email" json:"email"`
-	PasswordHash string         `db:"password_hash" json:"passwordHash"`
-	Name         string         `db:"name" json:"name"`
-	Role         UserRole       `db:"role" json:"role"`
-	Status       UserStatus     `db:"status" json:"status"`
-	TotpSecret   *string        `db:"totp_secret" json:"totpSecret"`
-	LastLoginAt  *time.Time     `db:"last_login_at" json:"lastLoginAt"`
-	CreatedAt    time.Time      `db:"created_at" json:"createdAt"`
-	UpdatedAt    time.Time      `db:"updated_at" json:"updatedAt"`
-	Sessions     []*UserSession `db:"-" json:"sessions,omitempty"`
-	AuditLogs    []*AuditLog    `db:"-" json:"auditLogs,omitempty"`
+	Id                 string           `db:"id" json:"id"`
+	Email              string           `db:"email" json:"email"`
+	PasswordHash       string           `db:"password_hash" json:"passwordHash"`
+	Name               string           `db:"name" json:"name"`
+	Role               UserRole         `db:"role" json:"role"`
+	Status             UserStatus       `db:"status" json:"status"`
+	TotpSecret         *string          `db:"totp_secret" json:"totpSecret"`
+	LastLoginAt        *time.Time       `db:"last_login_at" json:"lastLoginAt"`
+	CreatedAt          time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt          time.Time        `db:"updated_at" json:"updatedAt"`
+	Sessions           []*UserSession   `db:"-" json:"sessions,omitempty"`
+	AuditLogs          []*AuditLog      `db:"-" json:"auditLogs,omitempty"`
+	CreatedClusters    []*Cluster       `db:"-" json:"createdClusters,omitempty"`
+	ClusterMemberships []*ClusterMember `db:"-" json:"clusterMemberships,omitempty"`
+	CreatedSites       []*Site          `db:"-" json:"createdSites,omitempty"`
 }
 
 // UserSession represents the UserSession model.

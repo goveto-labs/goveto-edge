@@ -21,26 +21,31 @@ type querier interface {
 
 // Client is the main entry point for database operations.
 type Client struct {
-	db             *sql.DB
-	executor       querier
-	dialect        string
-	AuditLog       AuditLogActions
-	Cluster        ClusterActions
-	ClusterGroup   ClusterGroupActions
-	ClusterRegion  ClusterRegionActions
-	ConfigVersion  ConfigVersionActions
-	DNSLine        DNSLineActions
-	DynamicSetting DynamicSettingActions
-	Node           NodeActions
-	NodeAddress    NodeAddressActions
-	NodeDNSLine    NodeDNSLineActions
-	OriginPool     OriginPoolActions
-	Policy         PolicyActions
-	PublishJob     PublishJobActions
-	PurgeJob       PurgeJobActions
-	Site           SiteActions
-	User           UserActions
-	UserSession    UserSessionActions
+	db              *sql.DB
+	executor        querier
+	dialect         string
+	AuditLog        AuditLogActions
+	Certificate     CertificateActions
+	Cluster         ClusterActions
+	ClusterGroup    ClusterGroupActions
+	ClusterMember   ClusterMemberActions
+	ClusterRegion   ClusterRegionActions
+	ConfigVersion   ConfigVersionActions
+	DNSLine         DNSLineActions
+	DynamicSetting  DynamicSettingActions
+	Node            NodeActions
+	NodeAddress     NodeAddressActions
+	NodeDNSLine     NodeDNSLineActions
+	OriginBackend   OriginBackendActions
+	OriginPool      OriginPoolActions
+	Policy          PolicyActions
+	PublishJob      PublishJobActions
+	PurgeJob        PurgeJobActions
+	Site            SiteActions
+	SiteCertificate SiteCertificateActions
+	SiteDomain      SiteDomainActions
+	User            UserActions
+	UserSession     UserSessionActions
 }
 
 // New creates a new Client from a database connection.
@@ -50,8 +55,10 @@ func New(db *sql.DB, opts ...Option) *Client {
 		opt(c)
 	}
 	c.AuditLog = AuditLogActions{client: c}
+	c.Certificate = CertificateActions{client: c}
 	c.Cluster = ClusterActions{client: c}
 	c.ClusterGroup = ClusterGroupActions{client: c}
+	c.ClusterMember = ClusterMemberActions{client: c}
 	c.ClusterRegion = ClusterRegionActions{client: c}
 	c.ConfigVersion = ConfigVersionActions{client: c}
 	c.DNSLine = DNSLineActions{client: c}
@@ -59,11 +66,14 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.Node = NodeActions{client: c}
 	c.NodeAddress = NodeAddressActions{client: c}
 	c.NodeDNSLine = NodeDNSLineActions{client: c}
+	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
 	c.Policy = PolicyActions{client: c}
 	c.PublishJob = PublishJobActions{client: c}
 	c.PurgeJob = PurgeJobActions{client: c}
 	c.Site = SiteActions{client: c}
+	c.SiteCertificate = SiteCertificateActions{client: c}
+	c.SiteDomain = SiteDomainActions{client: c}
 	c.User = UserActions{client: c}
 	c.UserSession = UserSessionActions{client: c}
 	return c
@@ -224,8 +234,10 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 
 	txClient := &Client{db: c.db, executor: sqlTx, dialect: c.dialect}
 	txClient.AuditLog = AuditLogActions{client: txClient}
+	txClient.Certificate = CertificateActions{client: txClient}
 	txClient.Cluster = ClusterActions{client: txClient}
 	txClient.ClusterGroup = ClusterGroupActions{client: txClient}
+	txClient.ClusterMember = ClusterMemberActions{client: txClient}
 	txClient.ClusterRegion = ClusterRegionActions{client: txClient}
 	txClient.ConfigVersion = ConfigVersionActions{client: txClient}
 	txClient.DNSLine = DNSLineActions{client: txClient}
@@ -233,11 +245,14 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.Node = NodeActions{client: txClient}
 	txClient.NodeAddress = NodeAddressActions{client: txClient}
 	txClient.NodeDNSLine = NodeDNSLineActions{client: txClient}
+	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
 	txClient.Policy = PolicyActions{client: txClient}
 	txClient.PublishJob = PublishJobActions{client: txClient}
 	txClient.PurgeJob = PurgeJobActions{client: txClient}
 	txClient.Site = SiteActions{client: txClient}
+	txClient.SiteCertificate = SiteCertificateActions{client: txClient}
+	txClient.SiteDomain = SiteDomainActions{client: txClient}
 	txClient.User = UserActions{client: txClient}
 	txClient.UserSession = UserSessionActions{client: txClient}
 
@@ -1119,6 +1134,870 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 	return results, rows.Err()
 }
 
+// buildCertificateWhere recursively builds a WHERE clause string and arguments.
+func buildCertificateWhere(c *Client, wheres []query.CertificateWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.CertificateWhereClause); ok {
+				sub, subArgs := buildCertificateWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.CertificateWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildCertificateWhere(c, []query.CertificateWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.CertificateWhereClause); ok {
+				sub, subArgs := buildCertificateWhere(c, []query.CertificateWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// CertificateActions provides database operations for the Certificate model.
+type CertificateActions struct {
+	client *Client
+}
+
+// CertificateCreateBuilder builds a Certificate create operation incrementally.
+type CertificateCreateBuilder struct {
+	action CertificateActions
+	sets   []query.CertificateSetClause
+}
+
+// Create starts a staged Certificate create operation.
+func (a CertificateActions) Create() CertificateCreateBuilder {
+	return CertificateCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b CertificateCreateBuilder) Set(sets ...query.CertificateSetClause) CertificateCreateBuilder {
+	next := CertificateCreateBuilder{
+		action: b.action,
+		sets:   make([]query.CertificateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b CertificateCreateBuilder) Do(ctx context.Context) (*model.Certificate, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// CertificateCreateManyBuilder builds a bulk Certificate insert operation.
+type CertificateCreateManyBuilder struct {
+	action            CertificateActions
+	data              []query.CertificateCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk Certificate insert operation.
+func (a CertificateActions) BulkCreate(data []query.CertificateCreateInput) CertificateCreateManyBuilder {
+	return CertificateCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b CertificateCreateManyBuilder) OnConflictDoNothing(columns ...string) CertificateCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b CertificateCreateManyBuilder) Returning(columns ...string) CertificateCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b CertificateCreateManyBuilder) BatchSize(n int) CertificateCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b CertificateCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("Certificate.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("Certificate.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b CertificateCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Certificate, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.Certificate
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.Certificate
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b CertificateCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("Certificate.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// CertificateQueryBuilder builds a Certificate query incrementally.
+type CertificateQueryBuilder struct {
+	action CertificateActions
+	opts   []query.CertificateQueryOption
+}
+
+// Query starts a staged Certificate query.
+func (a CertificateActions) Query() CertificateQueryBuilder {
+	return CertificateQueryBuilder{action: a}
+}
+
+func (b CertificateQueryBuilder) withOptions(opts ...query.CertificateQueryOption) CertificateQueryBuilder {
+	next := CertificateQueryBuilder{
+		action: b.action,
+		opts:   make([]query.CertificateQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b CertificateQueryBuilder) Where(clauses ...query.CertificateWhereClause) CertificateQueryBuilder {
+	opts := make([]query.CertificateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b CertificateQueryBuilder) OrderBy(clause query.CertificateOrderByClause) CertificateQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b CertificateQueryBuilder) Include(clauses ...query.CertificateIncludeClause) CertificateQueryBuilder {
+	opts := make([]query.CertificateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b CertificateQueryBuilder) Take(n int) CertificateQueryBuilder {
+	return b.withOptions(query.CertificateTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b CertificateQueryBuilder) Skip(n int) CertificateQueryBuilder {
+	return b.withOptions(query.CertificateSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b CertificateQueryBuilder) Do(ctx context.Context) ([]model.Certificate, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b CertificateQueryBuilder) First(ctx context.Context) (*model.Certificate, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b CertificateQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyCertificateOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// CertificateUpdateBuilder builds a Certificate update operation incrementally.
+type CertificateUpdateBuilder struct {
+	action CertificateActions
+	wheres []query.CertificateWhereClause
+	sets   []query.CertificateSetClause
+}
+
+// Update starts a staged Certificate update operation.
+func (a CertificateActions) Update() CertificateUpdateBuilder {
+	return CertificateUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b CertificateUpdateBuilder) Where(clauses ...query.CertificateWhereClause) CertificateUpdateBuilder {
+	next := CertificateUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.CertificateWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.CertificateSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b CertificateUpdateBuilder) Set(sets ...query.CertificateSetClause) CertificateUpdateBuilder {
+	next := CertificateUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.CertificateWhereClause(nil), b.wheres...),
+		sets:   make([]query.CertificateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b CertificateUpdateBuilder) combinedWhere() (query.CertificateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.CertificateWhereClause{}, fmt.Errorf("Certificate.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.Certificate.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b CertificateUpdateBuilder) Do(ctx context.Context) (*model.Certificate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b CertificateUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// CertificateDeleteBuilder builds a Certificate delete operation incrementally.
+type CertificateDeleteBuilder struct {
+	action CertificateActions
+	wheres []query.CertificateWhereClause
+}
+
+// Delete starts a staged Certificate delete operation.
+func (a CertificateActions) Delete() CertificateDeleteBuilder {
+	return CertificateDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b CertificateDeleteBuilder) Where(clauses ...query.CertificateWhereClause) CertificateDeleteBuilder {
+	next := CertificateDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.CertificateWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b CertificateDeleteBuilder) combinedWhere() (query.CertificateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.CertificateWhereClause{}, fmt.Errorf("Certificate.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.Certificate.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b CertificateDeleteBuilder) Do(ctx context.Context) (*model.Certificate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b CertificateDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple Certificate records.
+func (a CertificateActions) FindMany(ctx context.Context, opts ...query.CertificateQueryOption) ([]model.Certificate, error) {
+	cfg := query.ApplyCertificateOptions(opts)
+	q := "SELECT id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at FROM certificates"
+	argIdx := 0
+	where, args := buildCertificateWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.Certificate
+	for rows.Next() {
+		var item model.Certificate
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Certificate.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching Certificate record.
+func (a CertificateActions) FindFirst(ctx context.Context, opts ...query.CertificateQueryOption) (*model.Certificate, error) {
+	opts = append(opts, query.CertificateTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single Certificate record by unique constraint.
+func (a CertificateActions) FindUnique(ctx context.Context, where query.CertificateWhereClause) (*model.Certificate, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at FROM certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.Certificate
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("Certificate.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single Certificate record.
+func (a CertificateActions) CreateOne(ctx context.Context, sets ...query.CertificateSetClause) (*model.Certificate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("Certificate.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.Certificate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Certificate.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple Certificate records.
+func (a CertificateActions) CreateMany(ctx context.Context, data []query.CertificateCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a CertificateActions) buildCertificateCreateManySQL(data []query.CertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single Certificate record matching the where clause.
+func (a CertificateActions) UpdateOne(ctx context.Context, where query.CertificateWhereClause, sets ...query.CertificateSetClause) (*model.Certificate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("Certificate.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE certificates SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Certificate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("Certificate.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple Certificate records matching the where clauses.
+func (a CertificateActions) UpdateMany(ctx context.Context, wheres []query.CertificateWhereClause, sets ...query.CertificateSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("Certificate.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildCertificateWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE certificates SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("Certificate.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single Certificate record.
+func (a CertificateActions) UpsertOne(ctx context.Context, where query.CertificateWhereClause, create []query.CertificateSetClause, update []query.CertificateSetClause) (*model.Certificate, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("Certificate.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Certificate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("Certificate.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single Certificate record matching the where clause.
+func (a CertificateActions) DeleteOne(ctx context.Context, where query.CertificateWhereClause) (*model.Certificate, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
+	q := "DELETE FROM certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.Certificate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("Certificate.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple Certificate records matching the where clauses.
+func (a CertificateActions) DeleteMany(ctx context.Context, wheres ...query.CertificateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("Certificate.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of Certificate records matching the where clauses.
+func (a CertificateActions) Count(ctx context.Context, wheres ...query.CertificateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("Certificate.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for Certificate.
+func (a CertificateActions) Aggregate(ctx context.Context, opts ...query.CertificateAggregateOption) (*query.CertificateAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM certificates", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.CertificateAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("Certificate.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on Certificate.
+func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts ...query.CertificateAggregateOption) ([]query.CertificateGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM certificates GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("Certificate.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.CertificateGroupByResult
+	for rows.Next() {
+		r := query.CertificateGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("Certificate.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // buildClusterWhere recursively builds a WHERE clause string and arguments.
 func buildClusterWhere(c *Client, wheres []query.ClusterWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -1318,14 +2197,14 @@ func (b ClusterCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Clus
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "created_at", "updated_at"})
+		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "creator_id", "name", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Cluster
-			if err := rows.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -1352,7 +2231,7 @@ func (b ClusterCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "name", "created_at", "updated_at"}
+		returningColumns = []string{"id", "creator_id", "name", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -1561,7 +2440,7 @@ func (b ClusterDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Cluster records.
 func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQueryOption) ([]model.Cluster, error) {
 	cfg := query.ApplyClusterOptions(opts)
-	q := "SELECT id, name, created_at, updated_at FROM clusters"
+	q := "SELECT id, creator_id, name, created_at, updated_at FROM clusters"
 	argIdx := 0
 	where, args := buildClusterWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -1588,7 +2467,7 @@ func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQuery
 	var results []model.Cluster
 	for rows.Next() {
 		var item model.Cluster
-		if err := rows.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -1613,14 +2492,14 @@ func (a ClusterActions) FindFirst(ctx context.Context, opts ...query.ClusterQuer
 func (a ClusterActions) FindUnique(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
-	q := "SELECT id, name, created_at, updated_at FROM clusters"
+	q := "SELECT id, creator_id, name, created_at, updated_at FROM clusters"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Cluster
-	if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -1645,10 +2524,10 @@ func (a ClusterActions) CreateOne(ctx context.Context, sets ...query.ClusterSetC
 	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -1667,7 +2546,7 @@ func (a ClusterActions) CreateMany(ctx context.Context, data []query.ClusterCrea
 }
 
 func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "name", "created_at", "updated_at"}
+	cols := []string{"id", "creator_id", "name", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -1723,10 +2602,10 @@ func (a ClusterActions) UpdateOne(ctx context.Context, where query.ClusterWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -1809,10 +2688,10 @@ func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -1833,10 +2712,10 @@ func (a ClusterActions) DeleteOne(ctx context.Context, where query.ClusterWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -2823,6 +3702,870 @@ func (a ClusterGroupActions) GroupBy(ctx context.Context, fields []string, opts 
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("ClusterGroup.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildClusterMemberWhere recursively builds a WHERE clause string and arguments.
+func buildClusterMemberWhere(c *Client, wheres []query.ClusterMemberWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ClusterMemberWhereClause); ok {
+				sub, subArgs := buildClusterMemberWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ClusterMemberWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildClusterMemberWhere(c, []query.ClusterMemberWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ClusterMemberWhereClause); ok {
+				sub, subArgs := buildClusterMemberWhere(c, []query.ClusterMemberWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ClusterMemberActions provides database operations for the ClusterMember model.
+type ClusterMemberActions struct {
+	client *Client
+}
+
+// ClusterMemberCreateBuilder builds a ClusterMember create operation incrementally.
+type ClusterMemberCreateBuilder struct {
+	action ClusterMemberActions
+	sets   []query.ClusterMemberSetClause
+}
+
+// Create starts a staged ClusterMember create operation.
+func (a ClusterMemberActions) Create() ClusterMemberCreateBuilder {
+	return ClusterMemberCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ClusterMemberCreateBuilder) Set(sets ...query.ClusterMemberSetClause) ClusterMemberCreateBuilder {
+	next := ClusterMemberCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ClusterMemberSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ClusterMemberCreateBuilder) Do(ctx context.Context) (*model.ClusterMember, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ClusterMemberCreateManyBuilder builds a bulk ClusterMember insert operation.
+type ClusterMemberCreateManyBuilder struct {
+	action            ClusterMemberActions
+	data              []query.ClusterMemberCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ClusterMember insert operation.
+func (a ClusterMemberActions) BulkCreate(data []query.ClusterMemberCreateInput) ClusterMemberCreateManyBuilder {
+	return ClusterMemberCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ClusterMemberCreateManyBuilder) OnConflictDoNothing(columns ...string) ClusterMemberCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ClusterMemberCreateManyBuilder) Returning(columns ...string) ClusterMemberCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ClusterMemberCreateManyBuilder) BatchSize(n int) ClusterMemberCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ClusterMemberCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterMemberCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ClusterMember.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ClusterMember.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ClusterMemberCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ClusterMember, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ClusterMember
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterMemberCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"cluster_id", "user_id", "permission", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ClusterMember
+			if err := rows.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ClusterMemberCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"cluster_id", "user_id", "permission", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterMemberCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ClusterMember.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ClusterMemberQueryBuilder builds a ClusterMember query incrementally.
+type ClusterMemberQueryBuilder struct {
+	action ClusterMemberActions
+	opts   []query.ClusterMemberQueryOption
+}
+
+// Query starts a staged ClusterMember query.
+func (a ClusterMemberActions) Query() ClusterMemberQueryBuilder {
+	return ClusterMemberQueryBuilder{action: a}
+}
+
+func (b ClusterMemberQueryBuilder) withOptions(opts ...query.ClusterMemberQueryOption) ClusterMemberQueryBuilder {
+	next := ClusterMemberQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ClusterMemberQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ClusterMemberQueryBuilder) Where(clauses ...query.ClusterMemberWhereClause) ClusterMemberQueryBuilder {
+	opts := make([]query.ClusterMemberQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ClusterMemberQueryBuilder) OrderBy(clause query.ClusterMemberOrderByClause) ClusterMemberQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ClusterMemberQueryBuilder) Include(clauses ...query.ClusterMemberIncludeClause) ClusterMemberQueryBuilder {
+	opts := make([]query.ClusterMemberQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ClusterMemberQueryBuilder) Take(n int) ClusterMemberQueryBuilder {
+	return b.withOptions(query.ClusterMemberTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ClusterMemberQueryBuilder) Skip(n int) ClusterMemberQueryBuilder {
+	return b.withOptions(query.ClusterMemberSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ClusterMemberQueryBuilder) Do(ctx context.Context) ([]model.ClusterMember, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ClusterMemberQueryBuilder) First(ctx context.Context) (*model.ClusterMember, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ClusterMemberQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyClusterMemberOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ClusterMemberUpdateBuilder builds a ClusterMember update operation incrementally.
+type ClusterMemberUpdateBuilder struct {
+	action ClusterMemberActions
+	wheres []query.ClusterMemberWhereClause
+	sets   []query.ClusterMemberSetClause
+}
+
+// Update starts a staged ClusterMember update operation.
+func (a ClusterMemberActions) Update() ClusterMemberUpdateBuilder {
+	return ClusterMemberUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ClusterMemberUpdateBuilder) Where(clauses ...query.ClusterMemberWhereClause) ClusterMemberUpdateBuilder {
+	next := ClusterMemberUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterMemberWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ClusterMemberSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ClusterMemberUpdateBuilder) Set(sets ...query.ClusterMemberSetClause) ClusterMemberUpdateBuilder {
+	next := ClusterMemberUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ClusterMemberWhereClause(nil), b.wheres...),
+		sets:   make([]query.ClusterMemberSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ClusterMemberUpdateBuilder) combinedWhere() (query.ClusterMemberWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterMemberWhereClause{}, fmt.Errorf("ClusterMember.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterMember.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ClusterMemberUpdateBuilder) Do(ctx context.Context) (*model.ClusterMember, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ClusterMemberUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ClusterMemberDeleteBuilder builds a ClusterMember delete operation incrementally.
+type ClusterMemberDeleteBuilder struct {
+	action ClusterMemberActions
+	wheres []query.ClusterMemberWhereClause
+}
+
+// Delete starts a staged ClusterMember delete operation.
+func (a ClusterMemberActions) Delete() ClusterMemberDeleteBuilder {
+	return ClusterMemberDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ClusterMemberDeleteBuilder) Where(clauses ...query.ClusterMemberWhereClause) ClusterMemberDeleteBuilder {
+	next := ClusterMemberDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterMemberWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ClusterMemberDeleteBuilder) combinedWhere() (query.ClusterMemberWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterMemberWhereClause{}, fmt.Errorf("ClusterMember.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterMember.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ClusterMemberDeleteBuilder) Do(ctx context.Context) (*model.ClusterMember, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ClusterMemberDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ClusterMember records.
+func (a ClusterMemberActions) FindMany(ctx context.Context, opts ...query.ClusterMemberQueryOption) ([]model.ClusterMember, error) {
+	cfg := query.ApplyClusterMemberOptions(opts)
+	q := "SELECT cluster_id, user_id, permission, created_at FROM cluster_members"
+	argIdx := 0
+	where, args := buildClusterMemberWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ClusterMember
+	for rows.Next() {
+		var item model.ClusterMember
+		if err := rows.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterMember.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ClusterMember record.
+func (a ClusterMemberActions) FindFirst(ctx context.Context, opts ...query.ClusterMemberQueryOption) (*model.ClusterMember, error) {
+	opts = append(opts, query.ClusterMemberTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ClusterMember record by unique constraint.
+func (a ClusterMemberActions) FindUnique(ctx context.Context, where query.ClusterMemberWhereClause) (*model.ClusterMember, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
+	q := "SELECT cluster_id, user_id, permission, created_at FROM cluster_members"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ClusterMember
+	if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ClusterMember.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ClusterMember record.
+func (a ClusterMemberActions) CreateOne(ctx context.Context, sets ...query.ClusterMemberSetClause) (*model.ClusterMember, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterMember.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING cluster_id, user_id, permission, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ClusterMember
+		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterMember.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ClusterMember records.
+func (a ClusterMemberActions) CreateMany(ctx context.Context, data []query.ClusterMemberCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ClusterMemberActions) buildClusterMemberCreateManySQL(data []query.ClusterMemberCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"cluster_id", "user_id", "permission", "created_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ClusterMember record matching the where clause.
+func (a ClusterMemberActions) UpdateOne(ctx context.Context, where query.ClusterMemberWhereClause, sets ...query.ClusterMemberSetClause) (*model.ClusterMember, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterMember.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE cluster_members SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING cluster_id, user_id, permission, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterMember
+		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterMember.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ClusterMember records matching the where clauses.
+func (a ClusterMemberActions) UpdateMany(ctx context.Context, wheres []query.ClusterMemberWhereClause, sets ...query.ClusterMemberSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ClusterMember.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterMemberWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE cluster_members SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterMember.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ClusterMember record.
+func (a ClusterMemberActions) UpsertOne(ctx context.Context, where query.ClusterMemberWhereClause, create []query.ClusterMemberSetClause, update []query.ClusterMemberSetClause) (*model.ClusterMember, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ClusterMember.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING cluster_id, user_id, permission, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterMember
+		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterMember.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ClusterMember record matching the where clause.
+func (a ClusterMemberActions) DeleteOne(ctx context.Context, where query.ClusterMemberWhereClause) (*model.ClusterMember, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
+	q := "DELETE FROM cluster_members"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING cluster_id, user_id, permission, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterMember
+		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterMember.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ClusterMember records matching the where clauses.
+func (a ClusterMemberActions) DeleteMany(ctx context.Context, wheres ...query.ClusterMemberWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterMemberWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM cluster_members"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterMember.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ClusterMember records matching the where clauses.
+func (a ClusterMemberActions) Count(ctx context.Context, wheres ...query.ClusterMemberWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterMemberWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM cluster_members"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ClusterMember.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ClusterMember.
+func (a ClusterMemberActions) Aggregate(ctx context.Context, opts ...query.ClusterMemberAggregateOption) (*query.ClusterMemberAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM cluster_members", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ClusterMemberAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ClusterMember.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ClusterMember.
+func (a ClusterMemberActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterMemberAggregateOption) ([]query.ClusterMemberGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM cluster_members GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterMember.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ClusterMemberGroupByResult
+	for rows.Next() {
+		r := query.ClusterMemberGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ClusterMember.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -8895,6 +10638,870 @@ func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts .
 	return results, rows.Err()
 }
 
+// buildOriginBackendWhere recursively builds a WHERE clause string and arguments.
+func buildOriginBackendWhere(c *Client, wheres []query.OriginBackendWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.OriginBackendWhereClause); ok {
+				sub, subArgs := buildOriginBackendWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.OriginBackendWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildOriginBackendWhere(c, []query.OriginBackendWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.OriginBackendWhereClause); ok {
+				sub, subArgs := buildOriginBackendWhere(c, []query.OriginBackendWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// OriginBackendActions provides database operations for the OriginBackend model.
+type OriginBackendActions struct {
+	client *Client
+}
+
+// OriginBackendCreateBuilder builds a OriginBackend create operation incrementally.
+type OriginBackendCreateBuilder struct {
+	action OriginBackendActions
+	sets   []query.OriginBackendSetClause
+}
+
+// Create starts a staged OriginBackend create operation.
+func (a OriginBackendActions) Create() OriginBackendCreateBuilder {
+	return OriginBackendCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b OriginBackendCreateBuilder) Set(sets ...query.OriginBackendSetClause) OriginBackendCreateBuilder {
+	next := OriginBackendCreateBuilder{
+		action: b.action,
+		sets:   make([]query.OriginBackendSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b OriginBackendCreateBuilder) Do(ctx context.Context) (*model.OriginBackend, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// OriginBackendCreateManyBuilder builds a bulk OriginBackend insert operation.
+type OriginBackendCreateManyBuilder struct {
+	action            OriginBackendActions
+	data              []query.OriginBackendCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk OriginBackend insert operation.
+func (a OriginBackendActions) BulkCreate(data []query.OriginBackendCreateInput) OriginBackendCreateManyBuilder {
+	return OriginBackendCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b OriginBackendCreateManyBuilder) OnConflictDoNothing(columns ...string) OriginBackendCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b OriginBackendCreateManyBuilder) Returning(columns ...string) OriginBackendCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b OriginBackendCreateManyBuilder) BatchSize(n int) OriginBackendCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b OriginBackendCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildOriginBackendCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("OriginBackend.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("OriginBackend.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b OriginBackendCreateManyBuilder) DoReturning(ctx context.Context) ([]model.OriginBackend, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.OriginBackend
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildOriginBackendCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "origin_pool_id", "protocol", "address", "host_header", "weight", "enabled", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.OriginBackend
+			if err := rows.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b OriginBackendCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "origin_pool_id", "protocol", "address", "host_header", "weight", "enabled", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildOriginBackendCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("OriginBackend.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// OriginBackendQueryBuilder builds a OriginBackend query incrementally.
+type OriginBackendQueryBuilder struct {
+	action OriginBackendActions
+	opts   []query.OriginBackendQueryOption
+}
+
+// Query starts a staged OriginBackend query.
+func (a OriginBackendActions) Query() OriginBackendQueryBuilder {
+	return OriginBackendQueryBuilder{action: a}
+}
+
+func (b OriginBackendQueryBuilder) withOptions(opts ...query.OriginBackendQueryOption) OriginBackendQueryBuilder {
+	next := OriginBackendQueryBuilder{
+		action: b.action,
+		opts:   make([]query.OriginBackendQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b OriginBackendQueryBuilder) Where(clauses ...query.OriginBackendWhereClause) OriginBackendQueryBuilder {
+	opts := make([]query.OriginBackendQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b OriginBackendQueryBuilder) OrderBy(clause query.OriginBackendOrderByClause) OriginBackendQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b OriginBackendQueryBuilder) Include(clauses ...query.OriginBackendIncludeClause) OriginBackendQueryBuilder {
+	opts := make([]query.OriginBackendQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b OriginBackendQueryBuilder) Take(n int) OriginBackendQueryBuilder {
+	return b.withOptions(query.OriginBackendTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b OriginBackendQueryBuilder) Skip(n int) OriginBackendQueryBuilder {
+	return b.withOptions(query.OriginBackendSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b OriginBackendQueryBuilder) Do(ctx context.Context) ([]model.OriginBackend, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b OriginBackendQueryBuilder) First(ctx context.Context) (*model.OriginBackend, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b OriginBackendQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyOriginBackendOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// OriginBackendUpdateBuilder builds a OriginBackend update operation incrementally.
+type OriginBackendUpdateBuilder struct {
+	action OriginBackendActions
+	wheres []query.OriginBackendWhereClause
+	sets   []query.OriginBackendSetClause
+}
+
+// Update starts a staged OriginBackend update operation.
+func (a OriginBackendActions) Update() OriginBackendUpdateBuilder {
+	return OriginBackendUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b OriginBackendUpdateBuilder) Where(clauses ...query.OriginBackendWhereClause) OriginBackendUpdateBuilder {
+	next := OriginBackendUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.OriginBackendWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.OriginBackendSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b OriginBackendUpdateBuilder) Set(sets ...query.OriginBackendSetClause) OriginBackendUpdateBuilder {
+	next := OriginBackendUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.OriginBackendWhereClause(nil), b.wheres...),
+		sets:   make([]query.OriginBackendSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b OriginBackendUpdateBuilder) combinedWhere() (query.OriginBackendWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.OriginBackendWhereClause{}, fmt.Errorf("OriginBackend.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.OriginBackend.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b OriginBackendUpdateBuilder) Do(ctx context.Context) (*model.OriginBackend, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b OriginBackendUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// OriginBackendDeleteBuilder builds a OriginBackend delete operation incrementally.
+type OriginBackendDeleteBuilder struct {
+	action OriginBackendActions
+	wheres []query.OriginBackendWhereClause
+}
+
+// Delete starts a staged OriginBackend delete operation.
+func (a OriginBackendActions) Delete() OriginBackendDeleteBuilder {
+	return OriginBackendDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b OriginBackendDeleteBuilder) Where(clauses ...query.OriginBackendWhereClause) OriginBackendDeleteBuilder {
+	next := OriginBackendDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.OriginBackendWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b OriginBackendDeleteBuilder) combinedWhere() (query.OriginBackendWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.OriginBackendWhereClause{}, fmt.Errorf("OriginBackend.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.OriginBackend.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b OriginBackendDeleteBuilder) Do(ctx context.Context) (*model.OriginBackend, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b OriginBackendDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple OriginBackend records.
+func (a OriginBackendActions) FindMany(ctx context.Context, opts ...query.OriginBackendQueryOption) ([]model.OriginBackend, error) {
+	cfg := query.ApplyOriginBackendOptions(opts)
+	q := "SELECT id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at FROM origin_backends"
+	argIdx := 0
+	where, args := buildOriginBackendWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.OriginBackend
+	for rows.Next() {
+		var item model.OriginBackend
+		if err := rows.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("OriginBackend.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching OriginBackend record.
+func (a OriginBackendActions) FindFirst(ctx context.Context, opts ...query.OriginBackendQueryOption) (*model.OriginBackend, error) {
+	opts = append(opts, query.OriginBackendTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single OriginBackend record by unique constraint.
+func (a OriginBackendActions) FindUnique(ctx context.Context, where query.OriginBackendWhereClause) (*model.OriginBackend, error) {
+	argIdx := 0
+	whereSQL, args := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
+	q := "SELECT id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at FROM origin_backends"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.OriginBackend
+	if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("OriginBackend.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single OriginBackend record.
+func (a OriginBackendActions) CreateOne(ctx context.Context, sets ...query.OriginBackendSetClause) (*model.OriginBackend, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("OriginBackend.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.OriginBackend
+		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("OriginBackend.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple OriginBackend records.
+func (a OriginBackendActions) CreateMany(ctx context.Context, data []query.OriginBackendCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a OriginBackendActions) buildOriginBackendCreateManySQL(data []query.OriginBackendCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "origin_pool_id", "protocol", "address", "host_header", "weight", "enabled", "created_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single OriginBackend record matching the where clause.
+func (a OriginBackendActions) UpdateOne(ctx context.Context, where query.OriginBackendWhereClause, sets ...query.OriginBackendSetClause) (*model.OriginBackend, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("OriginBackend.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE origin_backends SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.OriginBackend
+		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("OriginBackend.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple OriginBackend records matching the where clauses.
+func (a OriginBackendActions) UpdateMany(ctx context.Context, wheres []query.OriginBackendWhereClause, sets ...query.OriginBackendSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("OriginBackend.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildOriginBackendWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE origin_backends SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("OriginBackend.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single OriginBackend record.
+func (a OriginBackendActions) UpsertOne(ctx context.Context, where query.OriginBackendWhereClause, create []query.OriginBackendSetClause, update []query.OriginBackendSetClause) (*model.OriginBackend, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("OriginBackend.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.OriginBackend
+		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("OriginBackend.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single OriginBackend record matching the where clause.
+func (a OriginBackendActions) DeleteOne(ctx context.Context, where query.OriginBackendWhereClause) (*model.OriginBackend, error) {
+	argIdx := 0
+	whereSQL, args := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
+	q := "DELETE FROM origin_backends"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.OriginBackend
+		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("OriginBackend.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple OriginBackend records matching the where clauses.
+func (a OriginBackendActions) DeleteMany(ctx context.Context, wheres ...query.OriginBackendWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildOriginBackendWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM origin_backends"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("OriginBackend.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of OriginBackend records matching the where clauses.
+func (a OriginBackendActions) Count(ctx context.Context, wheres ...query.OriginBackendWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildOriginBackendWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM origin_backends"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("OriginBackend.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for OriginBackend.
+func (a OriginBackendActions) Aggregate(ctx context.Context, opts ...query.OriginBackendAggregateOption) (*query.OriginBackendAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM origin_backends", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.OriginBackendAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("OriginBackend.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on OriginBackend.
+func (a OriginBackendActions) GroupBy(ctx context.Context, fields []string, opts ...query.OriginBackendAggregateOption) ([]query.OriginBackendGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM origin_backends GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("OriginBackend.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.OriginBackendGroupByResult
+	for rows.Next() {
+		r := query.OriginBackendGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("OriginBackend.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 // buildOriginPoolWhere recursively builds a WHERE clause string and arguments.
 func buildOriginPoolWhere(c *Client, wheres []query.OriginPoolWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -9094,14 +11701,14 @@ func (b OriginPoolCreateManyBuilder) DoReturning(ctx context.Context) ([]model.O
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "protocol", "backends", "health_uri", "timeout", "headers", "created_at", "updated_at"})
+		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.OriginPool
-			if err := rows.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -9128,7 +11735,7 @@ func (b OriginPoolCreateManyBuilder) DoReturningValues(ctx context.Context) ([]m
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "name", "protocol", "backends", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -9337,7 +11944,7 @@ func (b OriginPoolDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple OriginPool records.
 func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoolQueryOption) ([]model.OriginPool, error) {
 	cfg := query.ApplyOriginPoolOptions(opts)
-	q := "SELECT id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
 	argIdx := 0
 	where, args := buildOriginPoolWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -9364,7 +11971,7 @@ func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoo
 	var results []model.OriginPool
 	for rows.Next() {
 		var item model.OriginPool
-		if err := rows.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -9389,14 +11996,14 @@ func (a OriginPoolActions) FindFirst(ctx context.Context, opts ...query.OriginPo
 func (a OriginPoolActions) FindUnique(ctx context.Context, where query.OriginPoolWhereClause) (*model.OriginPool, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, []query.OriginPoolWhereClause{where}, &argIdx)
-	q := "SELECT id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.OriginPool
-	if err := row.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -9421,10 +12028,10 @@ func (a OriginPoolActions) CreateOne(ctx context.Context, sets ...query.OriginPo
 	q := fmt.Sprintf("INSERT INTO origin_pools (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -9443,7 +12050,7 @@ func (a OriginPoolActions) CreateMany(ctx context.Context, data []query.OriginPo
 }
 
 func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "name", "protocol", "backends", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "health_uri", "timeout", "headers", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -9499,10 +12106,10 @@ func (a OriginPoolActions) UpdateOne(ctx context.Context, where query.OriginPool
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -9585,10 +12192,10 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -9609,10 +12216,10 @@ func (a OriginPoolActions) DeleteOne(ctx context.Context, where query.OriginPool
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, protocol, backends, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, health_uri, timeout, headers, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.Name, &item.Protocol, &item.Backends, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -12550,14 +15157,14 @@ func (b SiteCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Site, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildSiteCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "hostname", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"})
+		q, args := b.action.buildSiteCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "creator_id", "name", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Site.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Site
-			if err := rows.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Site.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -12584,7 +15191,7 @@ func (b SiteCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "hostname", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "creator_id", "name", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -12793,7 +15400,7 @@ func (b SiteDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Site records.
 func (a SiteActions) FindMany(ctx context.Context, opts ...query.SiteQueryOption) ([]model.Site, error) {
 	cfg := query.ApplySiteOptions(opts)
-	q := "SELECT id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
+	q := "SELECT id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
 	argIdx := 0
 	where, args := buildSiteWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -12820,7 +15427,7 @@ func (a SiteActions) FindMany(ctx context.Context, opts ...query.SiteQueryOption
 	var results []model.Site
 	for rows.Next() {
 		var item model.Site
-		if err := rows.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Site.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -12845,14 +15452,14 @@ func (a SiteActions) FindFirst(ctx context.Context, opts ...query.SiteQueryOptio
 func (a SiteActions) FindUnique(ctx context.Context, where query.SiteWhereClause) (*model.Site, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteWhere(a.client, []query.SiteWhereClause{where}, &argIdx)
-	q := "SELECT id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
+	q := "SELECT id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Site
-	if err := row.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -12877,10 +15484,10 @@ func (a SiteActions) CreateOne(ctx context.Context, sets ...query.SiteSetClause)
 	q := fmt.Sprintf("INSERT INTO sites (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Site
-		if err := row.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Site.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -12899,7 +15506,7 @@ func (a SiteActions) CreateMany(ctx context.Context, data []query.SiteCreateInpu
 }
 
 func (a SiteActions) buildSiteCreateManySQL(data []query.SiteCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "hostname", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "creator_id", "name", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -12955,10 +15562,10 @@ func (a SiteActions) UpdateOne(ctx context.Context, where query.SiteWhereClause,
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
-		if err := row.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -13041,10 +15648,10 @@ func (a SiteActions) UpsertOne(ctx context.Context, where query.SiteWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
-		if err := row.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Site.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -13065,10 +15672,10 @@ func (a SiteActions) DeleteOne(ctx context.Context, where query.SiteWhereClause)
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, hostname, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
-		if err := row.Scan(&item.Id, &item.Hostname, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -13191,6 +15798,1734 @@ func (a SiteActions) GroupBy(ctx context.Context, fields []string, opts ...query
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("Site.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildSiteCertificateWhere recursively builds a WHERE clause string and arguments.
+func buildSiteCertificateWhere(c *Client, wheres []query.SiteCertificateWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.SiteCertificateWhereClause); ok {
+				sub, subArgs := buildSiteCertificateWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.SiteCertificateWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildSiteCertificateWhere(c, []query.SiteCertificateWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.SiteCertificateWhereClause); ok {
+				sub, subArgs := buildSiteCertificateWhere(c, []query.SiteCertificateWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// SiteCertificateActions provides database operations for the SiteCertificate model.
+type SiteCertificateActions struct {
+	client *Client
+}
+
+// SiteCertificateCreateBuilder builds a SiteCertificate create operation incrementally.
+type SiteCertificateCreateBuilder struct {
+	action SiteCertificateActions
+	sets   []query.SiteCertificateSetClause
+}
+
+// Create starts a staged SiteCertificate create operation.
+func (a SiteCertificateActions) Create() SiteCertificateCreateBuilder {
+	return SiteCertificateCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b SiteCertificateCreateBuilder) Set(sets ...query.SiteCertificateSetClause) SiteCertificateCreateBuilder {
+	next := SiteCertificateCreateBuilder{
+		action: b.action,
+		sets:   make([]query.SiteCertificateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b SiteCertificateCreateBuilder) Do(ctx context.Context) (*model.SiteCertificate, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// SiteCertificateCreateManyBuilder builds a bulk SiteCertificate insert operation.
+type SiteCertificateCreateManyBuilder struct {
+	action            SiteCertificateActions
+	data              []query.SiteCertificateCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk SiteCertificate insert operation.
+func (a SiteCertificateActions) BulkCreate(data []query.SiteCertificateCreateInput) SiteCertificateCreateManyBuilder {
+	return SiteCertificateCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b SiteCertificateCreateManyBuilder) OnConflictDoNothing(columns ...string) SiteCertificateCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b SiteCertificateCreateManyBuilder) Returning(columns ...string) SiteCertificateCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b SiteCertificateCreateManyBuilder) BatchSize(n int) SiteCertificateCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b SiteCertificateCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("SiteCertificate.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("SiteCertificate.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b SiteCertificateCreateManyBuilder) DoReturning(ctx context.Context) ([]model.SiteCertificate, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.SiteCertificate
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"site_id", "certificate_id"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.SiteCertificate
+			if err := rows.Scan(&item.SiteId, &item.CertificateId); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b SiteCertificateCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"site_id", "certificate_id"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("SiteCertificate.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// SiteCertificateQueryBuilder builds a SiteCertificate query incrementally.
+type SiteCertificateQueryBuilder struct {
+	action SiteCertificateActions
+	opts   []query.SiteCertificateQueryOption
+}
+
+// Query starts a staged SiteCertificate query.
+func (a SiteCertificateActions) Query() SiteCertificateQueryBuilder {
+	return SiteCertificateQueryBuilder{action: a}
+}
+
+func (b SiteCertificateQueryBuilder) withOptions(opts ...query.SiteCertificateQueryOption) SiteCertificateQueryBuilder {
+	next := SiteCertificateQueryBuilder{
+		action: b.action,
+		opts:   make([]query.SiteCertificateQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b SiteCertificateQueryBuilder) Where(clauses ...query.SiteCertificateWhereClause) SiteCertificateQueryBuilder {
+	opts := make([]query.SiteCertificateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b SiteCertificateQueryBuilder) OrderBy(clause query.SiteCertificateOrderByClause) SiteCertificateQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b SiteCertificateQueryBuilder) Include(clauses ...query.SiteCertificateIncludeClause) SiteCertificateQueryBuilder {
+	opts := make([]query.SiteCertificateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b SiteCertificateQueryBuilder) Take(n int) SiteCertificateQueryBuilder {
+	return b.withOptions(query.SiteCertificateTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b SiteCertificateQueryBuilder) Skip(n int) SiteCertificateQueryBuilder {
+	return b.withOptions(query.SiteCertificateSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b SiteCertificateQueryBuilder) Do(ctx context.Context) ([]model.SiteCertificate, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b SiteCertificateQueryBuilder) First(ctx context.Context) (*model.SiteCertificate, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b SiteCertificateQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplySiteCertificateOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// SiteCertificateUpdateBuilder builds a SiteCertificate update operation incrementally.
+type SiteCertificateUpdateBuilder struct {
+	action SiteCertificateActions
+	wheres []query.SiteCertificateWhereClause
+	sets   []query.SiteCertificateSetClause
+}
+
+// Update starts a staged SiteCertificate update operation.
+func (a SiteCertificateActions) Update() SiteCertificateUpdateBuilder {
+	return SiteCertificateUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b SiteCertificateUpdateBuilder) Where(clauses ...query.SiteCertificateWhereClause) SiteCertificateUpdateBuilder {
+	next := SiteCertificateUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.SiteCertificateWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.SiteCertificateSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b SiteCertificateUpdateBuilder) Set(sets ...query.SiteCertificateSetClause) SiteCertificateUpdateBuilder {
+	next := SiteCertificateUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.SiteCertificateWhereClause(nil), b.wheres...),
+		sets:   make([]query.SiteCertificateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b SiteCertificateUpdateBuilder) combinedWhere() (query.SiteCertificateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteCertificateWhereClause{}, fmt.Errorf("SiteCertificate.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteCertificate.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b SiteCertificateUpdateBuilder) Do(ctx context.Context) (*model.SiteCertificate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b SiteCertificateUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// SiteCertificateDeleteBuilder builds a SiteCertificate delete operation incrementally.
+type SiteCertificateDeleteBuilder struct {
+	action SiteCertificateActions
+	wheres []query.SiteCertificateWhereClause
+}
+
+// Delete starts a staged SiteCertificate delete operation.
+func (a SiteCertificateActions) Delete() SiteCertificateDeleteBuilder {
+	return SiteCertificateDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b SiteCertificateDeleteBuilder) Where(clauses ...query.SiteCertificateWhereClause) SiteCertificateDeleteBuilder {
+	next := SiteCertificateDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.SiteCertificateWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b SiteCertificateDeleteBuilder) combinedWhere() (query.SiteCertificateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteCertificateWhereClause{}, fmt.Errorf("SiteCertificate.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteCertificate.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b SiteCertificateDeleteBuilder) Do(ctx context.Context) (*model.SiteCertificate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b SiteCertificateDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple SiteCertificate records.
+func (a SiteCertificateActions) FindMany(ctx context.Context, opts ...query.SiteCertificateQueryOption) ([]model.SiteCertificate, error) {
+	cfg := query.ApplySiteCertificateOptions(opts)
+	q := "SELECT site_id, certificate_id FROM site_certificates"
+	argIdx := 0
+	where, args := buildSiteCertificateWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.SiteCertificate
+	for rows.Next() {
+		var item model.SiteCertificate
+		if err := rows.Scan(&item.SiteId, &item.CertificateId); err != nil {
+			return nil, fmt.Errorf("SiteCertificate.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching SiteCertificate record.
+func (a SiteCertificateActions) FindFirst(ctx context.Context, opts ...query.SiteCertificateQueryOption) (*model.SiteCertificate, error) {
+	opts = append(opts, query.SiteCertificateTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single SiteCertificate record by unique constraint.
+func (a SiteCertificateActions) FindUnique(ctx context.Context, where query.SiteCertificateWhereClause) (*model.SiteCertificate, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
+	q := "SELECT site_id, certificate_id FROM site_certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.SiteCertificate
+	if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SiteCertificate.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single SiteCertificate record.
+func (a SiteCertificateActions) CreateOne(ctx context.Context, sets ...query.SiteCertificateSetClause) (*model.SiteCertificate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteCertificate.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING site_id, certificate_id"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.SiteCertificate
+		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
+			return nil, fmt.Errorf("SiteCertificate.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple SiteCertificate records.
+func (a SiteCertificateActions) CreateMany(ctx context.Context, data []query.SiteCertificateCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a SiteCertificateActions) buildSiteCertificateCreateManySQL(data []query.SiteCertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"site_id", "certificate_id"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single SiteCertificate record matching the where clause.
+func (a SiteCertificateActions) UpdateOne(ctx context.Context, where query.SiteCertificateWhereClause, sets ...query.SiteCertificateSetClause) (*model.SiteCertificate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteCertificate.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_certificates SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING site_id, certificate_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteCertificate
+		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteCertificate.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple SiteCertificate records matching the where clauses.
+func (a SiteCertificateActions) UpdateMany(ctx context.Context, wheres []query.SiteCertificateWhereClause, sets ...query.SiteCertificateSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("SiteCertificate.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteCertificateWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_certificates SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteCertificate.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single SiteCertificate record.
+func (a SiteCertificateActions) UpsertOne(ctx context.Context, where query.SiteCertificateWhereClause, create []query.SiteCertificateSetClause, update []query.SiteCertificateSetClause) (*model.SiteCertificate, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("SiteCertificate.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING site_id, certificate_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteCertificate
+		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
+			return nil, fmt.Errorf("SiteCertificate.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single SiteCertificate record matching the where clause.
+func (a SiteCertificateActions) DeleteOne(ctx context.Context, where query.SiteCertificateWhereClause) (*model.SiteCertificate, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
+	q := "DELETE FROM site_certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING site_id, certificate_id"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteCertificate
+		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteCertificate.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple SiteCertificate records matching the where clauses.
+func (a SiteCertificateActions) DeleteMany(ctx context.Context, wheres ...query.SiteCertificateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteCertificateWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM site_certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteCertificate.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of SiteCertificate records matching the where clauses.
+func (a SiteCertificateActions) Count(ctx context.Context, wheres ...query.SiteCertificateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteCertificateWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM site_certificates"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("SiteCertificate.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for SiteCertificate.
+func (a SiteCertificateActions) Aggregate(ctx context.Context, opts ...query.SiteCertificateAggregateOption) (*query.SiteCertificateAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_certificates", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.SiteCertificateAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("SiteCertificate.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on SiteCertificate.
+func (a SiteCertificateActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteCertificateAggregateOption) ([]query.SiteCertificateGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_certificates GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("SiteCertificate.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.SiteCertificateGroupByResult
+	for rows.Next() {
+		r := query.SiteCertificateGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("SiteCertificate.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildSiteDomainWhere recursively builds a WHERE clause string and arguments.
+func buildSiteDomainWhere(c *Client, wheres []query.SiteDomainWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.SiteDomainWhereClause); ok {
+				sub, subArgs := buildSiteDomainWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.SiteDomainWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildSiteDomainWhere(c, []query.SiteDomainWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.SiteDomainWhereClause); ok {
+				sub, subArgs := buildSiteDomainWhere(c, []query.SiteDomainWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// SiteDomainActions provides database operations for the SiteDomain model.
+type SiteDomainActions struct {
+	client *Client
+}
+
+// SiteDomainCreateBuilder builds a SiteDomain create operation incrementally.
+type SiteDomainCreateBuilder struct {
+	action SiteDomainActions
+	sets   []query.SiteDomainSetClause
+}
+
+// Create starts a staged SiteDomain create operation.
+func (a SiteDomainActions) Create() SiteDomainCreateBuilder {
+	return SiteDomainCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b SiteDomainCreateBuilder) Set(sets ...query.SiteDomainSetClause) SiteDomainCreateBuilder {
+	next := SiteDomainCreateBuilder{
+		action: b.action,
+		sets:   make([]query.SiteDomainSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b SiteDomainCreateBuilder) Do(ctx context.Context) (*model.SiteDomain, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// SiteDomainCreateManyBuilder builds a bulk SiteDomain insert operation.
+type SiteDomainCreateManyBuilder struct {
+	action            SiteDomainActions
+	data              []query.SiteDomainCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk SiteDomain insert operation.
+func (a SiteDomainActions) BulkCreate(data []query.SiteDomainCreateInput) SiteDomainCreateManyBuilder {
+	return SiteDomainCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b SiteDomainCreateManyBuilder) OnConflictDoNothing(columns ...string) SiteDomainCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b SiteDomainCreateManyBuilder) Returning(columns ...string) SiteDomainCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b SiteDomainCreateManyBuilder) BatchSize(n int) SiteDomainCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b SiteDomainCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteDomainCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("SiteDomain.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("SiteDomain.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b SiteDomainCreateManyBuilder) DoReturning(ctx context.Context) ([]model.SiteDomain, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.SiteDomain
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteDomainCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "hostname", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.SiteDomain
+			if err := rows.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b SiteDomainCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "site_id", "hostname", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteDomainCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("SiteDomain.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// SiteDomainQueryBuilder builds a SiteDomain query incrementally.
+type SiteDomainQueryBuilder struct {
+	action SiteDomainActions
+	opts   []query.SiteDomainQueryOption
+}
+
+// Query starts a staged SiteDomain query.
+func (a SiteDomainActions) Query() SiteDomainQueryBuilder {
+	return SiteDomainQueryBuilder{action: a}
+}
+
+func (b SiteDomainQueryBuilder) withOptions(opts ...query.SiteDomainQueryOption) SiteDomainQueryBuilder {
+	next := SiteDomainQueryBuilder{
+		action: b.action,
+		opts:   make([]query.SiteDomainQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b SiteDomainQueryBuilder) Where(clauses ...query.SiteDomainWhereClause) SiteDomainQueryBuilder {
+	opts := make([]query.SiteDomainQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b SiteDomainQueryBuilder) OrderBy(clause query.SiteDomainOrderByClause) SiteDomainQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b SiteDomainQueryBuilder) Include(clauses ...query.SiteDomainIncludeClause) SiteDomainQueryBuilder {
+	opts := make([]query.SiteDomainQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b SiteDomainQueryBuilder) Take(n int) SiteDomainQueryBuilder {
+	return b.withOptions(query.SiteDomainTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b SiteDomainQueryBuilder) Skip(n int) SiteDomainQueryBuilder {
+	return b.withOptions(query.SiteDomainSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b SiteDomainQueryBuilder) Do(ctx context.Context) ([]model.SiteDomain, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b SiteDomainQueryBuilder) First(ctx context.Context) (*model.SiteDomain, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b SiteDomainQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplySiteDomainOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// SiteDomainUpdateBuilder builds a SiteDomain update operation incrementally.
+type SiteDomainUpdateBuilder struct {
+	action SiteDomainActions
+	wheres []query.SiteDomainWhereClause
+	sets   []query.SiteDomainSetClause
+}
+
+// Update starts a staged SiteDomain update operation.
+func (a SiteDomainActions) Update() SiteDomainUpdateBuilder {
+	return SiteDomainUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b SiteDomainUpdateBuilder) Where(clauses ...query.SiteDomainWhereClause) SiteDomainUpdateBuilder {
+	next := SiteDomainUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.SiteDomainWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.SiteDomainSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b SiteDomainUpdateBuilder) Set(sets ...query.SiteDomainSetClause) SiteDomainUpdateBuilder {
+	next := SiteDomainUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.SiteDomainWhereClause(nil), b.wheres...),
+		sets:   make([]query.SiteDomainSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b SiteDomainUpdateBuilder) combinedWhere() (query.SiteDomainWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteDomainWhereClause{}, fmt.Errorf("SiteDomain.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteDomain.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b SiteDomainUpdateBuilder) Do(ctx context.Context) (*model.SiteDomain, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b SiteDomainUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// SiteDomainDeleteBuilder builds a SiteDomain delete operation incrementally.
+type SiteDomainDeleteBuilder struct {
+	action SiteDomainActions
+	wheres []query.SiteDomainWhereClause
+}
+
+// Delete starts a staged SiteDomain delete operation.
+func (a SiteDomainActions) Delete() SiteDomainDeleteBuilder {
+	return SiteDomainDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b SiteDomainDeleteBuilder) Where(clauses ...query.SiteDomainWhereClause) SiteDomainDeleteBuilder {
+	next := SiteDomainDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.SiteDomainWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b SiteDomainDeleteBuilder) combinedWhere() (query.SiteDomainWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteDomainWhereClause{}, fmt.Errorf("SiteDomain.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteDomain.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b SiteDomainDeleteBuilder) Do(ctx context.Context) (*model.SiteDomain, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b SiteDomainDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple SiteDomain records.
+func (a SiteDomainActions) FindMany(ctx context.Context, opts ...query.SiteDomainQueryOption) ([]model.SiteDomain, error) {
+	cfg := query.ApplySiteDomainOptions(opts)
+	q := "SELECT id, site_id, hostname, created_at FROM site_domains"
+	argIdx := 0
+	where, args := buildSiteDomainWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.SiteDomain
+	for rows.Next() {
+		var item model.SiteDomain
+		if err := rows.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("SiteDomain.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching SiteDomain record.
+func (a SiteDomainActions) FindFirst(ctx context.Context, opts ...query.SiteDomainQueryOption) (*model.SiteDomain, error) {
+	opts = append(opts, query.SiteDomainTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single SiteDomain record by unique constraint.
+func (a SiteDomainActions) FindUnique(ctx context.Context, where query.SiteDomainWhereClause) (*model.SiteDomain, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
+	q := "SELECT id, site_id, hostname, created_at FROM site_domains"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.SiteDomain
+	if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SiteDomain.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single SiteDomain record.
+func (a SiteDomainActions) CreateOne(ctx context.Context, sets ...query.SiteDomainSetClause) (*model.SiteDomain, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteDomain.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, hostname, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.SiteDomain
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("SiteDomain.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple SiteDomain records.
+func (a SiteDomainActions) CreateMany(ctx context.Context, data []query.SiteDomainCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a SiteDomainActions) buildSiteDomainCreateManySQL(data []query.SiteDomainCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "site_id", "hostname", "created_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single SiteDomain record matching the where clause.
+func (a SiteDomainActions) UpdateOne(ctx context.Context, where query.SiteDomainWhereClause, sets ...query.SiteDomainSetClause) (*model.SiteDomain, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteDomain.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_domains SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, hostname, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteDomain
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteDomain.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple SiteDomain records matching the where clauses.
+func (a SiteDomainActions) UpdateMany(ctx context.Context, wheres []query.SiteDomainWhereClause, sets ...query.SiteDomainSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("SiteDomain.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteDomainWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE site_domains SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteDomain.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single SiteDomain record.
+func (a SiteDomainActions) UpsertOne(ctx context.Context, where query.SiteDomainWhereClause, create []query.SiteDomainSetClause, update []query.SiteDomainSetClause) (*model.SiteDomain, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("SiteDomain.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, hostname, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteDomain
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("SiteDomain.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single SiteDomain record matching the where clause.
+func (a SiteDomainActions) DeleteOne(ctx context.Context, where query.SiteDomainWhereClause) (*model.SiteDomain, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
+	q := "DELETE FROM site_domains"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, site_id, hostname, created_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteDomain
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteDomain.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple SiteDomain records matching the where clauses.
+func (a SiteDomainActions) DeleteMany(ctx context.Context, wheres ...query.SiteDomainWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteDomainWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM site_domains"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteDomain.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of SiteDomain records matching the where clauses.
+func (a SiteDomainActions) Count(ctx context.Context, wheres ...query.SiteDomainWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteDomainWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM site_domains"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("SiteDomain.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for SiteDomain.
+func (a SiteDomainActions) Aggregate(ctx context.Context, opts ...query.SiteDomainAggregateOption) (*query.SiteDomainAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_domains", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.SiteDomainAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("SiteDomain.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on SiteDomain.
+func (a SiteDomainActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteDomainAggregateOption) ([]query.SiteDomainGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM site_domains GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("SiteDomain.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.SiteDomainGroupByResult
+	for rows.Next() {
+		r := query.SiteDomainGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("SiteDomain.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

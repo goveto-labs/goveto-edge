@@ -104,12 +104,28 @@ query.PostAuthorIdColumn
   - `Afterjson` (Json, optional)
   - `Createdat` (DateTime)
 
+### Certificate
+
+- Client handle: `c.Certificate`
+- Query namespace: `query.Certificate`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Certpem` (String)
+  - `Privatekeypem` (String)
+  - `Fingerprint` (String)
+  - `Expiresat` (DateTime)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### Cluster
 
 - Client handle: `c.Cluster`
 - Query namespace: `query.Cluster`
 - Fields:
   - `Id` (String, id)
+  - `Creatorid` (String)
   - `Name` (String)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
@@ -124,6 +140,16 @@ query.PostAuthorIdColumn
   - `Name` (String)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
+
+### ClusterMember
+
+- Client handle: `c.ClusterMember`
+- Query namespace: `query.ClusterMember`
+- Fields:
+  - `Clusterid` (String)
+  - `Userid` (String)
+  - `Permission` ()
+  - `Createdat` (DateTime)
 
 ### ClusterRegion
 
@@ -205,15 +231,28 @@ query.PostAuthorIdColumn
   - `Nodeid` (String)
   - `Dnslineid` (String)
 
+### OriginBackend
+
+- Client handle: `c.OriginBackend`
+- Query namespace: `query.OriginBackend`
+- Fields:
+  - `Id` (String, id)
+  - `Originpoolid` (String)
+  - `Protocol` ()
+  - `Address` (String)
+  - `Hostheader` (String, optional)
+  - `Weight` (Int)
+  - `Enabled` (Boolean)
+  - `Createdat` (DateTime)
+
 ### OriginPool
 
 - Client handle: `c.OriginPool`
 - Query namespace: `query.OriginPool`
 - Fields:
   - `Id` (String, id)
+  - `Clusterid` (String)
   - `Name` (String)
-  - `Protocol` ()
-  - `Backends` (Json)
   - `Healthuri` (String)
   - `Timeout` (Int)
   - `Headers` (Json)
@@ -268,13 +307,33 @@ query.PostAuthorIdColumn
 - Query namespace: `query.Site`
 - Fields:
   - `Id` (String, id)
-  - `Hostname` (String, unique)
+  - `Clusterid` (String)
+  - `Creatorid` (String)
+  - `Name` (String)
   - `Status` ()
   - `Originpoolid` (String)
-  - `Policyid` (String)
+  - `Policyid` (String, optional)
   - `Version` (BigInt)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
+
+### SiteCertificate
+
+- Client handle: `c.SiteCertificate`
+- Query namespace: `query.SiteCertificate`
+- Fields:
+  - `Siteid` (String)
+  - `Certificateid` (String)
+
+### SiteDomain
+
+- Client handle: `c.SiteDomain`
+- Query namespace: `query.SiteDomain`
+- Fields:
+  - `Id` (String, id)
+  - `Siteid` (String)
+  - `Hostname` (String, unique)
+  - `Createdat` (DateTime)
 
 ### User
 

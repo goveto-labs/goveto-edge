@@ -32,15 +32,21 @@ func ApplySiteOptions(opts []SiteQueryOption) SiteQueryConfig {
 // SiteQuery is the namespace for Site query operations.
 type SiteQuery struct {
 	Id             siteIdField
-	Hostname       siteHostnameField
+	ClusterId      siteClusterIdField
+	CreatorId      siteCreatorIdField
+	Name           siteNameField
 	Status         siteStatusField
 	OriginPoolId   siteOriginPoolIdField
 	PolicyId       sitePolicyIdField
 	Version        siteVersionField
 	CreatedAt      siteCreatedAtField
 	UpdatedAt      siteUpdatedAtField
+	Cluster        siteClusterRelation
+	Creator        siteCreatorRelation
 	OriginPool     siteOriginPoolRelation
 	Policy         sitePolicyRelation
+	Domains        siteDomainsRelation
+	Certificates   siteCertificatesRelation
 	ConfigVersions siteConfigVersionsRelation
 	PublishJobs    sitePublishJobsRelation
 	PurgeJobs      sitePurgeJobsRelation
@@ -48,7 +54,9 @@ type SiteQuery struct {
 
 const SiteTable = "sites"
 const SiteIdColumn = "id"
-const SiteHostnameColumn = "hostname"
+const SiteClusterIdColumn = "cluster_id"
+const SiteCreatorIdColumn = "creator_id"
+const SiteNameColumn = "name"
 const SiteStatusColumn = "status"
 const SiteOriginPoolIdColumn = "origin_pool_id"
 const SitePolicyIdColumn = "policy_id"
@@ -59,15 +67,21 @@ const SiteUpdatedAtColumn = "updated_at"
 // SiteQuery provides query building methods for the Site model.
 var Site = SiteQuery{
 	Id:             siteIdField{},
-	Hostname:       siteHostnameField{},
+	ClusterId:      siteClusterIdField{},
+	CreatorId:      siteCreatorIdField{},
+	Name:           siteNameField{},
 	Status:         siteStatusField{},
 	OriginPoolId:   siteOriginPoolIdField{},
 	PolicyId:       sitePolicyIdField{},
 	Version:        siteVersionField{},
 	CreatedAt:      siteCreatedAtField{},
 	UpdatedAt:      siteUpdatedAtField{},
+	Cluster:        siteClusterRelation{},
+	Creator:        siteCreatorRelation{},
 	OriginPool:     siteOriginPoolRelation{},
 	Policy:         sitePolicyRelation{},
+	Domains:        siteDomainsRelation{},
+	Certificates:   siteCertificatesRelation{},
 	ConfigVersions: siteConfigVersionsRelation{},
 	PublishJobs:    sitePublishJobsRelation{},
 	PurgeJobs:      sitePurgeJobsRelation{},
@@ -223,65 +237,187 @@ func (siteIdField) Desc() SiteOrderByClause {
 	return SiteOrderByClause{Field: "id", Direction: "DESC"}
 }
 
-// HostnameField provides query operations for the hostname field.
-type siteHostnameField struct{}
+// ClusterIdField provides query operations for the clusterId field.
+type siteClusterIdField struct{}
 
 // Equals creates an equality condition.
-func (siteHostnameField) Equals(v string) SiteWhereClause {
-	return SiteWhereClause{Field: "hostname", Operator: "=", Value: v}
+func (siteClusterIdField) Equals(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "cluster_id", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (siteHostnameField) Not(v string) SiteWhereClause {
-	return SiteWhereClause{Field: "hostname", Operator: "!=", Value: v}
+func (siteClusterIdField) Not(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "cluster_id", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (siteHostnameField) In(vals ...string) SiteWhereClause {
+func (siteClusterIdField) In(vals ...string) SiteWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return SiteWhereClause{Field: "hostname", Operator: "IN", Value: iVals}
+	return SiteWhereClause{Field: "cluster_id", Operator: "IN", Value: iVals}
 }
 
 // NotIn creates a NOT IN condition.
-func (siteHostnameField) NotIn(vals ...string) SiteWhereClause {
+func (siteClusterIdField) NotIn(vals ...string) SiteWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
 	}
-	return SiteWhereClause{Field: "hostname", Operator: "NOT IN", Value: iVals}
+	return SiteWhereClause{Field: "cluster_id", Operator: "NOT IN", Value: iVals}
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (siteHostnameField) Contains(v string) SiteWhereClause {
-	return SiteWhereClause{Field: "hostname", Operator: "CONTAINS", Value: v}
+func (siteClusterIdField) Contains(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "cluster_id", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (siteHostnameField) StartsWith(v string) SiteWhereClause {
-	return SiteWhereClause{Field: "hostname", Operator: "STARTS_WITH", Value: v}
+func (siteClusterIdField) StartsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "cluster_id", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (siteHostnameField) EndsWith(v string) SiteWhereClause {
-	return SiteWhereClause{Field: "hostname", Operator: "ENDS_WITH", Value: v}
+func (siteClusterIdField) EndsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "cluster_id", Operator: "ENDS_WITH", Value: v}
 }
 
 // Set creates a set operation for create/update.
-func (siteHostnameField) Set(v string) SiteSetClause {
-	return SiteSetClause{Field: "hostname", Value: v}
+func (siteClusterIdField) Set(v string) SiteSetClause {
+	return SiteSetClause{Field: "cluster_id", Value: v}
 }
 
 // Asc returns an ascending order clause for this field.
-func (siteHostnameField) Asc() SiteOrderByClause {
-	return SiteOrderByClause{Field: "hostname", Direction: "ASC"}
+func (siteClusterIdField) Asc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "cluster_id", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (siteHostnameField) Desc() SiteOrderByClause {
-	return SiteOrderByClause{Field: "hostname", Direction: "DESC"}
+func (siteClusterIdField) Desc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "cluster_id", Direction: "DESC"}
+}
+
+// CreatorIdField provides query operations for the creatorId field.
+type siteCreatorIdField struct{}
+
+// Equals creates an equality condition.
+func (siteCreatorIdField) Equals(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "creator_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (siteCreatorIdField) Not(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "creator_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (siteCreatorIdField) In(vals ...string) SiteWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return SiteWhereClause{Field: "creator_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (siteCreatorIdField) NotIn(vals ...string) SiteWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return SiteWhereClause{Field: "creator_id", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (siteCreatorIdField) Contains(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "creator_id", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (siteCreatorIdField) StartsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "creator_id", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (siteCreatorIdField) EndsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "creator_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (siteCreatorIdField) Set(v string) SiteSetClause {
+	return SiteSetClause{Field: "creator_id", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (siteCreatorIdField) Asc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "creator_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (siteCreatorIdField) Desc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "creator_id", Direction: "DESC"}
+}
+
+// NameField provides query operations for the name field.
+type siteNameField struct{}
+
+// Equals creates an equality condition.
+func (siteNameField) Equals(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "name", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (siteNameField) Not(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "name", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (siteNameField) In(vals ...string) SiteWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return SiteWhereClause{Field: "name", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (siteNameField) NotIn(vals ...string) SiteWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return SiteWhereClause{Field: "name", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (siteNameField) Contains(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "name", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (siteNameField) StartsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "name", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (siteNameField) EndsWith(v string) SiteWhereClause {
+	return SiteWhereClause{Field: "name", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (siteNameField) Set(v string) SiteSetClause {
+	return SiteSetClause{Field: "name", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (siteNameField) Asc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "name", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (siteNameField) Desc() SiteOrderByClause {
+	return SiteOrderByClause{Field: "name", Direction: "DESC"}
 }
 
 // StatusField provides query operations for the status field.
@@ -395,17 +531,17 @@ func (siteOriginPoolIdField) Desc() SiteOrderByClause {
 type sitePolicyIdField struct{}
 
 // Equals creates an equality condition.
-func (sitePolicyIdField) Equals(v string) SiteWhereClause {
+func (sitePolicyIdField) Equals(v *string) SiteWhereClause {
 	return SiteWhereClause{Field: "policy_id", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (sitePolicyIdField) Not(v string) SiteWhereClause {
+func (sitePolicyIdField) Not(v *string) SiteWhereClause {
 	return SiteWhereClause{Field: "policy_id", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (sitePolicyIdField) In(vals ...string) SiteWhereClause {
+func (sitePolicyIdField) In(vals ...*string) SiteWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -414,7 +550,7 @@ func (sitePolicyIdField) In(vals ...string) SiteWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (sitePolicyIdField) NotIn(vals ...string) SiteWhereClause {
+func (sitePolicyIdField) NotIn(vals ...*string) SiteWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -437,9 +573,19 @@ func (sitePolicyIdField) EndsWith(v string) SiteWhereClause {
 	return SiteWhereClause{Field: "policy_id", Operator: "ENDS_WITH", Value: v}
 }
 
+// IsNull creates an IS NULL condition.
+func (sitePolicyIdField) IsNull() SiteWhereClause {
+	return SiteWhereClause{Field: "policy_id", Operator: "IS NULL", Value: nil}
+}
+
 // Set creates a set operation for create/update.
 func (sitePolicyIdField) Set(v string) SiteSetClause {
 	return SiteSetClause{Field: "policy_id", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (sitePolicyIdField) SetNull() SiteSetClause {
+	return SiteSetClause{Field: "policy_id", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -650,6 +796,22 @@ func (siteUpdatedAtField) Desc() SiteOrderByClause {
 	return SiteOrderByClause{Field: "updated_at", Direction: "DESC"}
 }
 
+// ClusterRelation provides relation query helpers for cluster.
+type siteClusterRelation struct{}
+
+// Fetch creates an include clause to fetch related cluster.
+func (siteClusterRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "cluster"}
+}
+
+// CreatorRelation provides relation query helpers for creator.
+type siteCreatorRelation struct{}
+
+// Fetch creates an include clause to fetch related creator.
+func (siteCreatorRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "creator"}
+}
+
 // OriginPoolRelation provides relation query helpers for originPool.
 type siteOriginPoolRelation struct{}
 
@@ -664,6 +826,22 @@ type sitePolicyRelation struct{}
 // Fetch creates an include clause to fetch related policy.
 func (sitePolicyRelation) Fetch() SiteIncludeClause {
 	return SiteIncludeClause{Relation: "policy"}
+}
+
+// DomainsRelation provides relation query helpers for domains.
+type siteDomainsRelation struct{}
+
+// Fetch creates an include clause to fetch related domains.
+func (siteDomainsRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "domains"}
+}
+
+// CertificatesRelation provides relation query helpers for certificates.
+type siteCertificatesRelation struct{}
+
+// Fetch creates an include clause to fetch related certificates.
+func (siteCertificatesRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "certificates"}
 }
 
 // ConfigVersionsRelation provides relation query helpers for configVersions.
@@ -724,15 +902,21 @@ type SiteGroupByResult struct {
 // SiteCreateInput holds data for creating a Site record.
 type SiteCreateInput struct {
 	Id             string
-	Hostname       string
+	ClusterId      string
+	CreatorId      string
+	Name           string
 	Status         model.SiteStatus
 	OriginPoolId   string
-	PolicyId       string
+	PolicyId       **string
 	Version        int64
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Cluster        *ClusterCreateNestedInput
+	Creator        *UserCreateNestedInput
 	OriginPool     *OriginPoolCreateNestedInput
 	Policy         *PolicyCreateNestedInput
+	Domains        *SiteDomainCreateNestedInput
+	Certificates   *SiteCertificateCreateNestedInput
 	ConfigVersions *ConfigVersionCreateNestedInput
 	PublishJobs    *PublishJobCreateNestedInput
 	PurgeJobs      *PurgeJobCreateNestedInput
@@ -740,7 +924,7 @@ type SiteCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d SiteCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Hostname, d.Status, d.OriginPoolId, d.PolicyId, d.Version, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.CreatorId, d.Name, d.Status, d.OriginPoolId, d.PolicyId, d.Version, d.CreatedAt, d.UpdatedAt}
 }
 
 // SiteCreateNestedInput supports nested creates and connects.
@@ -751,6 +935,5 @@ type SiteCreateNestedInput struct {
 
 // SiteWhereUniqueInput identifies a unique Site record.
 type SiteWhereUniqueInput struct {
-	Id       *string
-	Hostname *string
+	Id *string
 }

@@ -30,32 +30,45 @@ func ApplyClusterOptions(opts []ClusterQueryOption) ClusterQueryConfig {
 
 // ClusterQuery is the namespace for Cluster query operations.
 type ClusterQuery struct {
-	Id        clusterIdField
-	Name      clusterNameField
-	CreatedAt clusterCreatedAtField
-	UpdatedAt clusterUpdatedAtField
-	Nodes     clusterNodesRelation
-	Groups    clusterGroupsRelation
-	Regions   clusterRegionsRelation
-	DnsLines  clusterDnsLinesRelation
+	Id           clusterIdField
+	CreatorId    clusterCreatorIdField
+	Name         clusterNameField
+	CreatedAt    clusterCreatedAtField
+	UpdatedAt    clusterUpdatedAtField
+	Creator      clusterCreatorRelation
+	Members      clusterMembersRelation
+	Nodes        clusterNodesRelation
+	Groups       clusterGroupsRelation
+	Regions      clusterRegionsRelation
+	DnsLines     clusterDnsLinesRelation
+	Certificates clusterCertificatesRelation
+	OriginPools  clusterOriginPoolsRelation
+	Sites        clusterSitesRelation
 }
 
 const ClusterTable = "clusters"
 const ClusterIdColumn = "id"
+const ClusterCreatorIdColumn = "creator_id"
 const ClusterNameColumn = "name"
 const ClusterCreatedAtColumn = "created_at"
 const ClusterUpdatedAtColumn = "updated_at"
 
 // ClusterQuery provides query building methods for the Cluster model.
 var Cluster = ClusterQuery{
-	Id:        clusterIdField{},
-	Name:      clusterNameField{},
-	CreatedAt: clusterCreatedAtField{},
-	UpdatedAt: clusterUpdatedAtField{},
-	Nodes:     clusterNodesRelation{},
-	Groups:    clusterGroupsRelation{},
-	Regions:   clusterRegionsRelation{},
-	DnsLines:  clusterDnsLinesRelation{},
+	Id:           clusterIdField{},
+	CreatorId:    clusterCreatorIdField{},
+	Name:         clusterNameField{},
+	CreatedAt:    clusterCreatedAtField{},
+	UpdatedAt:    clusterUpdatedAtField{},
+	Creator:      clusterCreatorRelation{},
+	Members:      clusterMembersRelation{},
+	Nodes:        clusterNodesRelation{},
+	Groups:       clusterGroupsRelation{},
+	Regions:      clusterRegionsRelation{},
+	DnsLines:     clusterDnsLinesRelation{},
+	Certificates: clusterCertificatesRelation{},
+	OriginPools:  clusterOriginPoolsRelation{},
+	Sites:        clusterSitesRelation{},
 }
 
 // ClusterWhereClause represents a WHERE condition for Cluster.
@@ -206,6 +219,67 @@ func (clusterIdField) Asc() ClusterOrderByClause {
 // Desc returns a descending order clause for this field.
 func (clusterIdField) Desc() ClusterOrderByClause {
 	return ClusterOrderByClause{Field: "id", Direction: "DESC"}
+}
+
+// CreatorIdField provides query operations for the creatorId field.
+type clusterCreatorIdField struct{}
+
+// Equals creates an equality condition.
+func (clusterCreatorIdField) Equals(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "creator_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (clusterCreatorIdField) Not(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "creator_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (clusterCreatorIdField) In(vals ...string) ClusterWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return ClusterWhereClause{Field: "creator_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (clusterCreatorIdField) NotIn(vals ...string) ClusterWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return ClusterWhereClause{Field: "creator_id", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (clusterCreatorIdField) Contains(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "creator_id", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (clusterCreatorIdField) StartsWith(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "creator_id", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (clusterCreatorIdField) EndsWith(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "creator_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (clusterCreatorIdField) Set(v string) ClusterSetClause {
+	return ClusterSetClause{Field: "creator_id", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (clusterCreatorIdField) Asc() ClusterOrderByClause {
+	return ClusterOrderByClause{Field: "creator_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (clusterCreatorIdField) Desc() ClusterOrderByClause {
+	return ClusterOrderByClause{Field: "creator_id", Direction: "DESC"}
 }
 
 // NameField provides query operations for the name field.
@@ -401,6 +475,22 @@ func (clusterUpdatedAtField) Desc() ClusterOrderByClause {
 	return ClusterOrderByClause{Field: "updated_at", Direction: "DESC"}
 }
 
+// CreatorRelation provides relation query helpers for creator.
+type clusterCreatorRelation struct{}
+
+// Fetch creates an include clause to fetch related creator.
+func (clusterCreatorRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "creator"}
+}
+
+// MembersRelation provides relation query helpers for members.
+type clusterMembersRelation struct{}
+
+// Fetch creates an include clause to fetch related members.
+func (clusterMembersRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "members"}
+}
+
 // NodesRelation provides relation query helpers for nodes.
 type clusterNodesRelation struct{}
 
@@ -431,6 +521,30 @@ type clusterDnsLinesRelation struct{}
 // Fetch creates an include clause to fetch related dnsLines.
 func (clusterDnsLinesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "dnsLines"}
+}
+
+// CertificatesRelation provides relation query helpers for certificates.
+type clusterCertificatesRelation struct{}
+
+// Fetch creates an include clause to fetch related certificates.
+func (clusterCertificatesRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "certificates"}
+}
+
+// OriginPoolsRelation provides relation query helpers for originPools.
+type clusterOriginPoolsRelation struct{}
+
+// Fetch creates an include clause to fetch related originPools.
+func (clusterOriginPoolsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "originPools"}
+}
+
+// SitesRelation provides relation query helpers for sites.
+type clusterSitesRelation struct{}
+
+// Fetch creates an include clause to fetch related sites.
+func (clusterSitesRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "sites"}
 }
 
 // ClusterSetClause represents a field set operation for create/update.
@@ -466,19 +580,25 @@ type ClusterGroupByResult struct {
 
 // ClusterCreateInput holds data for creating a Cluster record.
 type ClusterCreateInput struct {
-	Id        string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Nodes     *NodeCreateNestedInput
-	Groups    *ClusterGroupCreateNestedInput
-	Regions   *ClusterRegionCreateNestedInput
-	DnsLines  *DNSLineCreateNestedInput
+	Id           string
+	CreatorId    string
+	Name         string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Creator      *UserCreateNestedInput
+	Members      *ClusterMemberCreateNestedInput
+	Nodes        *NodeCreateNestedInput
+	Groups       *ClusterGroupCreateNestedInput
+	Regions      *ClusterRegionCreateNestedInput
+	DnsLines     *DNSLineCreateNestedInput
+	Certificates *CertificateCreateNestedInput
+	OriginPools  *OriginPoolCreateNestedInput
+	Sites        *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d ClusterCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Name, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.CreatorId, d.Name, d.CreatedAt, d.UpdatedAt}
 }
 
 // ClusterCreateNestedInput supports nested creates and connects.

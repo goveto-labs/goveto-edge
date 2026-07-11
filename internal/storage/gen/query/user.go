@@ -31,18 +31,21 @@ func ApplyUserOptions(opts []UserQueryOption) UserQueryConfig {
 
 // UserQuery is the namespace for User query operations.
 type UserQuery struct {
-	Id           userIdField
-	Email        userEmailField
-	PasswordHash userPasswordHashField
-	Name         userNameField
-	Role         userRoleField
-	Status       userStatusField
-	TotpSecret   userTotpSecretField
-	LastLoginAt  userLastLoginAtField
-	CreatedAt    userCreatedAtField
-	UpdatedAt    userUpdatedAtField
-	Sessions     userSessionsRelation
-	AuditLogs    userAuditLogsRelation
+	Id                 userIdField
+	Email              userEmailField
+	PasswordHash       userPasswordHashField
+	Name               userNameField
+	Role               userRoleField
+	Status             userStatusField
+	TotpSecret         userTotpSecretField
+	LastLoginAt        userLastLoginAtField
+	CreatedAt          userCreatedAtField
+	UpdatedAt          userUpdatedAtField
+	Sessions           userSessionsRelation
+	AuditLogs          userAuditLogsRelation
+	CreatedClusters    userCreatedClustersRelation
+	ClusterMemberships userClusterMembershipsRelation
+	CreatedSites       userCreatedSitesRelation
 }
 
 const UserTable = "users"
@@ -59,18 +62,21 @@ const UserUpdatedAtColumn = "updated_at"
 
 // UserQuery provides query building methods for the User model.
 var User = UserQuery{
-	Id:           userIdField{},
-	Email:        userEmailField{},
-	PasswordHash: userPasswordHashField{},
-	Name:         userNameField{},
-	Role:         userRoleField{},
-	Status:       userStatusField{},
-	TotpSecret:   userTotpSecretField{},
-	LastLoginAt:  userLastLoginAtField{},
-	CreatedAt:    userCreatedAtField{},
-	UpdatedAt:    userUpdatedAtField{},
-	Sessions:     userSessionsRelation{},
-	AuditLogs:    userAuditLogsRelation{},
+	Id:                 userIdField{},
+	Email:              userEmailField{},
+	PasswordHash:       userPasswordHashField{},
+	Name:               userNameField{},
+	Role:               userRoleField{},
+	Status:             userStatusField{},
+	TotpSecret:         userTotpSecretField{},
+	LastLoginAt:        userLastLoginAtField{},
+	CreatedAt:          userCreatedAtField{},
+	UpdatedAt:          userUpdatedAtField{},
+	Sessions:           userSessionsRelation{},
+	AuditLogs:          userAuditLogsRelation{},
+	CreatedClusters:    userCreatedClustersRelation{},
+	ClusterMemberships: userClusterMembershipsRelation{},
+	CreatedSites:       userCreatedSitesRelation{},
 }
 
 // UserWhereClause represents a WHERE condition for User.
@@ -793,6 +799,30 @@ func (userAuditLogsRelation) Fetch() UserIncludeClause {
 	return UserIncludeClause{Relation: "auditLogs"}
 }
 
+// CreatedClustersRelation provides relation query helpers for createdClusters.
+type userCreatedClustersRelation struct{}
+
+// Fetch creates an include clause to fetch related createdClusters.
+func (userCreatedClustersRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "createdClusters"}
+}
+
+// ClusterMembershipsRelation provides relation query helpers for clusterMemberships.
+type userClusterMembershipsRelation struct{}
+
+// Fetch creates an include clause to fetch related clusterMemberships.
+func (userClusterMembershipsRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "clusterMemberships"}
+}
+
+// CreatedSitesRelation provides relation query helpers for createdSites.
+type userCreatedSitesRelation struct{}
+
+// Fetch creates an include clause to fetch related createdSites.
+func (userCreatedSitesRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "createdSites"}
+}
+
 // UserSetClause represents a field set operation for create/update.
 type UserSetClause struct {
 	Field string
@@ -826,18 +856,21 @@ type UserGroupByResult struct {
 
 // UserCreateInput holds data for creating a User record.
 type UserCreateInput struct {
-	Id           string
-	Email        string
-	PasswordHash string
-	Name         string
-	Role         model.UserRole
-	Status       model.UserStatus
-	TotpSecret   **string
-	LastLoginAt  **time.Time
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Sessions     *UserSessionCreateNestedInput
-	AuditLogs    *AuditLogCreateNestedInput
+	Id                 string
+	Email              string
+	PasswordHash       string
+	Name               string
+	Role               model.UserRole
+	Status             model.UserStatus
+	TotpSecret         **string
+	LastLoginAt        **time.Time
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Sessions           *UserSessionCreateNestedInput
+	AuditLogs          *AuditLogCreateNestedInput
+	CreatedClusters    *ClusterCreateNestedInput
+	ClusterMemberships *ClusterMemberCreateNestedInput
+	CreatedSites       *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

@@ -9,6 +9,11 @@ generator client {
   package  = "db"
 }
 
+enum ClusterPermission {
+  OWNER
+  OPERATOR
+}
+
 enum ConfigStatus {
   DRAFT
   PUBLISHED
@@ -83,17 +88,42 @@ model AuditLog {
   @@map("audit_logs")
 }
 
+model Certificate {
+  id            String            @id @default(uuid())
+  clusterId     String            @map("cluster_id")
+  name          String
+  certPem       String            @db.Text @map("cert_pem")
+  privateKeyPem String            @db.Text @map("private_key_pem")
+  fingerprint   String
+  expiresAt     DateTime          @map("expires_at")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  cluster       Cluster           @relation(fields: [clusterId], references: [id])
+  sites         SiteCertificate[]
+
+  @@unique([clusterId, name])
+  @@index([clusterId, expiresAt])
+  @@map("certificates")
+}
+
 model Cluster {
-  id        String          @id @default(uuid())
-  name      String
-  createdAt DateTime        @default(now()) @map("created_at")
-  updatedAt DateTime        @updatedAt @map("updated_at")
-  nodes     Node[]
-  groups    ClusterGroup[]
-  regions   ClusterRegion[]
-  dnsLines  DNSLine[]
+  id           String          @id @default(uuid())
+  creatorId    String          @map("creator_id")
+  name         String
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  creator      User            @relation(fields: [creatorId], references: [id])
+  members      ClusterMember[]
+  nodes        Node[]
+  groups       ClusterGroup[]
+  regions      ClusterRegion[]
+  dnsLines     DNSLine[]
+  certificates Certificate[]
+  originPools  OriginPool[]
+  sites        Site[]
 
   @@unique([name])
+  @@index([creatorId])
   @@map("clusters")
 }
 
@@ -109,6 +139,19 @@ model ClusterGroup {
   @@unique([clusterId, name])
   @@index([clusterId])
   @@map("node_groups")
+}
+
+model ClusterMember {
+  clusterId  String            @map("cluster_id")
+  userId     String            @map("user_id")
+  permission ClusterPermission @default(OPERATOR)
+  createdAt  DateTime          @default(now()) @map("created_at")
+  cluster    Cluster           @relation(fields: [clusterId], references: [id])
+  user       User              @relation(fields: [userId], references: [id])
+
+  @@id([clusterId, userId])
+  @@index([userId])
+  @@map("cluster_members")
 }
 
 model ClusterRegion {
@@ -212,19 +255,35 @@ model NodeDNSLine {
   @@map("node_dns_lines")
 }
 
+model OriginBackend {
+  id           String         @id @default(uuid())
+  originPoolId String         @map("origin_pool_id")
+  protocol     OriginProtocol @default(HTTPS)
+  address      String
+  hostHeader   String?        @map("host_header")
+  weight       Int            @default(1)
+  enabled      Boolean        @default(true)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  originPool   OriginPool     @relation(fields: [originPoolId], references: [id])
+
+  @@index([originPoolId, enabled])
+  @@map("origin_backends")
+}
+
 model OriginPool {
-  id        String         @id @default(uuid())
+  id        String          @id @default(uuid())
+  clusterId String          @map("cluster_id")
   name      String
-  protocol  OriginProtocol @default(HTTPS)
-  backends  Json
-  healthUri String         @default("/health") @map("health_uri")
-  timeout   Int            @default(10000)
+  healthUri String          @default("/health") @map("health_uri")
+  timeout   Int             @default(10000)
   headers   Json
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
+  createdAt DateTime        @default(now()) @map("created_at")
+  updatedAt DateTime        @updatedAt @map("updated_at")
+  cluster   Cluster         @relation(fields: [clusterId], references: [id])
+  backends  OriginBackend[]
   sites     Site[]
 
-  @@index([protocol])
+  @@index([clusterId])
   @@map("origin_pools")
 }
 
@@ -275,39 +334,72 @@ model PurgeJob {
 }
 
 model Site {
-  id             String          @id @default(uuid())
-  hostname       String          @unique
-  status         SiteStatus      @default(ACTIVE)
-  originPoolId   String          @map("origin_pool_id")
-  policyId       String          @map("policy_id")
-  version        BigInt          @default(1)
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  originPool     OriginPool      @relation(fields: [originPoolId], references: [id])
-  policy         Policy          @relation(fields: [policyId], references: [id])
+  id             String            @id @default(uuid())
+  clusterId      String            @map("cluster_id")
+  creatorId      String            @map("creator_id")
+  name           String
+  status         SiteStatus        @default(ACTIVE)
+  originPoolId   String            @map("origin_pool_id")
+  policyId       String?           @map("policy_id")
+  version        BigInt            @default(1)
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  cluster        Cluster           @relation(fields: [clusterId], references: [id])
+  creator        User              @relation(fields: [creatorId], references: [id])
+  originPool     OriginPool        @relation(fields: [originPoolId], references: [id])
+  policy         Policy?           @relation(fields: [policyId], references: [id])
+  domains        SiteDomain[]
+  certificates   SiteCertificate[]
   configVersions ConfigVersion[]
   publishJobs    PublishJob[]
   purgeJobs      PurgeJob[]
 
-  @@index([status])
+  @@unique([clusterId, name])
+  @@index([clusterId, status])
+  @@index([creatorId])
   @@index([originPoolId])
   @@index([policyId])
   @@map("sites")
 }
 
+model SiteCertificate {
+  siteId        String      @map("site_id")
+  certificateId String      @map("certificate_id")
+  site          Site        @relation(fields: [siteId], references: [id])
+  certificate   Certificate @relation(fields: [certificateId], references: [id])
+
+  @@id([siteId, certificateId])
+  @@index([certificateId])
+  @@map("site_certificates")
+}
+
+model SiteDomain {
+  id        String   @id @default(uuid())
+  siteId    String   @map("site_id")
+  hostname  String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+  site      Site     @relation(fields: [siteId], references: [id])
+
+  @@index([siteId])
+  @@map("site_domains")
+}
+
 model User {
-  id           String        @id @default(uuid())
-  email        String        @unique
-  passwordHash String        @map("password_hash")
-  name         String
-  role         UserRole      @default(VIEWER)
-  status       UserStatus    @default(ACTIVE)
-  totpSecret   String?       @map("totp_secret")
-  lastLoginAt  DateTime?     @map("last_login_at")
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  sessions     UserSession[]
-  auditLogs    AuditLog[]
+  id                 String          @id @default(uuid())
+  email              String          @unique
+  passwordHash       String          @map("password_hash")
+  name               String
+  role               UserRole        @default(VIEWER)
+  status             UserStatus      @default(ACTIVE)
+  totpSecret         String?         @map("totp_secret")
+  lastLoginAt        DateTime?       @map("last_login_at")
+  createdAt          DateTime        @default(now()) @map("created_at")
+  updatedAt          DateTime        @updatedAt @map("updated_at")
+  sessions           UserSession[]
+  auditLogs          AuditLog[]
+  createdClusters    Cluster[]
+  clusterMemberships ClusterMember[]
+  createdSites       Site[]
 
   @@index([status])
   @@index([role])

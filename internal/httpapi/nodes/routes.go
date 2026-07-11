@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/clusteraccess"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -18,9 +19,9 @@ import (
 )
 
 func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue) {
-	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue), authn.RequireAuth)
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db), authn.RequireAuth)
-	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue), authn.RequireAuth)
+	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db), authn.RequireAuth, clusteraccess.Require(db))
+	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue), authn.RequireAuth, clusteraccess.Require(db))
 }
 
 func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc {

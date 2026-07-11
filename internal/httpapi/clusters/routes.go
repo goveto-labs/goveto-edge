@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -17,12 +18,13 @@ type nameRequest struct {
 }
 
 func Register(e *echo.Echo, db *client.Client) {
-	group := e.Group("/api/v1/clusters/:cluster_id", authn.RequireAuth)
+	group := e.Group("/api/v1/clusters/:cluster_id", authn.RequireAuth, clusteraccess.Require(db))
 	group.GET("/dns-lines", listDNSLines(db))
 	group.GET("/groups", listGroups(db))
 	group.POST("/groups", createGroup(db))
 	group.GET("/regions", listRegions(db))
 	group.POST("/regions", createRegion(db))
+	group.POST("/members", addMember(db))
 }
 
 func listDNSLines(db *client.Client) echo.HandlerFunc {
