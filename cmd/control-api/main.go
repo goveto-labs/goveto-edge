@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/httpapi"
@@ -36,29 +37,57 @@ func main() {
 	}
 	defer db.Close()
 	defer orm.Close()
+
 	redisClient, err := storage.OpenRedis(ctx, cfg.RedisURL)
 	if err != nil {
 		slog.Error("connect redis", "error", err)
 		os.Exit(1)
 	}
 	defer redisClient.Close()
+
 	sessions := auth.NewSessionStore(redisClient, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
+
 	credentialCipher, err := node.NewCredentialCipher(cfg.NodeCredentialMasterKey)
 	if err != nil {
 		slog.Error("initialize node credential encryption", "error", err)
 		os.Exit(1)
 	}
+
+	var analyticsStore *analytics.Store
+	if cfg.ClickHouseDSN != "" {
+		clickhouseConn, clickhouseErr := storage.OpenClickHouse(ctx, cfg.ClickHouseDSN)
+		if clickhouseErr != nil {
+			slog.Error("connect ClickHouse", "error", clickhouseErr)
+			os.Exit(1)
+		}
+		defer clickhouseConn.Close()
+
+		analyticsStore = analytics.NewStore(clickhouseConn)
+		go analytics.NewIngest(orm, credentialCipher, analyticsStore).Run(ctx)
+	}
+
 	publishService := publisher.New(orm, credentialCipher)
 	go publishService.Run(ctx)
+
 	purgeService := purge.New(orm, credentialCipher)
 	go purgeService.Run(ctx)
+
 	installQueue := node.NewInstallQueue(redisClient, 0)
 	go node.NewInstallWorker(orm, installQueue).Run(ctx)
 	go node.NewLifecycle(orm, credentialCipher, 45*time.Second).Run(ctx)
 
 	server := &http.Server{
-		Addr:              cfg.HTTPAddress(),
-		Handler:           httpapi.New(db, orm, sessions, credentialCipher, installQueue, publishService, purgeService),
+		Addr: cfg.HTTPAddress(),
+		Handler: httpapi.New(
+			db,
+			orm,
+			sessions,
+			credentialCipher,
+			installQueue,
+			publishService,
+			purgeService,
+			analyticsStore,
+		),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
 	}
 

@@ -14,6 +14,7 @@ SELECT
     sum(egress_bytes),
     sum(cache_hit_requests),
     sum(cache_miss_requests),
+    sum(cache_egress_bytes),
     sum(origin_requests),
     sum(error_requests),
     sum(duration_us_sum),

@@ -3,6 +3,7 @@ package edgeagent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -97,6 +98,14 @@ func envUint64(key string, fallback uint64) uint64 {
 type agentLogSink struct{ queue *LogQueue }
 
 func (s agentLogSink) WriteCaddyLog(payload []byte) error {
-	_, err := s.queue.Append(LogRecord{Type: "caddy", Payload: payload})
+	recordType := "caddy"
+	var access struct {
+		Request json.RawMessage `json:"request"`
+		Status  int             `json:"status"`
+	}
+	if json.Unmarshal(payload, &access) == nil && len(access.Request) > 0 && access.Status > 0 {
+		recordType = "access"
+	}
+	_, err := s.queue.Append(LogRecord{Type: recordType, Payload: payload})
 	return err
 }

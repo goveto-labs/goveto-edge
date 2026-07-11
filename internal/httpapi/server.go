@@ -6,8 +6,10 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
+	analyticsapi "goveto-edge/internal/httpapi/analytics"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
 	"goveto-edge/internal/httpapi/clusters"
@@ -23,11 +25,22 @@ import (
 	"goveto-edge/internal/storage/gen/client"
 )
 
-func New(db *sql.DB, orm *client.Client, sessions *auth.SessionStore, credentialCipher *node.CredentialCipher, installQueue *node.InstallQueue, publishService *publisher.Service, purgeService *purge.Service) *echo.Echo {
+func New(
+	db *sql.DB,
+	orm *client.Client,
+	sessions *auth.SessionStore,
+	credentialCipher *node.CredentialCipher,
+	installQueue *node.InstallQueue,
+	publishService *publisher.Service,
+	purgeService *purge.Service,
+	analyticsStore ...*analytics.Store,
+) *echo.Echo {
 	e := echo.New()
 	e.Use(sessions.Session)
+
 	settingStore := settings.New(orm)
 	captchaVerifier := captcha.New()
+
 	health.Register(e, db)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm)
@@ -36,6 +49,10 @@ func New(db *sql.DB, orm *client.Client, sessions *auth.SessionStore, credential
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	sites.Register(e, orm, publishService)
+
+	if len(analyticsStore) > 0 {
+		analyticsapi.Register(e, orm, analyticsStore[0])
+	}
 
 	return e
 }
