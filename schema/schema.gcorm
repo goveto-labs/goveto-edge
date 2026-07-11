@@ -213,24 +213,24 @@ model DynamicSetting {
 }
 
 model Node {
-  id               UUID             @id @default(uuid())
-  clusterId        String           @map("cluster_id")
-  groupId          String?          @map("group_id")
-  regionId         String?          @map("region_id")
-  name             String
-  communicationKey String           @map("communication_key")
-  configVersion    BigInt           @default(0) @map("config_version")
-  version          String?
-  heartbeatAt      DateTime?        @map("heartbeat_at")
-  status           NodeStatus       @default(PENDING)
-  createdAt        DateTime         @default(now()) @map("created_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  cluster          Cluster          @relation(fields: [clusterId], references: [id])
-  group            ClusterGroup?    @relation(fields: [groupId], references: [id])
-  region           ClusterRegion?   @relation(fields: [regionId], references: [id])
-  addresses        NodeAddress[]
-  dnsLines         NodeDNSLine[]
-  cacheConfig      NodeCacheConfig?
+  id            UUID             @id @default(uuid())
+  clusterId     String           @map("cluster_id")
+  groupId       String?          @map("group_id")
+  regionId      String?          @map("region_id")
+  name          String
+  configVersion BigInt           @default(0) @map("config_version")
+  version       String?
+  heartbeatAt   DateTime?        @map("heartbeat_at")
+  status        NodeStatus       @default(PENDING)
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+  cluster       Cluster          @relation(fields: [clusterId], references: [id])
+  group         ClusterGroup?    @relation(fields: [groupId], references: [id])
+  region        ClusterRegion?   @relation(fields: [regionId], references: [id])
+  addresses     NodeAddress[]
+  dnsLines      NodeDNSLine[]
+  cacheConfig   NodeCacheConfig?
+  credential    NodeCredential?
 
   @@unique([clusterId, name])
   @@index([clusterId, status])
@@ -264,6 +264,14 @@ model NodeCacheConfig {
   node                Node     @relation(fields: [nodeId], references: [id])
 
   @@map("node_cache_configs")
+}
+
+model NodeCredential {
+  nodeId           UUID   @id @map("node_id")
+  communicationKey String @map("communication_key")
+  node             Node   @relation(fields: [nodeId], references: [id])
+
+  @@map("node_credentials")
 }
 
 model NodeDNSLine {

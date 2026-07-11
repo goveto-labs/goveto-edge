@@ -1,12 +1,16 @@
 package edgeagent
 
 import (
-	"crypto/subtle"
+	"bytes"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"strconv"
-	"strings"
+	"sync"
 	"time"
+
+	"goveto-edge/internal/edgeprotocol"
 )
 
 func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *NodeConfigStore, logs *LogQueue) http.Handler {
@@ -75,25 +79,71 @@ func newAgentServer(identity Identity, configs *ConfigManager, nodeConfigs *Node
 			writeError(w, http.StatusBadRequest, "invalid node config")
 			return
 		}
-		nodeConfigs.Set(config)
+		if err := nodeConfigs.Set(config); err != nil {
+			writeError(w, http.StatusInternalServerError, "persist node config")
+			return
+		}
 		writeJSON(w, http.StatusOK, nodeConfigs.Get())
 	})
 	mux.HandleFunc("GET /v1/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"node_id": identity.NodeID, "status": "ok"})
 	})
-	return authenticate(identity, mux)
+	return newAuthenticator(identity).wrap(mux)
 }
 
-func authenticate(identity Identity, next http.Handler) http.Handler {
+type authenticator struct {
+	identity Identity
+	mu       sync.Mutex
+	nonces   map[string]time.Time
+}
+
+func newAuthenticator(identity Identity) *authenticator {
+	return &authenticator{identity: identity, nonces: map[string]time.Time{}}
+}
+
+func (a *authenticator) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		provided := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		host := strings.TrimSuffix(r.Host, ":80")
-		if host != identity.NodeID || r.Header.Get("X-Goveto-Node-ID") != identity.NodeID || len(provided) != len(identity.CommunicationKey) || subtle.ConstantTimeCompare([]byte(provided), []byte(identity.CommunicationKey)) != 1 {
+		host := r.Host
+		if parsedHost, _, err := net.SplitHostPort(r.Host); err == nil {
+			host = parsedHost
+		}
+		timestampText, nonce := r.Header.Get(edgeprotocol.HeaderTimestamp), r.Header.Get(edgeprotocol.HeaderNonce)
+		timestamp, err := time.Parse(time.RFC3339, timestampText)
+		if err != nil || time.Since(timestamp) > 5*time.Minute || time.Until(timestamp) > 5*time.Minute || nonce == "" {
+			writeError(w, http.StatusUnauthorized, "invalid or replayed request signature")
+			return
+		}
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 8<<20))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "request body too large")
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		contentHash := edgeprotocol.ContentHash(body)
+		if host != a.identity.NodeID || r.Header.Get(edgeprotocol.HeaderNodeID) != a.identity.NodeID || r.Header.Get(edgeprotocol.HeaderContentHash) != contentHash || !edgeprotocol.Verify(a.identity.CommunicationKey, r.Header.Get(edgeprotocol.HeaderSignature), r.Method, host, r.URL.RequestURI(), timestampText, nonce, contentHash) || !a.acceptNonce(nonce, time.Now()) {
 			writeError(w, http.StatusUnauthorized, "invalid node credentials")
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+func (a *authenticator) acceptNonce(nonce string, now time.Time) bool {
+	if nonce == "" {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for value, expires := range a.nonces {
+		if now.After(expires) {
+			delete(a.nonces, value)
+		}
+	}
+	if _, exists := a.nonces[nonce]; exists {
+		return false
+	}
+	a.nonces[nonce] = now.Add(5 * time.Minute)
+	return true
 }
 
 func parseDurationSeconds(value string, fallback, maximum time.Duration) time.Duration {

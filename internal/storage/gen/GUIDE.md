@@ -206,7 +206,6 @@ query.PostAuthorIdColumn
   - `Groupid` (String, optional)
   - `Regionid` (String, optional)
   - `Name` (String)
-  - `Communicationkey` (String)
   - `Configversion` (BigInt)
   - `Version` (String, optional)
   - `Heartbeatat` (DateTime, optional)
@@ -238,6 +237,14 @@ query.PostAuthorIdColumn
   - `Maxdiskusagepercent` (Int)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
+
+### NodeCredential
+
+- Client handle: `c.NodeCredential`
+- Query namespace: `query.NodeCredential`
+- Fields:
+  - `Nodeid` (UUID, id)
+  - `Communicationkey` (String)
 
 ### NodeDNSLine
 

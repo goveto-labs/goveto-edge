@@ -4,14 +4,15 @@ package edgecontrol
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"goveto-edge/internal/edgeagent"
+	"goveto-edge/internal/edgeprotocol"
 )
 
 type Client struct {
@@ -23,12 +24,12 @@ func New(baseURL, nodeID, communicationKey string) *Client {
 	return &Client{baseURL: strings.TrimRight(baseURL, "/"), nodeID: nodeID, key: communicationKey, http: &http.Client{Timeout: 75 * time.Second}}
 }
 
-func (c *Client) PushSiteConfig(ctx context.Context, config edgeagent.SiteConfig) error {
+func (c *Client) PushSiteConfig(ctx context.Context, config edgeprotocol.SiteConfig) error {
 	body, err := json.Marshal(config)
 	if err != nil {
 		return err
 	}
-	request, err := c.request(ctx, http.MethodPut, "/v1/sites/"+config.SiteID+"/config", bytes.NewReader(body))
+	request, err := c.request(ctx, http.MethodPut, "/v1/sites/"+config.SiteID+"/config", body)
 	if err != nil {
 		return err
 	}
@@ -46,7 +47,7 @@ func (c *Client) PushSiteConfig(ctx context.Context, config edgeagent.SiteConfig
 // PullLogs continuously long-polls the agent. Records are acknowledged only
 // after consume returns successfully, so transient control-plane failures do
 // not lose data.
-func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []edgeagent.LogRecord) error) error {
+func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []edgeprotocol.LogRecord) error) error {
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -57,20 +58,27 @@ func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []e
 		}
 		response, err := c.http.Do(request)
 		if err != nil {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Second):
-				continue
+			if err := retryDelay(ctx); err != nil {
+				return err
 			}
+			continue
 		}
 		var payload struct {
-			Records []edgeagent.LogRecord `json:"records"`
+			Records []edgeprotocol.LogRecord `json:"records"`
 		}
 		decodeErr := json.NewDecoder(response.Body).Decode(&payload)
 		response.Body.Close()
+		if response.StatusCode == http.StatusUnauthorized {
+			return fmt.Errorf("pull agent logs: unauthorized")
+		}
 		if response.StatusCode != http.StatusOK || decodeErr != nil {
-			return fmt.Errorf("pull agent logs: %s", response.Status)
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if err := retryDelay(ctx); err != nil {
+				return err
+			}
+			continue
 		}
 		if len(payload.Records) == 0 {
 			continue
@@ -84,9 +92,20 @@ func (c *Client) PullLogs(ctx context.Context, consume func(context.Context, []e
 	}
 }
 
+func retryDelay(ctx context.Context) error {
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (c *Client) ack(ctx context.Context, through uint64) error {
 	body, _ := json.Marshal(map[string]uint64{"through": through})
-	request, err := c.request(ctx, http.MethodPost, "/v1/logs/ack", bytes.NewReader(body))
+	request, err := c.request(ctx, http.MethodPost, "/v1/logs/ack", body)
 	if err != nil {
 		return err
 	}
@@ -101,14 +120,31 @@ func (c *Client) ack(ctx context.Context, through uint64) error {
 	return nil
 }
 
-func (c *Client) request(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
-	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+func (c *Client) request(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
-	request.Header.Set("Authorization", "Bearer "+c.key)
-	request.Header.Set("X-Goveto-Node-ID", c.nodeID)
 	request.Host = c.nodeID
+	timestamp := time.Now().UTC().Format(time.RFC3339)
+	nonce, err := newNonce()
+	if err != nil {
+		return nil, err
+	}
+	contentHash := edgeprotocol.ContentHash(body)
+	request.Header.Set(edgeprotocol.HeaderNodeID, c.nodeID)
+	request.Header.Set(edgeprotocol.HeaderTimestamp, timestamp)
+	request.Header.Set(edgeprotocol.HeaderNonce, nonce)
+	request.Header.Set(edgeprotocol.HeaderContentHash, contentHash)
+	request.Header.Set(edgeprotocol.HeaderSignature, edgeprotocol.Sign(c.key, method, c.nodeID, request.URL.RequestURI(), timestamp, nonce, contentHash))
 	request.Header.Set("Content-Type", "application/json")
 	return request, nil
+}
+
+func newNonce() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
 }

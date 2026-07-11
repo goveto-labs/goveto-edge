@@ -46,15 +46,11 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 		if err != nil {
 			return err
 		}
-		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID, CommunicationKey: communicationKey, SSH: input.SSH}); err != nil {
-			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
-		}
 		if err := db.Tx(ctx, func(tx *client.Client) error {
 			sets := []query.NodeSetClause{
 				query.Node.Id.Set(nodeID),
 				query.Node.ClusterId.Set(input.ClusterID),
 				query.Node.Name.Set(input.Name),
-				query.Node.CommunicationKey.Set(communicationKey),
 				query.Node.Status.Set(model.NodeStatusPENDING),
 			}
 			if input.GroupID != nil {
@@ -67,6 +63,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 				return err
 			}
 			if _, err := tx.NodeCacheConfig.Create().Set(query.NodeCacheConfig.NodeId.Set(nodeID)).Do(ctx); err != nil {
+				return err
+			}
+			if _, err := tx.NodeCredential.Create().Set(query.NodeCredential.NodeId.Set(nodeID), query.NodeCredential.CommunicationKey.Set(communicationKey)).Do(ctx); err != nil {
 				return err
 			}
 			for index, address := range input.Addresses {
@@ -88,8 +87,11 @@ func create(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc 
 			}
 			return nil
 		}); err != nil {
-			_ = queue.Delete(ctx, nodeID)
 			return err
+		}
+		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID, CommunicationKey: communicationKey, SSH: input.SSH}); err != nil {
+			_, _ = db.Node.Update().Where(query.Node.Id.Equals(nodeID)).Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).DoMany(ctx)
+			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
 		return c.JSON(http.StatusAccepted, map[string]any{"id": nodeID, "status": model.NodeStatusPENDING})

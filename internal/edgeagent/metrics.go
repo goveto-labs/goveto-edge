@@ -3,6 +3,8 @@ package edgeagent
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -22,12 +24,17 @@ type NodeConfig struct {
 type NodeConfigStore struct {
 	mu    sync.RWMutex
 	value NodeConfig
+	path  string
 }
 
-func NewNodeConfigStore() *NodeConfigStore {
-	return &NodeConfigStore{value: NodeConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: true, MaxDiskUsagePercent: 80}}
+func NewNodeConfigStore(path string) *NodeConfigStore {
+	store := &NodeConfigStore{path: path, value: NodeConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: true, MaxDiskUsagePercent: 80}}
+	if data, err := os.ReadFile(path); err == nil {
+		_ = json.Unmarshal(data, &store.value)
+	}
+	return store
 }
-func (s *NodeConfigStore) Set(value NodeConfig) {
+func (s *NodeConfigStore) Set(value NodeConfig) error {
 	if value.CacheDirectory == "" {
 		value.CacheDirectory = "/opt/goveto-edge/cache"
 	}
@@ -35,8 +42,23 @@ func (s *NodeConfigStore) Set(value NodeConfig) {
 		value.MaxDiskUsagePercent = 80
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
+		return err
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	temporary := s.path + ".tmp"
+	if err := os.WriteFile(temporary, data, 0600); err != nil {
+		return err
+	}
+	if err := os.Rename(temporary, s.path); err != nil {
+		return err
+	}
 	s.value = value
-	s.mu.Unlock()
+	return nil
 }
 func (s *NodeConfigStore) Get() NodeConfig { s.mu.RLock(); defer s.mu.RUnlock(); return s.value }
 

@@ -31,24 +31,24 @@ func ApplyNodeOptions(opts []NodeQueryOption) NodeQueryConfig {
 
 // NodeQuery is the namespace for Node query operations.
 type NodeQuery struct {
-	Id               nodeIdField
-	ClusterId        nodeClusterIdField
-	GroupId          nodeGroupIdField
-	RegionId         nodeRegionIdField
-	Name             nodeNameField
-	CommunicationKey nodeCommunicationKeyField
-	ConfigVersion    nodeConfigVersionField
-	Version          nodeVersionField
-	HeartbeatAt      nodeHeartbeatAtField
-	Status           nodeStatusField
-	CreatedAt        nodeCreatedAtField
-	UpdatedAt        nodeUpdatedAtField
-	Cluster          nodeClusterRelation
-	Group            nodeGroupRelation
-	Region           nodeRegionRelation
-	Addresses        nodeAddressesRelation
-	DnsLines         nodeDnsLinesRelation
-	CacheConfig      nodeCacheConfigRelation
+	Id            nodeIdField
+	ClusterId     nodeClusterIdField
+	GroupId       nodeGroupIdField
+	RegionId      nodeRegionIdField
+	Name          nodeNameField
+	ConfigVersion nodeConfigVersionField
+	Version       nodeVersionField
+	HeartbeatAt   nodeHeartbeatAtField
+	Status        nodeStatusField
+	CreatedAt     nodeCreatedAtField
+	UpdatedAt     nodeUpdatedAtField
+	Cluster       nodeClusterRelation
+	Group         nodeGroupRelation
+	Region        nodeRegionRelation
+	Addresses     nodeAddressesRelation
+	DnsLines      nodeDnsLinesRelation
+	CacheConfig   nodeCacheConfigRelation
+	Credential    nodeCredentialRelation
 }
 
 const NodeTable = "nodes"
@@ -57,7 +57,6 @@ const NodeClusterIdColumn = "cluster_id"
 const NodeGroupIdColumn = "group_id"
 const NodeRegionIdColumn = "region_id"
 const NodeNameColumn = "name"
-const NodeCommunicationKeyColumn = "communication_key"
 const NodeConfigVersionColumn = "config_version"
 const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
@@ -67,24 +66,24 @@ const NodeUpdatedAtColumn = "updated_at"
 
 // NodeQuery provides query building methods for the Node model.
 var Node = NodeQuery{
-	Id:               nodeIdField{},
-	ClusterId:        nodeClusterIdField{},
-	GroupId:          nodeGroupIdField{},
-	RegionId:         nodeRegionIdField{},
-	Name:             nodeNameField{},
-	CommunicationKey: nodeCommunicationKeyField{},
-	ConfigVersion:    nodeConfigVersionField{},
-	Version:          nodeVersionField{},
-	HeartbeatAt:      nodeHeartbeatAtField{},
-	Status:           nodeStatusField{},
-	CreatedAt:        nodeCreatedAtField{},
-	UpdatedAt:        nodeUpdatedAtField{},
-	Cluster:          nodeClusterRelation{},
-	Group:            nodeGroupRelation{},
-	Region:           nodeRegionRelation{},
-	Addresses:        nodeAddressesRelation{},
-	DnsLines:         nodeDnsLinesRelation{},
-	CacheConfig:      nodeCacheConfigRelation{},
+	Id:            nodeIdField{},
+	ClusterId:     nodeClusterIdField{},
+	GroupId:       nodeGroupIdField{},
+	RegionId:      nodeRegionIdField{},
+	Name:          nodeNameField{},
+	ConfigVersion: nodeConfigVersionField{},
+	Version:       nodeVersionField{},
+	HeartbeatAt:   nodeHeartbeatAtField{},
+	Status:        nodeStatusField{},
+	CreatedAt:     nodeCreatedAtField{},
+	UpdatedAt:     nodeUpdatedAtField{},
+	Cluster:       nodeClusterRelation{},
+	Group:         nodeGroupRelation{},
+	Region:        nodeRegionRelation{},
+	Addresses:     nodeAddressesRelation{},
+	DnsLines:      nodeDnsLinesRelation{},
+	CacheConfig:   nodeCacheConfigRelation{},
+	Credential:    nodeCredentialRelation{},
 }
 
 // NodeWhereClause represents a WHERE condition for Node.
@@ -484,67 +483,6 @@ func (nodeNameField) Asc() NodeOrderByClause {
 // Desc returns a descending order clause for this field.
 func (nodeNameField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "name", Direction: "DESC"}
-}
-
-// CommunicationKeyField provides query operations for the communicationKey field.
-type nodeCommunicationKeyField struct{}
-
-// Equals creates an equality condition.
-func (nodeCommunicationKeyField) Equals(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "communication_key", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (nodeCommunicationKeyField) Not(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "communication_key", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (nodeCommunicationKeyField) In(vals ...string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "communication_key", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (nodeCommunicationKeyField) NotIn(vals ...string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "communication_key", Operator: "NOT IN", Value: iVals}
-}
-
-// Contains creates a LIKE '%v%' condition.
-func (nodeCommunicationKeyField) Contains(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "communication_key", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeCommunicationKeyField) StartsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "communication_key", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeCommunicationKeyField) EndsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "communication_key", Operator: "ENDS_WITH", Value: v}
-}
-
-// Set creates a set operation for create/update.
-func (nodeCommunicationKeyField) Set(v string) NodeSetClause {
-	return NodeSetClause{Field: "communication_key", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (nodeCommunicationKeyField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "communication_key", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (nodeCommunicationKeyField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "communication_key", Direction: "DESC"}
 }
 
 // ConfigVersionField provides query operations for the configVersion field.
@@ -986,6 +924,14 @@ func (nodeCacheConfigRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "cacheConfig"}
 }
 
+// CredentialRelation provides relation query helpers for credential.
+type nodeCredentialRelation struct{}
+
+// Fetch creates an include clause to fetch related credential.
+func (nodeCredentialRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "credential"}
+}
+
 // NodeSetClause represents a field set operation for create/update.
 type NodeSetClause struct {
 	Field string
@@ -1019,29 +965,29 @@ type NodeGroupByResult struct {
 
 // NodeCreateInput holds data for creating a Node record.
 type NodeCreateInput struct {
-	Id               string
-	ClusterId        string
-	GroupId          **string
-	RegionId         **string
-	Name             string
-	CommunicationKey string
-	ConfigVersion    int64
-	Version          **string
-	HeartbeatAt      **time.Time
-	Status           model.NodeStatus
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	Cluster          *ClusterCreateNestedInput
-	Group            *ClusterGroupCreateNestedInput
-	Region           *ClusterRegionCreateNestedInput
-	Addresses        *NodeAddressCreateNestedInput
-	DnsLines         *NodeDNSLineCreateNestedInput
-	CacheConfig      *NodeCacheConfigCreateNestedInput
+	Id            string
+	ClusterId     string
+	GroupId       **string
+	RegionId      **string
+	Name          string
+	ConfigVersion int64
+	Version       **string
+	HeartbeatAt   **time.Time
+	Status        model.NodeStatus
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Cluster       *ClusterCreateNestedInput
+	Group         *ClusterGroupCreateNestedInput
+	Region        *ClusterRegionCreateNestedInput
+	Addresses     *NodeAddressCreateNestedInput
+	DnsLines      *NodeDNSLineCreateNestedInput
+	CacheConfig   *NodeCacheConfigCreateNestedInput
+	Credential    *NodeCredentialCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.CommunicationKey, d.ConfigVersion, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.ConfigVersion, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

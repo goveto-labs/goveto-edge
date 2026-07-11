@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/caddyserver/caddy/v2"
+	_ "github.com/caddyserver/caddy/v2/modules/standard"
 )
 
 type ConfigManager struct {
@@ -74,22 +76,38 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	}
 	m.sites[config.SiteID] = config
 	encoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost)
-	if err == nil {
-		err = caddy.Load(encoded, true)
-	}
 	if err != nil {
 		if existed {
 			m.sites[config.SiteID] = previous
 		} else {
 			delete(m.sites, config.SiteID)
 		}
-		return fmt.Errorf("apply site config: %w", err)
+		return fmt.Errorf("render site config: %w", err)
 	}
 	if err := m.persistLocked(); err != nil {
+		if existed {
+			m.sites[config.SiteID] = previous
+		} else {
+			delete(m.sites, config.SiteID)
+		}
 		return fmt.Errorf("persist site config: %w", err)
+	}
+	if err := caddy.Load(encoded, true); err != nil {
+		if existed {
+			m.sites[config.SiteID] = previous
+		} else {
+			delete(m.sites, config.SiteID)
+		}
+		rollbackErr := m.persistLocked()
+		if rollbackErr != nil {
+			return fmt.Errorf("apply site config: %w; restore persisted config: %v", err, rollbackErr)
+		}
+		return fmt.Errorf("apply site config: %w", err)
 	}
 	return nil
 }
+
+func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
 
 func (m *ConfigManager) persistLocked() error {
 	if m.path == "" {
@@ -166,7 +184,16 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 		if policy == "" {
 			policy = "round_robin"
 		}
+		if policy == "ip_hash" {
+			policy = "client_ip_hash"
+		}
+		if _, err := caddy.GetModule("http.reverse_proxy.selection_policies." + policy); err != nil {
+			return nil, fmt.Errorf("unsupported Caddy scheduler %q: %w", policy, err)
+		}
 		reverseProxy := map[string]any{"handler": "reverse_proxy", "upstreams": upstreams, "load_balancing": map[string]any{"selection_policy": map[string]any{"policy": policy}}}
+		if strings.EqualFold(site.Origins[0].Protocol, "https") {
+			reverseProxy["transport"] = map[string]any{"protocol": "http", "tls": map[string]any{}}
+		}
 		if hostHeader != "" {
 			reverseProxy["headers"] = map[string]any{"request": map[string]any{"set": map[string][]string{"Host": {hostHeader}}}}
 		}

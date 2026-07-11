@@ -7,15 +7,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
+	"strconv"
 
-	"github.com/caddyserver/caddy/v2"
 	"goveto-edge/caddy/agentlog"
 )
 
 // Agent owns the lifecycle and configuration of the embedded Caddy instance.
 type Agent struct {
-	mu           sync.Mutex
 	identityPath string
 	dataDir      string
 	configs      *ConfigManager
@@ -29,7 +27,7 @@ func New() *Agent {
 		identityPath: envOr("EDGE_AGENT_IDENTITY_FILE", "/opt/goveto-edge/agent/identity.json"),
 		dataDir:      dataDir,
 		configs:      NewConfigManager(filepath.Join(dataDir, "sites.json"), envOr("EDGE_AGENT_LISTEN", ":80")),
-		nodeConfigs:  NewNodeConfigStore(),
+		nodeConfigs:  NewNodeConfigStore(filepath.Join(dataDir, "node.json")),
 	}
 }
 
@@ -43,7 +41,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := os.MkdirAll(a.dataDir, 0700); err != nil {
 		return err
 	}
-	a.logs, err = OpenLogQueue(filepath.Join(a.dataDir, "logs.db"))
+	a.logs, err = OpenLogQueue(filepath.Join(a.dataDir, "logs.db"), envUint64("EDGE_AGENT_LOG_MAX_BYTES", 2<<30))
 	if err != nil {
 		return fmt.Errorf("open log queue: %w", err)
 	}
@@ -58,28 +56,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	return a.Stop()
 }
 
-// ApplyConfig atomically loads a Caddy JSON configuration received from the
-// control plane. Caddy keeps the previous working configuration if loading the
-// new configuration fails.
-func (a *Agent) ApplyConfig(configJSON []byte) error {
-	if len(configJSON) == 0 {
-		return errors.New("caddy config is empty")
-	}
-
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if err := caddy.Load(configJSON, true); err != nil {
-		return fmt.Errorf("load caddy config: %w", err)
-	}
-	return nil
-}
-
 func (a *Agent) Stop() error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if err := caddy.Stop(); err != nil {
+	if err := a.configs.Stop(); err != nil {
 		return fmt.Errorf("stop caddy: %w", err)
 	}
 	if a.logs != nil {
@@ -99,6 +77,18 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envUint64(key string, fallback uint64) uint64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseUint(value, 10, 64)
+	if err != nil || parsed == 0 {
+		return fallback
+	}
+	return parsed
 }
 
 type agentLogSink struct{ queue *LogQueue }
