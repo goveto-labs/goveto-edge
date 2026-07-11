@@ -91,6 +91,15 @@ model ConfigVersion {
   @@map("config_versions")
 }
 
+model DynamicSetting {
+  key         String   @id
+  valueJson   Json     @map("value_json")
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("dynamic_settings")
+}
+
 model Node {
   id          String     @id @default(uuid())
   region      String
@@ -196,6 +205,8 @@ model User {
   name         String
   role         UserRole      @default(VIEWER)
   status       UserStatus    @default(ACTIVE)
+  totpSecret   String?       @map("totp_secret")
+  totpEnabled  Boolean       @default(false) @map("totp_enabled")
   lastLoginAt  DateTime?     @map("last_login_at")
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")

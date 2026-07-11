@@ -117,6 +117,16 @@ query.PostAuthorIdColumn
   - `Status` ()
   - `Createdat` (DateTime)
 
+### DynamicSetting
+
+- Client handle: `c.DynamicSetting`
+- Query namespace: `query.DynamicSetting`
+- Fields:
+  - `Key` (String, id)
+  - `Valuejson` (Json)
+  - `Description` (String, optional)
+  - `Updatedat` (DateTime)
+
 ### Node
 
 - Client handle: `c.Node`
@@ -213,6 +223,8 @@ query.PostAuthorIdColumn
   - `Name` (String)
   - `Role` ()
   - `Status` ()
+  - `Totpsecret` (String, optional)
+  - `Totpenabled` (Boolean)
   - `Lastloginat` (DateTime, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
