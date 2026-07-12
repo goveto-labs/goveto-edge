@@ -21,9 +21,11 @@ import {
     Table,
     useOverlayState,
 } from '@heroui/react';
+import { Eye, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, clusterApi, nodesApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function parseCommaList(value: string) {
@@ -198,21 +200,31 @@ export default function Nodes() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to manage nodes.
+            <div className='space-y-6'>
+                <PageHeader
+                    subtitle='Manage edge nodes and their cache configuration.'
+                    title='Nodes'
+                />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to manage nodes.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     return (
-        <div className='space-y-4'>
-            <div className='flex items-center justify-between'>
-                <h1 className='text-2xl font-bold'>Nodes</h1>
-                <Button onPress={openCreate}>Create node</Button>
-            </div>
+        <div className='space-y-6'>
+            <PageHeader subtitle='Manage edge nodes and their cache configuration.' title='Nodes'>
+                <Button onPress={openCreate}>
+                    <Plus className='mr-2 h-4 w-4' />
+                    Create node
+                </Button>
+            </PageHeader>
 
             {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {error}
                 </div>
             )}
@@ -233,18 +245,19 @@ export default function Nodes() {
                         <Table.Body>
                             {nodes.map((node) => (
                                 <Table.Row key={node.id} id={node.id}>
-                                    <Table.Cell>{node.name}</Table.Cell>
+                                    <Table.Cell className='font-medium'>{node.name}</Table.Cell>
                                     <Table.Cell>{node.status}</Table.Cell>
                                     <Table.Cell>
                                         {node.addresses.map((a) => a.address).join(', ')}
                                     </Table.Cell>
                                     <Table.Cell>
-                                        <div className='flex gap-2'>
+                                        <div className='flex justify-end gap-2'>
                                             <Button
                                                 size='sm'
                                                 variant='secondary'
                                                 onPress={() => openDetail(node.id)}
                                             >
+                                                <Eye className='mr-1.5 h-3.5 w-3.5' />
                                                 View
                                             </Button>
                                             <Button
@@ -252,6 +265,7 @@ export default function Nodes() {
                                                 variant='danger'
                                                 onPress={() => handleDelete(node.id)}
                                             >
+                                                <Trash2 className='mr-1.5 h-3.5 w-3.5' />
                                                 Delete
                                             </Button>
                                         </div>

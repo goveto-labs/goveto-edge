@@ -1,9 +1,11 @@
 import type { PublishJob, PublishStatus, PublishTask } from '@/api';
 
 import { Button, Card, Chip, Input, Table } from '@heroui/react';
+import { Plus, RotateCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, publishApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function PublishJobs() {
@@ -79,62 +81,77 @@ export default function PublishJobs() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to view publish jobs.
+            <div className='space-y-6'>
+                <PageHeader
+                    subtitle='Publish configuration changes to edge nodes.'
+                    title='Publish Jobs'
+                />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to view publish jobs.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     return (
         <div className='space-y-6'>
-            <h1 className='text-2xl font-bold'>Publish jobs</h1>
+            <PageHeader
+                subtitle='Publish configuration changes to edge nodes.'
+                title='Publish Jobs'
+            />
 
             {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {error}
                 </div>
             )}
 
-            <div className='grid grid-cols-1 gap-4 lg:grid-cols-4'>
-                <Card className='p-4'>
+            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                <Card className='p-5'>
                     <div className='text-sm text-muted'>State</div>
-                    <div className='text-xl font-semibold'>{status?.state ?? '-'}</div>
+                    <div className='mt-1 text-xl font-semibold'>{status?.state ?? '-'}</div>
                 </Card>
-                <Card className='p-4'>
+                <Card className='p-5'>
                     <div className='text-sm text-muted'>Pending</div>
-                    <div className='text-xl font-semibold'>{status?.pending_count ?? 0}</div>
+                    <div className='mt-1 text-xl font-semibold'>{status?.pending_count ?? 0}</div>
                 </Card>
-                <Card className='p-4'>
+                <Card className='p-5'>
                     <div className='text-sm text-muted'>Running</div>
-                    <div className='text-xl font-semibold'>{status?.running_count ?? 0}</div>
+                    <div className='mt-1 text-xl font-semibold'>{status?.running_count ?? 0}</div>
                 </Card>
-                <Card className='p-4'>
+                <Card className='p-5'>
                     <div className='text-sm text-muted'>Failed</div>
-                    <div className='text-xl font-semibold text-danger'>
+                    <div className='mt-1 text-xl font-semibold text-danger'>
                         {status?.failed_count ?? 0}
                     </div>
                 </Card>
             </div>
 
-            <Card className='p-4'>
-                <div className='mb-2 text-sm font-medium'>Enqueue publish</div>
-                <div className='flex gap-2'>
+            <Card className='p-5'>
+                <div className='mb-4 text-sm font-medium'>Enqueue publish</div>
+                <div className='flex flex-col gap-3 sm:flex-row'>
                     <Input
                         className='flex-1'
                         placeholder='Site ID'
                         value={siteId}
                         onChange={(e) => setSiteId(e.target.value)}
                     />
-                    <Button isDisabled={publishing} onPress={handlePublish}>
-                        {publishing ? 'Publishing...' : 'Publish'}
-                    </Button>
-                    <Button variant='ghost' onPress={loadSiteJobs}>
-                        Load jobs
-                    </Button>
+                    <div className='flex gap-2'>
+                        <Button isDisabled={publishing} onPress={handlePublish}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            {publishing ? 'Publishing...' : 'Publish'}
+                        </Button>
+                        <Button variant='ghost' onPress={loadSiteJobs}>
+                            <RotateCw className='mr-2 h-4 w-4' />
+                            Load jobs
+                        </Button>
+                    </div>
                 </div>
             </Card>
 
-            <div className='space-y-2'>
+            <div className='space-y-3'>
                 <div className='text-sm font-medium'>Recent tasks</div>
                 <Card className='overflow-hidden'>
                     <Table>
@@ -170,7 +187,7 @@ export default function PublishJobs() {
                 </Card>
             </div>
 
-            <div className='space-y-2'>
+            <div className='space-y-3'>
                 <div className='text-sm font-medium'>Site jobs{loading && ' (loading)'}</div>
                 <Card className='overflow-hidden'>
                     <Table>

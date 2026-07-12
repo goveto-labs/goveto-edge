@@ -1,10 +1,13 @@
 import type { Certificate, Node, PublishStatus } from '@/api';
 
-import { Button, Card, Chip, Spinner } from '@heroui/react';
+import { Button, Card, Spinner } from '@heroui/react';
+import { ArrowRight, Files, Globe, Rocket, Server, ShieldCheck } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, certificatesApi, nodesApi, publishApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
+import { StatCard } from '@/components/StatCard.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function Dashboard() {
@@ -36,55 +39,81 @@ export default function Dashboard() {
             .finally(() => setLoading(false));
     }, [clusterId]);
 
-    if (loading) {
-        return (
-            <div className='flex h-64 items-center justify-center'>
-                <Spinner />
-            </div>
-        );
-    }
+    const publishFooter = status && (
+        <div className='flex gap-3'>
+            <span>Pending {status.pending_count}</span>
+            <span>Running {status.running_count}</span>
+            <span className='text-danger'>Failed {status.failed_count}</span>
+        </div>
+    );
 
     return (
         <div className='space-y-6'>
-            <div className='flex items-center justify-between'>
-                <h1 className='text-2xl font-bold'>Dashboard</h1>
-                <Chip color='default' variant='soft'>
-                    {clusterId || 'No cluster'}
-                </Chip>
-            </div>
+            <PageHeader subtitle='Overview of your edge cluster.' title='Dashboard' />
 
             {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {error}
                 </div>
             )}
 
-            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
-                <Card className='p-4'>
-                    <div className='text-sm text-muted'>Nodes</div>
-                    <div className='text-3xl font-bold'>{nodes.length}</div>
-                </Card>
-                <Card className='p-4'>
-                    <div className='text-sm text-muted'>Certificates</div>
-                    <div className='text-3xl font-bold'>{certs.length}</div>
-                </Card>
-                <Card className='p-4'>
-                    <div className='text-sm text-muted'>Publish state</div>
-                    <div className='text-xl font-semibold'>{status?.state ?? '-'}</div>
-                    <div className='mt-1 flex gap-2 text-xs text-muted'>
-                        <span>Pending {status?.pending_count ?? 0}</span>
-                        <span>Running {status?.running_count ?? 0}</span>
-                        <span>Failed {status?.failed_count ?? 0}</span>
-                    </div>
-                </Card>
-            </div>
+            {loading ? (
+                <div className='flex h-64 items-center justify-center'>
+                    <Spinner />
+                </div>
+            ) : (
+                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3'>
+                    <StatCard
+                        color='primary'
+                        footer={`${nodes.length} registered`}
+                        icon={Server}
+                        label='Nodes'
+                        value={nodes.length}
+                    />
+                    <StatCard
+                        color='success'
+                        footer={`${certs.length} uploaded`}
+                        icon={ShieldCheck}
+                        label='Certificates'
+                        value={certs.length}
+                    />
+                    <StatCard
+                        color='warning'
+                        footer={publishFooter}
+                        icon={Rocket}
+                        label='Publish state'
+                        value={status?.state ?? '-'}
+                    />
+                </div>
+            )}
 
-            <div className='flex flex-wrap gap-2'>
-                <Button onPress={() => navigate('/nodes')}>Manage nodes</Button>
-                <Button onPress={() => navigate('/sites')}>Manage sites</Button>
-                <Button onPress={() => navigate('/certificates')}>Manage certificates</Button>
-                <Button onPress={() => navigate('/publish')}>Publish status</Button>
-            </div>
+            <Card className='p-5'>
+                <div className='mb-4 flex items-center gap-2 text-sm font-medium'>
+                    <Files className='h-4 w-4 text-muted' />
+                    Quick actions
+                </div>
+                <div className='grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+                    {[
+                        { label: 'Manage nodes', path: '/nodes', icon: Server },
+                        { label: 'Manage sites', path: '/sites', icon: Globe },
+                        { label: 'Manage certificates', path: '/certificates', icon: ShieldCheck },
+                        { label: 'Publish status', path: '/publish', icon: Rocket },
+                    ].map((action) => (
+                        <Button
+                            key={action.path}
+                            className='h-auto justify-between px-4 py-3'
+                            variant='ghost'
+                            onPress={() => navigate(action.path)}
+                        >
+                            <span className='flex items-center gap-2'>
+                                <action.icon className='h-4 w-4' />
+                                {action.label}
+                            </span>
+                            <ArrowRight className='h-4 w-4 text-muted' />
+                        </Button>
+                    ))}
+                </div>
+            </Card>
         </div>
     );
 }

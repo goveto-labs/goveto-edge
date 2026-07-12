@@ -1,4 +1,5 @@
 import { Button, Card, Input, Label } from '@heroui/react';
+import { Globe, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
@@ -36,12 +37,19 @@ export default function Login() {
 
     return (
         <div className='flex min-h-screen items-center justify-center bg-background p-4'>
-            <Card className='w-full max-w-md p-6 shadow-md'>
-                <h1 className='mb-1 text-2xl font-bold'>Sign in</h1>
+            <Card className='w-full max-w-md p-6 shadow-sm'>
+                <div className='mb-6 flex items-center gap-2'>
+                    <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
+                        <Globe className='h-5 w-5' />
+                    </div>
+                    <span className='text-lg font-bold'>Goveto Edge</span>
+                </div>
+
+                <h1 className='text-2xl font-bold'>Sign in</h1>
                 <p className='mb-6 text-sm text-muted'>Enter your credentials to continue.</p>
 
                 {error && (
-                    <div className='mb-4 rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                    <div className='mb-4 rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                         {error}
                     </div>
                 )}
@@ -76,11 +84,18 @@ export default function Login() {
                         />
                     </div>
                     <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
-                        {loading ? 'Signing in...' : 'Sign in'}
+                        {loading ? (
+                            <span className='flex items-center justify-center gap-2'>
+                                <Loader2 className='h-4 w-4 animate-spin' />
+                                Signing in...
+                            </span>
+                        ) : (
+                            'Sign in'
+                        )}
                     </Button>
                 </form>
 
-                <p className='mt-4 text-center text-sm'>
+                <p className='mt-4 text-center text-sm text-muted'>
                     No account?{' '}
                     <Link className='text-accent hover:underline' to='/register'>
                         Register

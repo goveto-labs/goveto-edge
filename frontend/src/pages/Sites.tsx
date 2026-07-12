@@ -1,10 +1,12 @@
 import type { CachePolicy, Certificate, Site, SiteListenerConfig, SiteOrigin } from '@/api';
 
 import { Button, Card, Input, Label, ListBox, Select, Spinner, Switch, Tabs } from '@heroui/react';
+import { Plus, Rocket, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { ApiError, certificatesApi, publishApi, sitesApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function parseCommaList(value: string) {
@@ -151,23 +153,34 @@ export default function Sites() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to manage sites.
+            <div className='space-y-6'>
+                <PageHeader
+                    subtitle='Configure site listeners, origins, and cache policies.'
+                    title='Sites'
+                />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to manage sites.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     if (!siteId) {
         return (
-            <div className='mx-auto max-w-2xl space-y-4'>
-                <h1 className='text-2xl font-bold'>Create site</h1>
+            <div className='mx-auto max-w-2xl space-y-6'>
+                <PageHeader
+                    subtitle='Add a new site with origins and certificates.'
+                    title='Create site'
+                />
                 {createError && (
-                    <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                    <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                         {createError}
                     </div>
                 )}
-                <Card className='p-4'>
-                    <form className='space-y-4' onSubmit={handleCreate}>
+                <Card className='p-5'>
+                    <form className='space-y-5' onSubmit={handleCreate}>
                         <div>
                             <Label htmlFor='site-name'>Site name</Label>
                             <Input
@@ -209,7 +222,7 @@ export default function Sites() {
                             </Select>
                         </div>
 
-                        <div className='space-y-2'>
+                        <div className='space-y-3'>
                             <div className='text-sm font-medium'>Origins</div>
                             {origins.map((origin, idx) => (
                                 <div key={origin.localId} className='grid grid-cols-12 gap-2'>
@@ -272,6 +285,7 @@ export default function Sites() {
                                 variant='ghost'
                                 onPress={() => setOrigins((prev) => [...prev, createEmptyOrigin()])}
                             >
+                                <Plus className='mr-2 h-4 w-4' />
                                 Add origin
                             </Button>
                         </div>
@@ -291,24 +305,20 @@ export default function Sites() {
     }
 
     return (
-        <div className='space-y-4'>
-            <div className='flex items-center justify-between'>
-                <div>
-                    <h1 className='text-2xl font-bold'>{site?.name ?? 'Site config'}</h1>
-                    <div className='text-sm text-muted'>ID: {siteId}</div>
-                </div>
-                <div className='flex gap-2'>
-                    <Button isDisabled={publishLoading} variant='primary' onPress={publish}>
-                        {publishLoading ? 'Publishing...' : 'Publish'}
-                    </Button>
-                    <Button variant='ghost' onPress={() => setSearchParams({})}>
-                        New site
-                    </Button>
-                </div>
-            </div>
+        <div className='space-y-6'>
+            <PageHeader subtitle={`ID: ${siteId}`} title={site?.name ?? 'Site config'}>
+                <Button isDisabled={publishLoading} variant='primary' onPress={publish}>
+                    <Rocket className='mr-2 h-4 w-4' />
+                    {publishLoading ? 'Publishing...' : 'Publish'}
+                </Button>
+                <Button variant='ghost' onPress={() => setSearchParams({})}>
+                    <RotateCcw className='mr-2 h-4 w-4' />
+                    New site
+                </Button>
+            </PageHeader>
 
             {detailError && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {detailError}
                 </div>
             )}
@@ -324,8 +334,9 @@ export default function Sites() {
                         <Tabs.Tab id='cache'>Cache</Tabs.Tab>
                     </Tabs.List>
                     <Tabs.Panel className='space-y-4 pt-4' id='listener'>
-                        <Card className='p-4'>
-                            <div className='grid grid-cols-2 gap-4'>
+                        <Card className='p-5'>
+                            <div className='mb-4 text-sm font-medium'>Listener settings</div>
+                            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                                 <div>
                                     <Label htmlFor='listener-http-port'>HTTP port</Label>
                                     <Input
@@ -355,7 +366,7 @@ export default function Sites() {
                                     />
                                 </div>
                             </div>
-                            <div className='mt-4 flex flex-wrap gap-4'>
+                            <div className='mt-5 flex flex-wrap gap-4'>
                                 <label
                                     className='flex items-center gap-2 text-sm'
                                     htmlFor='site-http2'
@@ -400,16 +411,18 @@ export default function Sites() {
                                 </label>
                             </div>
                             <Button
-                                className='mt-4'
+                                className='mt-5'
                                 isDisabled={saveLoading}
                                 onPress={saveListener}
                             >
+                                <Save className='mr-2 h-4 w-4' />
                                 {saveLoading ? 'Saving...' : 'Save listener'}
                             </Button>
                         </Card>
                     </Tabs.Panel>
                     <Tabs.Panel className='space-y-4 pt-4' id='cache'>
-                        <Card className='p-4'>
+                        <Card className='p-5'>
+                            <div className='mb-4 text-sm font-medium'>Cache policy</div>
                             <label
                                 className='flex items-center gap-2 text-sm'
                                 htmlFor='site-cache-enabled'
@@ -421,7 +434,7 @@ export default function Sites() {
                                 />
                                 Enable caching
                             </label>
-                            <div className='mt-4 grid grid-cols-2 gap-4'>
+                            <div className='mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2'>
                                 <div>
                                     <Label htmlFor='cache-ttl'>TTL seconds</Label>
                                     <Input
@@ -459,7 +472,8 @@ export default function Sites() {
                                     />
                                 </div>
                             </div>
-                            <Button className='mt-4' isDisabled={saveLoading} onPress={saveCache}>
+                            <Button className='mt-5' isDisabled={saveLoading} onPress={saveCache}>
+                                <Save className='mr-2 h-4 w-4' />
                                 {saveLoading ? 'Saving...' : 'Save cache'}
                             </Button>
                         </Card>

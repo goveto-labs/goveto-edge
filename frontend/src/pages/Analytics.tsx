@@ -1,9 +1,12 @@
 import type { Summary, TopItem, TrafficPoint } from '@/api';
 
 import { Button, Card, Input, Label, Table } from '@heroui/react';
+import { ArrowDown, ArrowUp, BarChart3, MousePointerClick, Percent, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
+import { StatCard } from '@/components/StatCard.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function formatBytes(bytes: number) {
@@ -93,17 +96,28 @@ export default function Analytics() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to view analytics.
+            <div className='space-y-6'>
+                <PageHeader subtitle='Traffic and cache performance metrics.' title='Analytics' />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to view analytics.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     return (
         <div className='space-y-6'>
-            <h1 className='text-2xl font-bold'>Analytics</h1>
+            <PageHeader subtitle='Traffic and cache performance metrics.' title='Analytics' />
 
-            <Card className='p-4'>
+            {error && (
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
+                    {error}
+                </div>
+            )}
+
+            <Card className='p-5'>
                 <div className='flex flex-wrap items-end gap-4'>
                     <div>
                         <Label htmlFor='analytics-site-id'>Site ID (optional)</Label>
@@ -133,48 +147,46 @@ export default function Analytics() {
                         />
                     </div>
                     <Button isDisabled={loading} onPress={load}>
+                        <RefreshCw className='mr-2 h-4 w-4' />
                         {loading ? 'Loading...' : 'Refresh'}
                     </Button>
                 </div>
             </Card>
 
-            {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
-                    {error}
-                </div>
-            )}
-
             {summary && (
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-                    <Card className='p-4'>
-                        <div className='text-sm text-muted'>Requests</div>
-                        <div className='text-2xl font-bold'>
-                            {summary.requests.toLocaleString()}
-                        </div>
-                    </Card>
-                    <Card className='p-4'>
-                        <div className='text-sm text-muted'>Ingress bytes</div>
-                        <div className='text-2xl font-bold'>
-                            {formatBytes(summary.ingress_bytes)}
-                        </div>
-                    </Card>
-                    <Card className='p-4'>
-                        <div className='text-sm text-muted'>Egress bytes</div>
-                        <div className='text-2xl font-bold'>
-                            {formatBytes(summary.egress_bytes)}
-                        </div>
-                    </Card>
-                    <Card className='p-4'>
-                        <div className='text-sm text-muted'>Hit rate</div>
-                        <div className='text-2xl font-bold'>
-                            {(summary.hit_rate * 100).toFixed(2)}%
-                        </div>
-                    </Card>
+                    <StatCard
+                        color='primary'
+                        icon={MousePointerClick}
+                        label='Requests'
+                        value={summary.requests.toLocaleString()}
+                    />
+                    <StatCard
+                        color='default'
+                        icon={ArrowDown}
+                        label='Ingress bytes'
+                        value={formatBytes(summary.ingress_bytes)}
+                    />
+                    <StatCard
+                        color='default'
+                        icon={ArrowUp}
+                        label='Egress bytes'
+                        value={formatBytes(summary.egress_bytes)}
+                    />
+                    <StatCard
+                        color='success'
+                        icon={Percent}
+                        label='Hit rate'
+                        value={`${(summary.hit_rate * 100).toFixed(2)}%`}
+                    />
                 </div>
             )}
 
-            <Card className='p-4'>
-                <div className='mb-2 text-sm font-medium'>Traffic (requests)</div>
+            <Card className='p-5'>
+                <div className='mb-4 flex items-center gap-2 text-sm font-medium'>
+                    <BarChart3 className='h-4 w-4 text-muted' />
+                    Traffic (requests)
+                </div>
                 {traffic.length === 0 ? (
                     <div className='text-sm text-muted'>No traffic data.</div>
                 ) : (
@@ -211,7 +223,7 @@ export default function Analytics() {
 
             <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
                 <Card className='overflow-hidden'>
-                    <div className='p-3 text-sm font-medium'>Top URLs</div>
+                    <div className='p-4 text-sm font-medium'>Top URLs</div>
                     <Table>
                         <Table.Header>
                             <Table.Column>URL</Table.Column>
@@ -233,7 +245,7 @@ export default function Analytics() {
                 </Card>
 
                 <Card className='overflow-hidden'>
-                    <div className='p-3 text-sm font-medium'>Top IPs</div>
+                    <div className='p-4 text-sm font-medium'>Top IPs</div>
                     <Table>
                         <Table.Header>
                             <Table.Column>IP</Table.Column>

@@ -1,9 +1,11 @@
 import type { Certificate } from '@/api';
 
 import { Button, Card, Input, Label, Modal, Table, TextArea, useOverlayState } from '@heroui/react';
+import { Plus, ShieldCheck, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, certificatesApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function Certificates() {
@@ -63,55 +65,73 @@ export default function Certificates() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to manage certificates.
+            <div className='space-y-6'>
+                <PageHeader subtitle='TLS certificates for site listeners.' title='Certificates' />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to manage certificates.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     return (
-        <div className='space-y-4'>
-            <div className='flex items-center justify-between'>
-                <h1 className='text-2xl font-bold'>Certificates</h1>
-                <Button onPress={open}>Upload certificate</Button>
-            </div>
+        <div className='space-y-6'>
+            <PageHeader subtitle='TLS certificates for site listeners.' title='Certificates'>
+                <Button onPress={open}>
+                    <Plus className='mr-2 h-4 w-4' />
+                    Upload certificate
+                </Button>
+            </PageHeader>
 
             {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {error}
                 </div>
             )}
-            {loading && <div className='text-sm text-muted'>Loading...</div>}
 
-            <Card className='overflow-hidden'>
-                <Table>
-                    <Table.Header>
-                        <Table.Column>Name</Table.Column>
-                        <Table.Column>ID</Table.Column>
-                        <Table.Column>Created at</Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                        {certs.map((cert) => (
-                            <Table.Row key={cert.id} id={cert.id}>
-                                <Table.Cell>{cert.name}</Table.Cell>
-                                <Table.Cell className='font-mono text-xs'>{cert.id}</Table.Cell>
-                                <Table.Cell>{cert.created_at}</Table.Cell>
-                            </Table.Row>
-                        ))}
-                    </Table.Body>
-                </Table>
-            </Card>
+            {loading ? (
+                <div className='flex h-64 items-center justify-center text-sm text-muted'>
+                    Loading certificates...
+                </div>
+            ) : (
+                <Card className='overflow-hidden'>
+                    <Table>
+                        <Table.Header>
+                            <Table.Column>Name</Table.Column>
+                            <Table.Column>ID</Table.Column>
+                            <Table.Column>Created at</Table.Column>
+                        </Table.Header>
+                        <Table.Body>
+                            {certs.map((cert) => (
+                                <Table.Row key={cert.id} id={cert.id}>
+                                    <Table.Cell className='flex items-center gap-2 font-medium'>
+                                        <ShieldCheck className='h-4 w-4 text-success' />
+                                        {cert.name}
+                                    </Table.Cell>
+                                    <Table.Cell className='font-mono text-xs'>{cert.id}</Table.Cell>
+                                    <Table.Cell>{cert.created_at}</Table.Cell>
+                                </Table.Row>
+                            ))}
+                        </Table.Body>
+                    </Table>
+                </Card>
+            )}
 
             <Modal isOpen={modalState.isOpen} onOpenChange={modalState.setOpen}>
                 <Modal.Container size='md'>
                     <Modal.Dialog>
                         <form className='space-y-4' onSubmit={handleSubmit}>
                             <Modal.Header>
-                                <Modal.Heading>Upload certificate</Modal.Heading>
+                                <Modal.Heading className='flex items-center gap-2'>
+                                    <Upload className='h-5 w-5' />
+                                    Upload certificate
+                                </Modal.Heading>
                             </Modal.Header>
                             <Modal.Body className='space-y-4'>
                                 {submitError && (
-                                    <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                                    <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                                         {submitError}
                                     </div>
                                 )}

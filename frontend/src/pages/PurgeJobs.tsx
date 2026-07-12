@@ -1,10 +1,12 @@
 import type { PurgeJob, PurgeType } from '@/api';
 
 import { Button, Card, Input, Label, ListBox, Select, Spinner, Table } from '@heroui/react';
+import { Eraser, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { ApiError, purgeApi } from '@/api';
+import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 const purgeTypes: PurgeType[] = ['URL', 'PREFIX', 'TAG', 'ALL'];
@@ -61,25 +63,36 @@ export default function PurgeJobs() {
 
     if (!clusterId) {
         return (
-            <div className='text-sm text-muted'>
-                Select a cluster in the header to manage purge jobs.
+            <div className='space-y-6'>
+                <PageHeader
+                    subtitle='Clear cached content by URL, prefix, tag, or site.'
+                    title='Purge Jobs'
+                />
+                <Card className='p-8 text-center'>
+                    <div className='text-sm text-muted'>
+                        Select a cluster in the header to manage purge jobs.
+                    </div>
+                </Card>
             </div>
         );
     }
 
     return (
         <div className='space-y-6'>
-            <h1 className='text-2xl font-bold'>Purge jobs</h1>
+            <PageHeader
+                subtitle='Clear cached content by URL, prefix, tag, or site.'
+                title='Purge Jobs'
+            />
 
             {error && (
-                <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
                     {error}
                 </div>
             )}
 
-            <Card className='p-4'>
+            <Card className='p-5'>
                 <form className='space-y-4' onSubmit={handleSubmit}>
-                    <div className='flex gap-2'>
+                    <div className='flex flex-col gap-4 md:flex-row md:items-end'>
                         <div className='flex-1'>
                             <Label htmlFor='purge-site-id'>Site ID</Label>
                             <Input
@@ -96,13 +109,14 @@ export default function PurgeJobs() {
                                 }}
                             />
                         </div>
-                        <Button className='self-end' variant='ghost' onPress={load}>
+                        <Button className='w-full md:w-auto' variant='ghost' onPress={load}>
+                            <Search className='mr-2 h-4 w-4' />
                             {loading ? 'Loading...' : 'Load'}
                         </Button>
                     </div>
 
-                    <div className='flex items-end gap-2'>
-                        <div className='w-40'>
+                    <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
+                        <div className='w-full sm:w-40'>
                             <Label htmlFor='purge-type'>Type</Label>
                             <Select
                                 id='purge-type'
@@ -130,7 +144,13 @@ export default function PurgeJobs() {
                             value={value}
                             onChange={(e) => setValue(e.target.value)}
                         />
-                        <Button isDisabled={submitting} type='submit' variant='primary'>
+                        <Button
+                            className='w-full sm:w-auto'
+                            isDisabled={submitting}
+                            type='submit'
+                            variant='primary'
+                        >
+                            <Eraser className='mr-2 h-4 w-4' />
                             {submitting ? 'Purging...' : 'Purge'}
                         </Button>
                     </div>
