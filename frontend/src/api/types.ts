@@ -1,0 +1,283 @@
+export interface User {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    status: string;
+}
+
+export interface LoginRequest {
+    email: string;
+    password: string;
+    code?: string;
+}
+
+export interface RegisterRequest {
+    email: string;
+    password: string;
+    name: string;
+    captcha_token: string;
+}
+
+export interface RegistrationConfig {
+    enabled: boolean;
+    captcha?: {
+        provider: string;
+        site_key: string;
+    };
+}
+
+export interface DNSLine {
+    id: string;
+    name: string;
+}
+
+export interface ClusterGroup {
+    id: string;
+    name: string;
+}
+
+export interface ClusterRegion {
+    id: string;
+    name: string;
+}
+
+export interface ClusterMember {
+    cluster_id: string;
+    user_id: string;
+    permission: string;
+    created_at: string;
+}
+
+export interface NodeAddress {
+    id: string;
+    address: string;
+    primary: boolean;
+}
+
+export interface NodeSSH {
+    entry_ip: string;
+    port: number;
+    user: string;
+    password?: string;
+    private_key?: string;
+    passphrase?: string;
+}
+
+export interface NodeCacheConfig {
+    cache_directory: string;
+    auto_max_size: boolean;
+    max_size_bytes: number;
+    max_disk_usage_percent: number;
+}
+
+export interface SiteConfigVersion {
+    site_id: string;
+    version: number;
+}
+
+export interface Node {
+    id: string;
+    name: string;
+    status: string;
+    addresses: NodeAddress[];
+    siteConfigVersions?: SiteConfigVersion[];
+    cacheConfig?: NodeCacheConfig;
+}
+
+export interface CreateNodeRequest {
+    name: string;
+    addresses: string[];
+    dns_line_ids: string[];
+    group_id?: string;
+    region_id?: string;
+    ssh: NodeSSH;
+}
+
+export interface SiteOrigin {
+    protocol: 'HTTP' | 'HTTPS';
+    address: string;
+    host_header?: string;
+    weight?: number;
+}
+
+export interface Site {
+    id: string;
+    name: string;
+    domains: string[];
+    certificate_ids: string[];
+    origins: SiteOrigin[];
+    status: string;
+    publish_job?: string;
+    publish_error?: string;
+}
+
+export interface CreateSiteRequest {
+    name: string;
+    domains: string[];
+    certificate_ids: string[];
+    origins: SiteOrigin[];
+}
+
+export interface SiteListenerConfig {
+    http_enabled?: boolean;
+    http_port?: number;
+    redirect_http_to_https?: boolean;
+    https_enabled?: boolean;
+    https_port?: number;
+    http2_enabled?: boolean;
+    http3_enabled?: boolean;
+    tls_min_version?: string;
+    hsts_enabled?: boolean;
+    hsts_max_age?: number;
+    hsts_include_subdomains?: boolean;
+    hsts_preload?: boolean;
+    ocsp_stapling_enabled?: boolean;
+}
+
+export interface CachePolicy {
+    enabled?: boolean;
+    response_headers?: {
+        x_cache?: boolean;
+        age?: boolean;
+    };
+    allow_purge_method?: boolean;
+    stale?: {
+        enabled?: boolean;
+        if_error_seconds?: number;
+    };
+    ttl?: {
+        default_seconds?: number;
+        status?: Record<string, number>;
+    };
+    vary_headers?: string[];
+    surrogate_key_header?: string;
+    conditions?: {
+        group_operator?: string;
+        groups?: Array<{
+            operator?: string;
+            rules?: Array<{
+                type?: string;
+                value?: string;
+                values?: string[];
+            }>;
+        }>;
+    };
+}
+
+export interface Certificate {
+    id: string;
+    name: string;
+    cert_pem?: string;
+    private_key_pem?: string;
+    fingerprint?: string;
+    expires_at?: string;
+    created_at: string;
+    updated_at?: string;
+}
+
+export interface CreateCertificateRequest {
+    name: string;
+    certificate: string;
+    private_key: string;
+}
+
+export interface PublishTask {
+    id: string;
+    site_id?: string;
+    node_id?: string;
+    status: string;
+    created_at: string;
+    updated_at?: string;
+    error?: string;
+}
+
+export interface PublishStatus {
+    state: string;
+    has_active_tasks: boolean;
+    has_failed_tasks: boolean;
+    pending_count: number;
+    running_count: number;
+    failed_count: number;
+    recent_tasks: PublishTask[];
+}
+
+export interface PublishJob {
+    id: string;
+    site_id: string;
+    version?: number;
+    status: string;
+    created_at: string;
+    updated_at?: string;
+    publish_error?: string;
+}
+
+export type PurgeType = 'URL' | 'PREFIX' | 'TAG' | 'ALL';
+
+export interface PurgeJob {
+    id: string;
+    site_id: string;
+    type: PurgeType;
+    value?: string;
+    status: string;
+    created_at: string;
+    updated_at?: string;
+}
+
+export interface Summary {
+    requests: number;
+    ingress_bytes: number;
+    egress_bytes: number;
+    cache_hits: number;
+    cache_misses: number;
+    hit_rate: number;
+}
+
+export interface TopItem {
+    value: string;
+    requests: number;
+    traffic_bytes: number;
+}
+
+export interface TrafficPoint {
+    bucket: string;
+    requests: number;
+    ingress_bytes: number;
+    egress_bytes: number;
+    cache_egress_bytes: number;
+}
+
+export interface TrafficResponse {
+    period: string;
+    granularity: string;
+    series: TrafficPoint[];
+}
+
+export interface DistributionItem {
+    value: string;
+    requests: number;
+    ingress_bytes: number;
+    egress_bytes: number;
+}
+
+export interface NodeRuntimePoint {
+    bucket: string;
+    node_id: string;
+    cpu_usage_percent: number;
+    memory_used_bytes: number;
+    memory_total_bytes: number;
+    load_1: number;
+    load_5: number;
+    load_15: number;
+}
+
+export interface NodeRuntimeResponse {
+    period: string;
+    series: NodeRuntimePoint[];
+}
+
+export interface AnalyticsParams {
+    site_id?: string;
+    from?: string;
+    to?: string;
+}

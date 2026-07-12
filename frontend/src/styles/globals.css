@@ -1,4 +1,19 @@
 @import "tailwindcss";
-@import "@heroui/styles";
+@import "tw-animate-css";
+@import "@heroui/styles/base" layer(base);
+@import "@heroui/styles/components/index.css" layer(components);
+@import "@heroui/styles/themes/default" layer(theme);
+@import "@heroui/styles/utilities";
+@import "@heroui/styles/variants";
 
-@custom-variant dark (&:is(.dark *));
+@layer base {
+    html,
+    body,
+    #root {
+        @apply h-full;
+    }
+
+    body {
+        @apply bg-background text-foreground antialiased;
+    }
+}

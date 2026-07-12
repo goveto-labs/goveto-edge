@@ -1,21 +1,43 @@
 import { Route, Routes } from 'react-router-dom';
 
-import AboutPage from '@/pages/about';
-import BlogPage from '@/pages/blog';
-import DocsPage from '@/pages/docs';
-import IndexPage from '@/pages/index';
-import PricingPage from '@/pages/pricing';
+import { Layout } from '@/components/Layout.tsx';
+import { ProtectedRoute } from '@/components/ProtectedRoute.tsx';
+import { AuthProvider } from '@/hooks/useAuth.ts';
+import { ClusterProvider } from '@/hooks/useCluster.ts';
+import Analytics from '@/pages/Analytics.tsx';
+import Certificates from '@/pages/Certificates.tsx';
+import Dashboard from '@/pages/Dashboard.tsx';
+import Login from '@/pages/Login.tsx';
+import Nodes from '@/pages/Nodes.tsx';
+import PublishJobs from '@/pages/PublishJobs.tsx';
+import PurgeJobs from '@/pages/PurgeJobs.tsx';
+import Register from '@/pages/Register.tsx';
+import Sites from '@/pages/Sites.tsx';
 
-function App() {
+export default function App() {
     return (
-        <Routes>
-            <Route element={<IndexPage />} path='/' />
-            <Route element={<DocsPage />} path='/docs' />
-            <Route element={<PricingPage />} path='/pricing' />
-            <Route element={<BlogPage />} path='/blog' />
-            <Route element={<AboutPage />} path='/about' />
-        </Routes>
+        <AuthProvider>
+            <ClusterProvider>
+                <Routes>
+                    <Route element={<Login />} path='/login' />
+                    <Route element={<Register />} path='/register' />
+                    <Route
+                        element={
+                            <ProtectedRoute>
+                                <Layout />
+                            </ProtectedRoute>
+                        }
+                    >
+                        <Route element={<Dashboard />} path='/' />
+                        <Route element={<Nodes />} path='/nodes' />
+                        <Route element={<Sites />} path='/sites' />
+                        <Route element={<Certificates />} path='/certificates' />
+                        <Route element={<PublishJobs />} path='/publish' />
+                        <Route element={<PurgeJobs />} path='/purge' />
+                        <Route element={<Analytics />} path='/analytics' />
+                    </Route>
+                </Routes>
+            </ClusterProvider>
+        </AuthProvider>
     );
 }
-
-export default App;
