@@ -2,10 +2,14 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -21,6 +25,7 @@ type Config struct {
 	RedisURL                string
 	ClickHouseDSN           string
 	NodeCredentialMasterKey string
+	DataDir                 string
 	SessionCookieName       string
 	SessionTTL              time.Duration
 	SessionCookieSecure     bool
@@ -46,18 +51,27 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	appEnv := envString("APP_ENV", "development")
+	defaultDataDir := ".data"
+	if appEnv != "development" && appEnv != "test" {
+		defaultDataDir = "/var/lib/goveto-edge"
+	}
 	cfg := Config{
-		AppEnv:                  envString("APP_ENV", "development"),
-		HTTPHost:                envString("HTTP_HOST", "0.0.0.0"),
-		HTTPPort:                port,
-		HTTPReadHeaderTimeout:   readHeaderTimeout,
-		ShutdownTimeout:         shutdownTimeout,
-		DatabaseURL:             os.Getenv("DATABASE_URL"),
-		RedisURL:                os.Getenv("REDIS_URL"),
-		ClickHouseDSN:           os.Getenv("CLICKHOUSE_DSN"),
-		NodeCredentialMasterKey: os.Getenv("NODE_CREDENTIAL_MASTER_KEY"),
-		SessionCookieName:       envString("SESSION_COOKIE_NAME", "goveto_session"),
-		SessionCookieSecure:     envBool("SESSION_COOKIE_SECURE", false),
+		AppEnv:                appEnv,
+		DataDir:               envString("GOVETO_DATA_DIR", defaultDataDir),
+		HTTPHost:              envString("HTTP_HOST", "0.0.0.0"),
+		HTTPPort:              port,
+		HTTPReadHeaderTimeout: readHeaderTimeout,
+		ShutdownTimeout:       shutdownTimeout,
+		DatabaseURL:           os.Getenv("DATABASE_URL"),
+		RedisURL:              os.Getenv("REDIS_URL"),
+		ClickHouseDSN:         os.Getenv("CLICKHOUSE_DSN"),
+		SessionCookieName:     envString("SESSION_COOKIE_NAME", "goveto_session"),
+		SessionCookieSecure:   envBool("SESSION_COOKIE_SECURE", false),
+	}
+	cfg.NodeCredentialMasterKey, err = loadOrCreateMasterKey(cfg.DataDir)
+	if err != nil {
+		return Config{}, err
 	}
 	cfg.SessionTTL, err = envDuration("SESSION_TTL", 24*time.Hour)
 	if err != nil {
@@ -68,9 +82,6 @@ func Load() (Config, error) {
 	}
 	if cfg.RedisURL == "" {
 		return Config{}, errors.New("REDIS_URL is required")
-	}
-	if cfg.NodeCredentialMasterKey == "" {
-		return Config{}, errors.New("NODE_CREDENTIAL_MASTER_KEY is required")
 	}
 	if cfg.HTTPPort < 1 || cfg.HTTPPort > 65535 {
 		return Config{}, fmt.Errorf("HTTP_PORT must be between 1 and 65535")
@@ -92,6 +103,52 @@ func envBool(key string, fallback bool) bool {
 
 func (c Config) HTTPAddress() string {
 	return fmt.Sprintf("%s:%d", c.HTTPHost, c.HTTPPort)
+}
+
+func loadOrCreateMasterKey(dataDir string) (string, error) {
+	path := filepath.Join(dataDir, "secrets", "node-credential-master.key")
+	if value, err := os.ReadFile(path); err == nil {
+		return validateMasterKey(strings.TrimSpace(string(value)), path)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("read node credential master key: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return "", fmt.Errorf("create secrets directory: %w", err)
+	}
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate node credential master key: %w", err)
+	}
+	encoded := base64.StdEncoding.EncodeToString(raw)
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if errors.Is(err, os.ErrExist) {
+		value, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return "", fmt.Errorf("read concurrently created node credential master key: %w", readErr)
+		}
+		return validateMasterKey(strings.TrimSpace(string(value)), path)
+	}
+	if err != nil {
+		return "", fmt.Errorf("create node credential master key: %w", err)
+	}
+	if _, err = file.WriteString(encoded + "\n"); err == nil {
+		err = file.Sync()
+	}
+	if closeErr := file.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return "", fmt.Errorf("persist node credential master key: %w", err)
+	}
+	return encoded, nil
+}
+
+func validateMasterKey(value, path string) (string, error) {
+	raw, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(raw) != 32 {
+		return "", fmt.Errorf("node credential master key in %s must be base64-encoded 32 bytes", path)
+	}
+	return value, nil
 }
 
 func envString(key, fallback string) string {
