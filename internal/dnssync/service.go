@@ -64,8 +64,9 @@ func (s *Service) Enqueue(
 	return job, err
 }
 
-// EnqueueTx creates at most one active DNS job for a cluster. Callers can use
-// this inside the same transaction as a configuration change.
+// EnqueueTx creates at most one pending follow-up job for a cluster. A new
+// pending job is allowed while another job is running so changes that happen
+// during reconciliation cannot be lost.
 func (s *Service) EnqueueTx(
 	ctx context.Context,
 	db *client.Client,
@@ -79,7 +80,7 @@ func (s *Service) EnqueueTx(
 	active, err := db.DNSSyncJob.Query().
 		Where(
 			query.DNSSyncJob.ClusterId.Equals(clusterID),
-			query.DNSSyncJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
+			query.DNSSyncJob.Status.Equals(model.JobStatusPENDING),
 		).
 		OrderBy(query.DNSSyncJob.CreatedAt.Asc()).
 		First(ctx)

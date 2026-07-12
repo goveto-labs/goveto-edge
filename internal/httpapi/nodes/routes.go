@@ -26,6 +26,9 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", updateDNSLines(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 

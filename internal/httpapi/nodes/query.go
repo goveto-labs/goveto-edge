@@ -17,6 +17,7 @@ func list(db *client.Client) echo.HandlerFunc {
 			Where(query.Node.ClusterId.Equals(c.Param("cluster_id"))).
 			Include(
 				query.Node.Addresses.Fetch(),
+				query.Node.DnsLines.Fetch(),
 				query.Node.SiteConfigVersions.Fetch(),
 			).
 			OrderBy(query.Node.CreatedAt.Desc()).
@@ -37,6 +38,7 @@ func get(db *client.Client) echo.HandlerFunc {
 			Where(query.Node.Id.Equals(c.Param("node_id"))).
 			Include(
 				query.Node.Addresses.Fetch(),
+				query.Node.DnsLines.Fetch(),
 				query.Node.SiteConfigVersions.Fetch(),
 				query.Node.CacheConfig.Fetch(),
 			).

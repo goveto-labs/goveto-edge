@@ -63,7 +63,7 @@ func (l *Lifecycle) poll(ctx context.Context) {
 	targets, err := client.Raw[healthTarget](ctx, l.db, `SELECT n.id AS node_id, n.cluster_id, n.status, a.address
 		FROM nodes n
 		JOIN node_addresses a ON a.node_id = n.id AND a.primary = TRUE
-		WHERE n.status NOT IN ('PENDING', 'INSTALL_FAILED')`)
+		WHERE n.status NOT IN ('PENDING', 'INSTALLING', 'INSTALL_FAILED', 'DISABLED')`)
 	if err != nil {
 		return
 	}

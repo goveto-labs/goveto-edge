@@ -12,6 +12,10 @@ export const nodesApi = (clusterId: string) => ({
     create: (payload: CreateNodeRequest) =>
         post<{ id: string; status: string }>(clusterPath(clusterId, '/nodes'), payload),
     delete: (nodeId: string) => del<void>(clusterPath(clusterId, `/nodes/${nodeId}`)),
+    updateDNSLines: (nodeId: string, dnsLineIds: string[]) =>
+        put<{ node_id: string; dns_line_ids: string[] }>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), { dns_line_ids: dnsLineIds }),
+    enable: (nodeId: string) => post<{ id: string; status: string }>(clusterPath(clusterId, `/nodes/${nodeId}/enable`)),
+    disable: (nodeId: string) => post<{ id: string; status: string }>(clusterPath(clusterId, `/nodes/${nodeId}/disable`)),
 
     getCacheConfig: (nodeId: string) =>
         get<NodeCacheConfig>(clusterPath(clusterId, `/nodes/${nodeId}/cache-config`)),

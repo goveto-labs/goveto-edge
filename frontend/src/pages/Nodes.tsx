@@ -21,7 +21,7 @@ import {
     Table,
     useOverlayState,
 } from '@heroui/react';
-import { Eye, Plus, Trash2 } from 'lucide-react';
+import { Eye, Plus, Power, PowerOff, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, clusterApi, nodesApi } from '@/api';
@@ -70,6 +70,8 @@ export default function Nodes() {
     const [cacheSaving, setCacheSaving] = useState(false);
     const [newAddress, setNewAddress] = useState('');
     const [newAddressPrimary, setNewAddressPrimary] = useState(false);
+    const [detailDNSLineIds, setDetailDNSLineIds] = useState<Set<string>>(new Set());
+    const [nodeActionLoading, setNodeActionLoading] = useState(false);
 
     const load = useCallback(async () => {
         if (!clusterId) return;
@@ -161,6 +163,7 @@ export default function Nodes() {
         try {
             const node = await nodeApi.get(nodeId);
             setSelectedNode(node);
+            setDetailDNSLineIds(new Set((node.dnsLines || []).map((line) => line.dnsLineId)));
             const cfg = node.cacheConfig ?? (await nodeApi.getCacheConfig(nodeId));
             setCache(cfg);
         } catch (err) {
@@ -168,6 +171,26 @@ export default function Nodes() {
         } finally {
             setDetailLoading(false);
         }
+    };
+
+    const saveDNSLines = async () => {
+        if (!selectedNodeId) return;
+        setNodeActionLoading(true); setDetailError('');
+        try {
+            await nodeApi.updateDNSLines(selectedNodeId, Array.from(detailDNSLineIds));
+            await openDetail(selectedNodeId); await load();
+        } catch (err) { setDetailError(err instanceof ApiError ? err.message : 'Failed to update DNS lines'); }
+        finally { setNodeActionLoading(false); }
+    };
+
+    const setNodeEnabled = async (enabled: boolean) => {
+        if (!selectedNodeId) return;
+        setNodeActionLoading(true); setDetailError('');
+        try {
+            if (enabled) await nodeApi.enable(selectedNodeId); else await nodeApi.disable(selectedNodeId);
+            await openDetail(selectedNodeId); await load();
+        } catch (err) { setDetailError(err instanceof ApiError ? err.message : 'Failed to change node status'); }
+        finally { setNodeActionLoading(false); }
     };
 
     const saveCache = async () => {
@@ -239,6 +262,7 @@ export default function Nodes() {
                         <Table.Header>
                             <Table.Column>Name</Table.Column>
                             <Table.Column>Status</Table.Column>
+                            <Table.Column>DNS lines</Table.Column>
                             <Table.Column>Addresses</Table.Column>
                             <Table.Column>Actions</Table.Column>
                         </Table.Header>
@@ -247,6 +271,7 @@ export default function Nodes() {
                                 <Table.Row key={node.id} id={node.id}>
                                     <Table.Cell className='font-medium'>{node.name}</Table.Cell>
                                     <Table.Cell>{node.status}</Table.Cell>
+                                    <Table.Cell>{(node.dnsLines || []).map((link) => dnsLines.find((line) => line.id === link.dnsLineId)?.name || link.dnsLineId).join(', ') || 'Default'}</Table.Cell>
                                     <Table.Cell>
                                         {node.addresses.map((a) => a.address).join(', ')}
                                     </Table.Cell>
@@ -466,7 +491,23 @@ export default function Nodes() {
                                 </div>
                                 <div className='space-y-1'>
                                     <div className='text-sm text-muted'>Status</div>
-                                    <div className='font-medium'>{selectedNode.status}</div>
+                                    <div className='flex items-center justify-between gap-3'>
+                                        <div className='font-medium'>{selectedNode.status}</div>
+                                        {selectedNode.status === 'DISABLED' ? (
+                                            <Button isDisabled={nodeActionLoading} size='sm' onPress={() => setNodeEnabled(true)}><Power className='mr-1.5 h-4 w-4' />Enable</Button>
+										) : (selectedNode.status === 'ONLINE' || selectedNode.status === 'OFFLINE' || selectedNode.status === 'INSTALL_FAILED') ? (
+											<Button isDisabled={nodeActionLoading} size='sm' variant='danger' onPress={() => setNodeEnabled(false)}><PowerOff className='mr-1.5 h-4 w-4' />Disable</Button>
+										) : null}
+                                    </div>
+                                </div>
+
+                                <div className='space-y-2 border-t border-border pt-4'>
+                                    <Label htmlFor='node-detail-dns-lines'>Regional DNS lines</Label>
+                                    <Select id='node-detail-dns-lines' selectionMode='multiple' value={Array.from(detailDNSLineIds)} onChange={(keys) => setDetailDNSLineIds(new Set(keys as string[]))}>
+                                        <Select.Trigger><Select.Value /></Select.Trigger>
+                                        <Select.Popover><ListBox>{dnsLines.map((line) => <ListBox.Item key={line.id} id={line.id}>{line.name} ({line.providerCode})</ListBox.Item>)}</ListBox></Select.Popover>
+                                    </Select>
+                                    <Button isDisabled={nodeActionLoading} size='sm' variant='secondary' onPress={saveDNSLines}><Save className='mr-1.5 h-4 w-4' />Save DNS lines</Button>
                                 </div>
                                 <div className='space-y-1'>
                                     <div className='text-sm text-muted'>Addresses</div>

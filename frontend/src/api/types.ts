@@ -135,6 +135,7 @@ export interface Node {
     name: string;
     status: string;
     addresses: NodeAddress[];
+    dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     siteConfigVersions?: SiteConfigVersion[];
     cacheConfig?: NodeCacheConfig;
 }
