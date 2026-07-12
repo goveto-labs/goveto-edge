@@ -1,11 +1,15 @@
 openapi: 3.0.3
 info:
-    title: Example Echo API
+    title: Goveto Edge Control API
     version: 0.1.0
+    description: Control-plane API for managing edge clusters, nodes, sites, certificates, publish, purge and analytics.
+servers:
+    - url: /
 tags:
+    - name: analytics
     - name: auth
-    - name: auth-me
     - name: auth-registration-config
+    - name: certificates
     - name: clusters
     - name: clusters-analytics
     - name: clusters-certificates
@@ -16,9 +20,14 @@ tags:
     - name: clusters-publish
     - name: clusters-regions
     - name: clusters-sites
-    - name: health-live
+    - name: health
     - name: health-ready
+    - name: nodes
+    - name: publish
+    - name: purge
+    - name: session
     - name: session-cluster
+    - name: sites
 paths:
     /api/v1/auth/login:
         post:
@@ -40,9 +49,10 @@ paths:
     /api/v1/auth/me:
         get:
             operationId: me
-            summary: get /api/v1/auth/me
+            summary: Current user
+            description: Return the authenticated user id from the current session.
             tags:
-                - auth-me
+                - auth
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1103,9 +1113,10 @@ paths:
     /health/live:
         get:
             operationId: live
-            summary: get /health/live
+            summary: Liveness
+            description: Process liveness probe; returns ok when the process is running.
             tags:
-                - health-live
+                - health
             security:
                 - cookie_session: []
             x-middlewares:

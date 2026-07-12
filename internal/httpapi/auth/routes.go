@@ -40,6 +40,9 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, set
 	group.GET("/me", me, authn.RequireAuth)
 }
 
+// @summary Login
+// @description Authenticate with email, password and optional TOTP code; sets session cookie.
+// @Tags auth
 func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input loginRequest
@@ -91,6 +94,9 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 	}
 }
 
+// @summary Current user
+// @description Return the authenticated user id from the current session.
+// @Tags auth
 func me(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"uid": authn.CurrentUID(c)})
 }

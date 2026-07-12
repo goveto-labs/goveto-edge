@@ -8,6 +8,9 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+// @summary List nodes
+// @description List nodes in the cluster with addresses and site config versions.
+// @Tags nodes
 func list(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		nodes, err := db.Node.Query().
@@ -25,6 +28,9 @@ func list(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Get node
+// @description Get a single node with addresses, site config versions and cache config.
+// @Tags nodes
 func get(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		node, err := db.Node.Query().

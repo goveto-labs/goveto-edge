@@ -25,6 +25,9 @@ type request struct {
 	Value *string         `json:"value"`
 }
 
+// @summary Enqueue purge
+// @description Enqueue a cache purge job for the site.
+// @Tags purge
 func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		site, err := siteInCluster(c, db)
@@ -49,6 +52,9 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 	}
 }
 
+// @summary List purge jobs
+// @description List recent cache purge jobs for a site.
+// @Tags purge
 func list(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		site, err := siteInCluster(c, db)
@@ -72,6 +78,9 @@ func list(db *client.Client) echo.HandlerFunc {
 		return c.JSON(http.StatusOK, result)
 	}
 }
+// @summary Get purge job
+// @description Get a single cache purge job by id.
+// @Tags purge
 func get(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		site, err := siteInCluster(c, db)

@@ -28,6 +28,9 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
 	group.POST("/members", addMember(db))
 }
 
+// @summary List DNS lines
+// @description List DNS lines configured for the cluster.
+// @Tags clusters
 func listDNSLines(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.DNSLine.Query().
@@ -41,6 +44,9 @@ func listDNSLines(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary List groups
+// @description List node groups in the cluster.
+// @Tags clusters
 func listGroups(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.ClusterGroup.Query().
@@ -54,6 +60,9 @@ func listGroups(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Create group
+// @description Create a node group in the cluster.
+// @Tags clusters
 func createGroup(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nameRequest
@@ -79,6 +88,9 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary List regions
+// @description List regions in the cluster.
+// @Tags clusters
 func listRegions(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.ClusterRegion.Query().
@@ -92,6 +104,9 @@ func listRegions(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Create region
+// @description Create a region in the cluster.
+// @Tags clusters
 func createRegion(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nameRequest

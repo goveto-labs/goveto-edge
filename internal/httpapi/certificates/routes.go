@@ -29,6 +29,9 @@ func Register(e *echo.Echo, db *client.Client) {
 	group.POST("", upload(db))
 }
 
+// @summary List certificates
+// @description List TLS certificates in the cluster (private keys omitted).
+// @Tags certificates
 func list(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.Certificate.Query().
@@ -45,6 +48,9 @@ func list(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Upload certificate
+// @description Upload a certificate and private key pair for the cluster.
+// @Tags certificates
 func upload(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input uploadRequest

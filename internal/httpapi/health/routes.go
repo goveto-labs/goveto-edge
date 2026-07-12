@@ -16,10 +16,16 @@ func Register(e *echo.Echo, db *sql.DB) {
 	group.GET("/ready", ready(db))
 }
 
+// @summary Liveness
+// @description Process liveness probe; returns ok when the process is running.
+// @Tags health
 func live(c *echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// @summary Readiness
+// @description Readiness probe; checks database connectivity.
+// @Tags health
 func ready(db *sql.DB) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), time.Second)

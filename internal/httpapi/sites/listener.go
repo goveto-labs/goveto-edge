@@ -28,6 +28,9 @@ type listenerUpdateRequest struct {
 	OCSPStaplingEnabled   *bool                `json:"ocsp_stapling_enabled"`
 }
 
+// @summary Get site listener
+// @description Get HTTP/HTTPS listener and TLS settings for a site.
+// @Tags sites
 func getListener(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
@@ -45,6 +48,9 @@ func getListener(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Update site listener
+// @description Partially update site listener/TLS settings and enqueue publish.
+// @Tags sites
 func updateListener(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {

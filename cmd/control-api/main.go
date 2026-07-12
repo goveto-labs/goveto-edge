@@ -20,6 +20,10 @@ import (
 	"goveto-edge/internal/storage"
 )
 
+// @title Goveto Edge Control API
+// @version 0.1.0
+// @description Control-plane API for managing edge clusters, nodes, sites, certificates, publish, purge and analytics.
+// @BasePath /
 func main() {
 	cfg, err := config.Load()
 	if err != nil {

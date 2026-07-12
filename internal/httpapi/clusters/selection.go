@@ -36,6 +36,9 @@ func available(ctx context.Context, db *client.Client, uid string) ([]clusterCho
 		ORDER BY c.created_at, c.name`, uid)
 }
 
+// @summary List clusters
+// @description List clusters the current user can access and the selected cluster id.
+// @Tags clusters
 func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -65,6 +68,9 @@ func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 	}
 }
 
+// @summary Create cluster
+// @description Create a new cluster owned by the current user and select it in session.
+// @Tags clusters
 func create(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nameRequest
@@ -90,6 +96,9 @@ type selectRequest struct {
 	ClusterID string `json:"cluster_id"`
 }
 
+// @summary Select cluster
+// @description Set the current session cluster context.
+// @Tags session
 func selectCurrent(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input selectRequest

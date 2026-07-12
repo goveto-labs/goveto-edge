@@ -30,6 +30,9 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue), authn.RequireAuth, clusteraccess.Require(db))
 }
 
+// @summary Create node
+// @description Create a node and enqueue remote installation with SSH credentials.
+// @Tags nodes
 func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nodedomain.CreateInput

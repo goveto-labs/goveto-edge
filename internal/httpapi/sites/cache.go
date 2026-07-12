@@ -12,6 +12,9 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+// @summary Get site cache policy
+// @description Get the site cache policy (defaults when none stored).
+// @Tags sites
 func getCache(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
@@ -40,6 +43,9 @@ func getCache(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Update site cache policy
+// @description Create or update the site cache policy and enqueue publish.
+// @Tags sites
 func updateCache(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {

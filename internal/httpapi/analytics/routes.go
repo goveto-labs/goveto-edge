@@ -42,6 +42,9 @@ func chartPeriod(c *echo.Context) (string, error) {
 	return value, nil
 }
 
+// @summary Traffic series
+// @description Time-series traffic metrics for a cluster or site (period: 24h or 30d).
+// @Tags analytics
 func traffic(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		p, err := chartPeriod(c)
@@ -72,6 +75,9 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 	}
 }
 
+// @summary Ranking / distribution
+// @description Rank or distribute traffic by dimension (period, sort, limit query params).
+// @Tags analytics
 func ranking(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		p, err := chartPeriod(c)
@@ -109,6 +115,9 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 	}
 }
 
+// @summary Node runtime series
+// @description Time-series node runtime metrics (optional node_id filter).
+// @Tags analytics
 func nodeRuntime(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		p, err := chartPeriod(c)
@@ -152,6 +161,9 @@ func period(c *echo.Context) (time.Time, time.Time, error) {
 	return from, to, err
 }
 
+// @summary Analytics summary
+// @description Aggregate request/traffic summary for a time range (from/to).
+// @Tags analytics
 func summary(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		from, to, err := period(c)
@@ -174,6 +186,9 @@ func summary(s *analytics.Store) echo.HandlerFunc {
 	}
 }
 
+// @summary Top URLs or IPs
+// @description Top ranked URLs or client IPs for a time range.
+// @Tags analytics
 func top(s *analytics.Store, dim string) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		from, to, err := period(c)

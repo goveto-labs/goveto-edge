@@ -41,6 +41,9 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 }
 
+// @summary Create site
+// @description Create a site with domains, origins and certificates; enqueues publish.
+// @Tags sites
 func create(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input createRequest

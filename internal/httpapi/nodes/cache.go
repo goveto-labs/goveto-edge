@@ -13,6 +13,9 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+// @summary Get node cache config
+// @description Get disk cache configuration for a node.
+// @Tags nodes
 func getCacheConfig(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureNodeInCluster(c, db); err != nil {
@@ -30,6 +33,9 @@ func getCacheConfig(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Update node cache config
+// @description Update node disk cache settings and attempt to sync to the edge agent.
+// @Tags nodes
 func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureNodeInCluster(c, db); err != nil {

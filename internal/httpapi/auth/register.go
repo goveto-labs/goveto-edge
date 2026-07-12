@@ -23,6 +23,9 @@ type registerRequest struct {
 	CaptchaToken string `json:"captcha_token"`
 }
 
+// @summary Register
+// @description Create a new user account when registration is enabled; requires captcha.
+// @Tags auth
 func register(db *client.Client, settingStore *settings.Store, verifier *captcha.Verifier) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -88,6 +91,9 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 	}
 }
 
+// @summary Registration config
+// @description Return whether registration is enabled and public captcha settings.
+// @Tags auth
 func registrationConfig(settingStore *settings.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()

@@ -15,6 +15,9 @@ type addAddressRequest struct {
 	Primary bool   `json:"primary"`
 }
 
+// @summary Add node address
+// @description Add an IP address to a node; optionally mark it as primary.
+// @Tags nodes
 func addAddress(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input addAddressRequest

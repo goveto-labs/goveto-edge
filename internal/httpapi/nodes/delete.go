@@ -9,6 +9,9 @@ import (
 	"github.com/labstack/echo/v5"
 )
 
+// @summary Delete node
+// @description Delete a node and related credentials, addresses and config records.
+// @Tags nodes
 func deleteNode(db *client.Client, queue *nodedomain.InstallQueue) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()

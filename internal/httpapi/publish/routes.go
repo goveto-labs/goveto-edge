@@ -33,6 +33,9 @@ type clusterPublishCounts struct {
 	Failed  int64 `db:"failed"`
 }
 
+// @summary Cluster publish status
+// @description Aggregate publish job counts and recent tasks for the cluster.
+// @Tags publish
 func clusterStatus(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		snapshot, err := loadClusterStatus(c.Request().Context(), db, c.Param("cluster_id"))
@@ -91,6 +94,9 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	}, nil
 }
 
+// @summary Cluster publish events
+// @description SSE stream of cluster publish sync status snapshots.
+// @Tags publish
 func clusterEvents(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -162,6 +168,9 @@ func writeSSEBytes(response http.ResponseWriter, event string, data []byte) erro
 	return http.NewResponseController(response).Flush()
 }
 
+// @summary Enqueue publish
+// @description Enqueue a site configuration publish job.
+// @Tags publish
 func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		site, err := db.Site.FindUnique(c.Request().Context(), query.Site.Id.Equals(c.Param("site_id")))
@@ -177,6 +186,9 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 	}
 }
 
+// @summary Get publish job
+// @description Get a single site publish job by id.
+// @Tags publish
 func getJob(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -193,6 +205,9 @@ func getJob(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary List publish jobs
+// @description List recent publish jobs for a site.
+// @Tags publish
 func listJobs(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()

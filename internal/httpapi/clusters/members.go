@@ -19,6 +19,9 @@ type addMemberRequest struct {
 	Permission model.ClusterPermission `json:"permission"`
 }
 
+// @summary Add cluster member
+// @description Add a user as an OPERATOR member; only the cluster owner can call this.
+// @Tags clusters
 func addMember(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		_, owner, err := clusteraccess.Check(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentUID(c))
