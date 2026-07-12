@@ -7,6 +7,10 @@ import {
     Drawer,
     Dropdown,
     Input,
+    Label,
+    ListBox,
+    Modal,
+    Select,
     useOverlayState,
     useTheme,
 } from '@heroui/react';
@@ -18,6 +22,7 @@ import {
     LogOut,
     Menu,
     Moon,
+    Plus,
     Rocket,
     Server,
     ShieldCheck,
@@ -25,6 +30,7 @@ import {
     Trash2,
 } from 'lucide-react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 
 import { NavItem } from '@/components/NavItem.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
@@ -78,9 +84,13 @@ export function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, logout } = useAuth();
-    const { clusterId, setClusterId } = useCluster();
+    const { clusterId, clusters, loading: clustersLoading, error: clusterError, requiresCluster, setClusterId, createCluster } = useCluster();
     const { resolvedTheme, setTheme } = useTheme();
     const mobileMenu = useOverlayState();
+    const createModal = useOverlayState();
+    const [clusterName, setClusterName] = useState('');
+    const [creating, setCreating] = useState(false);
+    const [createError, setCreateError] = useState<string | null>(null);
 
     const toggleTheme = () => {
         setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
@@ -94,42 +104,62 @@ export function Layout() {
     const userLabel = user?.name || user?.email || user?.id || 'User';
     const userInitial = userLabel.slice(0, 1).toUpperCase();
 
+    const handleCreateCluster = async (event: React.FormEvent) => {
+        event.preventDefault();
+        setCreating(true);
+        setCreateError(null);
+        try {
+            await createCluster(clusterName);
+            setClusterName('');
+            createModal.close();
+        } catch (err) {
+            setCreateError(err instanceof Error ? err.message : 'Unable to create cluster');
+        } finally { setCreating(false); }
+    };
+
     return (
         <div className='flex h-full'>
             <aside className='hidden w-64 flex-col overflow-y-auto border-r border-border bg-surface md:flex'>
                 <SidebarContent />
             </aside>
 
-            <Drawer isOpen={mobileMenu.isOpen} onOpenChange={mobileMenu.setOpen}>
-                <Drawer.Content className='w-[280px]'>
-                    <SidebarContent onNavigate={mobileMenu.close} />
-                </Drawer.Content>
-            </Drawer>
-
-            <div className='flex min-w-0 flex-1 flex-col'>
+			<div className='flex min-w-0 flex-1 flex-col'>
                 <header className='flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-surface px-4'>
                     <div className='flex items-center gap-3'>
-                        <Button
-                            className='md:hidden'
-                            isIconOnly
-                            size='sm'
-                            variant='ghost'
-                            onPress={mobileMenu.open}
-                        >
-                            <Menu className='h-5 w-5' />
-                        </Button>
+						<Drawer state={mobileMenu}>
+							<Drawer.Trigger aria-label='Open navigation' className='md:hidden'><Menu className='h-5 w-5' /></Drawer.Trigger>
+							<Drawer.Content className='w-[280px]'><SidebarContent onNavigate={mobileMenu.close} /></Drawer.Content>
+						</Drawer>
                     </div>
 
                     <div className='flex flex-1 items-center justify-end gap-3'>
-                        <div className='hidden items-center gap-2 md:flex'>
-                            <span className='text-sm text-muted'>Cluster</span>
-                            <Input
-                                aria-label='Cluster ID'
-                                className='w-64'
-                                placeholder='cluster-id'
+                        <div className='flex items-center gap-2'>
+                            <span className='hidden text-sm text-muted md:inline'>Cluster</span>
+                            <Select
+                                aria-label='Current cluster'
+                                className='w-36 sm:w-48 md:w-64'
                                 value={clusterId}
-                                onChange={(e) => setClusterId(e.target.value)}
-                            />
+                                onChange={(key) => { if (key) void setClusterId(String(key)); }}
+                            >
+                                <Select.Trigger><Select.Value>{clustersLoading ? 'Loading clusters…' : undefined}</Select.Value></Select.Trigger>
+                                <Select.Popover><ListBox>{clusters.map((cluster) => <ListBox.Item id={cluster.id} key={cluster.id} textValue={cluster.name}>{cluster.name}</ListBox.Item>)}</ListBox></Select.Popover>
+                            </Select>
+							<Modal isOpen={requiresCluster || createModal.isOpen} onOpenChange={(open) => { if (!requiresCluster) createModal.setOpen(open); }}>
+								<Modal.Trigger aria-label='Create cluster' className='rounded-lg p-2 text-muted transition-colors hover:bg-surface-secondary hover:text-foreground'><Plus className='h-4 w-4' /></Modal.Trigger>
+								<Modal.Container size='sm'>
+									<Modal.Dialog>
+										<form className='space-y-4' onSubmit={handleCreateCluster}>
+											<Modal.Header><Modal.Heading>{requiresCluster ? 'Create your first cluster' : 'Create cluster'}</Modal.Heading></Modal.Header>
+											<Modal.Body className='space-y-4'>
+												<p className='text-sm text-muted'>{requiresCluster ? 'A cluster is required before you can add nodes, sites, or certificates.' : 'Create an isolated workspace for nodes and sites.'}</p>
+												{(createError || clusterError) && <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>{createError || clusterError}</div>}
+												<div><Label htmlFor='cluster-name'>Cluster name</Label><Input autoFocus id='cluster-name' maxLength={80} placeholder='Production edge' required value={clusterName} onChange={(event) => setClusterName(event.target.value)} /></div>
+											</Modal.Body>
+											<Modal.Footer>{!requiresCluster && <Button variant='ghost' onPress={createModal.close}>Cancel</Button>}<Button isDisabled={creating || !clusterName.trim()} type='submit'>{creating ? 'Creating…' : 'Create cluster'}</Button></Modal.Footer>
+										</form>
+									</Modal.Dialog>
+								</Modal.Container>
+							</Modal>
                         </div>
 
                         <div className='flex items-center gap-2'>
@@ -170,13 +200,13 @@ export function Layout() {
                 </header>
 
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
-                    {!clusterId && location.pathname !== '/' && (
+                    {!clusterId && !requiresCluster && location.pathname !== '/' && (
                         <Alert className='mb-6' status='warning'>
                             <Alert.Indicator />
                             <Alert.Content>
                                 <Alert.Title>No cluster selected</Alert.Title>
                                 <Alert.Description>
-                                    Enter a cluster ID in the header to use cluster features.
+                                    Select a cluster in the header to use cluster features.
                                 </Alert.Description>
                             </Alert.Content>
                         </Alert>
@@ -184,6 +214,6 @@ export function Layout() {
                     <Outlet />
                 </main>
             </div>
-        </div>
+		</div>
     );
 }

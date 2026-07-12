@@ -16,6 +16,7 @@ import (
 )
 
 const currentUIDKey = "auth.current_uid"
+const currentSessionTokenKey = "auth.current_session_token"
 
 type SessionStore struct {
 	redis      *redis.Client
@@ -60,12 +61,33 @@ func (s *SessionStore) Session(next echo.HandlerFunc) echo.HandlerFunc {
 			uid, getErr := s.redis.Get(c.Request().Context(), sessionKey(cookie.Value)).Result()
 			if getErr == nil {
 				c.Set(currentUIDKey, uid)
+				c.Set(currentSessionTokenKey, cookie.Value)
 			} else if !errors.Is(getErr, redis.Nil) {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "session storage unavailable")
 			}
 		}
 		return next(c)
 	}
+}
+
+func (s *SessionStore) SelectedCluster(ctx context.Context, c *echo.Context) (string, error) {
+	token, _ := c.Get(currentSessionTokenKey).(string)
+	if token == "" {
+		return "", nil
+	}
+	value, err := s.redis.Get(ctx, selectedClusterKey(token)).Result()
+	if errors.Is(err, redis.Nil) {
+		return "", nil
+	}
+	return value, err
+}
+
+func (s *SessionStore) SetSelectedCluster(ctx context.Context, c *echo.Context, clusterID string) error {
+	token, _ := c.Get(currentSessionTokenKey).(string)
+	if token == "" {
+		return errors.New("session token unavailable")
+	}
+	return s.redis.Set(ctx, selectedClusterKey(token), clusterID, s.ttl).Err()
 }
 
 // RequireAuth rejects requests without a UID loaded by Session.
@@ -87,3 +109,4 @@ func sessionKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return "session:" + hex.EncodeToString(sum[:])
 }
+func selectedClusterKey(token string) string { return sessionKey(token) + ":cluster" }

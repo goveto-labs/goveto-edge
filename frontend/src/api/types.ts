@@ -32,6 +32,19 @@ export interface DNSLine {
     name: string;
 }
 
+export interface ClusterChoice {
+    id: string;
+    name: string;
+    role: string;
+    created_at: string;
+}
+
+export interface ClusterListResponse {
+    clusters: ClusterChoice[];
+    selected_cluster_id: string;
+    requires_cluster: boolean;
+}
+
 export interface ClusterGroup {
     id: string;
     name: string;

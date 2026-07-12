@@ -17,7 +17,8 @@ type nameRequest struct {
 	Name string `json:"name"`
 }
 
-func Register(e *echo.Echo, db *client.Client) {
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
+	registerSelection(e, db, sessions)
 	group := e.Group("/api/v1/clusters/:cluster_id", authn.RequireAuth, clusteraccess.Require(db))
 	group.GET("/dns-lines", listDNSLines(db))
 	group.GET("/groups", listGroups(db))

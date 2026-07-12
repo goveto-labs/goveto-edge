@@ -43,7 +43,7 @@ func New(
 
 	health.Register(e, db)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
-	clusters.Register(e, orm)
+	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm)
 	nodes.Register(e, orm, installQueue, credentialCipher)
 	publishapi.Register(e, orm, publishService)
