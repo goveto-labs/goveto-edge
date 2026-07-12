@@ -119,6 +119,14 @@ func (c *Client) placeholder(n int) string {
 	return "?"
 }
 
+func (c *Client) quoteIdentifier(name string) string {
+	if c.dialect == "mysql" {
+		quote := string(rune(96))
+		return quote + strings.ReplaceAll(name, quote, quote+quote) + quote
+	}
+	return "\"" + strings.ReplaceAll(name, "\"", "\"\"") + "\""
+}
+
 func scanRowsToMaps(rows *sql.Rows) ([]map[string]any, error) {
 	cols, err := rows.Columns()
 	if err != nil {
@@ -155,6 +163,9 @@ func scanRowsToStructs[T any](rows *sql.Rows) ([]T, error) {
 
 	var sample T
 	typ := reflect.TypeOf(sample)
+	if typ == nil {
+		return nil, fmt.Errorf("Raw: destination type must be a struct, got <nil>")
+	}
 	if typ.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("Raw: destination type must be a struct, got %s", typ.Kind())
 	}
@@ -291,6 +302,38 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	return sqlTx.Commit()
 }
 
+func quotedAuditLogTable(c *Client) string { return c.quoteIdentifier("audit_logs") }
+func quotedAuditLogColumns(c *Client) string {
+	cols := []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAuditLogField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "actor_id":
+		return c.quoteIdentifier(field), nil
+	case "actor":
+		return c.quoteIdentifier(field), nil
+	case "action":
+		return c.quoteIdentifier(field), nil
+	case "resource":
+		return c.quoteIdentifier(field), nil
+	case "before_json":
+		return c.quoteIdentifier(field), nil
+	case "after_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AuditLog field %q", field)
+	}
+}
+
 // buildAuditLogWhere recursively builds a WHERE clause string and arguments.
 func buildAuditLogWhere(c *Client, wheres []query.AuditLogWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -328,9 +371,14 @@ func buildAuditLogWhere(c *Client, wheres []query.AuditLogWhereClause, argIdx *i
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteAuditLogField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -346,24 +394,24 @@ func buildAuditLogWhere(c *Client, wheres []query.AuditLogWhereClause, argIdx *i
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -733,7 +781,7 @@ func (b AuditLogDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple AuditLog records.
 func (a AuditLogActions) FindMany(ctx context.Context, opts ...query.AuditLogQueryOption) ([]model.AuditLog, error) {
 	cfg := query.ApplyAuditLogOptions(opts)
-	q := "SELECT id, actor_id, actor, action, resource, before_json, after_json, created_at FROM audit_logs"
+	q := "SELECT " + quotedAuditLogColumns(a.client) + " FROM " + quotedAuditLogTable(a.client)
 	argIdx := 0
 	where, args := buildAuditLogWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -742,7 +790,15 @@ func (a AuditLogActions) FindMany(ctx context.Context, opts ...query.AuditLogQue
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteAuditLogField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -750,6 +806,14 @@ func (a AuditLogActions) FindMany(ctx context.Context, opts ...query.AuditLogQue
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -785,7 +849,7 @@ func (a AuditLogActions) FindFirst(ctx context.Context, opts ...query.AuditLogQu
 func (a AuditLogActions) FindUnique(ctx context.Context, where query.AuditLogWhereClause) (*model.AuditLog, error) {
 	argIdx := 0
 	whereSQL, args := buildAuditLogWhere(a.client, []query.AuditLogWhereClause{where}, &argIdx)
-	q := "SELECT id, actor_id, actor, action, resource, before_json, after_json, created_at FROM audit_logs"
+	q := "SELECT " + quotedAuditLogColumns(a.client) + " FROM " + quotedAuditLogTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -810,14 +874,17 @@ func (a AuditLogActions) CreateOne(ctx context.Context, sets ...query.AuditLogSe
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteAuditLogField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO audit_logs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAuditLogTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, actor_id, actor, action, resource, before_json, after_json, created_at"
+		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.AuditLog
 		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
@@ -840,6 +907,9 @@ func (a AuditLogActions) CreateMany(ctx context.Context, data []query.AuditLogCr
 
 func (a AuditLogActions) buildAuditLogCreateManySQL(data []query.AuditLogCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -853,8 +923,7 @@ func (a AuditLogActions) buildAuditLogCreateManySQL(data []query.AuditLogCreateI
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO audit_logs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAuditLogTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -864,13 +933,21 @@ func (a AuditLogActions) buildAuditLogCreateManySQL(data []query.AuditLogCreateI
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -885,17 +962,21 @@ func (a AuditLogActions) UpdateOne(ctx context.Context, where query.AuditLogWher
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteAuditLogField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildAuditLogWhere(a.client, []query.AuditLogWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE audit_logs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAuditLogTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, actor_id, actor, action, resource, before_json, after_json, created_at"
+		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
 		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
@@ -923,12 +1004,16 @@ func (a AuditLogActions) UpdateMany(ctx context.Context, wheres []query.AuditLog
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteAuditLogField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildAuditLogWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE audit_logs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAuditLogTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -949,30 +1034,45 @@ func (a AuditLogActions) UpsertOne(ctx context.Context, where query.AuditLogWher
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteAuditLogField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO audit_logs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAuditLogTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteAuditLogField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteAuditLogField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteAuditLogField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -981,7 +1081,7 @@ func (a AuditLogActions) UpsertOne(ctx context.Context, where query.AuditLogWher
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, actor_id, actor, action, resource, before_json, after_json, created_at"
+		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
 		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
@@ -1000,12 +1100,12 @@ func (a AuditLogActions) UpsertOne(ctx context.Context, where query.AuditLogWher
 func (a AuditLogActions) DeleteOne(ctx context.Context, where query.AuditLogWhereClause) (*model.AuditLog, error) {
 	argIdx := 0
 	whereSQL, args := buildAuditLogWhere(a.client, []query.AuditLogWhereClause{where}, &argIdx)
-	q := "DELETE FROM audit_logs"
+	q := "DELETE FROM " + quotedAuditLogTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, actor_id, actor, action, resource, before_json, after_json, created_at"
+		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
 		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
@@ -1027,7 +1127,7 @@ func (a AuditLogActions) DeleteOne(ctx context.Context, where query.AuditLogWher
 func (a AuditLogActions) DeleteMany(ctx context.Context, wheres ...query.AuditLogWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildAuditLogWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM audit_logs"
+	q := "DELETE FROM " + quotedAuditLogTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1042,7 +1142,7 @@ func (a AuditLogActions) DeleteMany(ctx context.Context, wheres ...query.AuditLo
 func (a AuditLogActions) Count(ctx context.Context, wheres ...query.AuditLogWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildAuditLogWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM audit_logs"
+	q := "SELECT COUNT(*) FROM " + quotedAuditLogTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1057,9 +1157,17 @@ func (a AuditLogActions) Count(ctx context.Context, wheres ...query.AuditLogWher
 func (a AuditLogActions) Aggregate(ctx context.Context, opts ...query.AuditLogAggregateOption) (*query.AuditLogAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAuditLogField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM audit_logs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAuditLogTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.AuditLogAggregateResult{
 		Avg: make(map[string]*float64),
@@ -1097,13 +1205,28 @@ func (a AuditLogActions) Aggregate(ctx context.Context, opts ...query.AuditLogAg
 // GroupBy performs a GROUP BY query on AuditLog.
 func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...query.AuditLogAggregateOption) ([]query.AuditLogGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAuditLogField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAuditLogField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM audit_logs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAuditLogTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("AuditLog.GroupBy: %w", err)
@@ -1155,6 +1278,40 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 	return results, rows.Err()
 }
 
+func quotedCertificateTable(c *Client) string { return c.quoteIdentifier("certificates") }
+func quotedCertificateColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteCertificateField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "cert_pem":
+		return c.quoteIdentifier(field), nil
+	case "private_key_pem":
+		return c.quoteIdentifier(field), nil
+	case "fingerprint":
+		return c.quoteIdentifier(field), nil
+	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown Certificate field %q", field)
+	}
+}
+
 // buildCertificateWhere recursively builds a WHERE clause string and arguments.
 func buildCertificateWhere(c *Client, wheres []query.CertificateWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -1192,9 +1349,14 @@ func buildCertificateWhere(c *Client, wheres []query.CertificateWhereClause, arg
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteCertificateField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -1210,24 +1372,24 @@ func buildCertificateWhere(c *Client, wheres []query.CertificateWhereClause, arg
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -1597,7 +1759,7 @@ func (b CertificateDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Certificate records.
 func (a CertificateActions) FindMany(ctx context.Context, opts ...query.CertificateQueryOption) ([]model.Certificate, error) {
 	cfg := query.ApplyCertificateOptions(opts)
-	q := "SELECT id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at FROM certificates"
+	q := "SELECT " + quotedCertificateColumns(a.client) + " FROM " + quotedCertificateTable(a.client)
 	argIdx := 0
 	where, args := buildCertificateWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -1606,7 +1768,15 @@ func (a CertificateActions) FindMany(ctx context.Context, opts ...query.Certific
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteCertificateField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -1614,6 +1784,14 @@ func (a CertificateActions) FindMany(ctx context.Context, opts ...query.Certific
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -1649,7 +1827,7 @@ func (a CertificateActions) FindFirst(ctx context.Context, opts ...query.Certifi
 func (a CertificateActions) FindUnique(ctx context.Context, where query.CertificateWhereClause) (*model.Certificate, error) {
 	argIdx := 0
 	whereSQL, args := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at FROM certificates"
+	q := "SELECT " + quotedCertificateColumns(a.client) + " FROM " + quotedCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1674,14 +1852,17 @@ func (a CertificateActions) CreateOne(ctx context.Context, sets ...query.Certifi
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Certificate
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -1704,6 +1885,9 @@ func (a CertificateActions) CreateMany(ctx context.Context, data []query.Certifi
 
 func (a CertificateActions) buildCertificateCreateManySQL(data []query.CertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -1717,8 +1901,7 @@ func (a CertificateActions) buildCertificateCreateManySQL(data []query.Certifica
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -1728,13 +1911,21 @@ func (a CertificateActions) buildCertificateCreateManySQL(data []query.Certifica
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -1749,17 +1940,21 @@ func (a CertificateActions) UpdateOne(ctx context.Context, where query.Certifica
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE certificates SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedCertificateTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -1787,12 +1982,16 @@ func (a CertificateActions) UpdateMany(ctx context.Context, wheres []query.Certi
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteCertificateField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildCertificateWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE certificates SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedCertificateTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1813,30 +2012,45 @@ func (a CertificateActions) UpsertOne(ctx context.Context, where query.Certifica
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO certificates (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteCertificateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteCertificateField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteCertificateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -1845,7 +2059,7 @@ func (a CertificateActions) UpsertOne(ctx context.Context, where query.Certifica
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -1864,12 +2078,12 @@ func (a CertificateActions) UpsertOne(ctx context.Context, where query.Certifica
 func (a CertificateActions) DeleteOne(ctx context.Context, where query.CertificateWhereClause) (*model.Certificate, error) {
 	argIdx := 0
 	whereSQL, args := buildCertificateWhere(a.client, []query.CertificateWhereClause{where}, &argIdx)
-	q := "DELETE FROM certificates"
+	q := "DELETE FROM " + quotedCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, cert_pem, private_key_pem, fingerprint, expires_at, created_at, updated_at"
+		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -1891,7 +2105,7 @@ func (a CertificateActions) DeleteOne(ctx context.Context, where query.Certifica
 func (a CertificateActions) DeleteMany(ctx context.Context, wheres ...query.CertificateWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildCertificateWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM certificates"
+	q := "DELETE FROM " + quotedCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1906,7 +2120,7 @@ func (a CertificateActions) DeleteMany(ctx context.Context, wheres ...query.Cert
 func (a CertificateActions) Count(ctx context.Context, wheres ...query.CertificateWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildCertificateWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM certificates"
+	q := "SELECT COUNT(*) FROM " + quotedCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -1921,9 +2135,17 @@ func (a CertificateActions) Count(ctx context.Context, wheres ...query.Certifica
 func (a CertificateActions) Aggregate(ctx context.Context, opts ...query.CertificateAggregateOption) (*query.CertificateAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteCertificateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM certificates", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedCertificateTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.CertificateAggregateResult{
 		Avg: make(map[string]*float64),
@@ -1961,13 +2183,28 @@ func (a CertificateActions) Aggregate(ctx context.Context, opts ...query.Certifi
 // GroupBy performs a GROUP BY query on Certificate.
 func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts ...query.CertificateAggregateOption) ([]query.CertificateGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteCertificateField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteCertificateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM certificates GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedCertificateTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("Certificate.GroupBy: %w", err)
@@ -2019,6 +2256,34 @@ func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts .
 	return results, rows.Err()
 }
 
+func quotedClusterTable(c *Client) string { return c.quoteIdentifier("clusters") }
+func quotedClusterColumns(c *Client) string {
+	cols := []string{"id", "creator_id", "name", "primary_hostname", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteClusterField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "creator_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "primary_hostname":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown Cluster field %q", field)
+	}
+}
+
 // buildClusterWhere recursively builds a WHERE clause string and arguments.
 func buildClusterWhere(c *Client, wheres []query.ClusterWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -2056,9 +2321,14 @@ func buildClusterWhere(c *Client, wheres []query.ClusterWhereClause, argIdx *int
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteClusterField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -2074,24 +2344,24 @@ func buildClusterWhere(c *Client, wheres []query.ClusterWhereClause, argIdx *int
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -2461,7 +2731,7 @@ func (b ClusterDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Cluster records.
 func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQueryOption) ([]model.Cluster, error) {
 	cfg := query.ApplyClusterOptions(opts)
-	q := "SELECT id, creator_id, name, primary_hostname, created_at, updated_at FROM clusters"
+	q := "SELECT " + quotedClusterColumns(a.client) + " FROM " + quotedClusterTable(a.client)
 	argIdx := 0
 	where, args := buildClusterWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -2470,7 +2740,15 @@ func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQuery
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteClusterField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -2478,6 +2756,14 @@ func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQuery
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -2513,7 +2799,7 @@ func (a ClusterActions) FindFirst(ctx context.Context, opts ...query.ClusterQuer
 func (a ClusterActions) FindUnique(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
-	q := "SELECT id, creator_id, name, primary_hostname, created_at, updated_at FROM clusters"
+	q := "SELECT " + quotedClusterColumns(a.client) + " FROM " + quotedClusterTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -2538,14 +2824,17 @@ func (a ClusterActions) CreateOne(ctx context.Context, sets ...query.ClusterSetC
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteClusterField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
+		q += " RETURNING " + quotedClusterColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Cluster
 		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -2568,6 +2857,9 @@ func (a ClusterActions) CreateMany(ctx context.Context, data []query.ClusterCrea
 
 func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "creator_id", "name", "primary_hostname", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -2581,8 +2873,7 @@ func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInpu
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedClusterTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -2592,13 +2883,21 @@ func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInpu
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -2613,17 +2912,21 @@ func (a ClusterActions) UpdateOne(ctx context.Context, where query.ClusterWhereC
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE clusters SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
+		q += " RETURNING " + quotedClusterColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
 		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -2651,12 +2954,16 @@ func (a ClusterActions) UpdateMany(ctx context.Context, wheres []query.ClusterWh
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE clusters SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -2677,30 +2984,45 @@ func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereC
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteClusterField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteClusterField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -2709,7 +3031,7 @@ func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
+		q += " RETURNING " + quotedClusterColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
 		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -2728,12 +3050,12 @@ func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereC
 func (a ClusterActions) DeleteOne(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
-	q := "DELETE FROM clusters"
+	q := "DELETE FROM " + quotedClusterTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
+		q += " RETURNING " + quotedClusterColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
 		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -2755,7 +3077,7 @@ func (a ClusterActions) DeleteOne(ctx context.Context, where query.ClusterWhereC
 func (a ClusterActions) DeleteMany(ctx context.Context, wheres ...query.ClusterWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM clusters"
+	q := "DELETE FROM " + quotedClusterTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -2770,7 +3092,7 @@ func (a ClusterActions) DeleteMany(ctx context.Context, wheres ...query.ClusterW
 func (a ClusterActions) Count(ctx context.Context, wheres ...query.ClusterWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM clusters"
+	q := "SELECT COUNT(*) FROM " + quotedClusterTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -2785,9 +3107,17 @@ func (a ClusterActions) Count(ctx context.Context, wheres ...query.ClusterWhereC
 func (a ClusterActions) Aggregate(ctx context.Context, opts ...query.ClusterAggregateOption) (*query.ClusterAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM clusters", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedClusterTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.ClusterAggregateResult{
 		Avg: make(map[string]*float64),
@@ -2825,13 +3155,28 @@ func (a ClusterActions) Aggregate(ctx context.Context, opts ...query.ClusterAggr
 // GroupBy performs a GROUP BY query on Cluster.
 func (a ClusterActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterAggregateOption) ([]query.ClusterGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteClusterField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM clusters GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedClusterTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("Cluster.GroupBy: %w", err)
@@ -2883,6 +3228,32 @@ func (a ClusterActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 	return results, rows.Err()
 }
 
+func quotedClusterGroupTable(c *Client) string { return c.quoteIdentifier("node_groups") }
+func quotedClusterGroupColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteClusterGroupField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ClusterGroup field %q", field)
+	}
+}
+
 // buildClusterGroupWhere recursively builds a WHERE clause string and arguments.
 func buildClusterGroupWhere(c *Client, wheres []query.ClusterGroupWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -2920,9 +3291,14 @@ func buildClusterGroupWhere(c *Client, wheres []query.ClusterGroupWhereClause, a
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteClusterGroupField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -2938,24 +3314,24 @@ func buildClusterGroupWhere(c *Client, wheres []query.ClusterGroupWhereClause, a
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -3325,7 +3701,7 @@ func (b ClusterGroupDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple ClusterGroup records.
 func (a ClusterGroupActions) FindMany(ctx context.Context, opts ...query.ClusterGroupQueryOption) ([]model.ClusterGroup, error) {
 	cfg := query.ApplyClusterGroupOptions(opts)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_groups"
+	q := "SELECT " + quotedClusterGroupColumns(a.client) + " FROM " + quotedClusterGroupTable(a.client)
 	argIdx := 0
 	where, args := buildClusterGroupWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -3334,7 +3710,15 @@ func (a ClusterGroupActions) FindMany(ctx context.Context, opts ...query.Cluster
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteClusterGroupField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -3342,6 +3726,14 @@ func (a ClusterGroupActions) FindMany(ctx context.Context, opts ...query.Cluster
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -3377,7 +3769,7 @@ func (a ClusterGroupActions) FindFirst(ctx context.Context, opts ...query.Cluste
 func (a ClusterGroupActions) FindUnique(ctx context.Context, where query.ClusterGroupWhereClause) (*model.ClusterGroup, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_groups"
+	q := "SELECT " + quotedClusterGroupColumns(a.client) + " FROM " + quotedClusterGroupTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -3402,14 +3794,17 @@ func (a ClusterGroupActions) CreateOne(ctx context.Context, sets ...query.Cluste
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteClusterGroupField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterGroupTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterGroupColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.ClusterGroup
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -3432,6 +3827,9 @@ func (a ClusterGroupActions) CreateMany(ctx context.Context, data []query.Cluste
 
 func (a ClusterGroupActions) buildClusterGroupCreateManySQL(data []query.ClusterGroupCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -3445,8 +3843,7 @@ func (a ClusterGroupActions) buildClusterGroupCreateManySQL(data []query.Cluster
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedClusterGroupTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -3456,13 +3853,21 @@ func (a ClusterGroupActions) buildClusterGroupCreateManySQL(data []query.Cluster
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -3477,17 +3882,21 @@ func (a ClusterGroupActions) UpdateOne(ctx context.Context, where query.ClusterG
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterGroupField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_groups SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterGroupTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterGroupColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterGroup
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -3515,12 +3924,16 @@ func (a ClusterGroupActions) UpdateMany(ctx context.Context, wheres []query.Clus
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterGroupField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterGroupWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_groups SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterGroupTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -3541,30 +3954,45 @@ func (a ClusterGroupActions) UpsertOne(ctx context.Context, where query.ClusterG
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteClusterGroupField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_groups (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterGroupTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterGroupField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteClusterGroupField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterGroupField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -3573,7 +4001,7 @@ func (a ClusterGroupActions) UpsertOne(ctx context.Context, where query.ClusterG
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterGroupColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterGroup
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -3592,12 +4020,12 @@ func (a ClusterGroupActions) UpsertOne(ctx context.Context, where query.ClusterG
 func (a ClusterGroupActions) DeleteOne(ctx context.Context, where query.ClusterGroupWhereClause) (*model.ClusterGroup, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterGroupWhere(a.client, []query.ClusterGroupWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_groups"
+	q := "DELETE FROM " + quotedClusterGroupTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterGroupColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterGroup
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -3619,7 +4047,7 @@ func (a ClusterGroupActions) DeleteOne(ctx context.Context, where query.ClusterG
 func (a ClusterGroupActions) DeleteMany(ctx context.Context, wheres ...query.ClusterGroupWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterGroupWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_groups"
+	q := "DELETE FROM " + quotedClusterGroupTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -3634,7 +4062,7 @@ func (a ClusterGroupActions) DeleteMany(ctx context.Context, wheres ...query.Clu
 func (a ClusterGroupActions) Count(ctx context.Context, wheres ...query.ClusterGroupWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterGroupWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_groups"
+	q := "SELECT COUNT(*) FROM " + quotedClusterGroupTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -3649,9 +4077,17 @@ func (a ClusterGroupActions) Count(ctx context.Context, wheres ...query.ClusterG
 func (a ClusterGroupActions) Aggregate(ctx context.Context, opts ...query.ClusterGroupAggregateOption) (*query.ClusterGroupAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterGroupField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_groups", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedClusterGroupTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.ClusterGroupAggregateResult{
 		Avg: make(map[string]*float64),
@@ -3689,13 +4125,28 @@ func (a ClusterGroupActions) Aggregate(ctx context.Context, opts ...query.Cluste
 // GroupBy performs a GROUP BY query on ClusterGroup.
 func (a ClusterGroupActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterGroupAggregateOption) ([]query.ClusterGroupGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteClusterGroupField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterGroupField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_groups GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedClusterGroupTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("ClusterGroup.GroupBy: %w", err)
@@ -3747,6 +4198,30 @@ func (a ClusterGroupActions) GroupBy(ctx context.Context, fields []string, opts 
 	return results, rows.Err()
 }
 
+func quotedClusterMemberTable(c *Client) string { return c.quoteIdentifier("cluster_members") }
+func quotedClusterMemberColumns(c *Client) string {
+	cols := []string{"cluster_id", "user_id", "permission", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteClusterMemberField(c *Client, field string) (string, error) {
+	switch field {
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "user_id":
+		return c.quoteIdentifier(field), nil
+	case "permission":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ClusterMember field %q", field)
+	}
+}
+
 // buildClusterMemberWhere recursively builds a WHERE clause string and arguments.
 func buildClusterMemberWhere(c *Client, wheres []query.ClusterMemberWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -3784,9 +4259,14 @@ func buildClusterMemberWhere(c *Client, wheres []query.ClusterMemberWhereClause,
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteClusterMemberField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -3802,24 +4282,24 @@ func buildClusterMemberWhere(c *Client, wheres []query.ClusterMemberWhereClause,
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -4189,7 +4669,7 @@ func (b ClusterMemberDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple ClusterMember records.
 func (a ClusterMemberActions) FindMany(ctx context.Context, opts ...query.ClusterMemberQueryOption) ([]model.ClusterMember, error) {
 	cfg := query.ApplyClusterMemberOptions(opts)
-	q := "SELECT cluster_id, user_id, permission, created_at FROM cluster_members"
+	q := "SELECT " + quotedClusterMemberColumns(a.client) + " FROM " + quotedClusterMemberTable(a.client)
 	argIdx := 0
 	where, args := buildClusterMemberWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -4198,7 +4678,15 @@ func (a ClusterMemberActions) FindMany(ctx context.Context, opts ...query.Cluste
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteClusterMemberField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -4206,6 +4694,14 @@ func (a ClusterMemberActions) FindMany(ctx context.Context, opts ...query.Cluste
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -4241,7 +4737,7 @@ func (a ClusterMemberActions) FindFirst(ctx context.Context, opts ...query.Clust
 func (a ClusterMemberActions) FindUnique(ctx context.Context, where query.ClusterMemberWhereClause) (*model.ClusterMember, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
-	q := "SELECT cluster_id, user_id, permission, created_at FROM cluster_members"
+	q := "SELECT " + quotedClusterMemberColumns(a.client) + " FROM " + quotedClusterMemberTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -4266,14 +4762,17 @@ func (a ClusterMemberActions) CreateOne(ctx context.Context, sets ...query.Clust
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteClusterMemberField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterMemberTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING cluster_id, user_id, permission, created_at"
+		q += " RETURNING " + quotedClusterMemberColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.ClusterMember
 		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
@@ -4296,6 +4795,9 @@ func (a ClusterMemberActions) CreateMany(ctx context.Context, data []query.Clust
 
 func (a ClusterMemberActions) buildClusterMemberCreateManySQL(data []query.ClusterMemberCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"cluster_id", "user_id", "permission", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -4309,8 +4811,7 @@ func (a ClusterMemberActions) buildClusterMemberCreateManySQL(data []query.Clust
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedClusterMemberTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -4320,13 +4821,21 @@ func (a ClusterMemberActions) buildClusterMemberCreateManySQL(data []query.Clust
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -4341,17 +4850,21 @@ func (a ClusterMemberActions) UpdateOne(ctx context.Context, where query.Cluster
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterMemberField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE cluster_members SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterMemberTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING cluster_id, user_id, permission, created_at"
+		q += " RETURNING " + quotedClusterMemberColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterMember
 		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
@@ -4379,12 +4892,16 @@ func (a ClusterMemberActions) UpdateMany(ctx context.Context, wheres []query.Clu
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterMemberField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterMemberWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE cluster_members SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterMemberTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -4405,30 +4922,45 @@ func (a ClusterMemberActions) UpsertOne(ctx context.Context, where query.Cluster
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteClusterMemberField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO cluster_members (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterMemberTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterMemberField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteClusterMemberField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterMemberField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -4437,7 +4969,7 @@ func (a ClusterMemberActions) UpsertOne(ctx context.Context, where query.Cluster
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING cluster_id, user_id, permission, created_at"
+		q += " RETURNING " + quotedClusterMemberColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterMember
 		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
@@ -4456,12 +4988,12 @@ func (a ClusterMemberActions) UpsertOne(ctx context.Context, where query.Cluster
 func (a ClusterMemberActions) DeleteOne(ctx context.Context, where query.ClusterMemberWhereClause) (*model.ClusterMember, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterMemberWhere(a.client, []query.ClusterMemberWhereClause{where}, &argIdx)
-	q := "DELETE FROM cluster_members"
+	q := "DELETE FROM " + quotedClusterMemberTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING cluster_id, user_id, permission, created_at"
+		q += " RETURNING " + quotedClusterMemberColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterMember
 		if err := row.Scan(&item.ClusterId, &item.UserId, &item.Permission, &item.CreatedAt); err != nil {
@@ -4483,7 +5015,7 @@ func (a ClusterMemberActions) DeleteOne(ctx context.Context, where query.Cluster
 func (a ClusterMemberActions) DeleteMany(ctx context.Context, wheres ...query.ClusterMemberWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterMemberWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM cluster_members"
+	q := "DELETE FROM " + quotedClusterMemberTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -4498,7 +5030,7 @@ func (a ClusterMemberActions) DeleteMany(ctx context.Context, wheres ...query.Cl
 func (a ClusterMemberActions) Count(ctx context.Context, wheres ...query.ClusterMemberWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterMemberWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM cluster_members"
+	q := "SELECT COUNT(*) FROM " + quotedClusterMemberTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -4513,9 +5045,17 @@ func (a ClusterMemberActions) Count(ctx context.Context, wheres ...query.Cluster
 func (a ClusterMemberActions) Aggregate(ctx context.Context, opts ...query.ClusterMemberAggregateOption) (*query.ClusterMemberAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterMemberField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM cluster_members", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedClusterMemberTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.ClusterMemberAggregateResult{
 		Avg: make(map[string]*float64),
@@ -4553,13 +5093,28 @@ func (a ClusterMemberActions) Aggregate(ctx context.Context, opts ...query.Clust
 // GroupBy performs a GROUP BY query on ClusterMember.
 func (a ClusterMemberActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterMemberAggregateOption) ([]query.ClusterMemberGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteClusterMemberField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterMemberField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM cluster_members GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedClusterMemberTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("ClusterMember.GroupBy: %w", err)
@@ -4611,6 +5166,32 @@ func (a ClusterMemberActions) GroupBy(ctx context.Context, fields []string, opts
 	return results, rows.Err()
 }
 
+func quotedClusterRegionTable(c *Client) string { return c.quoteIdentifier("node_regions") }
+func quotedClusterRegionColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteClusterRegionField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ClusterRegion field %q", field)
+	}
+}
+
 // buildClusterRegionWhere recursively builds a WHERE clause string and arguments.
 func buildClusterRegionWhere(c *Client, wheres []query.ClusterRegionWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -4648,9 +5229,14 @@ func buildClusterRegionWhere(c *Client, wheres []query.ClusterRegionWhereClause,
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteClusterRegionField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -4666,24 +5252,24 @@ func buildClusterRegionWhere(c *Client, wheres []query.ClusterRegionWhereClause,
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -5053,7 +5639,7 @@ func (b ClusterRegionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple ClusterRegion records.
 func (a ClusterRegionActions) FindMany(ctx context.Context, opts ...query.ClusterRegionQueryOption) ([]model.ClusterRegion, error) {
 	cfg := query.ApplyClusterRegionOptions(opts)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_regions"
+	q := "SELECT " + quotedClusterRegionColumns(a.client) + " FROM " + quotedClusterRegionTable(a.client)
 	argIdx := 0
 	where, args := buildClusterRegionWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -5062,7 +5648,15 @@ func (a ClusterRegionActions) FindMany(ctx context.Context, opts ...query.Cluste
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteClusterRegionField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -5070,6 +5664,14 @@ func (a ClusterRegionActions) FindMany(ctx context.Context, opts ...query.Cluste
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -5105,7 +5707,7 @@ func (a ClusterRegionActions) FindFirst(ctx context.Context, opts ...query.Clust
 func (a ClusterRegionActions) FindUnique(ctx context.Context, where query.ClusterRegionWhereClause) (*model.ClusterRegion, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM node_regions"
+	q := "SELECT " + quotedClusterRegionColumns(a.client) + " FROM " + quotedClusterRegionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -5130,14 +5732,17 @@ func (a ClusterRegionActions) CreateOne(ctx context.Context, sets ...query.Clust
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteClusterRegionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterRegionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterRegionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.ClusterRegion
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -5160,6 +5765,9 @@ func (a ClusterRegionActions) CreateMany(ctx context.Context, data []query.Clust
 
 func (a ClusterRegionActions) buildClusterRegionCreateManySQL(data []query.ClusterRegionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -5173,8 +5781,7 @@ func (a ClusterRegionActions) buildClusterRegionCreateManySQL(data []query.Clust
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedClusterRegionTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -5184,13 +5791,21 @@ func (a ClusterRegionActions) buildClusterRegionCreateManySQL(data []query.Clust
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -5205,17 +5820,21 @@ func (a ClusterRegionActions) UpdateOne(ctx context.Context, where query.Cluster
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterRegionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_regions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterRegionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterRegionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterRegion
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -5243,12 +5862,16 @@ func (a ClusterRegionActions) UpdateMany(ctx context.Context, wheres []query.Clu
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteClusterRegionField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildClusterRegionWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_regions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterRegionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -5269,30 +5892,45 @@ func (a ClusterRegionActions) UpsertOne(ctx context.Context, where query.Cluster
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteClusterRegionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_regions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterRegionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterRegionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteClusterRegionField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteClusterRegionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -5301,7 +5939,7 @@ func (a ClusterRegionActions) UpsertOne(ctx context.Context, where query.Cluster
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterRegionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterRegion
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -5320,12 +5958,12 @@ func (a ClusterRegionActions) UpsertOne(ctx context.Context, where query.Cluster
 func (a ClusterRegionActions) DeleteOne(ctx context.Context, where query.ClusterRegionWhereClause) (*model.ClusterRegion, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterRegionWhere(a.client, []query.ClusterRegionWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_regions"
+	q := "DELETE FROM " + quotedClusterRegionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING " + quotedClusterRegionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ClusterRegion
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -5347,7 +5985,7 @@ func (a ClusterRegionActions) DeleteOne(ctx context.Context, where query.Cluster
 func (a ClusterRegionActions) DeleteMany(ctx context.Context, wheres ...query.ClusterRegionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterRegionWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_regions"
+	q := "DELETE FROM " + quotedClusterRegionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -5362,7 +6000,7 @@ func (a ClusterRegionActions) DeleteMany(ctx context.Context, wheres ...query.Cl
 func (a ClusterRegionActions) Count(ctx context.Context, wheres ...query.ClusterRegionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterRegionWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_regions"
+	q := "SELECT COUNT(*) FROM " + quotedClusterRegionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -5377,9 +6015,17 @@ func (a ClusterRegionActions) Count(ctx context.Context, wheres ...query.Cluster
 func (a ClusterRegionActions) Aggregate(ctx context.Context, opts ...query.ClusterRegionAggregateOption) (*query.ClusterRegionAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterRegionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_regions", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedClusterRegionTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.ClusterRegionAggregateResult{
 		Avg: make(map[string]*float64),
@@ -5417,13 +6063,28 @@ func (a ClusterRegionActions) Aggregate(ctx context.Context, opts ...query.Clust
 // GroupBy performs a GROUP BY query on ClusterRegion.
 func (a ClusterRegionActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterRegionAggregateOption) ([]query.ClusterRegionGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteClusterRegionField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterRegionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_regions GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedClusterRegionTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("ClusterRegion.GroupBy: %w", err)
@@ -5475,6 +6136,36 @@ func (a ClusterRegionActions) GroupBy(ctx context.Context, fields []string, opts
 	return results, rows.Err()
 }
 
+func quotedConfigVersionTable(c *Client) string { return c.quoteIdentifier("config_versions") }
+func quotedConfigVersionColumns(c *Client) string {
+	cols := []string{"id", "site_id", "version", "config_json", "hash", "status", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteConfigVersionField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "version":
+		return c.quoteIdentifier(field), nil
+	case "config_json":
+		return c.quoteIdentifier(field), nil
+	case "hash":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ConfigVersion field %q", field)
+	}
+}
+
 // buildConfigVersionWhere recursively builds a WHERE clause string and arguments.
 func buildConfigVersionWhere(c *Client, wheres []query.ConfigVersionWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -5512,9 +6203,14 @@ func buildConfigVersionWhere(c *Client, wheres []query.ConfigVersionWhereClause,
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteConfigVersionField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -5530,24 +6226,24 @@ func buildConfigVersionWhere(c *Client, wheres []query.ConfigVersionWhereClause,
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -5917,7 +6613,7 @@ func (b ConfigVersionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple ConfigVersion records.
 func (a ConfigVersionActions) FindMany(ctx context.Context, opts ...query.ConfigVersionQueryOption) ([]model.ConfigVersion, error) {
 	cfg := query.ApplyConfigVersionOptions(opts)
-	q := "SELECT id, site_id, version, config_json, hash, status, created_at FROM config_versions"
+	q := "SELECT " + quotedConfigVersionColumns(a.client) + " FROM " + quotedConfigVersionTable(a.client)
 	argIdx := 0
 	where, args := buildConfigVersionWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -5926,7 +6622,15 @@ func (a ConfigVersionActions) FindMany(ctx context.Context, opts ...query.Config
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteConfigVersionField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -5934,6 +6638,14 @@ func (a ConfigVersionActions) FindMany(ctx context.Context, opts ...query.Config
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -5969,7 +6681,7 @@ func (a ConfigVersionActions) FindFirst(ctx context.Context, opts ...query.Confi
 func (a ConfigVersionActions) FindUnique(ctx context.Context, where query.ConfigVersionWhereClause) (*model.ConfigVersion, error) {
 	argIdx := 0
 	whereSQL, args := buildConfigVersionWhere(a.client, []query.ConfigVersionWhereClause{where}, &argIdx)
-	q := "SELECT id, site_id, version, config_json, hash, status, created_at FROM config_versions"
+	q := "SELECT " + quotedConfigVersionColumns(a.client) + " FROM " + quotedConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -5994,14 +6706,17 @@ func (a ConfigVersionActions) CreateOne(ctx context.Context, sets ...query.Confi
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO config_versions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, config_json, hash, status, created_at"
+		q += " RETURNING " + quotedConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.ConfigVersion
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.ConfigJson, &item.Hash, &item.Status, &item.CreatedAt); err != nil {
@@ -6024,6 +6739,9 @@ func (a ConfigVersionActions) CreateMany(ctx context.Context, data []query.Confi
 
 func (a ConfigVersionActions) buildConfigVersionCreateManySQL(data []query.ConfigVersionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "site_id", "version", "config_json", "hash", "status", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -6037,8 +6755,7 @@ func (a ConfigVersionActions) buildConfigVersionCreateManySQL(data []query.Confi
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO config_versions (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -6048,13 +6765,21 @@ func (a ConfigVersionActions) buildConfigVersionCreateManySQL(data []query.Confi
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -6069,17 +6794,21 @@ func (a ConfigVersionActions) UpdateOne(ctx context.Context, where query.ConfigV
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildConfigVersionWhere(a.client, []query.ConfigVersionWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE config_versions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedConfigVersionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, config_json, hash, status, created_at"
+		q += " RETURNING " + quotedConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ConfigVersion
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.ConfigJson, &item.Hash, &item.Status, &item.CreatedAt); err != nil {
@@ -6107,12 +6836,16 @@ func (a ConfigVersionActions) UpdateMany(ctx context.Context, wheres []query.Con
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildConfigVersionWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE config_versions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedConfigVersionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -6133,30 +6866,45 @@ func (a ConfigVersionActions) UpsertOne(ctx context.Context, where query.ConfigV
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO config_versions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteConfigVersionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteConfigVersionField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteConfigVersionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -6165,7 +6913,7 @@ func (a ConfigVersionActions) UpsertOne(ctx context.Context, where query.ConfigV
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, config_json, hash, status, created_at"
+		q += " RETURNING " + quotedConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ConfigVersion
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.ConfigJson, &item.Hash, &item.Status, &item.CreatedAt); err != nil {
@@ -6184,12 +6932,12 @@ func (a ConfigVersionActions) UpsertOne(ctx context.Context, where query.ConfigV
 func (a ConfigVersionActions) DeleteOne(ctx context.Context, where query.ConfigVersionWhereClause) (*model.ConfigVersion, error) {
 	argIdx := 0
 	whereSQL, args := buildConfigVersionWhere(a.client, []query.ConfigVersionWhereClause{where}, &argIdx)
-	q := "DELETE FROM config_versions"
+	q := "DELETE FROM " + quotedConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, config_json, hash, status, created_at"
+		q += " RETURNING " + quotedConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.ConfigVersion
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.ConfigJson, &item.Hash, &item.Status, &item.CreatedAt); err != nil {
@@ -6211,7 +6959,7 @@ func (a ConfigVersionActions) DeleteOne(ctx context.Context, where query.ConfigV
 func (a ConfigVersionActions) DeleteMany(ctx context.Context, wheres ...query.ConfigVersionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildConfigVersionWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM config_versions"
+	q := "DELETE FROM " + quotedConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -6226,7 +6974,7 @@ func (a ConfigVersionActions) DeleteMany(ctx context.Context, wheres ...query.Co
 func (a ConfigVersionActions) Count(ctx context.Context, wheres ...query.ConfigVersionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildConfigVersionWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM config_versions"
+	q := "SELECT COUNT(*) FROM " + quotedConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -6241,9 +6989,17 @@ func (a ConfigVersionActions) Count(ctx context.Context, wheres ...query.ConfigV
 func (a ConfigVersionActions) Aggregate(ctx context.Context, opts ...query.ConfigVersionAggregateOption) (*query.ConfigVersionAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteConfigVersionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM config_versions", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedConfigVersionTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.ConfigVersionAggregateResult{
 		Avg: make(map[string]*float64),
@@ -6281,13 +7037,28 @@ func (a ConfigVersionActions) Aggregate(ctx context.Context, opts ...query.Confi
 // GroupBy performs a GROUP BY query on ConfigVersion.
 func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts ...query.ConfigVersionAggregateOption) ([]query.ConfigVersionGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteConfigVersionField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteConfigVersionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM config_versions GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedConfigVersionTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("ConfigVersion.GroupBy: %w", err)
@@ -6339,6 +7110,34 @@ func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts
 	return results, rows.Err()
 }
 
+func quotedDNSLineTable(c *Client) string { return c.quoteIdentifier("dns_lines") }
+func quotedDNSLineColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDNSLineField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "provider_code":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DNSLine field %q", field)
+	}
+}
+
 // buildDNSLineWhere recursively builds a WHERE clause string and arguments.
 func buildDNSLineWhere(c *Client, wheres []query.DNSLineWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -6376,9 +7175,14 @@ func buildDNSLineWhere(c *Client, wheres []query.DNSLineWhereClause, argIdx *int
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteDNSLineField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -6394,24 +7198,24 @@ func buildDNSLineWhere(c *Client, wheres []query.DNSLineWhereClause, argIdx *int
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -6781,7 +7585,7 @@ func (b DNSLineDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple DNSLine records.
 func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQueryOption) ([]model.DNSLine, error) {
 	cfg := query.ApplyDNSLineOptions(opts)
-	q := "SELECT id, cluster_id, name, provider_code, created_at, updated_at FROM dns_lines"
+	q := "SELECT " + quotedDNSLineColumns(a.client) + " FROM " + quotedDNSLineTable(a.client)
 	argIdx := 0
 	where, args := buildDNSLineWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -6790,7 +7594,15 @@ func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQuery
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteDNSLineField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -6798,6 +7610,14 @@ func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQuery
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -6833,7 +7653,7 @@ func (a DNSLineActions) FindFirst(ctx context.Context, opts ...query.DNSLineQuer
 func (a DNSLineActions) FindUnique(ctx context.Context, where query.DNSLineWhereClause) (*model.DNSLine, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, provider_code, created_at, updated_at FROM dns_lines"
+	q := "SELECT " + quotedDNSLineColumns(a.client) + " FROM " + quotedDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -6858,14 +7678,17 @@ func (a DNSLineActions) CreateOne(ctx context.Context, sets ...query.DNSLineSetC
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
+		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSLine
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -6888,6 +7711,9 @@ func (a DNSLineActions) CreateMany(ctx context.Context, data []query.DNSLineCrea
 
 func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -6901,8 +7727,7 @@ func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInpu
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -6912,13 +7737,21 @@ func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInpu
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -6933,17 +7766,21 @@ func (a DNSLineActions) UpdateOne(ctx context.Context, where query.DNSLineWhereC
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_lines SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSLineTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
+		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -6971,12 +7808,16 @@ func (a DNSLineActions) UpdateMany(ctx context.Context, wheres []query.DNSLineWh
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSLineField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSLineWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_lines SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSLineTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -6997,30 +7838,45 @@ func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereC
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSLineField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteDNSLineField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSLineField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -7029,7 +7885,7 @@ func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
+		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7048,12 +7904,12 @@ func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereC
 func (a DNSLineActions) DeleteOne(ctx context.Context, where query.DNSLineWhereClause) (*model.DNSLine, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
-	q := "DELETE FROM dns_lines"
+	q := "DELETE FROM " + quotedDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
+		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7075,7 +7931,7 @@ func (a DNSLineActions) DeleteOne(ctx context.Context, where query.DNSLineWhereC
 func (a DNSLineActions) DeleteMany(ctx context.Context, wheres ...query.DNSLineWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSLineWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM dns_lines"
+	q := "DELETE FROM " + quotedDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7090,7 +7946,7 @@ func (a DNSLineActions) DeleteMany(ctx context.Context, wheres ...query.DNSLineW
 func (a DNSLineActions) Count(ctx context.Context, wheres ...query.DNSLineWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSLineWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM dns_lines"
+	q := "SELECT COUNT(*) FROM " + quotedDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7105,9 +7961,17 @@ func (a DNSLineActions) Count(ctx context.Context, wheres ...query.DNSLineWhereC
 func (a DNSLineActions) Aggregate(ctx context.Context, opts ...query.DNSLineAggregateOption) (*query.DNSLineAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSLineField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_lines", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDNSLineTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.DNSLineAggregateResult{
 		Avg: make(map[string]*float64),
@@ -7145,13 +8009,28 @@ func (a DNSLineActions) Aggregate(ctx context.Context, opts ...query.DNSLineAggr
 // GroupBy performs a GROUP BY query on DNSLine.
 func (a DNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSLineAggregateOption) ([]query.DNSLineGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDNSLineField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSLineField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_lines GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDNSLineTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("DNSLine.GroupBy: %w", err)
@@ -7203,6 +8082,52 @@ func (a DNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 	return results, rows.Err()
 }
 
+func quotedDNSManagedRecordTable(c *Client) string { return c.quoteIdentifier("dns_managed_records") }
+func quotedDNSManagedRecordColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "site_domain_id", "dns_line_id", "dns_line_key", "node_id", "hostname", "type", "value", "provider_record_id", "status", "last_error", "last_synced_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDNSManagedRecordField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "site_domain_id":
+		return c.quoteIdentifier(field), nil
+	case "dns_line_id":
+		return c.quoteIdentifier(field), nil
+	case "dns_line_key":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "hostname":
+		return c.quoteIdentifier(field), nil
+	case "type":
+		return c.quoteIdentifier(field), nil
+	case "value":
+		return c.quoteIdentifier(field), nil
+	case "provider_record_id":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "last_error":
+		return c.quoteIdentifier(field), nil
+	case "last_synced_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DNSManagedRecord field %q", field)
+	}
+}
+
 // buildDNSManagedRecordWhere recursively builds a WHERE clause string and arguments.
 func buildDNSManagedRecordWhere(c *Client, wheres []query.DNSManagedRecordWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -7240,9 +8165,14 @@ func buildDNSManagedRecordWhere(c *Client, wheres []query.DNSManagedRecordWhereC
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteDNSManagedRecordField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -7258,24 +8188,24 @@ func buildDNSManagedRecordWhere(c *Client, wheres []query.DNSManagedRecordWhereC
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -7645,7 +8575,7 @@ func (b DNSManagedRecordDeleteBuilder) DoMany(ctx context.Context) (int64, error
 // FindMany retrieves multiple DNSManagedRecord records.
 func (a DNSManagedRecordActions) FindMany(ctx context.Context, opts ...query.DNSManagedRecordQueryOption) ([]model.DNSManagedRecord, error) {
 	cfg := query.ApplyDNSManagedRecordOptions(opts)
-	q := "SELECT id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at FROM dns_managed_records"
+	q := "SELECT " + quotedDNSManagedRecordColumns(a.client) + " FROM " + quotedDNSManagedRecordTable(a.client)
 	argIdx := 0
 	where, args := buildDNSManagedRecordWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -7654,7 +8584,15 @@ func (a DNSManagedRecordActions) FindMany(ctx context.Context, opts ...query.DNS
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteDNSManagedRecordField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -7662,6 +8600,14 @@ func (a DNSManagedRecordActions) FindMany(ctx context.Context, opts ...query.DNS
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -7697,7 +8643,7 @@ func (a DNSManagedRecordActions) FindFirst(ctx context.Context, opts ...query.DN
 func (a DNSManagedRecordActions) FindUnique(ctx context.Context, where query.DNSManagedRecordWhereClause) (*model.DNSManagedRecord, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at FROM dns_managed_records"
+	q := "SELECT " + quotedDNSManagedRecordColumns(a.client) + " FROM " + quotedDNSManagedRecordTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7722,14 +8668,17 @@ func (a DNSManagedRecordActions) CreateOne(ctx context.Context, sets ...query.DN
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteDNSManagedRecordField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSManagedRecordTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		q += " RETURNING " + quotedDNSManagedRecordColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSManagedRecord
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7752,6 +8701,9 @@ func (a DNSManagedRecordActions) CreateMany(ctx context.Context, data []query.DN
 
 func (a DNSManagedRecordActions) buildDNSManagedRecordCreateManySQL(data []query.DNSManagedRecordCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "site_domain_id", "dns_line_id", "dns_line_key", "node_id", "hostname", "type", "value", "provider_record_id", "status", "last_error", "last_synced_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -7765,8 +8717,7 @@ func (a DNSManagedRecordActions) buildDNSManagedRecordCreateManySQL(data []query
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDNSManagedRecordTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -7776,13 +8727,21 @@ func (a DNSManagedRecordActions) buildDNSManagedRecordCreateManySQL(data []query
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -7797,17 +8756,21 @@ func (a DNSManagedRecordActions) UpdateOne(ctx context.Context, where query.DNSM
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSManagedRecordField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_managed_records SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSManagedRecordTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		q += " RETURNING " + quotedDNSManagedRecordColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSManagedRecord
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7835,12 +8798,16 @@ func (a DNSManagedRecordActions) UpdateMany(ctx context.Context, wheres []query.
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSManagedRecordField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_managed_records SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSManagedRecordTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7861,30 +8828,45 @@ func (a DNSManagedRecordActions) UpsertOne(ctx context.Context, where query.DNSM
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteDNSManagedRecordField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSManagedRecordTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSManagedRecordField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteDNSManagedRecordField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSManagedRecordField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -7893,7 +8875,7 @@ func (a DNSManagedRecordActions) UpsertOne(ctx context.Context, where query.DNSM
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		q += " RETURNING " + quotedDNSManagedRecordColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSManagedRecord
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7912,12 +8894,12 @@ func (a DNSManagedRecordActions) UpsertOne(ctx context.Context, where query.DNSM
 func (a DNSManagedRecordActions) DeleteOne(ctx context.Context, where query.DNSManagedRecordWhereClause) (*model.DNSManagedRecord, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
-	q := "DELETE FROM dns_managed_records"
+	q := "DELETE FROM " + quotedDNSManagedRecordTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		q += " RETURNING " + quotedDNSManagedRecordColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSManagedRecord
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -7939,7 +8921,7 @@ func (a DNSManagedRecordActions) DeleteOne(ctx context.Context, where query.DNSM
 func (a DNSManagedRecordActions) DeleteMany(ctx context.Context, wheres ...query.DNSManagedRecordWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM dns_managed_records"
+	q := "DELETE FROM " + quotedDNSManagedRecordTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7954,7 +8936,7 @@ func (a DNSManagedRecordActions) DeleteMany(ctx context.Context, wheres ...query
 func (a DNSManagedRecordActions) Count(ctx context.Context, wheres ...query.DNSManagedRecordWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM dns_managed_records"
+	q := "SELECT COUNT(*) FROM " + quotedDNSManagedRecordTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -7969,9 +8951,17 @@ func (a DNSManagedRecordActions) Count(ctx context.Context, wheres ...query.DNSM
 func (a DNSManagedRecordActions) Aggregate(ctx context.Context, opts ...query.DNSManagedRecordAggregateOption) (*query.DNSManagedRecordAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSManagedRecordField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_managed_records", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDNSManagedRecordTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.DNSManagedRecordAggregateResult{
 		Avg: make(map[string]*float64),
@@ -8009,13 +8999,28 @@ func (a DNSManagedRecordActions) Aggregate(ctx context.Context, opts ...query.DN
 // GroupBy performs a GROUP BY query on DNSManagedRecord.
 func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSManagedRecordAggregateOption) ([]query.DNSManagedRecordGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDNSManagedRecordField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSManagedRecordField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_managed_records GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDNSManagedRecordTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("DNSManagedRecord.GroupBy: %w", err)
@@ -8067,6 +9072,44 @@ func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, o
 	return results, rows.Err()
 }
 
+func quotedDNSProviderConfigTable(c *Client) string { return c.quoteIdentifier("dns_provider_configs") }
+func quotedDNSProviderConfigColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDNSProviderConfigField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "provider":
+		return c.quoteIdentifier(field), nil
+	case "zone":
+		return c.quoteIdentifier(field), nil
+	case "zone_id":
+		return c.quoteIdentifier(field), nil
+	case "credentials_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "default_ttl":
+		return c.quoteIdentifier(field), nil
+	case "proxied":
+		return c.quoteIdentifier(field), nil
+	case "enabled":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DNSProviderConfig field %q", field)
+	}
+}
+
 // buildDNSProviderConfigWhere recursively builds a WHERE clause string and arguments.
 func buildDNSProviderConfigWhere(c *Client, wheres []query.DNSProviderConfigWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -8104,9 +9147,14 @@ func buildDNSProviderConfigWhere(c *Client, wheres []query.DNSProviderConfigWher
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteDNSProviderConfigField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -8122,24 +9170,24 @@ func buildDNSProviderConfigWhere(c *Client, wheres []query.DNSProviderConfigWher
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -8509,7 +9557,7 @@ func (b DNSProviderConfigDeleteBuilder) DoMany(ctx context.Context) (int64, erro
 // FindMany retrieves multiple DNSProviderConfig records.
 func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DNSProviderConfigQueryOption) ([]model.DNSProviderConfig, error) {
 	cfg := query.ApplyDNSProviderConfigOptions(opts)
-	q := "SELECT id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at FROM dns_provider_configs"
+	q := "SELECT " + quotedDNSProviderConfigColumns(a.client) + " FROM " + quotedDNSProviderConfigTable(a.client)
 	argIdx := 0
 	where, args := buildDNSProviderConfigWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -8518,7 +9566,15 @@ func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DN
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteDNSProviderConfigField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -8526,6 +9582,14 @@ func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DN
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -8561,7 +9625,7 @@ func (a DNSProviderConfigActions) FindFirst(ctx context.Context, opts ...query.D
 func (a DNSProviderConfigActions) FindUnique(ctx context.Context, where query.DNSProviderConfigWhereClause) (*model.DNSProviderConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at FROM dns_provider_configs"
+	q := "SELECT " + quotedDNSProviderConfigColumns(a.client) + " FROM " + quotedDNSProviderConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -8586,14 +9650,17 @@ func (a DNSProviderConfigActions) CreateOne(ctx context.Context, sets ...query.D
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteDNSProviderConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSProviderConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSProviderConfig
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -8616,6 +9683,9 @@ func (a DNSProviderConfigActions) CreateMany(ctx context.Context, data []query.D
 
 func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []query.DNSProviderConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -8629,8 +9699,7 @@ func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []que
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDNSProviderConfigTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -8640,13 +9709,21 @@ func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []que
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -8661,17 +9738,21 @@ func (a DNSProviderConfigActions) UpdateOne(ctx context.Context, where query.DNS
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSProviderConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_provider_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSProviderConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -8699,12 +9780,16 @@ func (a DNSProviderConfigActions) UpdateMany(ctx context.Context, wheres []query
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSProviderConfigField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_provider_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSProviderConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -8725,30 +9810,45 @@ func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNS
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteDNSProviderConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSProviderConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSProviderConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteDNSProviderConfigField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSProviderConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -8757,7 +9857,7 @@ func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNS
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -8776,12 +9876,12 @@ func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNS
 func (a DNSProviderConfigActions) DeleteOne(ctx context.Context, where query.DNSProviderConfigWhereClause) (*model.DNSProviderConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
-	q := "DELETE FROM dns_provider_configs"
+	q := "DELETE FROM " + quotedDNSProviderConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -8803,7 +9903,7 @@ func (a DNSProviderConfigActions) DeleteOne(ctx context.Context, where query.DNS
 func (a DNSProviderConfigActions) DeleteMany(ctx context.Context, wheres ...query.DNSProviderConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM dns_provider_configs"
+	q := "DELETE FROM " + quotedDNSProviderConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -8818,7 +9918,7 @@ func (a DNSProviderConfigActions) DeleteMany(ctx context.Context, wheres ...quer
 func (a DNSProviderConfigActions) Count(ctx context.Context, wheres ...query.DNSProviderConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM dns_provider_configs"
+	q := "SELECT COUNT(*) FROM " + quotedDNSProviderConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -8833,9 +9933,17 @@ func (a DNSProviderConfigActions) Count(ctx context.Context, wheres ...query.DNS
 func (a DNSProviderConfigActions) Aggregate(ctx context.Context, opts ...query.DNSProviderConfigAggregateOption) (*query.DNSProviderConfigAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSProviderConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_provider_configs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDNSProviderConfigTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.DNSProviderConfigAggregateResult{
 		Avg: make(map[string]*float64),
@@ -8873,13 +9981,28 @@ func (a DNSProviderConfigActions) Aggregate(ctx context.Context, opts ...query.D
 // GroupBy performs a GROUP BY query on DNSProviderConfig.
 func (a DNSProviderConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSProviderConfigAggregateOption) ([]query.DNSProviderConfigGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDNSProviderConfigField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSProviderConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_provider_configs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDNSProviderConfigTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("DNSProviderConfig.GroupBy: %w", err)
@@ -8931,6 +10054,46 @@ func (a DNSProviderConfigActions) GroupBy(ctx context.Context, fields []string, 
 	return results, rows.Err()
 }
 
+func quotedDNSSyncJobTable(c *Client) string { return c.quoteIdentifier("dns_sync_jobs") }
+func quotedDNSSyncJobColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDNSSyncJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "action":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DNSSyncJob field %q", field)
+	}
+}
+
 // buildDNSSyncJobWhere recursively builds a WHERE clause string and arguments.
 func buildDNSSyncJobWhere(c *Client, wheres []query.DNSSyncJobWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -8968,9 +10131,14 @@ func buildDNSSyncJobWhere(c *Client, wheres []query.DNSSyncJobWhereClause, argId
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteDNSSyncJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -8986,24 +10154,24 @@ func buildDNSSyncJobWhere(c *Client, wheres []query.DNSSyncJobWhereClause, argId
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -9373,7 +10541,7 @@ func (b DNSSyncJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple DNSSyncJob records.
 func (a DNSSyncJobActions) FindMany(ctx context.Context, opts ...query.DNSSyncJobQueryOption) ([]model.DNSSyncJob, error) {
 	cfg := query.ApplyDNSSyncJobOptions(opts)
-	q := "SELECT id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at FROM dns_sync_jobs"
+	q := "SELECT " + quotedDNSSyncJobColumns(a.client) + " FROM " + quotedDNSSyncJobTable(a.client)
 	argIdx := 0
 	where, args := buildDNSSyncJobWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -9382,7 +10550,15 @@ func (a DNSSyncJobActions) FindMany(ctx context.Context, opts ...query.DNSSyncJo
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteDNSSyncJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -9390,6 +10566,14 @@ func (a DNSSyncJobActions) FindMany(ctx context.Context, opts ...query.DNSSyncJo
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -9425,7 +10609,7 @@ func (a DNSSyncJobActions) FindFirst(ctx context.Context, opts ...query.DNSSyncJ
 func (a DNSSyncJobActions) FindUnique(ctx context.Context, where query.DNSSyncJobWhereClause) (*model.DNSSyncJob, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at FROM dns_sync_jobs"
+	q := "SELECT " + quotedDNSSyncJobColumns(a.client) + " FROM " + quotedDNSSyncJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -9450,14 +10634,17 @@ func (a DNSSyncJobActions) CreateOne(ctx context.Context, sets ...query.DNSSyncJ
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteDNSSyncJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSSyncJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSSyncJob
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -9480,6 +10667,9 @@ func (a DNSSyncJobActions) CreateMany(ctx context.Context, data []query.DNSSyncJ
 
 func (a DNSSyncJobActions) buildDNSSyncJobCreateManySQL(data []query.DNSSyncJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -9493,8 +10683,7 @@ func (a DNSSyncJobActions) buildDNSSyncJobCreateManySQL(data []query.DNSSyncJobC
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDNSSyncJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -9504,13 +10693,21 @@ func (a DNSSyncJobActions) buildDNSSyncJobCreateManySQL(data []query.DNSSyncJobC
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -9525,17 +10722,21 @@ func (a DNSSyncJobActions) UpdateOne(ctx context.Context, where query.DNSSyncJob
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSSyncJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_sync_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSSyncJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -9563,12 +10764,16 @@ func (a DNSSyncJobActions) UpdateMany(ctx context.Context, wheres []query.DNSSyn
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDNSSyncJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dns_sync_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSSyncJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -9589,30 +10794,45 @@ func (a DNSSyncJobActions) UpsertOne(ctx context.Context, where query.DNSSyncJob
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteDNSSyncJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSSyncJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSSyncJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteDNSSyncJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDNSSyncJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -9621,7 +10841,7 @@ func (a DNSSyncJobActions) UpsertOne(ctx context.Context, where query.DNSSyncJob
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -9640,12 +10860,12 @@ func (a DNSSyncJobActions) UpsertOne(ctx context.Context, where query.DNSSyncJob
 func (a DNSSyncJobActions) DeleteOne(ctx context.Context, where query.DNSSyncJobWhereClause) (*model.DNSSyncJob, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
-	q := "DELETE FROM dns_sync_jobs"
+	q := "DELETE FROM " + quotedDNSSyncJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -9667,7 +10887,7 @@ func (a DNSSyncJobActions) DeleteOne(ctx context.Context, where query.DNSSyncJob
 func (a DNSSyncJobActions) DeleteMany(ctx context.Context, wheres ...query.DNSSyncJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM dns_sync_jobs"
+	q := "DELETE FROM " + quotedDNSSyncJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -9682,7 +10902,7 @@ func (a DNSSyncJobActions) DeleteMany(ctx context.Context, wheres ...query.DNSSy
 func (a DNSSyncJobActions) Count(ctx context.Context, wheres ...query.DNSSyncJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM dns_sync_jobs"
+	q := "SELECT COUNT(*) FROM " + quotedDNSSyncJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -9697,9 +10917,17 @@ func (a DNSSyncJobActions) Count(ctx context.Context, wheres ...query.DNSSyncJob
 func (a DNSSyncJobActions) Aggregate(ctx context.Context, opts ...query.DNSSyncJobAggregateOption) (*query.DNSSyncJobAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSSyncJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_sync_jobs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDNSSyncJobTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.DNSSyncJobAggregateResult{
 		Avg: make(map[string]*float64),
@@ -9737,13 +10965,28 @@ func (a DNSSyncJobActions) Aggregate(ctx context.Context, opts ...query.DNSSyncJ
 // GroupBy performs a GROUP BY query on DNSSyncJob.
 func (a DNSSyncJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSSyncJobAggregateOption) ([]query.DNSSyncJobGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDNSSyncJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSSyncJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dns_sync_jobs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDNSSyncJobTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("DNSSyncJob.GroupBy: %w", err)
@@ -9795,6 +11038,30 @@ func (a DNSSyncJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 	return results, rows.Err()
 }
 
+func quotedDynamicSettingTable(c *Client) string { return c.quoteIdentifier("dynamic_settings") }
+func quotedDynamicSettingColumns(c *Client) string {
+	cols := []string{"key", "value_json", "description", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDynamicSettingField(c *Client, field string) (string, error) {
+	switch field {
+	case "key":
+		return c.quoteIdentifier(field), nil
+	case "value_json":
+		return c.quoteIdentifier(field), nil
+	case "description":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DynamicSetting field %q", field)
+	}
+}
+
 // buildDynamicSettingWhere recursively builds a WHERE clause string and arguments.
 func buildDynamicSettingWhere(c *Client, wheres []query.DynamicSettingWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -9832,9 +11099,14 @@ func buildDynamicSettingWhere(c *Client, wheres []query.DynamicSettingWhereClaus
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteDynamicSettingField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -9850,24 +11122,24 @@ func buildDynamicSettingWhere(c *Client, wheres []query.DynamicSettingWhereClaus
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -10237,7 +11509,7 @@ func (b DynamicSettingDeleteBuilder) DoMany(ctx context.Context) (int64, error) 
 // FindMany retrieves multiple DynamicSetting records.
 func (a DynamicSettingActions) FindMany(ctx context.Context, opts ...query.DynamicSettingQueryOption) ([]model.DynamicSetting, error) {
 	cfg := query.ApplyDynamicSettingOptions(opts)
-	q := "SELECT key, value_json, description, updated_at FROM dynamic_settings"
+	q := "SELECT " + quotedDynamicSettingColumns(a.client) + " FROM " + quotedDynamicSettingTable(a.client)
 	argIdx := 0
 	where, args := buildDynamicSettingWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -10246,7 +11518,15 @@ func (a DynamicSettingActions) FindMany(ctx context.Context, opts ...query.Dynam
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteDynamicSettingField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -10254,6 +11534,14 @@ func (a DynamicSettingActions) FindMany(ctx context.Context, opts ...query.Dynam
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -10289,7 +11577,7 @@ func (a DynamicSettingActions) FindFirst(ctx context.Context, opts ...query.Dyna
 func (a DynamicSettingActions) FindUnique(ctx context.Context, where query.DynamicSettingWhereClause) (*model.DynamicSetting, error) {
 	argIdx := 0
 	whereSQL, args := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
-	q := "SELECT key, value_json, description, updated_at FROM dynamic_settings"
+	q := "SELECT " + quotedDynamicSettingColumns(a.client) + " FROM " + quotedDynamicSettingTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -10314,14 +11602,17 @@ func (a DynamicSettingActions) CreateOne(ctx context.Context, sets ...query.Dyna
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteDynamicSettingField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDynamicSettingTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING key, value_json, description, updated_at"
+		q += " RETURNING " + quotedDynamicSettingColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DynamicSetting
 		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
@@ -10344,6 +11635,9 @@ func (a DynamicSettingActions) CreateMany(ctx context.Context, data []query.Dyna
 
 func (a DynamicSettingActions) buildDynamicSettingCreateManySQL(data []query.DynamicSettingCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"key", "value_json", "description", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -10357,8 +11651,7 @@ func (a DynamicSettingActions) buildDynamicSettingCreateManySQL(data []query.Dyn
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDynamicSettingTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -10368,13 +11661,21 @@ func (a DynamicSettingActions) buildDynamicSettingCreateManySQL(data []query.Dyn
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -10389,17 +11690,21 @@ func (a DynamicSettingActions) UpdateOne(ctx context.Context, where query.Dynami
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDynamicSettingField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dynamic_settings SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDynamicSettingTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING key, value_json, description, updated_at"
+		q += " RETURNING " + quotedDynamicSettingColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DynamicSetting
 		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
@@ -10427,12 +11732,16 @@ func (a DynamicSettingActions) UpdateMany(ctx context.Context, wheres []query.Dy
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteDynamicSettingField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildDynamicSettingWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE dynamic_settings SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDynamicSettingTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -10453,30 +11762,45 @@ func (a DynamicSettingActions) UpsertOne(ctx context.Context, where query.Dynami
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteDynamicSettingField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO dynamic_settings (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDynamicSettingTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDynamicSettingField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteDynamicSettingField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteDynamicSettingField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -10485,7 +11809,7 @@ func (a DynamicSettingActions) UpsertOne(ctx context.Context, where query.Dynami
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING key, value_json, description, updated_at"
+		q += " RETURNING " + quotedDynamicSettingColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DynamicSetting
 		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
@@ -10504,12 +11828,12 @@ func (a DynamicSettingActions) UpsertOne(ctx context.Context, where query.Dynami
 func (a DynamicSettingActions) DeleteOne(ctx context.Context, where query.DynamicSettingWhereClause) (*model.DynamicSetting, error) {
 	argIdx := 0
 	whereSQL, args := buildDynamicSettingWhere(a.client, []query.DynamicSettingWhereClause{where}, &argIdx)
-	q := "DELETE FROM dynamic_settings"
+	q := "DELETE FROM " + quotedDynamicSettingTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING key, value_json, description, updated_at"
+		q += " RETURNING " + quotedDynamicSettingColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DynamicSetting
 		if err := row.Scan(&item.Key, &item.ValueJson, &item.Description, &item.UpdatedAt); err != nil {
@@ -10531,7 +11855,7 @@ func (a DynamicSettingActions) DeleteOne(ctx context.Context, where query.Dynami
 func (a DynamicSettingActions) DeleteMany(ctx context.Context, wheres ...query.DynamicSettingWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDynamicSettingWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM dynamic_settings"
+	q := "DELETE FROM " + quotedDynamicSettingTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -10546,7 +11870,7 @@ func (a DynamicSettingActions) DeleteMany(ctx context.Context, wheres ...query.D
 func (a DynamicSettingActions) Count(ctx context.Context, wheres ...query.DynamicSettingWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildDynamicSettingWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM dynamic_settings"
+	q := "SELECT COUNT(*) FROM " + quotedDynamicSettingTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -10561,9 +11885,17 @@ func (a DynamicSettingActions) Count(ctx context.Context, wheres ...query.Dynami
 func (a DynamicSettingActions) Aggregate(ctx context.Context, opts ...query.DynamicSettingAggregateOption) (*query.DynamicSettingAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDynamicSettingField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dynamic_settings", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDynamicSettingTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.DynamicSettingAggregateResult{
 		Avg: make(map[string]*float64),
@@ -10601,13 +11933,28 @@ func (a DynamicSettingActions) Aggregate(ctx context.Context, opts ...query.Dyna
 // GroupBy performs a GROUP BY query on DynamicSetting.
 func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opts ...query.DynamicSettingAggregateOption) ([]query.DynamicSettingGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDynamicSettingField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDynamicSettingField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM dynamic_settings GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDynamicSettingTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("DynamicSetting.GroupBy: %w", err)
@@ -10659,6 +12006,42 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 	return results, rows.Err()
 }
 
+func quotedNodeTable(c *Client) string { return c.quoteIdentifier("nodes") }
+func quotedNodeColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "group_id":
+		return c.quoteIdentifier(field), nil
+	case "region_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "version":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown Node field %q", field)
+	}
+}
+
 // buildNodeWhere recursively builds a WHERE clause string and arguments.
 func buildNodeWhere(c *Client, wheres []query.NodeWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -10696,9 +12079,14 @@ func buildNodeWhere(c *Client, wheres []query.NodeWhereClause, argIdx *int) (str
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -10714,24 +12102,24 @@ func buildNodeWhere(c *Client, wheres []query.NodeWhereClause, argIdx *int) (str
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -11101,7 +12489,7 @@ func (b NodeDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Node records.
 func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption) ([]model.Node, error) {
 	cfg := query.ApplyNodeOptions(opts)
-	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT " + quotedNodeColumns(a.client) + " FROM " + quotedNodeTable(a.client)
 	argIdx := 0
 	where, args := buildNodeWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -11110,7 +12498,15 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -11118,6 +12514,14 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -11153,7 +12557,7 @@ func (a NodeActions) FindFirst(ctx context.Context, opts ...query.NodeQueryOptio
 func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause) (*model.Node, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, []query.NodeWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at FROM nodes"
+	q := "SELECT " + quotedNodeColumns(a.client) + " FROM " + quotedNodeTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -11178,14 +12582,17 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO nodes (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -11208,6 +12615,9 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -11221,8 +12631,7 @@ func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, confli
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO nodes (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -11232,13 +12641,21 @@ func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, confli
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -11253,17 +12670,21 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeWhere(a.client, []query.NodeWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE nodes SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -11291,12 +12712,16 @@ func (a NodeActions) UpdateMany(ctx context.Context, wheres []query.NodeWhereCla
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE nodes SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -11317,30 +12742,45 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO nodes (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -11349,7 +12789,7 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -11368,12 +12808,12 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause) (*model.Node, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, []query.NodeWhereClause{where}, &argIdx)
-	q := "DELETE FROM nodes"
+	q := "DELETE FROM " + quotedNodeTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, group_id, region_id, name, version, heartbeat_at, status, created_at, updated_at"
+		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -11395,7 +12835,7 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 func (a NodeActions) DeleteMany(ctx context.Context, wheres ...query.NodeWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM nodes"
+	q := "DELETE FROM " + quotedNodeTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -11410,7 +12850,7 @@ func (a NodeActions) DeleteMany(ctx context.Context, wheres ...query.NodeWhereCl
 func (a NodeActions) Count(ctx context.Context, wheres ...query.NodeWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM nodes"
+	q := "SELECT COUNT(*) FROM " + quotedNodeTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -11425,9 +12865,17 @@ func (a NodeActions) Count(ctx context.Context, wheres ...query.NodeWhereClause)
 func (a NodeActions) Aggregate(ctx context.Context, opts ...query.NodeAggregateOption) (*query.NodeAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM nodes", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeAggregateResult{
 		Avg: make(map[string]*float64),
@@ -11465,13 +12913,28 @@ func (a NodeActions) Aggregate(ctx context.Context, opts ...query.NodeAggregateO
 // GroupBy performs a GROUP BY query on Node.
 func (a NodeActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeAggregateOption) ([]query.NodeGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM nodes GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("Node.GroupBy: %w", err)
@@ -11523,6 +12986,32 @@ func (a NodeActions) GroupBy(ctx context.Context, fields []string, opts ...query
 	return results, rows.Err()
 }
 
+func quotedNodeAddressTable(c *Client) string { return c.quoteIdentifier("node_addresses") }
+func quotedNodeAddressColumns(c *Client) string {
+	cols := []string{"id", "node_id", "address", "primary", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeAddressField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "address":
+		return c.quoteIdentifier(field), nil
+	case "primary":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeAddress field %q", field)
+	}
+}
+
 // buildNodeAddressWhere recursively builds a WHERE clause string and arguments.
 func buildNodeAddressWhere(c *Client, wheres []query.NodeAddressWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -11560,9 +13049,14 @@ func buildNodeAddressWhere(c *Client, wheres []query.NodeAddressWhereClause, arg
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeAddressField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -11578,24 +13072,24 @@ func buildNodeAddressWhere(c *Client, wheres []query.NodeAddressWhereClause, arg
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -11965,7 +13459,7 @@ func (b NodeAddressDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple NodeAddress records.
 func (a NodeAddressActions) FindMany(ctx context.Context, opts ...query.NodeAddressQueryOption) ([]model.NodeAddress, error) {
 	cfg := query.ApplyNodeAddressOptions(opts)
-	q := "SELECT id, node_id, address, primary, created_at FROM node_addresses"
+	q := "SELECT " + quotedNodeAddressColumns(a.client) + " FROM " + quotedNodeAddressTable(a.client)
 	argIdx := 0
 	where, args := buildNodeAddressWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -11974,7 +13468,15 @@ func (a NodeAddressActions) FindMany(ctx context.Context, opts ...query.NodeAddr
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeAddressField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -11982,6 +13484,14 @@ func (a NodeAddressActions) FindMany(ctx context.Context, opts ...query.NodeAddr
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -12017,7 +13527,7 @@ func (a NodeAddressActions) FindFirst(ctx context.Context, opts ...query.NodeAdd
 func (a NodeAddressActions) FindUnique(ctx context.Context, where query.NodeAddressWhereClause) (*model.NodeAddress, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
-	q := "SELECT id, node_id, address, primary, created_at FROM node_addresses"
+	q := "SELECT " + quotedNodeAddressColumns(a.client) + " FROM " + quotedNodeAddressTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -12042,14 +13552,17 @@ func (a NodeAddressActions) CreateOne(ctx context.Context, sets ...query.NodeAdd
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeAddressField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeAddressTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, address, primary, created_at"
+		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeAddress
 		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
@@ -12072,6 +13585,9 @@ func (a NodeAddressActions) CreateMany(ctx context.Context, data []query.NodeAdd
 
 func (a NodeAddressActions) buildNodeAddressCreateManySQL(data []query.NodeAddressCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "node_id", "address", "primary", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -12085,8 +13601,7 @@ func (a NodeAddressActions) buildNodeAddressCreateManySQL(data []query.NodeAddre
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeAddressTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -12096,13 +13611,21 @@ func (a NodeAddressActions) buildNodeAddressCreateManySQL(data []query.NodeAddre
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -12117,17 +13640,21 @@ func (a NodeAddressActions) UpdateOne(ctx context.Context, where query.NodeAddre
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeAddressField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_addresses SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeAddressTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, address, primary, created_at"
+		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
 		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
@@ -12155,12 +13682,16 @@ func (a NodeAddressActions) UpdateMany(ctx context.Context, wheres []query.NodeA
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeAddressField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeAddressWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_addresses SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeAddressTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -12181,30 +13712,45 @@ func (a NodeAddressActions) UpsertOne(ctx context.Context, where query.NodeAddre
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeAddressField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_addresses (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeAddressTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeAddressField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeAddressField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeAddressField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -12213,7 +13759,7 @@ func (a NodeAddressActions) UpsertOne(ctx context.Context, where query.NodeAddre
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, address, primary, created_at"
+		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
 		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
@@ -12232,12 +13778,12 @@ func (a NodeAddressActions) UpsertOne(ctx context.Context, where query.NodeAddre
 func (a NodeAddressActions) DeleteOne(ctx context.Context, where query.NodeAddressWhereClause) (*model.NodeAddress, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeAddressWhere(a.client, []query.NodeAddressWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_addresses"
+	q := "DELETE FROM " + quotedNodeAddressTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, address, primary, created_at"
+		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
 		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
@@ -12259,7 +13805,7 @@ func (a NodeAddressActions) DeleteOne(ctx context.Context, where query.NodeAddre
 func (a NodeAddressActions) DeleteMany(ctx context.Context, wheres ...query.NodeAddressWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeAddressWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_addresses"
+	q := "DELETE FROM " + quotedNodeAddressTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -12274,7 +13820,7 @@ func (a NodeAddressActions) DeleteMany(ctx context.Context, wheres ...query.Node
 func (a NodeAddressActions) Count(ctx context.Context, wheres ...query.NodeAddressWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeAddressWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_addresses"
+	q := "SELECT COUNT(*) FROM " + quotedNodeAddressTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -12289,9 +13835,17 @@ func (a NodeAddressActions) Count(ctx context.Context, wheres ...query.NodeAddre
 func (a NodeAddressActions) Aggregate(ctx context.Context, opts ...query.NodeAddressAggregateOption) (*query.NodeAddressAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeAddressField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_addresses", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeAddressTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeAddressAggregateResult{
 		Avg: make(map[string]*float64),
@@ -12329,13 +13883,28 @@ func (a NodeAddressActions) Aggregate(ctx context.Context, opts ...query.NodeAdd
 // GroupBy performs a GROUP BY query on NodeAddress.
 func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeAddressAggregateOption) ([]query.NodeAddressGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeAddressField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeAddressField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_addresses GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeAddressTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("NodeAddress.GroupBy: %w", err)
@@ -12387,6 +13956,38 @@ func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts .
 	return results, rows.Err()
 }
 
+func quotedNodeCacheConfigTable(c *Client) string { return c.quoteIdentifier("node_cache_configs") }
+func quotedNodeCacheConfigColumns(c *Client) string {
+	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeCacheConfigField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "cache_dir":
+		return c.quoteIdentifier(field), nil
+	case "auto_max_size":
+		return c.quoteIdentifier(field), nil
+	case "max_size_bytes":
+		return c.quoteIdentifier(field), nil
+	case "max_disk_usage_percent":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeCacheConfig field %q", field)
+	}
+}
+
 // buildNodeCacheConfigWhere recursively builds a WHERE clause string and arguments.
 func buildNodeCacheConfigWhere(c *Client, wheres []query.NodeCacheConfigWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -12424,9 +14025,14 @@ func buildNodeCacheConfigWhere(c *Client, wheres []query.NodeCacheConfigWhereCla
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeCacheConfigField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -12442,24 +14048,24 @@ func buildNodeCacheConfigWhere(c *Client, wheres []query.NodeCacheConfigWhereCla
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -12829,7 +14435,7 @@ func (b NodeCacheConfigDeleteBuilder) DoMany(ctx context.Context) (int64, error)
 // FindMany retrieves multiple NodeCacheConfig records.
 func (a NodeCacheConfigActions) FindMany(ctx context.Context, opts ...query.NodeCacheConfigQueryOption) ([]model.NodeCacheConfig, error) {
 	cfg := query.ApplyNodeCacheConfigOptions(opts)
-	q := "SELECT id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at FROM node_cache_configs"
+	q := "SELECT " + quotedNodeCacheConfigColumns(a.client) + " FROM " + quotedNodeCacheConfigTable(a.client)
 	argIdx := 0
 	where, args := buildNodeCacheConfigWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -12838,7 +14444,15 @@ func (a NodeCacheConfigActions) FindMany(ctx context.Context, opts ...query.Node
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeCacheConfigField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -12846,6 +14460,14 @@ func (a NodeCacheConfigActions) FindMany(ctx context.Context, opts ...query.Node
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -12881,7 +14503,7 @@ func (a NodeCacheConfigActions) FindFirst(ctx context.Context, opts ...query.Nod
 func (a NodeCacheConfigActions) FindUnique(ctx context.Context, where query.NodeCacheConfigWhereClause) (*model.NodeCacheConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
-	q := "SELECT id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at FROM node_cache_configs"
+	q := "SELECT " + quotedNodeCacheConfigColumns(a.client) + " FROM " + quotedNodeCacheConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -12906,14 +14528,17 @@ func (a NodeCacheConfigActions) CreateOne(ctx context.Context, sets ...query.Nod
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeCacheConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeCacheConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeCacheConfig
 		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -12936,6 +14561,9 @@ func (a NodeCacheConfigActions) CreateMany(ctx context.Context, data []query.Nod
 
 func (a NodeCacheConfigActions) buildNodeCacheConfigCreateManySQL(data []query.NodeCacheConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -12949,8 +14577,7 @@ func (a NodeCacheConfigActions) buildNodeCacheConfigCreateManySQL(data []query.N
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeCacheConfigTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -12960,13 +14587,21 @@ func (a NodeCacheConfigActions) buildNodeCacheConfigCreateManySQL(data []query.N
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -12981,17 +14616,21 @@ func (a NodeCacheConfigActions) UpdateOne(ctx context.Context, where query.NodeC
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeCacheConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_cache_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeCacheConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
 		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -13019,12 +14658,16 @@ func (a NodeCacheConfigActions) UpdateMany(ctx context.Context, wheres []query.N
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeCacheConfigField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_cache_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeCacheConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -13045,30 +14688,45 @@ func (a NodeCacheConfigActions) UpsertOne(ctx context.Context, where query.NodeC
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeCacheConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_cache_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeCacheConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeCacheConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeCacheConfigField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeCacheConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -13077,7 +14735,7 @@ func (a NodeCacheConfigActions) UpsertOne(ctx context.Context, where query.NodeC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
 		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -13096,12 +14754,12 @@ func (a NodeCacheConfigActions) UpsertOne(ctx context.Context, where query.NodeC
 func (a NodeCacheConfigActions) DeleteOne(ctx context.Context, where query.NodeCacheConfigWhereClause) (*model.NodeCacheConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCacheConfigWhere(a.client, []query.NodeCacheConfigWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_cache_configs"
+	q := "DELETE FROM " + quotedNodeCacheConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, node_id, cache_dir, auto_max_size, max_size_bytes, max_disk_usage_percent, created_at, updated_at"
+		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
 		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -13123,7 +14781,7 @@ func (a NodeCacheConfigActions) DeleteOne(ctx context.Context, where query.NodeC
 func (a NodeCacheConfigActions) DeleteMany(ctx context.Context, wheres ...query.NodeCacheConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_cache_configs"
+	q := "DELETE FROM " + quotedNodeCacheConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -13138,7 +14796,7 @@ func (a NodeCacheConfigActions) DeleteMany(ctx context.Context, wheres ...query.
 func (a NodeCacheConfigActions) Count(ctx context.Context, wheres ...query.NodeCacheConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCacheConfigWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_cache_configs"
+	q := "SELECT COUNT(*) FROM " + quotedNodeCacheConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -13153,9 +14811,17 @@ func (a NodeCacheConfigActions) Count(ctx context.Context, wheres ...query.NodeC
 func (a NodeCacheConfigActions) Aggregate(ctx context.Context, opts ...query.NodeCacheConfigAggregateOption) (*query.NodeCacheConfigAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeCacheConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_cache_configs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeCacheConfigTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeCacheConfigAggregateResult{
 		Avg: make(map[string]*float64),
@@ -13193,13 +14859,28 @@ func (a NodeCacheConfigActions) Aggregate(ctx context.Context, opts ...query.Nod
 // GroupBy performs a GROUP BY query on NodeCacheConfig.
 func (a NodeCacheConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeCacheConfigAggregateOption) ([]query.NodeCacheConfigGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeCacheConfigField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeCacheConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_cache_configs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeCacheConfigTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("NodeCacheConfig.GroupBy: %w", err)
@@ -13251,6 +14932,26 @@ func (a NodeCacheConfigActions) GroupBy(ctx context.Context, fields []string, op
 	return results, rows.Err()
 }
 
+func quotedNodeCredentialTable(c *Client) string { return c.quoteIdentifier("node_credentials") }
+func quotedNodeCredentialColumns(c *Client) string {
+	cols := []string{"node_id", "communication_key_encrypted"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeCredentialField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "communication_key_encrypted":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeCredential field %q", field)
+	}
+}
+
 // buildNodeCredentialWhere recursively builds a WHERE clause string and arguments.
 func buildNodeCredentialWhere(c *Client, wheres []query.NodeCredentialWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -13288,9 +14989,14 @@ func buildNodeCredentialWhere(c *Client, wheres []query.NodeCredentialWhereClaus
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeCredentialField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -13306,24 +15012,24 @@ func buildNodeCredentialWhere(c *Client, wheres []query.NodeCredentialWhereClaus
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -13693,7 +15399,7 @@ func (b NodeCredentialDeleteBuilder) DoMany(ctx context.Context) (int64, error) 
 // FindMany retrieves multiple NodeCredential records.
 func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeCredentialQueryOption) ([]model.NodeCredential, error) {
 	cfg := query.ApplyNodeCredentialOptions(opts)
-	q := "SELECT node_id, communication_key_encrypted FROM node_credentials"
+	q := "SELECT " + quotedNodeCredentialColumns(a.client) + " FROM " + quotedNodeCredentialTable(a.client)
 	argIdx := 0
 	where, args := buildNodeCredentialWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -13702,7 +15408,15 @@ func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeC
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeCredentialField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -13710,6 +15424,14 @@ func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeC
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -13745,7 +15467,7 @@ func (a NodeCredentialActions) FindFirst(ctx context.Context, opts ...query.Node
 func (a NodeCredentialActions) FindUnique(ctx context.Context, where query.NodeCredentialWhereClause) (*model.NodeCredential, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCredentialWhere(a.client, []query.NodeCredentialWhereClause{where}, &argIdx)
-	q := "SELECT node_id, communication_key_encrypted FROM node_credentials"
+	q := "SELECT " + quotedNodeCredentialColumns(a.client) + " FROM " + quotedNodeCredentialTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -13770,14 +15492,17 @@ func (a NodeCredentialActions) CreateOne(ctx context.Context, sets ...query.Node
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_credentials (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key_encrypted"
+		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeCredential
 		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
@@ -13800,6 +15525,9 @@ func (a NodeCredentialActions) CreateMany(ctx context.Context, data []query.Node
 
 func (a NodeCredentialActions) buildNodeCredentialCreateManySQL(data []query.NodeCredentialCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"node_id", "communication_key_encrypted"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -13813,8 +15541,7 @@ func (a NodeCredentialActions) buildNodeCredentialCreateManySQL(data []query.Nod
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_credentials (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -13824,13 +15551,21 @@ func (a NodeCredentialActions) buildNodeCredentialCreateManySQL(data []query.Nod
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -13845,17 +15580,21 @@ func (a NodeCredentialActions) UpdateOne(ctx context.Context, where query.NodeCr
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeCredentialWhere(a.client, []query.NodeCredentialWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_credentials SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeCredentialTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key_encrypted"
+		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
 		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
@@ -13883,12 +15622,16 @@ func (a NodeCredentialActions) UpdateMany(ctx context.Context, wheres []query.No
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeCredentialField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeCredentialWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_credentials SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeCredentialTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -13909,30 +15652,45 @@ func (a NodeCredentialActions) UpsertOne(ctx context.Context, where query.NodeCr
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_credentials (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeCredentialField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeCredentialField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeCredentialField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -13941,7 +15699,7 @@ func (a NodeCredentialActions) UpsertOne(ctx context.Context, where query.NodeCr
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key_encrypted"
+		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
 		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
@@ -13960,12 +15718,12 @@ func (a NodeCredentialActions) UpsertOne(ctx context.Context, where query.NodeCr
 func (a NodeCredentialActions) DeleteOne(ctx context.Context, where query.NodeCredentialWhereClause) (*model.NodeCredential, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCredentialWhere(a.client, []query.NodeCredentialWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_credentials"
+	q := "DELETE FROM " + quotedNodeCredentialTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, communication_key_encrypted"
+		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
 		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
@@ -13987,7 +15745,7 @@ func (a NodeCredentialActions) DeleteOne(ctx context.Context, where query.NodeCr
 func (a NodeCredentialActions) DeleteMany(ctx context.Context, wheres ...query.NodeCredentialWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCredentialWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_credentials"
+	q := "DELETE FROM " + quotedNodeCredentialTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14002,7 +15760,7 @@ func (a NodeCredentialActions) DeleteMany(ctx context.Context, wheres ...query.N
 func (a NodeCredentialActions) Count(ctx context.Context, wheres ...query.NodeCredentialWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeCredentialWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_credentials"
+	q := "SELECT COUNT(*) FROM " + quotedNodeCredentialTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14017,9 +15775,17 @@ func (a NodeCredentialActions) Count(ctx context.Context, wheres ...query.NodeCr
 func (a NodeCredentialActions) Aggregate(ctx context.Context, opts ...query.NodeCredentialAggregateOption) (*query.NodeCredentialAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeCredentialField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_credentials", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeCredentialTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeCredentialAggregateResult{
 		Avg: make(map[string]*float64),
@@ -14057,13 +15823,28 @@ func (a NodeCredentialActions) Aggregate(ctx context.Context, opts ...query.Node
 // GroupBy performs a GROUP BY query on NodeCredential.
 func (a NodeCredentialActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeCredentialAggregateOption) ([]query.NodeCredentialGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeCredentialField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeCredentialField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_credentials GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeCredentialTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("NodeCredential.GroupBy: %w", err)
@@ -14115,6 +15896,26 @@ func (a NodeCredentialActions) GroupBy(ctx context.Context, fields []string, opt
 	return results, rows.Err()
 }
 
+func quotedNodeDNSLineTable(c *Client) string { return c.quoteIdentifier("node_dns_lines") }
+func quotedNodeDNSLineColumns(c *Client) string {
+	cols := []string{"node_id", "dns_line_id"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeDNSLineField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "dns_line_id":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeDNSLine field %q", field)
+	}
+}
+
 // buildNodeDNSLineWhere recursively builds a WHERE clause string and arguments.
 func buildNodeDNSLineWhere(c *Client, wheres []query.NodeDNSLineWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -14152,9 +15953,14 @@ func buildNodeDNSLineWhere(c *Client, wheres []query.NodeDNSLineWhereClause, arg
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeDNSLineField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -14170,24 +15976,24 @@ func buildNodeDNSLineWhere(c *Client, wheres []query.NodeDNSLineWhereClause, arg
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -14557,7 +16363,7 @@ func (b NodeDNSLineDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple NodeDNSLine records.
 func (a NodeDNSLineActions) FindMany(ctx context.Context, opts ...query.NodeDNSLineQueryOption) ([]model.NodeDNSLine, error) {
 	cfg := query.ApplyNodeDNSLineOptions(opts)
-	q := "SELECT node_id, dns_line_id FROM node_dns_lines"
+	q := "SELECT " + quotedNodeDNSLineColumns(a.client) + " FROM " + quotedNodeDNSLineTable(a.client)
 	argIdx := 0
 	where, args := buildNodeDNSLineWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -14566,7 +16372,15 @@ func (a NodeDNSLineActions) FindMany(ctx context.Context, opts ...query.NodeDNSL
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeDNSLineField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -14574,6 +16388,14 @@ func (a NodeDNSLineActions) FindMany(ctx context.Context, opts ...query.NodeDNSL
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -14609,7 +16431,7 @@ func (a NodeDNSLineActions) FindFirst(ctx context.Context, opts ...query.NodeDNS
 func (a NodeDNSLineActions) FindUnique(ctx context.Context, where query.NodeDNSLineWhereClause) (*model.NodeDNSLine, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
-	q := "SELECT node_id, dns_line_id FROM node_dns_lines"
+	q := "SELECT " + quotedNodeDNSLineColumns(a.client) + " FROM " + quotedNodeDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14634,14 +16456,17 @@ func (a NodeDNSLineActions) CreateOne(ctx context.Context, sets ...query.NodeDNS
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, dns_line_id"
+		q += " RETURNING " + quotedNodeDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeDNSLine
 		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
@@ -14664,6 +16489,9 @@ func (a NodeDNSLineActions) CreateMany(ctx context.Context, data []query.NodeDNS
 
 func (a NodeDNSLineActions) buildNodeDNSLineCreateManySQL(data []query.NodeDNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"node_id", "dns_line_id"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -14677,8 +16505,7 @@ func (a NodeDNSLineActions) buildNodeDNSLineCreateManySQL(data []query.NodeDNSLi
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -14688,13 +16515,21 @@ func (a NodeDNSLineActions) buildNodeDNSLineCreateManySQL(data []query.NodeDNSLi
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -14709,17 +16544,21 @@ func (a NodeDNSLineActions) UpdateOne(ctx context.Context, where query.NodeDNSLi
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_dns_lines SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeDNSLineTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, dns_line_id"
+		q += " RETURNING " + quotedNodeDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeDNSLine
 		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
@@ -14747,12 +16586,16 @@ func (a NodeDNSLineActions) UpdateMany(ctx context.Context, wheres []query.NodeD
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeDNSLineField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_dns_lines SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeDNSLineTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14773,30 +16616,45 @@ func (a NodeDNSLineActions) UpsertOne(ctx context.Context, where query.NodeDNSLi
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeDNSLineField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_dns_lines (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeDNSLineTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeDNSLineField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeDNSLineField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeDNSLineField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -14805,7 +16663,7 @@ func (a NodeDNSLineActions) UpsertOne(ctx context.Context, where query.NodeDNSLi
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, dns_line_id"
+		q += " RETURNING " + quotedNodeDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeDNSLine
 		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
@@ -14824,12 +16682,12 @@ func (a NodeDNSLineActions) UpsertOne(ctx context.Context, where query.NodeDNSLi
 func (a NodeDNSLineActions) DeleteOne(ctx context.Context, where query.NodeDNSLineWhereClause) (*model.NodeDNSLine, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeDNSLineWhere(a.client, []query.NodeDNSLineWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_dns_lines"
+	q := "DELETE FROM " + quotedNodeDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, dns_line_id"
+		q += " RETURNING " + quotedNodeDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeDNSLine
 		if err := row.Scan(&item.NodeId, &item.DnsLineId); err != nil {
@@ -14851,7 +16709,7 @@ func (a NodeDNSLineActions) DeleteOne(ctx context.Context, where query.NodeDNSLi
 func (a NodeDNSLineActions) DeleteMany(ctx context.Context, wheres ...query.NodeDNSLineWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_dns_lines"
+	q := "DELETE FROM " + quotedNodeDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14866,7 +16724,7 @@ func (a NodeDNSLineActions) DeleteMany(ctx context.Context, wheres ...query.Node
 func (a NodeDNSLineActions) Count(ctx context.Context, wheres ...query.NodeDNSLineWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeDNSLineWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_dns_lines"
+	q := "SELECT COUNT(*) FROM " + quotedNodeDNSLineTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -14881,9 +16739,17 @@ func (a NodeDNSLineActions) Count(ctx context.Context, wheres ...query.NodeDNSLi
 func (a NodeDNSLineActions) Aggregate(ctx context.Context, opts ...query.NodeDNSLineAggregateOption) (*query.NodeDNSLineAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeDNSLineField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_dns_lines", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeDNSLineTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeDNSLineAggregateResult{
 		Avg: make(map[string]*float64),
@@ -14921,13 +16787,28 @@ func (a NodeDNSLineActions) Aggregate(ctx context.Context, opts ...query.NodeDNS
 // GroupBy performs a GROUP BY query on NodeDNSLine.
 func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeDNSLineAggregateOption) ([]query.NodeDNSLineGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeDNSLineField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeDNSLineField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_dns_lines GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeDNSLineTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("NodeDNSLine.GroupBy: %w", err)
@@ -14979,6 +16860,34 @@ func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts .
 	return results, rows.Err()
 }
 
+func quotedNodeSiteConfigVersionTable(c *Client) string {
+	return c.quoteIdentifier("node_site_config_versions")
+}
+func quotedNodeSiteConfigVersionColumns(c *Client) string {
+	cols := []string{"node_id", "site_id", "version", "status", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeSiteConfigVersionField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "version":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeSiteConfigVersion field %q", field)
+	}
+}
+
 // buildNodeSiteConfigVersionWhere recursively builds a WHERE clause string and arguments.
 func buildNodeSiteConfigVersionWhere(c *Client, wheres []query.NodeSiteConfigVersionWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -15016,9 +16925,14 @@ func buildNodeSiteConfigVersionWhere(c *Client, wheres []query.NodeSiteConfigVer
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteNodeSiteConfigVersionField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -15034,24 +16948,24 @@ func buildNodeSiteConfigVersionWhere(c *Client, wheres []query.NodeSiteConfigVer
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -15421,7 +17335,7 @@ func (b NodeSiteConfigVersionDeleteBuilder) DoMany(ctx context.Context) (int64, 
 // FindMany retrieves multiple NodeSiteConfigVersion records.
 func (a NodeSiteConfigVersionActions) FindMany(ctx context.Context, opts ...query.NodeSiteConfigVersionQueryOption) ([]model.NodeSiteConfigVersion, error) {
 	cfg := query.ApplyNodeSiteConfigVersionOptions(opts)
-	q := "SELECT node_id, site_id, version, status, updated_at FROM node_site_config_versions"
+	q := "SELECT " + quotedNodeSiteConfigVersionColumns(a.client) + " FROM " + quotedNodeSiteConfigVersionTable(a.client)
 	argIdx := 0
 	where, args := buildNodeSiteConfigVersionWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -15430,7 +17344,15 @@ func (a NodeSiteConfigVersionActions) FindMany(ctx context.Context, opts ...quer
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteNodeSiteConfigVersionField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -15438,6 +17360,14 @@ func (a NodeSiteConfigVersionActions) FindMany(ctx context.Context, opts ...quer
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -15473,7 +17403,7 @@ func (a NodeSiteConfigVersionActions) FindFirst(ctx context.Context, opts ...que
 func (a NodeSiteConfigVersionActions) FindUnique(ctx context.Context, where query.NodeSiteConfigVersionWhereClause) (*model.NodeSiteConfigVersion, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
-	q := "SELECT node_id, site_id, version, status, updated_at FROM node_site_config_versions"
+	q := "SELECT " + quotedNodeSiteConfigVersionColumns(a.client) + " FROM " + quotedNodeSiteConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -15498,14 +17428,17 @@ func (a NodeSiteConfigVersionActions) CreateOne(ctx context.Context, sets ...que
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeSiteConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, site_id, version, status, updated_at"
+		q += " RETURNING " + quotedNodeSiteConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeSiteConfigVersion
 		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
@@ -15528,6 +17461,9 @@ func (a NodeSiteConfigVersionActions) CreateMany(ctx context.Context, data []que
 
 func (a NodeSiteConfigVersionActions) buildNodeSiteConfigVersionCreateManySQL(data []query.NodeSiteConfigVersionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"node_id", "site_id", "version", "status", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -15541,8 +17477,7 @@ func (a NodeSiteConfigVersionActions) buildNodeSiteConfigVersionCreateManySQL(da
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeSiteConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -15552,13 +17487,21 @@ func (a NodeSiteConfigVersionActions) buildNodeSiteConfigVersionCreateManySQL(da
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -15573,17 +17516,21 @@ func (a NodeSiteConfigVersionActions) UpdateOne(ctx context.Context, where query
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_site_config_versions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeSiteConfigVersionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, site_id, version, status, updated_at"
+		q += " RETURNING " + quotedNodeSiteConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeSiteConfigVersion
 		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
@@ -15611,12 +17558,16 @@ func (a NodeSiteConfigVersionActions) UpdateMany(ctx context.Context, wheres []q
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE node_site_config_versions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeSiteConfigVersionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -15637,30 +17588,45 @@ func (a NodeSiteConfigVersionActions) UpsertOne(ctx context.Context, where query
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO node_site_config_versions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeSiteConfigVersionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteNodeSiteConfigVersionField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteNodeSiteConfigVersionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -15669,7 +17635,7 @@ func (a NodeSiteConfigVersionActions) UpsertOne(ctx context.Context, where query
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, site_id, version, status, updated_at"
+		q += " RETURNING " + quotedNodeSiteConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeSiteConfigVersion
 		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
@@ -15688,12 +17654,12 @@ func (a NodeSiteConfigVersionActions) UpsertOne(ctx context.Context, where query
 func (a NodeSiteConfigVersionActions) DeleteOne(ctx context.Context, where query.NodeSiteConfigVersionWhereClause) (*model.NodeSiteConfigVersion, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, []query.NodeSiteConfigVersionWhereClause{where}, &argIdx)
-	q := "DELETE FROM node_site_config_versions"
+	q := "DELETE FROM " + quotedNodeSiteConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING node_id, site_id, version, status, updated_at"
+		q += " RETURNING " + quotedNodeSiteConfigVersionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeSiteConfigVersion
 		if err := row.Scan(&item.NodeId, &item.SiteId, &item.Version, &item.Status, &item.UpdatedAt); err != nil {
@@ -15715,7 +17681,7 @@ func (a NodeSiteConfigVersionActions) DeleteOne(ctx context.Context, where query
 func (a NodeSiteConfigVersionActions) DeleteMany(ctx context.Context, wheres ...query.NodeSiteConfigVersionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM node_site_config_versions"
+	q := "DELETE FROM " + quotedNodeSiteConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -15730,7 +17696,7 @@ func (a NodeSiteConfigVersionActions) DeleteMany(ctx context.Context, wheres ...
 func (a NodeSiteConfigVersionActions) Count(ctx context.Context, wheres ...query.NodeSiteConfigVersionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildNodeSiteConfigVersionWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM node_site_config_versions"
+	q := "SELECT COUNT(*) FROM " + quotedNodeSiteConfigVersionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -15745,9 +17711,17 @@ func (a NodeSiteConfigVersionActions) Count(ctx context.Context, wheres ...query
 func (a NodeSiteConfigVersionActions) Aggregate(ctx context.Context, opts ...query.NodeSiteConfigVersionAggregateOption) (*query.NodeSiteConfigVersionAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeSiteConfigVersionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_site_config_versions", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeSiteConfigVersionTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.NodeSiteConfigVersionAggregateResult{
 		Avg: make(map[string]*float64),
@@ -15785,13 +17759,28 @@ func (a NodeSiteConfigVersionActions) Aggregate(ctx context.Context, opts ...que
 // GroupBy performs a GROUP BY query on NodeSiteConfigVersion.
 func (a NodeSiteConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeSiteConfigVersionAggregateOption) ([]query.NodeSiteConfigVersionGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeSiteConfigVersionField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeSiteConfigVersionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM node_site_config_versions GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeSiteConfigVersionTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("NodeSiteConfigVersion.GroupBy: %w", err)
@@ -15843,6 +17832,38 @@ func (a NodeSiteConfigVersionActions) GroupBy(ctx context.Context, fields []stri
 	return results, rows.Err()
 }
 
+func quotedOriginBackendTable(c *Client) string { return c.quoteIdentifier("origin_backends") }
+func quotedOriginBackendColumns(c *Client) string {
+	cols := []string{"id", "origin_pool_id", "protocol", "address", "host_header", "weight", "enabled", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteOriginBackendField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "origin_pool_id":
+		return c.quoteIdentifier(field), nil
+	case "protocol":
+		return c.quoteIdentifier(field), nil
+	case "address":
+		return c.quoteIdentifier(field), nil
+	case "host_header":
+		return c.quoteIdentifier(field), nil
+	case "weight":
+		return c.quoteIdentifier(field), nil
+	case "enabled":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown OriginBackend field %q", field)
+	}
+}
+
 // buildOriginBackendWhere recursively builds a WHERE clause string and arguments.
 func buildOriginBackendWhere(c *Client, wheres []query.OriginBackendWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -15880,9 +17901,14 @@ func buildOriginBackendWhere(c *Client, wheres []query.OriginBackendWhereClause,
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteOriginBackendField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -15898,24 +17924,24 @@ func buildOriginBackendWhere(c *Client, wheres []query.OriginBackendWhereClause,
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -16285,7 +18311,7 @@ func (b OriginBackendDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple OriginBackend records.
 func (a OriginBackendActions) FindMany(ctx context.Context, opts ...query.OriginBackendQueryOption) ([]model.OriginBackend, error) {
 	cfg := query.ApplyOriginBackendOptions(opts)
-	q := "SELECT id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at FROM origin_backends"
+	q := "SELECT " + quotedOriginBackendColumns(a.client) + " FROM " + quotedOriginBackendTable(a.client)
 	argIdx := 0
 	where, args := buildOriginBackendWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -16294,7 +18320,15 @@ func (a OriginBackendActions) FindMany(ctx context.Context, opts ...query.Origin
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteOriginBackendField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -16302,6 +18336,14 @@ func (a OriginBackendActions) FindMany(ctx context.Context, opts ...query.Origin
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -16337,7 +18379,7 @@ func (a OriginBackendActions) FindFirst(ctx context.Context, opts ...query.Origi
 func (a OriginBackendActions) FindUnique(ctx context.Context, where query.OriginBackendWhereClause) (*model.OriginBackend, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
-	q := "SELECT id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at FROM origin_backends"
+	q := "SELECT " + quotedOriginBackendColumns(a.client) + " FROM " + quotedOriginBackendTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -16362,14 +18404,17 @@ func (a OriginBackendActions) CreateOne(ctx context.Context, sets ...query.Origi
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteOriginBackendField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedOriginBackendTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		q += " RETURNING " + quotedOriginBackendColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.OriginBackend
 		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
@@ -16392,6 +18437,9 @@ func (a OriginBackendActions) CreateMany(ctx context.Context, data []query.Origi
 
 func (a OriginBackendActions) buildOriginBackendCreateManySQL(data []query.OriginBackendCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "origin_pool_id", "protocol", "address", "host_header", "weight", "enabled", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -16405,8 +18453,7 @@ func (a OriginBackendActions) buildOriginBackendCreateManySQL(data []query.Origi
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedOriginBackendTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -16416,13 +18463,21 @@ func (a OriginBackendActions) buildOriginBackendCreateManySQL(data []query.Origi
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -16437,17 +18492,21 @@ func (a OriginBackendActions) UpdateOne(ctx context.Context, where query.OriginB
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteOriginBackendField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE origin_backends SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedOriginBackendTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		q += " RETURNING " + quotedOriginBackendColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginBackend
 		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
@@ -16475,12 +18534,16 @@ func (a OriginBackendActions) UpdateMany(ctx context.Context, wheres []query.Ori
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteOriginBackendField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildOriginBackendWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE origin_backends SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedOriginBackendTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -16501,30 +18564,45 @@ func (a OriginBackendActions) UpsertOne(ctx context.Context, where query.OriginB
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteOriginBackendField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO origin_backends (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedOriginBackendTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteOriginBackendField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteOriginBackendField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteOriginBackendField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -16533,7 +18611,7 @@ func (a OriginBackendActions) UpsertOne(ctx context.Context, where query.OriginB
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		q += " RETURNING " + quotedOriginBackendColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginBackend
 		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
@@ -16552,12 +18630,12 @@ func (a OriginBackendActions) UpsertOne(ctx context.Context, where query.OriginB
 func (a OriginBackendActions) DeleteOne(ctx context.Context, where query.OriginBackendWhereClause) (*model.OriginBackend, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginBackendWhere(a.client, []query.OriginBackendWhereClause{where}, &argIdx)
-	q := "DELETE FROM origin_backends"
+	q := "DELETE FROM " + quotedOriginBackendTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, origin_pool_id, protocol, address, host_header, weight, enabled, created_at"
+		q += " RETURNING " + quotedOriginBackendColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginBackend
 		if err := row.Scan(&item.Id, &item.OriginPoolId, &item.Protocol, &item.Address, &item.HostHeader, &item.Weight, &item.Enabled, &item.CreatedAt); err != nil {
@@ -16579,7 +18657,7 @@ func (a OriginBackendActions) DeleteOne(ctx context.Context, where query.OriginB
 func (a OriginBackendActions) DeleteMany(ctx context.Context, wheres ...query.OriginBackendWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginBackendWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM origin_backends"
+	q := "DELETE FROM " + quotedOriginBackendTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -16594,7 +18672,7 @@ func (a OriginBackendActions) DeleteMany(ctx context.Context, wheres ...query.Or
 func (a OriginBackendActions) Count(ctx context.Context, wheres ...query.OriginBackendWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginBackendWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM origin_backends"
+	q := "SELECT COUNT(*) FROM " + quotedOriginBackendTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -16609,9 +18687,17 @@ func (a OriginBackendActions) Count(ctx context.Context, wheres ...query.OriginB
 func (a OriginBackendActions) Aggregate(ctx context.Context, opts ...query.OriginBackendAggregateOption) (*query.OriginBackendAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteOriginBackendField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM origin_backends", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedOriginBackendTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.OriginBackendAggregateResult{
 		Avg: make(map[string]*float64),
@@ -16649,13 +18735,28 @@ func (a OriginBackendActions) Aggregate(ctx context.Context, opts ...query.Origi
 // GroupBy performs a GROUP BY query on OriginBackend.
 func (a OriginBackendActions) GroupBy(ctx context.Context, fields []string, opts ...query.OriginBackendAggregateOption) ([]query.OriginBackendGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteOriginBackendField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteOriginBackendField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM origin_backends GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedOriginBackendTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("OriginBackend.GroupBy: %w", err)
@@ -16707,6 +18808,40 @@ func (a OriginBackendActions) GroupBy(ctx context.Context, fields []string, opts
 	return results, rows.Err()
 }
 
+func quotedOriginPoolTable(c *Client) string { return c.quoteIdentifier("origin_pools") }
+func quotedOriginPoolColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteOriginPoolField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "scheduler":
+		return c.quoteIdentifier(field), nil
+	case "health_uri":
+		return c.quoteIdentifier(field), nil
+	case "timeout":
+		return c.quoteIdentifier(field), nil
+	case "headers":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown OriginPool field %q", field)
+	}
+}
+
 // buildOriginPoolWhere recursively builds a WHERE clause string and arguments.
 func buildOriginPoolWhere(c *Client, wheres []query.OriginPoolWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -16744,9 +18879,14 @@ func buildOriginPoolWhere(c *Client, wheres []query.OriginPoolWhereClause, argId
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteOriginPoolField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -16762,24 +18902,24 @@ func buildOriginPoolWhere(c *Client, wheres []query.OriginPoolWhereClause, argId
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -17149,7 +19289,7 @@ func (b OriginPoolDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple OriginPool records.
 func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoolQueryOption) ([]model.OriginPool, error) {
 	cfg := query.ApplyOriginPoolOptions(opts)
-	q := "SELECT id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT " + quotedOriginPoolColumns(a.client) + " FROM " + quotedOriginPoolTable(a.client)
 	argIdx := 0
 	where, args := buildOriginPoolWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -17158,7 +19298,15 @@ func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoo
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteOriginPoolField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -17166,6 +19314,14 @@ func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoo
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -17201,7 +19357,7 @@ func (a OriginPoolActions) FindFirst(ctx context.Context, opts ...query.OriginPo
 func (a OriginPoolActions) FindUnique(ctx context.Context, where query.OriginPoolWhereClause) (*model.OriginPool, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, []query.OriginPoolWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at FROM origin_pools"
+	q := "SELECT " + quotedOriginPoolColumns(a.client) + " FROM " + quotedOriginPoolTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -17226,14 +19382,17 @@ func (a OriginPoolActions) CreateOne(ctx context.Context, sets ...query.OriginPo
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteOriginPoolField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO origin_pools (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedOriginPoolTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.OriginPool
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -17256,6 +19415,9 @@ func (a OriginPoolActions) CreateMany(ctx context.Context, data []query.OriginPo
 
 func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -17269,8 +19431,7 @@ func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolC
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO origin_pools (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedOriginPoolTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -17280,13 +19441,21 @@ func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolC
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -17301,17 +19470,21 @@ func (a OriginPoolActions) UpdateOne(ctx context.Context, where query.OriginPool
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteOriginPoolField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildOriginPoolWhere(a.client, []query.OriginPoolWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE origin_pools SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedOriginPoolTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -17339,12 +19512,16 @@ func (a OriginPoolActions) UpdateMany(ctx context.Context, wheres []query.Origin
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteOriginPoolField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildOriginPoolWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE origin_pools SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedOriginPoolTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -17365,30 +19542,45 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteOriginPoolField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO origin_pools (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedOriginPoolTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteOriginPoolField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteOriginPoolField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteOriginPoolField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -17397,7 +19589,7 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -17416,12 +19608,12 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 func (a OriginPoolActions) DeleteOne(ctx context.Context, where query.OriginPoolWhereClause) (*model.OriginPool, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, []query.OriginPoolWhereClause{where}, &argIdx)
-	q := "DELETE FROM origin_pools"
+	q := "DELETE FROM " + quotedOriginPoolTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, scheduler, health_uri, timeout, headers, created_at, updated_at"
+		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -17443,7 +19635,7 @@ func (a OriginPoolActions) DeleteOne(ctx context.Context, where query.OriginPool
 func (a OriginPoolActions) DeleteMany(ctx context.Context, wheres ...query.OriginPoolWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM origin_pools"
+	q := "DELETE FROM " + quotedOriginPoolTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -17458,7 +19650,7 @@ func (a OriginPoolActions) DeleteMany(ctx context.Context, wheres ...query.Origi
 func (a OriginPoolActions) Count(ctx context.Context, wheres ...query.OriginPoolWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildOriginPoolWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM origin_pools"
+	q := "SELECT COUNT(*) FROM " + quotedOriginPoolTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -17473,9 +19665,17 @@ func (a OriginPoolActions) Count(ctx context.Context, wheres ...query.OriginPool
 func (a OriginPoolActions) Aggregate(ctx context.Context, opts ...query.OriginPoolAggregateOption) (*query.OriginPoolAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteOriginPoolField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM origin_pools", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedOriginPoolTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.OriginPoolAggregateResult{
 		Avg: make(map[string]*float64),
@@ -17513,13 +19713,28 @@ func (a OriginPoolActions) Aggregate(ctx context.Context, opts ...query.OriginPo
 // GroupBy performs a GROUP BY query on OriginPool.
 func (a OriginPoolActions) GroupBy(ctx context.Context, fields []string, opts ...query.OriginPoolAggregateOption) ([]query.OriginPoolGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteOriginPoolField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteOriginPoolField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM origin_pools GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedOriginPoolTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("OriginPool.GroupBy: %w", err)
@@ -17571,6 +19786,38 @@ func (a OriginPoolActions) GroupBy(ctx context.Context, fields []string, opts ..
 	return results, rows.Err()
 }
 
+func quotedPolicyTable(c *Client) string { return c.quoteIdentifier("policies") }
+func quotedPolicyColumns(c *Client) string {
+	cols := []string{"id", "name", "cache_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quotePolicyField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "cache_json":
+		return c.quoteIdentifier(field), nil
+	case "waf_json":
+		return c.quoteIdentifier(field), nil
+	case "cc_json":
+		return c.quoteIdentifier(field), nil
+	case "access_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown Policy field %q", field)
+	}
+}
+
 // buildPolicyWhere recursively builds a WHERE clause string and arguments.
 func buildPolicyWhere(c *Client, wheres []query.PolicyWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -17608,9 +19855,14 @@ func buildPolicyWhere(c *Client, wheres []query.PolicyWhereClause, argIdx *int) 
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quotePolicyField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -17626,24 +19878,24 @@ func buildPolicyWhere(c *Client, wheres []query.PolicyWhereClause, argIdx *int) 
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -18013,7 +20265,7 @@ func (b PolicyDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Policy records.
 func (a PolicyActions) FindMany(ctx context.Context, opts ...query.PolicyQueryOption) ([]model.Policy, error) {
 	cfg := query.ApplyPolicyOptions(opts)
-	q := "SELECT id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at FROM policies"
+	q := "SELECT " + quotedPolicyColumns(a.client) + " FROM " + quotedPolicyTable(a.client)
 	argIdx := 0
 	where, args := buildPolicyWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -18022,7 +20274,15 @@ func (a PolicyActions) FindMany(ctx context.Context, opts ...query.PolicyQueryOp
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quotePolicyField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -18030,6 +20290,14 @@ func (a PolicyActions) FindMany(ctx context.Context, opts ...query.PolicyQueryOp
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -18065,7 +20333,7 @@ func (a PolicyActions) FindFirst(ctx context.Context, opts ...query.PolicyQueryO
 func (a PolicyActions) FindUnique(ctx context.Context, where query.PolicyWhereClause) (*model.Policy, error) {
 	argIdx := 0
 	whereSQL, args := buildPolicyWhere(a.client, []query.PolicyWhereClause{where}, &argIdx)
-	q := "SELECT id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at FROM policies"
+	q := "SELECT " + quotedPolicyColumns(a.client) + " FROM " + quotedPolicyTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -18090,14 +20358,17 @@ func (a PolicyActions) CreateOne(ctx context.Context, sets ...query.PolicySetCla
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quotePolicyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO policies (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPolicyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at"
+		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Policy
 		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -18120,6 +20391,9 @@ func (a PolicyActions) CreateMany(ctx context.Context, data []query.PolicyCreate
 
 func (a PolicyActions) buildPolicyCreateManySQL(data []query.PolicyCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "name", "cache_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -18133,8 +20407,7 @@ func (a PolicyActions) buildPolicyCreateManySQL(data []query.PolicyCreateInput, 
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO policies (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedPolicyTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -18144,13 +20417,21 @@ func (a PolicyActions) buildPolicyCreateManySQL(data []query.PolicyCreateInput, 
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -18165,17 +20446,21 @@ func (a PolicyActions) UpdateOne(ctx context.Context, where query.PolicyWhereCla
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePolicyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPolicyWhere(a.client, []query.PolicyWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE policies SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPolicyTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at"
+		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
 		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -18203,12 +20488,16 @@ func (a PolicyActions) UpdateMany(ctx context.Context, wheres []query.PolicyWher
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePolicyField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPolicyWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE policies SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPolicyTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -18229,30 +20518,45 @@ func (a PolicyActions) UpsertOne(ctx context.Context, where query.PolicyWhereCla
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quotePolicyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO policies (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPolicyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePolicyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quotePolicyField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePolicyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -18261,7 +20565,7 @@ func (a PolicyActions) UpsertOne(ctx context.Context, where query.PolicyWhereCla
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at"
+		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
 		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -18280,12 +20584,12 @@ func (a PolicyActions) UpsertOne(ctx context.Context, where query.PolicyWhereCla
 func (a PolicyActions) DeleteOne(ctx context.Context, where query.PolicyWhereClause) (*model.Policy, error) {
 	argIdx := 0
 	whereSQL, args := buildPolicyWhere(a.client, []query.PolicyWhereClause{where}, &argIdx)
-	q := "DELETE FROM policies"
+	q := "DELETE FROM " + quotedPolicyTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, name, cache_json, waf_json, cc_json, access_json, created_at, updated_at"
+		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
 		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -18307,7 +20611,7 @@ func (a PolicyActions) DeleteOne(ctx context.Context, where query.PolicyWhereCla
 func (a PolicyActions) DeleteMany(ctx context.Context, wheres ...query.PolicyWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPolicyWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM policies"
+	q := "DELETE FROM " + quotedPolicyTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -18322,7 +20626,7 @@ func (a PolicyActions) DeleteMany(ctx context.Context, wheres ...query.PolicyWhe
 func (a PolicyActions) Count(ctx context.Context, wheres ...query.PolicyWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPolicyWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM policies"
+	q := "SELECT COUNT(*) FROM " + quotedPolicyTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -18337,9 +20641,17 @@ func (a PolicyActions) Count(ctx context.Context, wheres ...query.PolicyWhereCla
 func (a PolicyActions) Aggregate(ctx context.Context, opts ...query.PolicyAggregateOption) (*query.PolicyAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePolicyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM policies", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedPolicyTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.PolicyAggregateResult{
 		Avg: make(map[string]*float64),
@@ -18377,13 +20689,28 @@ func (a PolicyActions) Aggregate(ctx context.Context, opts ...query.PolicyAggreg
 // GroupBy performs a GROUP BY query on Policy.
 func (a PolicyActions) GroupBy(ctx context.Context, fields []string, opts ...query.PolicyAggregateOption) ([]query.PolicyGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quotePolicyField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePolicyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM policies GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedPolicyTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("Policy.GroupBy: %w", err)
@@ -18435,6 +20762,38 @@ func (a PolicyActions) GroupBy(ctx context.Context, fields []string, opts ...que
 	return results, rows.Err()
 }
 
+func quotedPublishJobTable(c *Client) string { return c.quoteIdentifier("publish_jobs") }
+func quotedPublishJobColumns(c *Client) string {
+	cols := []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quotePublishJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "version":
+		return c.quoteIdentifier(field), nil
+	case "targets":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown PublishJob field %q", field)
+	}
+}
+
 // buildPublishJobWhere recursively builds a WHERE clause string and arguments.
 func buildPublishJobWhere(c *Client, wheres []query.PublishJobWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -18472,9 +20831,14 @@ func buildPublishJobWhere(c *Client, wheres []query.PublishJobWhereClause, argId
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quotePublishJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -18490,24 +20854,24 @@ func buildPublishJobWhere(c *Client, wheres []query.PublishJobWhereClause, argId
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -18877,7 +21241,7 @@ func (b PublishJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple PublishJob records.
 func (a PublishJobActions) FindMany(ctx context.Context, opts ...query.PublishJobQueryOption) ([]model.PublishJob, error) {
 	cfg := query.ApplyPublishJobOptions(opts)
-	q := "SELECT id, site_id, version, targets, status, result_json, created_at, updated_at FROM publish_jobs"
+	q := "SELECT " + quotedPublishJobColumns(a.client) + " FROM " + quotedPublishJobTable(a.client)
 	argIdx := 0
 	where, args := buildPublishJobWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -18886,7 +21250,15 @@ func (a PublishJobActions) FindMany(ctx context.Context, opts ...query.PublishJo
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quotePublishJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -18894,6 +21266,14 @@ func (a PublishJobActions) FindMany(ctx context.Context, opts ...query.PublishJo
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -18929,7 +21309,7 @@ func (a PublishJobActions) FindFirst(ctx context.Context, opts ...query.PublishJ
 func (a PublishJobActions) FindUnique(ctx context.Context, where query.PublishJobWhereClause) (*model.PublishJob, error) {
 	argIdx := 0
 	whereSQL, args := buildPublishJobWhere(a.client, []query.PublishJobWhereClause{where}, &argIdx)
-	q := "SELECT id, site_id, version, targets, status, result_json, created_at, updated_at FROM publish_jobs"
+	q := "SELECT " + quotedPublishJobColumns(a.client) + " FROM " + quotedPublishJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -18954,14 +21334,17 @@ func (a PublishJobActions) CreateOne(ctx context.Context, sets ...query.PublishJ
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quotePublishJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO publish_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPublishJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, targets, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.PublishJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -18984,6 +21367,9 @@ func (a PublishJobActions) CreateMany(ctx context.Context, data []query.PublishJ
 
 func (a PublishJobActions) buildPublishJobCreateManySQL(data []query.PublishJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -18997,8 +21383,7 @@ func (a PublishJobActions) buildPublishJobCreateManySQL(data []query.PublishJobC
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO publish_jobs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedPublishJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -19008,13 +21393,21 @@ func (a PublishJobActions) buildPublishJobCreateManySQL(data []query.PublishJobC
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -19029,17 +21422,21 @@ func (a PublishJobActions) UpdateOne(ctx context.Context, where query.PublishJob
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePublishJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPublishJobWhere(a.client, []query.PublishJobWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE publish_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPublishJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, targets, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -19067,12 +21464,16 @@ func (a PublishJobActions) UpdateMany(ctx context.Context, wheres []query.Publis
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePublishJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPublishJobWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE publish_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPublishJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -19093,30 +21494,45 @@ func (a PublishJobActions) UpsertOne(ctx context.Context, where query.PublishJob
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quotePublishJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO publish_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPublishJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePublishJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quotePublishJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePublishJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -19125,7 +21541,7 @@ func (a PublishJobActions) UpsertOne(ctx context.Context, where query.PublishJob
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, targets, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -19144,12 +21560,12 @@ func (a PublishJobActions) UpsertOne(ctx context.Context, where query.PublishJob
 func (a PublishJobActions) DeleteOne(ctx context.Context, where query.PublishJobWhereClause) (*model.PublishJob, error) {
 	argIdx := 0
 	whereSQL, args := buildPublishJobWhere(a.client, []query.PublishJobWhereClause{where}, &argIdx)
-	q := "DELETE FROM publish_jobs"
+	q := "DELETE FROM " + quotedPublishJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, version, targets, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -19171,7 +21587,7 @@ func (a PublishJobActions) DeleteOne(ctx context.Context, where query.PublishJob
 func (a PublishJobActions) DeleteMany(ctx context.Context, wheres ...query.PublishJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPublishJobWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM publish_jobs"
+	q := "DELETE FROM " + quotedPublishJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -19186,7 +21602,7 @@ func (a PublishJobActions) DeleteMany(ctx context.Context, wheres ...query.Publi
 func (a PublishJobActions) Count(ctx context.Context, wheres ...query.PublishJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPublishJobWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM publish_jobs"
+	q := "SELECT COUNT(*) FROM " + quotedPublishJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -19201,9 +21617,17 @@ func (a PublishJobActions) Count(ctx context.Context, wheres ...query.PublishJob
 func (a PublishJobActions) Aggregate(ctx context.Context, opts ...query.PublishJobAggregateOption) (*query.PublishJobAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePublishJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM publish_jobs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedPublishJobTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.PublishJobAggregateResult{
 		Avg: make(map[string]*float64),
@@ -19241,13 +21665,28 @@ func (a PublishJobActions) Aggregate(ctx context.Context, opts ...query.PublishJ
 // GroupBy performs a GROUP BY query on PublishJob.
 func (a PublishJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.PublishJobAggregateOption) ([]query.PublishJobGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quotePublishJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePublishJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM publish_jobs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedPublishJobTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("PublishJob.GroupBy: %w", err)
@@ -19299,6 +21738,38 @@ func (a PublishJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 	return results, rows.Err()
 }
 
+func quotedPurgeJobTable(c *Client) string { return c.quoteIdentifier("purge_jobs") }
+func quotedPurgeJobColumns(c *Client) string {
+	cols := []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quotePurgeJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "type":
+		return c.quoteIdentifier(field), nil
+	case "value":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown PurgeJob field %q", field)
+	}
+}
+
 // buildPurgeJobWhere recursively builds a WHERE clause string and arguments.
 func buildPurgeJobWhere(c *Client, wheres []query.PurgeJobWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -19336,9 +21807,14 @@ func buildPurgeJobWhere(c *Client, wheres []query.PurgeJobWhereClause, argIdx *i
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quotePurgeJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -19354,24 +21830,24 @@ func buildPurgeJobWhere(c *Client, wheres []query.PurgeJobWhereClause, argIdx *i
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -19741,7 +22217,7 @@ func (b PurgeJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple PurgeJob records.
 func (a PurgeJobActions) FindMany(ctx context.Context, opts ...query.PurgeJobQueryOption) ([]model.PurgeJob, error) {
 	cfg := query.ApplyPurgeJobOptions(opts)
-	q := "SELECT id, site_id, type, value, status, result_json, created_at, updated_at FROM purge_jobs"
+	q := "SELECT " + quotedPurgeJobColumns(a.client) + " FROM " + quotedPurgeJobTable(a.client)
 	argIdx := 0
 	where, args := buildPurgeJobWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -19750,7 +22226,15 @@ func (a PurgeJobActions) FindMany(ctx context.Context, opts ...query.PurgeJobQue
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quotePurgeJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -19758,6 +22242,14 @@ func (a PurgeJobActions) FindMany(ctx context.Context, opts ...query.PurgeJobQue
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -19793,7 +22285,7 @@ func (a PurgeJobActions) FindFirst(ctx context.Context, opts ...query.PurgeJobQu
 func (a PurgeJobActions) FindUnique(ctx context.Context, where query.PurgeJobWhereClause) (*model.PurgeJob, error) {
 	argIdx := 0
 	whereSQL, args := buildPurgeJobWhere(a.client, []query.PurgeJobWhereClause{where}, &argIdx)
-	q := "SELECT id, site_id, type, value, status, result_json, created_at, updated_at FROM purge_jobs"
+	q := "SELECT " + quotedPurgeJobColumns(a.client) + " FROM " + quotedPurgeJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -19818,14 +22310,17 @@ func (a PurgeJobActions) CreateOne(ctx context.Context, sets ...query.PurgeJobSe
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quotePurgeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO purge_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPurgeJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, type, value, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.PurgeJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -19848,6 +22343,9 @@ func (a PurgeJobActions) CreateMany(ctx context.Context, data []query.PurgeJobCr
 
 func (a PurgeJobActions) buildPurgeJobCreateManySQL(data []query.PurgeJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -19861,8 +22359,7 @@ func (a PurgeJobActions) buildPurgeJobCreateManySQL(data []query.PurgeJobCreateI
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO purge_jobs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedPurgeJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -19872,13 +22369,21 @@ func (a PurgeJobActions) buildPurgeJobCreateManySQL(data []query.PurgeJobCreateI
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -19893,17 +22398,21 @@ func (a PurgeJobActions) UpdateOne(ctx context.Context, where query.PurgeJobWher
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePurgeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPurgeJobWhere(a.client, []query.PurgeJobWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE purge_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPurgeJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, type, value, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -19931,12 +22440,16 @@ func (a PurgeJobActions) UpdateMany(ctx context.Context, wheres []query.PurgeJob
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quotePurgeJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildPurgeJobWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE purge_jobs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPurgeJobTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -19957,30 +22470,45 @@ func (a PurgeJobActions) UpsertOne(ctx context.Context, where query.PurgeJobWher
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quotePurgeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO purge_jobs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPurgeJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePurgeJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quotePurgeJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quotePurgeJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -19989,7 +22517,7 @@ func (a PurgeJobActions) UpsertOne(ctx context.Context, where query.PurgeJobWher
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, type, value, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20008,12 +22536,12 @@ func (a PurgeJobActions) UpsertOne(ctx context.Context, where query.PurgeJobWher
 func (a PurgeJobActions) DeleteOne(ctx context.Context, where query.PurgeJobWhereClause) (*model.PurgeJob, error) {
 	argIdx := 0
 	whereSQL, args := buildPurgeJobWhere(a.client, []query.PurgeJobWhereClause{where}, &argIdx)
-	q := "DELETE FROM purge_jobs"
+	q := "DELETE FROM " + quotedPurgeJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, type, value, status, result_json, created_at, updated_at"
+		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20035,7 +22563,7 @@ func (a PurgeJobActions) DeleteOne(ctx context.Context, where query.PurgeJobWher
 func (a PurgeJobActions) DeleteMany(ctx context.Context, wheres ...query.PurgeJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPurgeJobWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM purge_jobs"
+	q := "DELETE FROM " + quotedPurgeJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20050,7 +22578,7 @@ func (a PurgeJobActions) DeleteMany(ctx context.Context, wheres ...query.PurgeJo
 func (a PurgeJobActions) Count(ctx context.Context, wheres ...query.PurgeJobWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildPurgeJobWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM purge_jobs"
+	q := "SELECT COUNT(*) FROM " + quotedPurgeJobTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20065,9 +22593,17 @@ func (a PurgeJobActions) Count(ctx context.Context, wheres ...query.PurgeJobWher
 func (a PurgeJobActions) Aggregate(ctx context.Context, opts ...query.PurgeJobAggregateOption) (*query.PurgeJobAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePurgeJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM purge_jobs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedPurgeJobTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.PurgeJobAggregateResult{
 		Avg: make(map[string]*float64),
@@ -20105,13 +22641,28 @@ func (a PurgeJobActions) Aggregate(ctx context.Context, opts ...query.PurgeJobAg
 // GroupBy performs a GROUP BY query on PurgeJob.
 func (a PurgeJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.PurgeJobAggregateOption) ([]query.PurgeJobGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quotePurgeJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePurgeJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM purge_jobs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedPurgeJobTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("PurgeJob.GroupBy: %w", err)
@@ -20163,6 +22714,42 @@ func (a PurgeJobActions) GroupBy(ctx context.Context, fields []string, opts ...q
 	return results, rows.Err()
 }
 
+func quotedSiteTable(c *Client) string { return c.quoteIdentifier("sites") }
+func quotedSiteColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "creator_id", "name", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSiteField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "creator_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "origin_pool_id":
+		return c.quoteIdentifier(field), nil
+	case "policy_id":
+		return c.quoteIdentifier(field), nil
+	case "version":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown Site field %q", field)
+	}
+}
+
 // buildSiteWhere recursively builds a WHERE clause string and arguments.
 func buildSiteWhere(c *Client, wheres []query.SiteWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -20200,9 +22787,14 @@ func buildSiteWhere(c *Client, wheres []query.SiteWhereClause, argIdx *int) (str
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteSiteField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -20218,24 +22810,24 @@ func buildSiteWhere(c *Client, wheres []query.SiteWhereClause, argIdx *int) (str
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -20605,7 +23197,7 @@ func (b SiteDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Site records.
 func (a SiteActions) FindMany(ctx context.Context, opts ...query.SiteQueryOption) ([]model.Site, error) {
 	cfg := query.ApplySiteOptions(opts)
-	q := "SELECT id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
+	q := "SELECT " + quotedSiteColumns(a.client) + " FROM " + quotedSiteTable(a.client)
 	argIdx := 0
 	where, args := buildSiteWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -20614,7 +23206,15 @@ func (a SiteActions) FindMany(ctx context.Context, opts ...query.SiteQueryOption
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteSiteField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -20622,6 +23222,14 @@ func (a SiteActions) FindMany(ctx context.Context, opts ...query.SiteQueryOption
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -20657,7 +23265,7 @@ func (a SiteActions) FindFirst(ctx context.Context, opts ...query.SiteQueryOptio
 func (a SiteActions) FindUnique(ctx context.Context, where query.SiteWhereClause) (*model.Site, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteWhere(a.client, []query.SiteWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at FROM sites"
+	q := "SELECT " + quotedSiteColumns(a.client) + " FROM " + quotedSiteTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20682,14 +23290,17 @@ func (a SiteActions) CreateOne(ctx context.Context, sets ...query.SiteSetClause)
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteSiteField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO sites (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING " + quotedSiteColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Site
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20712,6 +23323,9 @@ func (a SiteActions) CreateMany(ctx context.Context, data []query.SiteCreateInpu
 
 func (a SiteActions) buildSiteCreateManySQL(data []query.SiteCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "cluster_id", "creator_id", "name", "status", "origin_pool_id", "policy_id", "version", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -20725,8 +23339,7 @@ func (a SiteActions) buildSiteCreateManySQL(data []query.SiteCreateInput, confli
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO sites (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSiteTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -20736,13 +23349,21 @@ func (a SiteActions) buildSiteCreateManySQL(data []query.SiteCreateInput, confli
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -20757,17 +23378,21 @@ func (a SiteActions) UpdateOne(ctx context.Context, where query.SiteWhereClause,
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteWhere(a.client, []query.SiteWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE sites SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING " + quotedSiteColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20795,12 +23420,16 @@ func (a SiteActions) UpdateMany(ctx context.Context, wheres []query.SiteWhereCla
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE sites SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20821,30 +23450,45 @@ func (a SiteActions) UpsertOne(ctx context.Context, where query.SiteWhereClause,
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteSiteField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO sites (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteSiteField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -20853,7 +23497,7 @@ func (a SiteActions) UpsertOne(ctx context.Context, where query.SiteWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING " + quotedSiteColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20872,12 +23516,12 @@ func (a SiteActions) UpsertOne(ctx context.Context, where query.SiteWhereClause,
 func (a SiteActions) DeleteOne(ctx context.Context, where query.SiteWhereClause) (*model.Site, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteWhere(a.client, []query.SiteWhereClause{where}, &argIdx)
-	q := "DELETE FROM sites"
+	q := "DELETE FROM " + quotedSiteTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, creator_id, name, status, origin_pool_id, policy_id, version, created_at, updated_at"
+		q += " RETURNING " + quotedSiteColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Site
 		if err := row.Scan(&item.Id, &item.ClusterId, &item.CreatorId, &item.Name, &item.Status, &item.OriginPoolId, &item.PolicyId, &item.Version, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -20899,7 +23543,7 @@ func (a SiteActions) DeleteOne(ctx context.Context, where query.SiteWhereClause)
 func (a SiteActions) DeleteMany(ctx context.Context, wheres ...query.SiteWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM sites"
+	q := "DELETE FROM " + quotedSiteTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20914,7 +23558,7 @@ func (a SiteActions) DeleteMany(ctx context.Context, wheres ...query.SiteWhereCl
 func (a SiteActions) Count(ctx context.Context, wheres ...query.SiteWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM sites"
+	q := "SELECT COUNT(*) FROM " + quotedSiteTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -20929,9 +23573,17 @@ func (a SiteActions) Count(ctx context.Context, wheres ...query.SiteWhereClause)
 func (a SiteActions) Aggregate(ctx context.Context, opts ...query.SiteAggregateOption) (*query.SiteAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM sites", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSiteTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.SiteAggregateResult{
 		Avg: make(map[string]*float64),
@@ -20969,13 +23621,28 @@ func (a SiteActions) Aggregate(ctx context.Context, opts ...query.SiteAggregateO
 // GroupBy performs a GROUP BY query on Site.
 func (a SiteActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteAggregateOption) ([]query.SiteGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSiteField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM sites GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSiteTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("Site.GroupBy: %w", err)
@@ -21027,6 +23694,26 @@ func (a SiteActions) GroupBy(ctx context.Context, fields []string, opts ...query
 	return results, rows.Err()
 }
 
+func quotedSiteCertificateTable(c *Client) string { return c.quoteIdentifier("site_certificates") }
+func quotedSiteCertificateColumns(c *Client) string {
+	cols := []string{"site_id", "certificate_id"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSiteCertificateField(c *Client, field string) (string, error) {
+	switch field {
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "certificate_id":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown SiteCertificate field %q", field)
+	}
+}
+
 // buildSiteCertificateWhere recursively builds a WHERE clause string and arguments.
 func buildSiteCertificateWhere(c *Client, wheres []query.SiteCertificateWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -21064,9 +23751,14 @@ func buildSiteCertificateWhere(c *Client, wheres []query.SiteCertificateWhereCla
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteSiteCertificateField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -21082,24 +23774,24 @@ func buildSiteCertificateWhere(c *Client, wheres []query.SiteCertificateWhereCla
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -21469,7 +24161,7 @@ func (b SiteCertificateDeleteBuilder) DoMany(ctx context.Context) (int64, error)
 // FindMany retrieves multiple SiteCertificate records.
 func (a SiteCertificateActions) FindMany(ctx context.Context, opts ...query.SiteCertificateQueryOption) ([]model.SiteCertificate, error) {
 	cfg := query.ApplySiteCertificateOptions(opts)
-	q := "SELECT site_id, certificate_id FROM site_certificates"
+	q := "SELECT " + quotedSiteCertificateColumns(a.client) + " FROM " + quotedSiteCertificateTable(a.client)
 	argIdx := 0
 	where, args := buildSiteCertificateWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -21478,7 +24170,15 @@ func (a SiteCertificateActions) FindMany(ctx context.Context, opts ...query.Site
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteSiteCertificateField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -21486,6 +24186,14 @@ func (a SiteCertificateActions) FindMany(ctx context.Context, opts ...query.Site
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -21521,7 +24229,7 @@ func (a SiteCertificateActions) FindFirst(ctx context.Context, opts ...query.Sit
 func (a SiteCertificateActions) FindUnique(ctx context.Context, where query.SiteCertificateWhereClause) (*model.SiteCertificate, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
-	q := "SELECT site_id, certificate_id FROM site_certificates"
+	q := "SELECT " + quotedSiteCertificateColumns(a.client) + " FROM " + quotedSiteCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -21546,14 +24254,17 @@ func (a SiteCertificateActions) CreateOne(ctx context.Context, sets ...query.Sit
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteSiteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING site_id, certificate_id"
+		q += " RETURNING " + quotedSiteCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.SiteCertificate
 		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
@@ -21576,6 +24287,9 @@ func (a SiteCertificateActions) CreateMany(ctx context.Context, data []query.Sit
 
 func (a SiteCertificateActions) buildSiteCertificateCreateManySQL(data []query.SiteCertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"site_id", "certificate_id"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -21589,8 +24303,7 @@ func (a SiteCertificateActions) buildSiteCertificateCreateManySQL(data []query.S
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSiteCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -21600,13 +24313,21 @@ func (a SiteCertificateActions) buildSiteCertificateCreateManySQL(data []query.S
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -21621,17 +24342,21 @@ func (a SiteCertificateActions) UpdateOne(ctx context.Context, where query.SiteC
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_certificates SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteCertificateTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING site_id, certificate_id"
+		q += " RETURNING " + quotedSiteCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteCertificate
 		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
@@ -21659,12 +24384,16 @@ func (a SiteCertificateActions) UpdateMany(ctx context.Context, wheres []query.S
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteCertificateField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteCertificateWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_certificates SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteCertificateTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -21685,30 +24414,45 @@ func (a SiteCertificateActions) UpsertOne(ctx context.Context, where query.SiteC
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteSiteCertificateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO site_certificates (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteCertificateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteCertificateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteSiteCertificateField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteCertificateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -21717,7 +24461,7 @@ func (a SiteCertificateActions) UpsertOne(ctx context.Context, where query.SiteC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING site_id, certificate_id"
+		q += " RETURNING " + quotedSiteCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteCertificate
 		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
@@ -21736,12 +24480,12 @@ func (a SiteCertificateActions) UpsertOne(ctx context.Context, where query.SiteC
 func (a SiteCertificateActions) DeleteOne(ctx context.Context, where query.SiteCertificateWhereClause) (*model.SiteCertificate, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteCertificateWhere(a.client, []query.SiteCertificateWhereClause{where}, &argIdx)
-	q := "DELETE FROM site_certificates"
+	q := "DELETE FROM " + quotedSiteCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING site_id, certificate_id"
+		q += " RETURNING " + quotedSiteCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteCertificate
 		if err := row.Scan(&item.SiteId, &item.CertificateId); err != nil {
@@ -21763,7 +24507,7 @@ func (a SiteCertificateActions) DeleteOne(ctx context.Context, where query.SiteC
 func (a SiteCertificateActions) DeleteMany(ctx context.Context, wheres ...query.SiteCertificateWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteCertificateWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM site_certificates"
+	q := "DELETE FROM " + quotedSiteCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -21778,7 +24522,7 @@ func (a SiteCertificateActions) DeleteMany(ctx context.Context, wheres ...query.
 func (a SiteCertificateActions) Count(ctx context.Context, wheres ...query.SiteCertificateWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteCertificateWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM site_certificates"
+	q := "SELECT COUNT(*) FROM " + quotedSiteCertificateTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -21793,9 +24537,17 @@ func (a SiteCertificateActions) Count(ctx context.Context, wheres ...query.SiteC
 func (a SiteCertificateActions) Aggregate(ctx context.Context, opts ...query.SiteCertificateAggregateOption) (*query.SiteCertificateAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteCertificateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_certificates", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSiteCertificateTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.SiteCertificateAggregateResult{
 		Avg: make(map[string]*float64),
@@ -21833,13 +24585,28 @@ func (a SiteCertificateActions) Aggregate(ctx context.Context, opts ...query.Sit
 // GroupBy performs a GROUP BY query on SiteCertificate.
 func (a SiteCertificateActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteCertificateAggregateOption) ([]query.SiteCertificateGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSiteCertificateField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteCertificateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_certificates GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSiteCertificateTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("SiteCertificate.GroupBy: %w", err)
@@ -21891,6 +24658,30 @@ func (a SiteCertificateActions) GroupBy(ctx context.Context, fields []string, op
 	return results, rows.Err()
 }
 
+func quotedSiteDomainTable(c *Client) string { return c.quoteIdentifier("site_domains") }
+func quotedSiteDomainColumns(c *Client) string {
+	cols := []string{"id", "site_id", "hostname", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSiteDomainField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "hostname":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown SiteDomain field %q", field)
+	}
+}
+
 // buildSiteDomainWhere recursively builds a WHERE clause string and arguments.
 func buildSiteDomainWhere(c *Client, wheres []query.SiteDomainWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -21928,9 +24719,14 @@ func buildSiteDomainWhere(c *Client, wheres []query.SiteDomainWhereClause, argId
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteSiteDomainField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -21946,24 +24742,24 @@ func buildSiteDomainWhere(c *Client, wheres []query.SiteDomainWhereClause, argId
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -22333,7 +25129,7 @@ func (b SiteDomainDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple SiteDomain records.
 func (a SiteDomainActions) FindMany(ctx context.Context, opts ...query.SiteDomainQueryOption) ([]model.SiteDomain, error) {
 	cfg := query.ApplySiteDomainOptions(opts)
-	q := "SELECT id, site_id, hostname, created_at FROM site_domains"
+	q := "SELECT " + quotedSiteDomainColumns(a.client) + " FROM " + quotedSiteDomainTable(a.client)
 	argIdx := 0
 	where, args := buildSiteDomainWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -22342,7 +25138,15 @@ func (a SiteDomainActions) FindMany(ctx context.Context, opts ...query.SiteDomai
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteSiteDomainField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -22350,6 +25154,14 @@ func (a SiteDomainActions) FindMany(ctx context.Context, opts ...query.SiteDomai
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -22385,7 +25197,7 @@ func (a SiteDomainActions) FindFirst(ctx context.Context, opts ...query.SiteDoma
 func (a SiteDomainActions) FindUnique(ctx context.Context, where query.SiteDomainWhereClause) (*model.SiteDomain, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
-	q := "SELECT id, site_id, hostname, created_at FROM site_domains"
+	q := "SELECT " + quotedSiteDomainColumns(a.client) + " FROM " + quotedSiteDomainTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -22410,14 +25222,17 @@ func (a SiteDomainActions) CreateOne(ctx context.Context, sets ...query.SiteDoma
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteSiteDomainField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteDomainTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, hostname, created_at"
+		q += " RETURNING " + quotedSiteDomainColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.SiteDomain
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
@@ -22440,6 +25255,9 @@ func (a SiteDomainActions) CreateMany(ctx context.Context, data []query.SiteDoma
 
 func (a SiteDomainActions) buildSiteDomainCreateManySQL(data []query.SiteDomainCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "site_id", "hostname", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -22453,8 +25271,7 @@ func (a SiteDomainActions) buildSiteDomainCreateManySQL(data []query.SiteDomainC
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSiteDomainTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -22464,13 +25281,21 @@ func (a SiteDomainActions) buildSiteDomainCreateManySQL(data []query.SiteDomainC
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -22485,17 +25310,21 @@ func (a SiteDomainActions) UpdateOne(ctx context.Context, where query.SiteDomain
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteDomainField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_domains SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteDomainTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, hostname, created_at"
+		q += " RETURNING " + quotedSiteDomainColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteDomain
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
@@ -22523,12 +25352,16 @@ func (a SiteDomainActions) UpdateMany(ctx context.Context, wheres []query.SiteDo
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteDomainField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteDomainWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_domains SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteDomainTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -22549,30 +25382,45 @@ func (a SiteDomainActions) UpsertOne(ctx context.Context, where query.SiteDomain
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteSiteDomainField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO site_domains (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteDomainTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteDomainField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteSiteDomainField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteDomainField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -22581,7 +25429,7 @@ func (a SiteDomainActions) UpsertOne(ctx context.Context, where query.SiteDomain
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, hostname, created_at"
+		q += " RETURNING " + quotedSiteDomainColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteDomain
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
@@ -22600,12 +25448,12 @@ func (a SiteDomainActions) UpsertOne(ctx context.Context, where query.SiteDomain
 func (a SiteDomainActions) DeleteOne(ctx context.Context, where query.SiteDomainWhereClause) (*model.SiteDomain, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteDomainWhere(a.client, []query.SiteDomainWhereClause{where}, &argIdx)
-	q := "DELETE FROM site_domains"
+	q := "DELETE FROM " + quotedSiteDomainTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, hostname, created_at"
+		q += " RETURNING " + quotedSiteDomainColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteDomain
 		if err := row.Scan(&item.Id, &item.SiteId, &item.Hostname, &item.CreatedAt); err != nil {
@@ -22627,7 +25475,7 @@ func (a SiteDomainActions) DeleteOne(ctx context.Context, where query.SiteDomain
 func (a SiteDomainActions) DeleteMany(ctx context.Context, wheres ...query.SiteDomainWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteDomainWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM site_domains"
+	q := "DELETE FROM " + quotedSiteDomainTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -22642,7 +25490,7 @@ func (a SiteDomainActions) DeleteMany(ctx context.Context, wheres ...query.SiteD
 func (a SiteDomainActions) Count(ctx context.Context, wheres ...query.SiteDomainWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteDomainWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM site_domains"
+	q := "SELECT COUNT(*) FROM " + quotedSiteDomainTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -22657,9 +25505,17 @@ func (a SiteDomainActions) Count(ctx context.Context, wheres ...query.SiteDomain
 func (a SiteDomainActions) Aggregate(ctx context.Context, opts ...query.SiteDomainAggregateOption) (*query.SiteDomainAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteDomainField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_domains", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSiteDomainTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.SiteDomainAggregateResult{
 		Avg: make(map[string]*float64),
@@ -22697,13 +25553,28 @@ func (a SiteDomainActions) Aggregate(ctx context.Context, opts ...query.SiteDoma
 // GroupBy performs a GROUP BY query on SiteDomain.
 func (a SiteDomainActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteDomainAggregateOption) ([]query.SiteDomainGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSiteDomainField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteDomainField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_domains GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSiteDomainTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("SiteDomain.GroupBy: %w", err)
@@ -22755,6 +25626,58 @@ func (a SiteDomainActions) GroupBy(ctx context.Context, fields []string, opts ..
 	return results, rows.Err()
 }
 
+func quotedSiteListenerConfigTable(c *Client) string {
+	return c.quoteIdentifier("site_listener_configs")
+}
+func quotedSiteListenerConfigColumns(c *Client) string {
+	cols := []string{"id", "site_id", "http_enabled", "http_port", "redirect_http_to_https", "https_enabled", "https_port", "http2_enabled", "http3_enabled", "tls_min_version", "hsts_enabled", "hsts_max_age", "hsts_include_subdomains", "hsts_preload", "ocsp_stapling_enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSiteListenerConfigField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "site_id":
+		return c.quoteIdentifier(field), nil
+	case "http_enabled":
+		return c.quoteIdentifier(field), nil
+	case "http_port":
+		return c.quoteIdentifier(field), nil
+	case "redirect_http_to_https":
+		return c.quoteIdentifier(field), nil
+	case "https_enabled":
+		return c.quoteIdentifier(field), nil
+	case "https_port":
+		return c.quoteIdentifier(field), nil
+	case "http2_enabled":
+		return c.quoteIdentifier(field), nil
+	case "http3_enabled":
+		return c.quoteIdentifier(field), nil
+	case "tls_min_version":
+		return c.quoteIdentifier(field), nil
+	case "hsts_enabled":
+		return c.quoteIdentifier(field), nil
+	case "hsts_max_age":
+		return c.quoteIdentifier(field), nil
+	case "hsts_include_subdomains":
+		return c.quoteIdentifier(field), nil
+	case "hsts_preload":
+		return c.quoteIdentifier(field), nil
+	case "ocsp_stapling_enabled":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown SiteListenerConfig field %q", field)
+	}
+}
+
 // buildSiteListenerConfigWhere recursively builds a WHERE clause string and arguments.
 func buildSiteListenerConfigWhere(c *Client, wheres []query.SiteListenerConfigWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -22792,9 +25715,14 @@ func buildSiteListenerConfigWhere(c *Client, wheres []query.SiteListenerConfigWh
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteSiteListenerConfigField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -22810,24 +25738,24 @@ func buildSiteListenerConfigWhere(c *Client, wheres []query.SiteListenerConfigWh
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -23197,7 +26125,7 @@ func (b SiteListenerConfigDeleteBuilder) DoMany(ctx context.Context) (int64, err
 // FindMany retrieves multiple SiteListenerConfig records.
 func (a SiteListenerConfigActions) FindMany(ctx context.Context, opts ...query.SiteListenerConfigQueryOption) ([]model.SiteListenerConfig, error) {
 	cfg := query.ApplySiteListenerConfigOptions(opts)
-	q := "SELECT id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at FROM site_listener_configs"
+	q := "SELECT " + quotedSiteListenerConfigColumns(a.client) + " FROM " + quotedSiteListenerConfigTable(a.client)
 	argIdx := 0
 	where, args := buildSiteListenerConfigWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -23206,7 +26134,15 @@ func (a SiteListenerConfigActions) FindMany(ctx context.Context, opts ...query.S
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteSiteListenerConfigField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -23214,6 +26150,14 @@ func (a SiteListenerConfigActions) FindMany(ctx context.Context, opts ...query.S
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -23249,7 +26193,7 @@ func (a SiteListenerConfigActions) FindFirst(ctx context.Context, opts ...query.
 func (a SiteListenerConfigActions) FindUnique(ctx context.Context, where query.SiteListenerConfigWhereClause) (*model.SiteListenerConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
-	q := "SELECT id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at FROM site_listener_configs"
+	q := "SELECT " + quotedSiteListenerConfigColumns(a.client) + " FROM " + quotedSiteListenerConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -23274,14 +26218,17 @@ func (a SiteListenerConfigActions) CreateOne(ctx context.Context, sets ...query.
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteSiteListenerConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteListenerConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		q += " RETURNING " + quotedSiteListenerConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.SiteListenerConfig
 		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -23304,6 +26251,9 @@ func (a SiteListenerConfigActions) CreateMany(ctx context.Context, data []query.
 
 func (a SiteListenerConfigActions) buildSiteListenerConfigCreateManySQL(data []query.SiteListenerConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "site_id", "http_enabled", "http_port", "redirect_http_to_https", "https_enabled", "https_port", "http2_enabled", "http3_enabled", "tls_min_version", "hsts_enabled", "hsts_max_age", "hsts_include_subdomains", "hsts_preload", "ocsp_stapling_enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -23317,8 +26267,7 @@ func (a SiteListenerConfigActions) buildSiteListenerConfigCreateManySQL(data []q
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSiteListenerConfigTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -23328,13 +26277,21 @@ func (a SiteListenerConfigActions) buildSiteListenerConfigCreateManySQL(data []q
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -23349,17 +26306,21 @@ func (a SiteListenerConfigActions) UpdateOne(ctx context.Context, where query.Si
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteListenerConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_listener_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteListenerConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		q += " RETURNING " + quotedSiteListenerConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteListenerConfig
 		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -23387,12 +26348,16 @@ func (a SiteListenerConfigActions) UpdateMany(ctx context.Context, wheres []quer
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteSiteListenerConfigField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE site_listener_configs SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteListenerConfigTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -23413,30 +26378,45 @@ func (a SiteListenerConfigActions) UpsertOne(ctx context.Context, where query.Si
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteSiteListenerConfigField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO site_listener_configs (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteListenerConfigTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteListenerConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteSiteListenerConfigField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteSiteListenerConfigField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -23445,7 +26425,7 @@ func (a SiteListenerConfigActions) UpsertOne(ctx context.Context, where query.Si
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		q += " RETURNING " + quotedSiteListenerConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteListenerConfig
 		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -23464,12 +26444,12 @@ func (a SiteListenerConfigActions) UpsertOne(ctx context.Context, where query.Si
 func (a SiteListenerConfigActions) DeleteOne(ctx context.Context, where query.SiteListenerConfigWhereClause) (*model.SiteListenerConfig, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteListenerConfigWhere(a.client, []query.SiteListenerConfigWhereClause{where}, &argIdx)
-	q := "DELETE FROM site_listener_configs"
+	q := "DELETE FROM " + quotedSiteListenerConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, site_id, http_enabled, http_port, redirect_http_to_https, https_enabled, https_port, http2_enabled, http3_enabled, tls_min_version, hsts_enabled, hsts_max_age, hsts_include_subdomains, hsts_preload, ocsp_stapling_enabled, created_at, updated_at"
+		q += " RETURNING " + quotedSiteListenerConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.SiteListenerConfig
 		if err := row.Scan(&item.Id, &item.SiteId, &item.HttpEnabled, &item.HttpPort, &item.RedirectHttpToHttps, &item.HttpsEnabled, &item.HttpsPort, &item.Http2Enabled, &item.Http3Enabled, &item.TlsMinVersion, &item.HstsEnabled, &item.HstsMaxAge, &item.HstsIncludeSubdomains, &item.HstsPreload, &item.OcspStaplingEnabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -23491,7 +26471,7 @@ func (a SiteListenerConfigActions) DeleteOne(ctx context.Context, where query.Si
 func (a SiteListenerConfigActions) DeleteMany(ctx context.Context, wheres ...query.SiteListenerConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM site_listener_configs"
+	q := "DELETE FROM " + quotedSiteListenerConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -23506,7 +26486,7 @@ func (a SiteListenerConfigActions) DeleteMany(ctx context.Context, wheres ...que
 func (a SiteListenerConfigActions) Count(ctx context.Context, wheres ...query.SiteListenerConfigWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildSiteListenerConfigWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM site_listener_configs"
+	q := "SELECT COUNT(*) FROM " + quotedSiteListenerConfigTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -23521,9 +26501,17 @@ func (a SiteListenerConfigActions) Count(ctx context.Context, wheres ...query.Si
 func (a SiteListenerConfigActions) Aggregate(ctx context.Context, opts ...query.SiteListenerConfigAggregateOption) (*query.SiteListenerConfigAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteListenerConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_listener_configs", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSiteListenerConfigTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.SiteListenerConfigAggregateResult{
 		Avg: make(map[string]*float64),
@@ -23561,13 +26549,28 @@ func (a SiteListenerConfigActions) Aggregate(ctx context.Context, opts ...query.
 // GroupBy performs a GROUP BY query on SiteListenerConfig.
 func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteListenerConfigAggregateOption) ([]query.SiteListenerConfigGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSiteListenerConfigField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteListenerConfigField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM site_listener_configs GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSiteListenerConfigTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("SiteListenerConfig.GroupBy: %w", err)
@@ -23619,6 +26622,42 @@ func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string,
 	return results, rows.Err()
 }
 
+func quotedUserTable(c *Client) string { return c.quoteIdentifier("users") }
+func quotedUserColumns(c *Client) string {
+	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteUserField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "email":
+		return c.quoteIdentifier(field), nil
+	case "password_hash":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "role":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "totp_secret":
+		return c.quoteIdentifier(field), nil
+	case "last_login_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown User field %q", field)
+	}
+}
+
 // buildUserWhere recursively builds a WHERE clause string and arguments.
 func buildUserWhere(c *Client, wheres []query.UserWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -23656,9 +26695,14 @@ func buildUserWhere(c *Client, wheres []query.UserWhereClause, argIdx *int) (str
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteUserField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -23674,24 +26718,24 @@ func buildUserWhere(c *Client, wheres []query.UserWhereClause, argIdx *int) (str
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -24061,7 +27105,7 @@ func (b UserDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple User records.
 func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption) ([]model.User, error) {
 	cfg := query.ApplyUserOptions(opts)
-	q := "SELECT id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT " + quotedUserColumns(a.client) + " FROM " + quotedUserTable(a.client)
 	argIdx := 0
 	where, args := buildUserWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -24070,7 +27114,15 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteUserField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -24078,6 +27130,14 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -24113,7 +27173,7 @@ func (a UserActions) FindFirst(ctx context.Context, opts ...query.UserQueryOptio
 func (a UserActions) FindUnique(ctx context.Context, where query.UserWhereClause) (*model.User, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, []query.UserWhereClause{where}, &argIdx)
-	q := "SELECT id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at FROM users"
+	q := "SELECT " + quotedUserColumns(a.client) + " FROM " + quotedUserTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -24138,14 +27198,17 @@ func (a UserActions) CreateOne(ctx context.Context, sets ...query.UserSetClause)
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteUserField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedUserTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
+		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.User
 		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -24168,6 +27231,9 @@ func (a UserActions) CreateMany(ctx context.Context, data []query.UserCreateInpu
 
 func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -24181,8 +27247,7 @@ func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, confli
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO users (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedUserTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -24192,13 +27257,21 @@ func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, confli
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -24213,17 +27286,21 @@ func (a UserActions) UpdateOne(ctx context.Context, where query.UserWhereClause,
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteUserField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildUserWhere(a.client, []query.UserWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE users SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedUserTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
+		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
 		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -24251,12 +27328,16 @@ func (a UserActions) UpdateMany(ctx context.Context, wheres []query.UserWhereCla
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteUserField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildUserWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE users SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedUserTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -24277,30 +27358,45 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteUserField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedUserTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteUserField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteUserField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteUserField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -24309,7 +27405,7 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
+		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
 		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -24328,12 +27424,12 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause) (*model.User, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, []query.UserWhereClause{where}, &argIdx)
-	q := "DELETE FROM users"
+	q := "DELETE FROM " + quotedUserTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, email, password_hash, name, role, status, totp_secret, last_login_at, created_at, updated_at"
+		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
 		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
@@ -24355,7 +27451,7 @@ func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause)
 func (a UserActions) DeleteMany(ctx context.Context, wheres ...query.UserWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM users"
+	q := "DELETE FROM " + quotedUserTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -24370,7 +27466,7 @@ func (a UserActions) DeleteMany(ctx context.Context, wheres ...query.UserWhereCl
 func (a UserActions) Count(ctx context.Context, wheres ...query.UserWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildUserWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM users"
+	q := "SELECT COUNT(*) FROM " + quotedUserTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -24385,9 +27481,17 @@ func (a UserActions) Count(ctx context.Context, wheres ...query.UserWhereClause)
 func (a UserActions) Aggregate(ctx context.Context, opts ...query.UserAggregateOption) (*query.UserAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteUserField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM users", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedUserTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.UserAggregateResult{
 		Avg: make(map[string]*float64),
@@ -24425,13 +27529,28 @@ func (a UserActions) Aggregate(ctx context.Context, opts ...query.UserAggregateO
 // GroupBy performs a GROUP BY query on User.
 func (a UserActions) GroupBy(ctx context.Context, fields []string, opts ...query.UserAggregateOption) ([]query.UserGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteUserField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteUserField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM users GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedUserTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("User.GroupBy: %w", err)
@@ -24483,6 +27602,32 @@ func (a UserActions) GroupBy(ctx context.Context, fields []string, opts ...query
 	return results, rows.Err()
 }
 
+func quotedUserSessionTable(c *Client) string { return c.quoteIdentifier("user_sessions") }
+func quotedUserSessionColumns(c *Client) string {
+	cols := []string{"id", "user_id", "token_hash", "expires_at", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteUserSessionField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "user_id":
+		return c.quoteIdentifier(field), nil
+	case "token_hash":
+		return c.quoteIdentifier(field), nil
+	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown UserSession field %q", field)
+	}
+}
+
 // buildUserSessionWhere recursively builds a WHERE clause string and arguments.
 func buildUserSessionWhere(c *Client, wheres []query.UserSessionWhereClause, argIdx *int) (string, []any) {
 	var parts []string
@@ -24520,9 +27665,14 @@ func buildUserSessionWhere(c *Client, wheres []query.UserSessionWhereClause, arg
 				args = append(args, subArgs...)
 			}
 		default:
+			field, err := quoteUserSessionField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
 			switch w.Operator {
 			case "IS NULL":
-				parts = append(parts, w.Field+" IS NULL")
+				parts = append(parts, field+" IS NULL")
 			case "IN", "NOT IN":
 				if vals, ok := w.Value.([]any); ok {
 					if len(vals) == 0 {
@@ -24538,24 +27688,24 @@ func buildUserSessionWhere(c *Client, wheres []query.UserSessionWhereClause, arg
 							phs[i] = c.placeholder(*argIdx)
 							args = append(args, v)
 						}
-						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
 					}
 				}
 			case "CONTAINS":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "STARTS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
 			case "ENDS_WITH":
 				*argIdx++
-				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
 				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
 			default:
 				*argIdx++
-				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
 				args = append(args, w.Value)
 			}
 		}
@@ -24925,7 +28075,7 @@ func (b UserSessionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple UserSession records.
 func (a UserSessionActions) FindMany(ctx context.Context, opts ...query.UserSessionQueryOption) ([]model.UserSession, error) {
 	cfg := query.ApplyUserSessionOptions(opts)
-	q := "SELECT id, user_id, token_hash, expires_at, created_at FROM user_sessions"
+	q := "SELECT " + quotedUserSessionColumns(a.client) + " FROM " + quotedUserSessionTable(a.client)
 	argIdx := 0
 	where, args := buildUserSessionWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -24934,7 +28084,15 @@ func (a UserSessionActions) FindMany(ctx context.Context, opts ...query.UserSess
 	if len(cfg.OrderBys) > 0 {
 		obs := make([]string, len(cfg.OrderBys))
 		for i, ob := range cfg.OrderBys {
-			obs[i] = ob.Field + " " + ob.Direction
+			field, err := quoteUserSessionField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
 		}
 		q += " ORDER BY " + strings.Join(obs, ", ")
 	}
@@ -24942,6 +28100,14 @@ func (a UserSessionActions) FindMany(ctx context.Context, opts ...query.UserSess
 		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
 	}
 	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
 		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
 	}
 	rows, err := a.client.executor.QueryContext(ctx, q, args...)
@@ -24977,7 +28143,7 @@ func (a UserSessionActions) FindFirst(ctx context.Context, opts ...query.UserSes
 func (a UserSessionActions) FindUnique(ctx context.Context, where query.UserSessionWhereClause) (*model.UserSession, error) {
 	argIdx := 0
 	whereSQL, args := buildUserSessionWhere(a.client, []query.UserSessionWhereClause{where}, &argIdx)
-	q := "SELECT id, user_id, token_hash, expires_at, created_at FROM user_sessions"
+	q := "SELECT " + quotedUserSessionColumns(a.client) + " FROM " + quotedUserSessionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -25002,14 +28168,17 @@ func (a UserSessionActions) CreateOne(ctx context.Context, sets ...query.UserSes
 	vals := make([]any, len(sets))
 	phs := make([]string, len(sets))
 	for i, s := range sets {
-		cols[i] = s.Field
+		field, err := quoteUserSessionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		vals[i] = s.Value
 		phs[i] = a.client.placeholder(i + 1)
 	}
-	q := fmt.Sprintf("INSERT INTO user_sessions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedUserSessionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, user_id, token_hash, expires_at, created_at"
+		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.UserSession
 		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
@@ -25032,6 +28201,9 @@ func (a UserSessionActions) CreateMany(ctx context.Context, data []query.UserSes
 
 func (a UserSessionActions) buildUserSessionCreateManySQL(data []query.UserSessionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
 	cols := []string{"id", "user_id", "token_hash", "expires_at", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -25045,8 +28217,7 @@ func (a UserSessionActions) buildUserSessionCreateManySQL(data []query.UserSessi
 		}
 		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
 	}
-	q := fmt.Sprintf("INSERT INTO user_sessions (%s) VALUES %s",
-		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedUserSessionTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
 	if conflictDoNothing {
 		switch a.client.dialect {
 		case "mysql":
@@ -25056,13 +28227,21 @@ func (a UserSessionActions) buildUserSessionCreateManySQL(data []query.UserSessi
 		default:
 			q += " ON CONFLICT"
 			if len(conflictColumns) > 0 {
-				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
 			}
 			q += " DO NOTHING"
 		}
 	}
 	if len(returningColumns) > 0 {
-		q += " RETURNING " + strings.Join(returningColumns, ", ")
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
 	}
 	return q, args
 }
@@ -25077,17 +28256,21 @@ func (a UserSessionActions) UpdateOne(ctx context.Context, where query.UserSessi
 	args := make([]any, 0, len(sets)+1)
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteUserSessionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildUserSessionWhere(a.client, []query.UserSessionWhereClause{where}, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE user_sessions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedUserSessionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, user_id, token_hash, expires_at, created_at"
+		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
 		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
@@ -25115,12 +28298,16 @@ func (a UserSessionActions) UpdateMany(ctx context.Context, wheres []query.UserS
 	args := make([]any, 0, len(sets)+len(wheres))
 	for i, s := range sets {
 		argIdx++
-		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		field, err := quoteUserSessionField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
 	whereSQL, whereArgs := buildUserSessionWhere(a.client, wheres, &argIdx)
 	args = append(args, whereArgs...)
-	q := fmt.Sprintf("UPDATE user_sessions SET %s", strings.Join(setParts, ", "))
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedUserSessionTable(a.client), strings.Join(setParts, ", "))
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -25141,30 +28328,45 @@ func (a UserSessionActions) UpsertOne(ctx context.Context, where query.UserSessi
 	phs := make([]string, len(create))
 	args := make([]any, 0, len(create)+len(update))
 	for i, s := range create {
-		cols[i] = s.Field
+		field, err := quoteUserSessionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
 		argIdx++
 		phs[i] = a.client.placeholder(argIdx)
 		args = append(args, s.Value)
 	}
-	q := fmt.Sprintf("INSERT INTO user_sessions (%s) VALUES (%s)",
-		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedUserSessionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "mysql" {
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteUserSessionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
 		}
 	} else {
-		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		conflictField, err := quoteUserSessionField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
 		if len(update) > 0 {
 			uParts := make([]string, len(update))
 			for i, s := range update {
 				argIdx++
-				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				field, err := quoteUserSessionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
 				args = append(args, s.Value)
 			}
 			q += " UPDATE SET " + strings.Join(uParts, ", ")
@@ -25173,7 +28375,7 @@ func (a UserSessionActions) UpsertOne(ctx context.Context, where query.UserSessi
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, user_id, token_hash, expires_at, created_at"
+		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
 		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
@@ -25192,12 +28394,12 @@ func (a UserSessionActions) UpsertOne(ctx context.Context, where query.UserSessi
 func (a UserSessionActions) DeleteOne(ctx context.Context, where query.UserSessionWhereClause) (*model.UserSession, error) {
 	argIdx := 0
 	whereSQL, args := buildUserSessionWhere(a.client, []query.UserSessionWhereClause{where}, &argIdx)
-	q := "DELETE FROM user_sessions"
+	q := "DELETE FROM " + quotedUserSessionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, user_id, token_hash, expires_at, created_at"
+		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
 		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
@@ -25219,7 +28421,7 @@ func (a UserSessionActions) DeleteOne(ctx context.Context, where query.UserSessi
 func (a UserSessionActions) DeleteMany(ctx context.Context, wheres ...query.UserSessionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildUserSessionWhere(a.client, wheres, &argIdx)
-	q := "DELETE FROM user_sessions"
+	q := "DELETE FROM " + quotedUserSessionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -25234,7 +28436,7 @@ func (a UserSessionActions) DeleteMany(ctx context.Context, wheres ...query.User
 func (a UserSessionActions) Count(ctx context.Context, wheres ...query.UserSessionWhereClause) (int64, error) {
 	argIdx := 0
 	whereSQL, args := buildUserSessionWhere(a.client, wheres, &argIdx)
-	q := "SELECT COUNT(*) FROM user_sessions"
+	q := "SELECT COUNT(*) FROM " + quotedUserSessionTable(a.client)
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
@@ -25249,9 +28451,17 @@ func (a UserSessionActions) Count(ctx context.Context, wheres ...query.UserSessi
 func (a UserSessionActions) Aggregate(ctx context.Context, opts ...query.UserSessionAggregateOption) (*query.UserSessionAggregateResult, error) {
 	selParts := []string{"COUNT(*)"}
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteUserSessionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM user_sessions", strings.Join(selParts, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedUserSessionTable(a.client))
 	row := a.client.executor.QueryRowContext(ctx, q)
 	result := &query.UserSessionAggregateResult{
 		Avg: make(map[string]*float64),
@@ -25289,13 +28499,28 @@ func (a UserSessionActions) Aggregate(ctx context.Context, opts ...query.UserSes
 // GroupBy performs a GROUP BY query on UserSession.
 func (a UserSessionActions) GroupBy(ctx context.Context, fields []string, opts ...query.UserSessionAggregateOption) ([]query.UserSessionGroupByResult, error) {
 	selParts := make([]string, 0, len(fields)+1+len(opts))
-	selParts = append(selParts, fields...)
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteUserSessionField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
 	selParts = append(selParts, "COUNT(*)")
 	for _, opt := range opts {
-		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteUserSessionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
 	}
-	q := fmt.Sprintf("SELECT %s FROM user_sessions GROUP BY %s",
-		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedUserSessionTable(a.client), strings.Join(groupFields, ", "))
 	rows, err := a.client.executor.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("UserSession.GroupBy: %w", err)
