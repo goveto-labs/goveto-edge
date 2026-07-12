@@ -14,6 +14,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -33,8 +34,8 @@ type createRequest struct {
 	Origins        []originInput `json:"origins"`
 }
 
-func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service) {
-	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, dnsService *dnssync.Service) {
+	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService, dnsService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))
@@ -44,7 +45,7 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 // @summary Create site
 // @description Create a site with domains, origins and certificates; enqueues publish.
 // @Tags sites
-func create(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func create(db *client.Client, publishService *publisher.Service, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input createRequest
 		if err := c.Bind(&input); err != nil {
@@ -60,7 +61,6 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-
 		for index := range input.Origins {
 			address, err := normalizeOrigin(input.Origins[index].Protocol, input.Origins[index].Address)
 			if err != nil {
@@ -75,13 +75,52 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		ctx := c.Request().Context()
 		for _, certificateID := range input.CertificateIDs {
 			certificate, err := db.Certificate.FindUnique(ctx, query.Certificate.Id.Equals(certificateID))
-			if err != nil || certificate.ClusterId != c.Param("cluster_id") {
+			if err != nil {
+				return err
+			}
+			if certificate == nil || certificate.ClusterId != c.Param("cluster_id") {
 				return echo.NewHTTPError(http.StatusBadRequest, "certificate does not belong to cluster")
 			}
 		}
 
 		siteID, poolID := uuid.NewString(), uuid.NewString()
+		var dnsJob *model.DNSSyncJob
 		err = db.Tx(ctx, func(tx *client.Client) error {
+			var dnsConfig *model.DNSProviderConfig
+			if dnsService != nil {
+				if err := dnssync.LockClusterTx(ctx, tx, c.Param("cluster_id")); err != nil {
+					return err
+				}
+				var configErr error
+				dnsConfig, configErr = tx.DNSProviderConfig.FindUnique(
+					ctx,
+					query.DNSProviderConfig.ClusterId.Equals(c.Param("cluster_id")),
+				)
+				if configErr != nil {
+					return configErr
+				}
+			}
+			if dnsConfig != nil && dnsConfig.Enabled {
+				cluster, clusterErr := tx.Cluster.FindUnique(
+					ctx,
+					query.Cluster.Id.Equals(c.Param("cluster_id")),
+				)
+				if clusterErr != nil {
+					return clusterErr
+				}
+				if cluster == nil {
+					return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+				}
+				for _, domain := range domains {
+					if domain != dnsConfig.Zone && !strings.HasSuffix(domain, "."+dnsConfig.Zone) {
+						return echo.NewHTTPError(http.StatusBadRequest, "all site domains must belong to the cluster DNS zone")
+					}
+					if cluster.PrimaryHostname != nil && domain == *cluster.PrimaryHostname {
+						return echo.NewHTTPError(http.StatusBadRequest, "site domain cannot equal the cluster primary hostname")
+					}
+				}
+			}
+
 			emptyHeaders := json.RawMessage(`{}`)
 			if _, err := tx.OriginPool.Create().
 				Set(
@@ -151,6 +190,17 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 					return err
 				}
 			}
+			if dnsConfig != nil && dnsConfig.Enabled {
+				var enqueueErr error
+				dnsJob, enqueueErr = dnsService.EnqueueTx(
+					ctx,
+					tx,
+					c.Param("cluster_id"),
+					&siteID,
+					model.DNSSyncActionUPSERT_SITE,
+				)
+				return enqueueErr
+			}
 			return nil
 		})
 		if err != nil {
@@ -162,6 +212,9 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 			response["publish_job"] = job
 		} else {
 			response["publish_error"] = publishErr.Error()
+		}
+		if dnsJob != nil {
+			response["dns_sync_job"] = dnsJob
 		}
 		return c.JSON(http.StatusCreated, response)
 	}

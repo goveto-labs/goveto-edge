@@ -30,13 +30,19 @@ func Require(db *client.Client) echo.MiddlewareFunc {
 func Check(ctx context.Context, db *client.Client, clusterID, uid string) (allowed, owner bool, err error) {
 	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
 	if err != nil {
+		return false, false, err
+	}
+	if cluster == nil {
 		return false, false, nil
 	}
 	if cluster.CreatorId == uid {
 		return true, true, nil
 	}
-	_, err = db.ClusterMember.Query().Where(query.ClusterMember.ClusterId.Equals(clusterID), query.ClusterMember.UserId.Equals(uid)).First(ctx)
+	member, err := db.ClusterMember.Query().Where(query.ClusterMember.ClusterId.Equals(clusterID), query.ClusterMember.UserId.Equals(uid)).First(ctx)
 	if err != nil {
+		return false, false, err
+	}
+	if member == nil {
 		return false, false, nil
 	}
 	return true, false, nil

@@ -4,9 +4,7 @@ package nodes
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
-	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -14,20 +12,21 @@ import (
 
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/dnssync"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
-func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher) {
+func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, dnsService *dnssync.Service) {
 	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 
 // @summary Create node
@@ -143,23 +142,30 @@ func newCommunicationKey() (string, error) {
 }
 
 func validateReferences(ctx context.Context, db *client.Client, input nodedomain.CreateInput) error {
-	if _, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(input.ClusterID)); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
-		}
+	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(input.ClusterID))
+	if err != nil {
 		return err
+	}
+	if cluster == nil {
+		return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
 	}
 
 	if input.GroupID != nil {
 		group, err := db.ClusterGroup.FindUnique(ctx, query.ClusterGroup.Id.Equals(*input.GroupID))
-		if err != nil || group.ClusterId != input.ClusterID {
+		if err != nil {
+			return err
+		}
+		if group == nil || group.ClusterId != input.ClusterID {
 			return echo.NewHTTPError(http.StatusBadRequest, "group does not belong to cluster")
 		}
 	}
 
 	if input.RegionID != nil {
 		region, err := db.ClusterRegion.FindUnique(ctx, query.ClusterRegion.Id.Equals(*input.RegionID))
-		if err != nil || region.ClusterId != input.ClusterID {
+		if err != nil {
+			return err
+		}
+		if region == nil || region.ClusterId != input.ClusterID {
 			return echo.NewHTTPError(http.StatusBadRequest, "region does not belong to cluster")
 		}
 	}
@@ -171,7 +177,10 @@ func validateReferences(ctx context.Context, db *client.Client, input nodedomain
 		}
 		seen[lineID] = struct{}{}
 		line, err := db.DNSLine.FindUnique(ctx, query.DNSLine.Id.Equals(lineID))
-		if err != nil || line.ClusterId != input.ClusterID {
+		if err != nil {
+			return err
+		}
+		if line == nil || line.ClusterId != input.ClusterID {
 			return echo.NewHTTPError(http.StatusBadRequest, "DNS line does not belong to cluster")
 		}
 	}

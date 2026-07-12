@@ -13,11 +13,13 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
+	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/httpapi"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/storage"
+	"goveto-edge/internal/storage/gen/model"
 )
 
 // @title Goveto Edge Control API
@@ -76,9 +78,26 @@ func main() {
 	purgeService := purge.New(orm, credentialCipher)
 	go purgeService.Run(ctx)
 
+	dnsService := dnssync.New(orm, credentialCipher)
+	go dnsService.Run(ctx)
+
 	installQueue := node.NewInstallQueue(redisClient, 0)
 	go node.NewInstallWorker(orm, installQueue).Run(ctx)
-	go node.NewLifecycle(orm, credentialCipher, 45*time.Second).Run(ctx)
+	go node.NewLifecycle(
+		orm,
+		credentialCipher,
+		45*time.Second,
+		func(callbackCtx context.Context, clusterID string) {
+			go func() {
+				_, _ = dnsService.EnqueueIfConfigured(
+					callbackCtx,
+					clusterID,
+					nil,
+					model.DNSSyncActionRECONCILE,
+				)
+			}()
+		},
+	).Run(ctx)
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddress(),
@@ -90,6 +109,7 @@ func main() {
 			installQueue,
 			publishService,
 			purgeService,
+			dnsService,
 			analyticsStore,
 		),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,

@@ -30,11 +30,12 @@ func ApplySiteDomainOptions(opts []SiteDomainQueryOption) SiteDomainQueryConfig 
 
 // SiteDomainQuery is the namespace for SiteDomain query operations.
 type SiteDomainQuery struct {
-	Id        siteDomainIdField
-	SiteId    siteDomainSiteIdField
-	Hostname  siteDomainHostnameField
-	CreatedAt siteDomainCreatedAtField
-	Site      siteDomainSiteRelation
+	Id         siteDomainIdField
+	SiteId     siteDomainSiteIdField
+	Hostname   siteDomainHostnameField
+	CreatedAt  siteDomainCreatedAtField
+	Site       siteDomainSiteRelation
+	DnsRecords siteDomainDnsRecordsRelation
 }
 
 const SiteDomainTable = "site_domains"
@@ -45,11 +46,12 @@ const SiteDomainCreatedAtColumn = "created_at"
 
 // SiteDomainQuery provides query building methods for the SiteDomain model.
 var SiteDomain = SiteDomainQuery{
-	Id:        siteDomainIdField{},
-	SiteId:    siteDomainSiteIdField{},
-	Hostname:  siteDomainHostnameField{},
-	CreatedAt: siteDomainCreatedAtField{},
-	Site:      siteDomainSiteRelation{},
+	Id:         siteDomainIdField{},
+	SiteId:     siteDomainSiteIdField{},
+	Hostname:   siteDomainHostnameField{},
+	CreatedAt:  siteDomainCreatedAtField{},
+	Site:       siteDomainSiteRelation{},
+	DnsRecords: siteDomainDnsRecordsRelation{},
 }
 
 // SiteDomainWhereClause represents a WHERE condition for SiteDomain.
@@ -398,6 +400,14 @@ func (siteDomainSiteRelation) Fetch() SiteDomainIncludeClause {
 	return SiteDomainIncludeClause{Relation: "site"}
 }
 
+// DnsRecordsRelation provides relation query helpers for dnsRecords.
+type siteDomainDnsRecordsRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsRecords.
+func (siteDomainDnsRecordsRelation) Fetch() SiteDomainIncludeClause {
+	return SiteDomainIncludeClause{Relation: "dnsRecords"}
+}
+
 // SiteDomainSetClause represents a field set operation for create/update.
 type SiteDomainSetClause struct {
 	Field string
@@ -431,11 +441,12 @@ type SiteDomainGroupByResult struct {
 
 // SiteDomainCreateInput holds data for creating a SiteDomain record.
 type SiteDomainCreateInput struct {
-	Id        string
-	SiteId    string
-	Hostname  string
-	CreatedAt time.Time
-	Site      *SiteCreateNestedInput
+	Id         string
+	SiteId     string
+	Hostname   string
+	CreatedAt  time.Time
+	Site       *SiteCreateNestedInput
+	DnsRecords *DNSManagedRecordCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

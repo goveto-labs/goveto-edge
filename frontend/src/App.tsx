@@ -7,6 +7,7 @@ import { ClusterProvider } from '@/hooks/useCluster.ts';
 import Analytics from '@/pages/Analytics.tsx';
 import Certificates from '@/pages/Certificates.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
+import DNS from '@/pages/DNS.tsx';
 import Login from '@/pages/Login.tsx';
 import Nodes from '@/pages/Nodes.tsx';
 import PublishJobs from '@/pages/PublishJobs.tsx';
@@ -31,6 +32,7 @@ export default function App() {
                         <Route element={<Dashboard />} path='/' />
                         <Route element={<Nodes />} path='/nodes' />
                         <Route element={<Sites />} path='/sites' />
+                        <Route element={<DNS />} path='/dns' />
                         <Route element={<Certificates />} path='/certificates' />
                         <Route element={<PublishJobs />} path='/publish' />
                         <Route element={<PurgeJobs />} path='/purge' />

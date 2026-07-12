@@ -21,6 +21,32 @@ enum ConfigStatus {
   ROLLED_BACK
 }
 
+enum DNSProviderType {
+  ALIYUN
+  CLOUDFLARE
+}
+
+enum DNSRecordStatus {
+  PENDING
+  SYNCED
+  FAILED
+  DELETING
+}
+
+enum DNSRecordType {
+  A
+  AAAA
+  CNAME
+}
+
+enum DNSSyncAction {
+  RECONCILE
+  UPSERT_CLUSTER
+  UPSERT_SITE
+  DELETE_CLUSTER
+  DELETE_SITE
+}
+
 enum JobStatus {
   PENDING
   RUNNING
@@ -112,20 +138,24 @@ model Certificate {
 }
 
 model Cluster {
-  id           String          @id @default(uuid())
-  creatorId    String          @map("creator_id")
-  name         String
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
-  creator      User            @relation(fields: [creatorId], references: [id])
-  members      ClusterMember[]
-  nodes        Node[]
-  groups       ClusterGroup[]
-  regions      ClusterRegion[]
-  dnsLines     DNSLine[]
-  certificates Certificate[]
-  originPools  OriginPool[]
-  sites        Site[]
+  id              String             @id @default(uuid())
+  creatorId       String             @map("creator_id")
+  name            String
+  primaryHostname String?            @unique @map("primary_hostname")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  creator         User               @relation(fields: [creatorId], references: [id])
+  members         ClusterMember[]
+  nodes           Node[]
+  groups          ClusterGroup[]
+  regions         ClusterRegion[]
+  dnsLines        DNSLine[]
+  dnsProvider     DNSProviderConfig?
+  dnsRecords      DNSManagedRecord[]
+  dnsSyncJobs     DNSSyncJob[]
+  certificates    Certificate[]
+  originPools     OriginPool[]
+  sites           Site[]
 
   @@unique([name])
   @@index([creatorId])
@@ -190,17 +220,90 @@ model ConfigVersion {
 }
 
 model DNSLine {
-  id        String        @id
-  clusterId String        @map("cluster_id")
-  name      String
-  createdAt DateTime      @default(now()) @map("created_at")
-  updatedAt DateTime      @updatedAt @map("updated_at")
-  cluster   Cluster       @relation(fields: [clusterId], references: [id])
-  nodes     NodeDNSLine[]
+  id           String             @id
+  clusterId    String             @map("cluster_id")
+  name         String
+  providerCode String             @default("default") @map("provider_code")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
+  cluster      Cluster            @relation(fields: [clusterId], references: [id])
+  nodes        NodeDNSLine[]
+  records      DNSManagedRecord[]
 
   @@unique([clusterId, name])
   @@index([clusterId])
   @@map("dns_lines")
+}
+
+model DNSManagedRecord {
+  id               String          @id @default(uuid())
+  clusterId        String          @map("cluster_id")
+  siteDomainId     String?         @map("site_domain_id")
+  dnsLineId        String?         @map("dns_line_id")
+  dnsLineKey       String          @default("default") @map("dns_line_key")
+  nodeId           UUID?           @map("node_id")
+  hostname         String
+  type             DNSRecordType
+  value            String
+  providerRecordId String?         @map("provider_record_id")
+  status           DNSRecordStatus @default(PENDING)
+  lastError        String?         @map("last_error") @db.Text
+  lastSyncedAt     DateTime?       @map("last_synced_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @default(now()) @updatedAt @map("updated_at")
+  cluster          Cluster         @relation(fields: [clusterId], references: [id])
+  siteDomain       SiteDomain?     @relation(fields: [siteDomainId], references: [id], onDelete: SetNull)
+  dnsLine          DNSLine?        @relation(fields: [dnsLineId], references: [id])
+  node             Node?           @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+
+  @@unique([clusterId, hostname, type, value, dnsLineKey])
+  @@index([clusterId, status])
+  @@index([siteDomainId])
+  @@index([dnsLineId])
+  @@index([nodeId])
+  @@map("dns_managed_records")
+}
+
+model DNSProviderConfig {
+  id                   String          @id @default(uuid())
+  clusterId            String          @unique @map("cluster_id")
+  provider             DNSProviderType
+  zone                 String
+  zoneId               String?         @map("zone_id")
+  credentialsEncrypted String          @map("credentials_encrypted") @db.Text
+  defaultTtl           Int             @default(300) @map("default_ttl")
+  proxied              Boolean         @default(false)
+  enabled              Boolean         @default(true)
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at")
+  cluster              Cluster         @relation(fields: [clusterId], references: [id])
+
+  @@index([provider, enabled])
+  @@map("dns_provider_configs")
+}
+
+model DNSSyncJob {
+  id            String        @id @default(uuid())
+  clusterId     String        @map("cluster_id")
+  siteId        String?       @map("site_id")
+  action        DNSSyncAction
+  status        JobStatus     @default(PENDING)
+  attempts      Int           @default(0)
+  maxAttempts   Int           @default(8) @map("max_attempts")
+  nextAttemptAt DateTime      @default(now()) @map("next_attempt_at")
+  leaseUntil    DateTime?     @map("lease_until")
+  resultJson    Json?         @map("result_json")
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
+  cluster       Cluster       @relation(fields: [clusterId], references: [id])
+  site          Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+  @@index([status, updatedAt])
+  @@index([clusterId, createdAt])
+  @@index([siteId, createdAt])
+  @@map("dns_sync_jobs")
 }
 
 model DynamicSetting {
@@ -228,6 +331,7 @@ model Node {
   region             ClusterRegion?          @relation(fields: [regionId], references: [id])
   addresses          NodeAddress[]
   dnsLines           NodeDNSLine[]
+  dnsRecords         DNSManagedRecord[]
   cacheConfig        NodeCacheConfig?
   credential         NodeCredential?
   siteConfigVersions NodeSiteConfigVersion[]
@@ -400,6 +504,7 @@ model Site {
   configVersions     ConfigVersion[]
   publishJobs        PublishJob[]
   purgeJobs          PurgeJob[]
+  dnsSyncJobs        DNSSyncJob[]
 
   @@unique([clusterId, name])
   @@index([clusterId, status])
@@ -421,11 +526,12 @@ model SiteCertificate {
 }
 
 model SiteDomain {
-  id        String   @id @default(uuid())
-  siteId    String   @map("site_id")
-  hostname  String   @unique
-  createdAt DateTime @default(now()) @map("created_at")
-  site      Site     @relation(fields: [siteId], references: [id])
+  id         String             @id @default(uuid())
+  siteId     String             @map("site_id")
+  hostname   String             @unique
+  createdAt  DateTime           @default(now()) @map("created_at")
+  site       Site               @relation(fields: [siteId], references: [id])
+  dnsRecords DNSManagedRecord[]
 
   @@index([siteId])
   @@map("site_domains")

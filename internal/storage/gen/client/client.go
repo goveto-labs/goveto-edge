@@ -32,6 +32,9 @@ type Client struct {
 	ClusterRegion         ClusterRegionActions
 	ConfigVersion         ConfigVersionActions
 	DNSLine               DNSLineActions
+	DNSManagedRecord      DNSManagedRecordActions
+	DNSProviderConfig     DNSProviderConfigActions
+	DNSSyncJob            DNSSyncJobActions
 	DynamicSetting        DynamicSettingActions
 	Node                  NodeActions
 	NodeAddress           NodeAddressActions
@@ -66,6 +69,9 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.ClusterRegion = ClusterRegionActions{client: c}
 	c.ConfigVersion = ConfigVersionActions{client: c}
 	c.DNSLine = DNSLineActions{client: c}
+	c.DNSManagedRecord = DNSManagedRecordActions{client: c}
+	c.DNSProviderConfig = DNSProviderConfigActions{client: c}
+	c.DNSSyncJob = DNSSyncJobActions{client: c}
 	c.DynamicSetting = DynamicSettingActions{client: c}
 	c.Node = NodeActions{client: c}
 	c.NodeAddress = NodeAddressActions{client: c}
@@ -249,6 +255,9 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.ClusterRegion = ClusterRegionActions{client: txClient}
 	txClient.ConfigVersion = ConfigVersionActions{client: txClient}
 	txClient.DNSLine = DNSLineActions{client: txClient}
+	txClient.DNSManagedRecord = DNSManagedRecordActions{client: txClient}
+	txClient.DNSProviderConfig = DNSProviderConfigActions{client: txClient}
+	txClient.DNSSyncJob = DNSSyncJobActions{client: txClient}
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
 	txClient.NodeAddress = NodeAddressActions{client: txClient}
@@ -2209,14 +2218,14 @@ func (b ClusterCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Clus
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "creator_id", "name", "created_at", "updated_at"})
+		q, args := b.action.buildClusterCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "creator_id", "name", "primary_hostname", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Cluster
-			if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Cluster.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -2243,7 +2252,7 @@ func (b ClusterCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "creator_id", "name", "created_at", "updated_at"}
+		returningColumns = []string{"id", "creator_id", "name", "primary_hostname", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -2452,7 +2461,7 @@ func (b ClusterDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple Cluster records.
 func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQueryOption) ([]model.Cluster, error) {
 	cfg := query.ApplyClusterOptions(opts)
-	q := "SELECT id, creator_id, name, created_at, updated_at FROM clusters"
+	q := "SELECT id, creator_id, name, primary_hostname, created_at, updated_at FROM clusters"
 	argIdx := 0
 	where, args := buildClusterWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -2479,7 +2488,7 @@ func (a ClusterActions) FindMany(ctx context.Context, opts ...query.ClusterQuery
 	var results []model.Cluster
 	for rows.Next() {
 		var item model.Cluster
-		if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -2504,14 +2513,14 @@ func (a ClusterActions) FindFirst(ctx context.Context, opts ...query.ClusterQuer
 func (a ClusterActions) FindUnique(ctx context.Context, where query.ClusterWhereClause) (*model.Cluster, error) {
 	argIdx := 0
 	whereSQL, args := buildClusterWhere(a.client, []query.ClusterWhereClause{where}, &argIdx)
-	q := "SELECT id, creator_id, name, created_at, updated_at FROM clusters"
+	q := "SELECT id, creator_id, name, primary_hostname, created_at, updated_at FROM clusters"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Cluster
-	if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -2536,10 +2545,10 @@ func (a ClusterActions) CreateOne(ctx context.Context, sets ...query.ClusterSetC
 	q := fmt.Sprintf("INSERT INTO clusters (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -2558,7 +2567,7 @@ func (a ClusterActions) CreateMany(ctx context.Context, data []query.ClusterCrea
 }
 
 func (a ClusterActions) buildClusterCreateManySQL(data []query.ClusterCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "creator_id", "name", "created_at", "updated_at"}
+	cols := []string{"id", "creator_id", "name", "primary_hostname", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -2614,10 +2623,10 @@ func (a ClusterActions) UpdateOne(ctx context.Context, where query.ClusterWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -2700,10 +2709,10 @@ func (a ClusterActions) UpsertOne(ctx context.Context, where query.ClusterWhereC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Cluster.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -2724,10 +2733,10 @@ func (a ClusterActions) DeleteOne(ctx context.Context, where query.ClusterWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, creator_id, name, created_at, updated_at"
+		q += " RETURNING id, creator_id, name, primary_hostname, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Cluster
-		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CreatorId, &item.Name, &item.PrimaryHostname, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -6529,14 +6538,14 @@ func (b DNSLineCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSL
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "created_at", "updated_at"})
+		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.DNSLine
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -6563,7 +6572,7 @@ func (b DNSLineCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -6772,7 +6781,7 @@ func (b DNSLineDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
 // FindMany retrieves multiple DNSLine records.
 func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQueryOption) ([]model.DNSLine, error) {
 	cfg := query.ApplyDNSLineOptions(opts)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM dns_lines"
+	q := "SELECT id, cluster_id, name, provider_code, created_at, updated_at FROM dns_lines"
 	argIdx := 0
 	where, args := buildDNSLineWhere(a.client, cfg.Wheres, &argIdx)
 	if where != "" {
@@ -6799,7 +6808,7 @@ func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQuery
 	var results []model.DNSLine
 	for rows.Next() {
 		var item model.DNSLine
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -6824,14 +6833,14 @@ func (a DNSLineActions) FindFirst(ctx context.Context, opts ...query.DNSLineQuer
 func (a DNSLineActions) FindUnique(ctx context.Context, where query.DNSLineWhereClause) (*model.DNSLine, error) {
 	argIdx := 0
 	whereSQL, args := buildDNSLineWhere(a.client, []query.DNSLineWhereClause{where}, &argIdx)
-	q := "SELECT id, cluster_id, name, created_at, updated_at FROM dns_lines"
+	q := "SELECT id, cluster_id, name, provider_code, created_at, updated_at FROM dns_lines"
 	if whereSQL != "" {
 		q += " WHERE " + whereSQL
 	}
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.DNSLine
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -6856,10 +6865,10 @@ func (a DNSLineActions) CreateOne(ctx context.Context, sets ...query.DNSLineSetC
 	q := fmt.Sprintf("INSERT INTO dns_lines (%s) VALUES (%s)",
 		strings.Join(cols, ", "), strings.Join(phs, ", "))
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -6878,7 +6887,7 @@ func (a DNSLineActions) CreateMany(ctx context.Context, data []query.DNSLineCrea
 }
 
 func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
 	argIdx := 0
 	var valueSets []string
 	var args []any
@@ -6934,10 +6943,10 @@ func (a DNSLineActions) UpdateOne(ctx context.Context, where query.DNSLineWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -7020,10 +7029,10 @@ func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereC
 		}
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -7044,10 +7053,10 @@ func (a DNSLineActions) DeleteOne(ctx context.Context, where query.DNSLineWhereC
 		q += " WHERE " + whereSQL
 	}
 	if a.client.dialect == "postgresql" {
-		q += " RETURNING id, cluster_id, name, created_at, updated_at"
+		q += " RETURNING id, cluster_id, name, provider_code, created_at, updated_at"
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -7170,6 +7179,2598 @@ func (a DNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("DNSLine.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildDNSManagedRecordWhere recursively builds a WHERE clause string and arguments.
+func buildDNSManagedRecordWhere(c *Client, wheres []query.DNSManagedRecordWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DNSManagedRecordWhereClause); ok {
+				sub, subArgs := buildDNSManagedRecordWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DNSManagedRecordWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDNSManagedRecordWhere(c, []query.DNSManagedRecordWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DNSManagedRecordWhereClause); ok {
+				sub, subArgs := buildDNSManagedRecordWhere(c, []query.DNSManagedRecordWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DNSManagedRecordActions provides database operations for the DNSManagedRecord model.
+type DNSManagedRecordActions struct {
+	client *Client
+}
+
+// DNSManagedRecordCreateBuilder builds a DNSManagedRecord create operation incrementally.
+type DNSManagedRecordCreateBuilder struct {
+	action DNSManagedRecordActions
+	sets   []query.DNSManagedRecordSetClause
+}
+
+// Create starts a staged DNSManagedRecord create operation.
+func (a DNSManagedRecordActions) Create() DNSManagedRecordCreateBuilder {
+	return DNSManagedRecordCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DNSManagedRecordCreateBuilder) Set(sets ...query.DNSManagedRecordSetClause) DNSManagedRecordCreateBuilder {
+	next := DNSManagedRecordCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DNSManagedRecordSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DNSManagedRecordCreateBuilder) Do(ctx context.Context) (*model.DNSManagedRecord, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DNSManagedRecordCreateManyBuilder builds a bulk DNSManagedRecord insert operation.
+type DNSManagedRecordCreateManyBuilder struct {
+	action            DNSManagedRecordActions
+	data              []query.DNSManagedRecordCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DNSManagedRecord insert operation.
+func (a DNSManagedRecordActions) BulkCreate(data []query.DNSManagedRecordCreateInput) DNSManagedRecordCreateManyBuilder {
+	return DNSManagedRecordCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DNSManagedRecordCreateManyBuilder) OnConflictDoNothing(columns ...string) DNSManagedRecordCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DNSManagedRecordCreateManyBuilder) Returning(columns ...string) DNSManagedRecordCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DNSManagedRecordCreateManyBuilder) BatchSize(n int) DNSManagedRecordCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DNSManagedRecordCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSManagedRecordCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DNSManagedRecord.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DNSManagedRecord.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DNSManagedRecordCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSManagedRecord, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DNSManagedRecord
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSManagedRecordCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "site_domain_id", "dns_line_id", "dns_line_key", "node_id", "hostname", "type", "value", "provider_record_id", "status", "last_error", "last_synced_at", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DNSManagedRecord
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DNSManagedRecordCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "site_domain_id", "dns_line_id", "dns_line_key", "node_id", "hostname", "type", "value", "provider_record_id", "status", "last_error", "last_synced_at", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSManagedRecordCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DNSManagedRecordQueryBuilder builds a DNSManagedRecord query incrementally.
+type DNSManagedRecordQueryBuilder struct {
+	action DNSManagedRecordActions
+	opts   []query.DNSManagedRecordQueryOption
+}
+
+// Query starts a staged DNSManagedRecord query.
+func (a DNSManagedRecordActions) Query() DNSManagedRecordQueryBuilder {
+	return DNSManagedRecordQueryBuilder{action: a}
+}
+
+func (b DNSManagedRecordQueryBuilder) withOptions(opts ...query.DNSManagedRecordQueryOption) DNSManagedRecordQueryBuilder {
+	next := DNSManagedRecordQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DNSManagedRecordQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DNSManagedRecordQueryBuilder) Where(clauses ...query.DNSManagedRecordWhereClause) DNSManagedRecordQueryBuilder {
+	opts := make([]query.DNSManagedRecordQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DNSManagedRecordQueryBuilder) OrderBy(clause query.DNSManagedRecordOrderByClause) DNSManagedRecordQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DNSManagedRecordQueryBuilder) Include(clauses ...query.DNSManagedRecordIncludeClause) DNSManagedRecordQueryBuilder {
+	opts := make([]query.DNSManagedRecordQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DNSManagedRecordQueryBuilder) Take(n int) DNSManagedRecordQueryBuilder {
+	return b.withOptions(query.DNSManagedRecordTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DNSManagedRecordQueryBuilder) Skip(n int) DNSManagedRecordQueryBuilder {
+	return b.withOptions(query.DNSManagedRecordSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DNSManagedRecordQueryBuilder) Do(ctx context.Context) ([]model.DNSManagedRecord, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DNSManagedRecordQueryBuilder) First(ctx context.Context) (*model.DNSManagedRecord, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DNSManagedRecordQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDNSManagedRecordOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DNSManagedRecordUpdateBuilder builds a DNSManagedRecord update operation incrementally.
+type DNSManagedRecordUpdateBuilder struct {
+	action DNSManagedRecordActions
+	wheres []query.DNSManagedRecordWhereClause
+	sets   []query.DNSManagedRecordSetClause
+}
+
+// Update starts a staged DNSManagedRecord update operation.
+func (a DNSManagedRecordActions) Update() DNSManagedRecordUpdateBuilder {
+	return DNSManagedRecordUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DNSManagedRecordUpdateBuilder) Where(clauses ...query.DNSManagedRecordWhereClause) DNSManagedRecordUpdateBuilder {
+	next := DNSManagedRecordUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DNSManagedRecordWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DNSManagedRecordSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DNSManagedRecordUpdateBuilder) Set(sets ...query.DNSManagedRecordSetClause) DNSManagedRecordUpdateBuilder {
+	next := DNSManagedRecordUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DNSManagedRecordWhereClause(nil), b.wheres...),
+		sets:   make([]query.DNSManagedRecordSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DNSManagedRecordUpdateBuilder) combinedWhere() (query.DNSManagedRecordWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSManagedRecordWhereClause{}, fmt.Errorf("DNSManagedRecord.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSManagedRecord.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DNSManagedRecordUpdateBuilder) Do(ctx context.Context) (*model.DNSManagedRecord, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DNSManagedRecordUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DNSManagedRecordDeleteBuilder builds a DNSManagedRecord delete operation incrementally.
+type DNSManagedRecordDeleteBuilder struct {
+	action DNSManagedRecordActions
+	wheres []query.DNSManagedRecordWhereClause
+}
+
+// Delete starts a staged DNSManagedRecord delete operation.
+func (a DNSManagedRecordActions) Delete() DNSManagedRecordDeleteBuilder {
+	return DNSManagedRecordDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DNSManagedRecordDeleteBuilder) Where(clauses ...query.DNSManagedRecordWhereClause) DNSManagedRecordDeleteBuilder {
+	next := DNSManagedRecordDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DNSManagedRecordWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DNSManagedRecordDeleteBuilder) combinedWhere() (query.DNSManagedRecordWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSManagedRecordWhereClause{}, fmt.Errorf("DNSManagedRecord.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSManagedRecord.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DNSManagedRecordDeleteBuilder) Do(ctx context.Context) (*model.DNSManagedRecord, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DNSManagedRecordDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DNSManagedRecord records.
+func (a DNSManagedRecordActions) FindMany(ctx context.Context, opts ...query.DNSManagedRecordQueryOption) ([]model.DNSManagedRecord, error) {
+	cfg := query.ApplyDNSManagedRecordOptions(opts)
+	q := "SELECT id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at FROM dns_managed_records"
+	argIdx := 0
+	where, args := buildDNSManagedRecordWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DNSManagedRecord
+	for rows.Next() {
+		var item model.DNSManagedRecord
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DNSManagedRecord record.
+func (a DNSManagedRecordActions) FindFirst(ctx context.Context, opts ...query.DNSManagedRecordQueryOption) (*model.DNSManagedRecord, error) {
+	opts = append(opts, query.DNSManagedRecordTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DNSManagedRecord record by unique constraint.
+func (a DNSManagedRecordActions) FindUnique(ctx context.Context, where query.DNSManagedRecordWhereClause) (*model.DNSManagedRecord, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at FROM dns_managed_records"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DNSManagedRecord
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DNSManagedRecord.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DNSManagedRecord record.
+func (a DNSManagedRecordActions) CreateOne(ctx context.Context, sets ...query.DNSManagedRecordSetClause) (*model.DNSManagedRecord, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSManagedRecord.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DNSManagedRecord
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DNSManagedRecord records.
+func (a DNSManagedRecordActions) CreateMany(ctx context.Context, data []query.DNSManagedRecordCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DNSManagedRecordActions) buildDNSManagedRecordCreateManySQL(data []query.DNSManagedRecordCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "site_domain_id", "dns_line_id", "dns_line_key", "node_id", "hostname", "type", "value", "provider_record_id", "status", "last_error", "last_synced_at", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DNSManagedRecord record matching the where clause.
+func (a DNSManagedRecordActions) UpdateOne(ctx context.Context, where query.DNSManagedRecordWhereClause, sets ...query.DNSManagedRecordSetClause) (*model.DNSManagedRecord, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSManagedRecord.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_managed_records SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSManagedRecord
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSManagedRecord.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DNSManagedRecord records matching the where clauses.
+func (a DNSManagedRecordActions) UpdateMany(ctx context.Context, wheres []query.DNSManagedRecordWhereClause, sets ...query.DNSManagedRecordSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DNSManagedRecord.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_managed_records SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSManagedRecord.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DNSManagedRecord record.
+func (a DNSManagedRecordActions) UpsertOne(ctx context.Context, where query.DNSManagedRecordWhereClause, create []query.DNSManagedRecordSetClause, update []query.DNSManagedRecordSetClause) (*model.DNSManagedRecord, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DNSManagedRecord.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_managed_records (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSManagedRecord
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DNSManagedRecord record matching the where clause.
+func (a DNSManagedRecordActions) DeleteOne(ctx context.Context, where query.DNSManagedRecordWhereClause) (*model.DNSManagedRecord, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSManagedRecordWhere(a.client, []query.DNSManagedRecordWhereClause{where}, &argIdx)
+	q := "DELETE FROM dns_managed_records"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_domain_id, dns_line_id, dns_line_key, node_id, hostname, type, value, provider_record_id, status, last_error, last_synced_at, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSManagedRecord
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteDomainId, &item.DnsLineId, &item.DnsLineKey, &item.NodeId, &item.Hostname, &item.Type, &item.Value, &item.ProviderRecordId, &item.Status, &item.LastError, &item.LastSyncedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSManagedRecord.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DNSManagedRecord records matching the where clauses.
+func (a DNSManagedRecordActions) DeleteMany(ctx context.Context, wheres ...query.DNSManagedRecordWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM dns_managed_records"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSManagedRecord.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DNSManagedRecord records matching the where clauses.
+func (a DNSManagedRecordActions) Count(ctx context.Context, wheres ...query.DNSManagedRecordWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSManagedRecordWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM dns_managed_records"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DNSManagedRecord.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DNSManagedRecord.
+func (a DNSManagedRecordActions) Aggregate(ctx context.Context, opts ...query.DNSManagedRecordAggregateOption) (*query.DNSManagedRecordAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_managed_records", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DNSManagedRecordAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DNSManagedRecord.
+func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSManagedRecordAggregateOption) ([]query.DNSManagedRecordGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_managed_records GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DNSManagedRecord.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DNSManagedRecordGroupByResult
+	for rows.Next() {
+		r := query.DNSManagedRecordGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DNSManagedRecord.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildDNSProviderConfigWhere recursively builds a WHERE clause string and arguments.
+func buildDNSProviderConfigWhere(c *Client, wheres []query.DNSProviderConfigWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DNSProviderConfigWhereClause); ok {
+				sub, subArgs := buildDNSProviderConfigWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DNSProviderConfigWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDNSProviderConfigWhere(c, []query.DNSProviderConfigWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DNSProviderConfigWhereClause); ok {
+				sub, subArgs := buildDNSProviderConfigWhere(c, []query.DNSProviderConfigWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DNSProviderConfigActions provides database operations for the DNSProviderConfig model.
+type DNSProviderConfigActions struct {
+	client *Client
+}
+
+// DNSProviderConfigCreateBuilder builds a DNSProviderConfig create operation incrementally.
+type DNSProviderConfigCreateBuilder struct {
+	action DNSProviderConfigActions
+	sets   []query.DNSProviderConfigSetClause
+}
+
+// Create starts a staged DNSProviderConfig create operation.
+func (a DNSProviderConfigActions) Create() DNSProviderConfigCreateBuilder {
+	return DNSProviderConfigCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DNSProviderConfigCreateBuilder) Set(sets ...query.DNSProviderConfigSetClause) DNSProviderConfigCreateBuilder {
+	next := DNSProviderConfigCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DNSProviderConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DNSProviderConfigCreateBuilder) Do(ctx context.Context) (*model.DNSProviderConfig, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DNSProviderConfigCreateManyBuilder builds a bulk DNSProviderConfig insert operation.
+type DNSProviderConfigCreateManyBuilder struct {
+	action            DNSProviderConfigActions
+	data              []query.DNSProviderConfigCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DNSProviderConfig insert operation.
+func (a DNSProviderConfigActions) BulkCreate(data []query.DNSProviderConfigCreateInput) DNSProviderConfigCreateManyBuilder {
+	return DNSProviderConfigCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DNSProviderConfigCreateManyBuilder) OnConflictDoNothing(columns ...string) DNSProviderConfigCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DNSProviderConfigCreateManyBuilder) Returning(columns ...string) DNSProviderConfigCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DNSProviderConfigCreateManyBuilder) BatchSize(n int) DNSProviderConfigCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DNSProviderConfigCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DNSProviderConfig.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DNSProviderConfig.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DNSProviderConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSProviderConfig, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DNSProviderConfig
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DNSProviderConfig
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DNSProviderConfigCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DNSProviderConfigQueryBuilder builds a DNSProviderConfig query incrementally.
+type DNSProviderConfigQueryBuilder struct {
+	action DNSProviderConfigActions
+	opts   []query.DNSProviderConfigQueryOption
+}
+
+// Query starts a staged DNSProviderConfig query.
+func (a DNSProviderConfigActions) Query() DNSProviderConfigQueryBuilder {
+	return DNSProviderConfigQueryBuilder{action: a}
+}
+
+func (b DNSProviderConfigQueryBuilder) withOptions(opts ...query.DNSProviderConfigQueryOption) DNSProviderConfigQueryBuilder {
+	next := DNSProviderConfigQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DNSProviderConfigQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DNSProviderConfigQueryBuilder) Where(clauses ...query.DNSProviderConfigWhereClause) DNSProviderConfigQueryBuilder {
+	opts := make([]query.DNSProviderConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DNSProviderConfigQueryBuilder) OrderBy(clause query.DNSProviderConfigOrderByClause) DNSProviderConfigQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DNSProviderConfigQueryBuilder) Include(clauses ...query.DNSProviderConfigIncludeClause) DNSProviderConfigQueryBuilder {
+	opts := make([]query.DNSProviderConfigQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DNSProviderConfigQueryBuilder) Take(n int) DNSProviderConfigQueryBuilder {
+	return b.withOptions(query.DNSProviderConfigTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DNSProviderConfigQueryBuilder) Skip(n int) DNSProviderConfigQueryBuilder {
+	return b.withOptions(query.DNSProviderConfigSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DNSProviderConfigQueryBuilder) Do(ctx context.Context) ([]model.DNSProviderConfig, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DNSProviderConfigQueryBuilder) First(ctx context.Context) (*model.DNSProviderConfig, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DNSProviderConfigQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDNSProviderConfigOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DNSProviderConfigUpdateBuilder builds a DNSProviderConfig update operation incrementally.
+type DNSProviderConfigUpdateBuilder struct {
+	action DNSProviderConfigActions
+	wheres []query.DNSProviderConfigWhereClause
+	sets   []query.DNSProviderConfigSetClause
+}
+
+// Update starts a staged DNSProviderConfig update operation.
+func (a DNSProviderConfigActions) Update() DNSProviderConfigUpdateBuilder {
+	return DNSProviderConfigUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DNSProviderConfigUpdateBuilder) Where(clauses ...query.DNSProviderConfigWhereClause) DNSProviderConfigUpdateBuilder {
+	next := DNSProviderConfigUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DNSProviderConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DNSProviderConfigSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DNSProviderConfigUpdateBuilder) Set(sets ...query.DNSProviderConfigSetClause) DNSProviderConfigUpdateBuilder {
+	next := DNSProviderConfigUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DNSProviderConfigWhereClause(nil), b.wheres...),
+		sets:   make([]query.DNSProviderConfigSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DNSProviderConfigUpdateBuilder) combinedWhere() (query.DNSProviderConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSProviderConfigWhereClause{}, fmt.Errorf("DNSProviderConfig.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSProviderConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DNSProviderConfigUpdateBuilder) Do(ctx context.Context) (*model.DNSProviderConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DNSProviderConfigUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DNSProviderConfigDeleteBuilder builds a DNSProviderConfig delete operation incrementally.
+type DNSProviderConfigDeleteBuilder struct {
+	action DNSProviderConfigActions
+	wheres []query.DNSProviderConfigWhereClause
+}
+
+// Delete starts a staged DNSProviderConfig delete operation.
+func (a DNSProviderConfigActions) Delete() DNSProviderConfigDeleteBuilder {
+	return DNSProviderConfigDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DNSProviderConfigDeleteBuilder) Where(clauses ...query.DNSProviderConfigWhereClause) DNSProviderConfigDeleteBuilder {
+	next := DNSProviderConfigDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DNSProviderConfigWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DNSProviderConfigDeleteBuilder) combinedWhere() (query.DNSProviderConfigWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSProviderConfigWhereClause{}, fmt.Errorf("DNSProviderConfig.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSProviderConfig.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DNSProviderConfigDeleteBuilder) Do(ctx context.Context) (*model.DNSProviderConfig, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DNSProviderConfigDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DNSProviderConfig records.
+func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DNSProviderConfigQueryOption) ([]model.DNSProviderConfig, error) {
+	cfg := query.ApplyDNSProviderConfigOptions(opts)
+	q := "SELECT id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at FROM dns_provider_configs"
+	argIdx := 0
+	where, args := buildDNSProviderConfigWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DNSProviderConfig
+	for rows.Next() {
+		var item model.DNSProviderConfig
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DNSProviderConfig record.
+func (a DNSProviderConfigActions) FindFirst(ctx context.Context, opts ...query.DNSProviderConfigQueryOption) (*model.DNSProviderConfig, error) {
+	opts = append(opts, query.DNSProviderConfigTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DNSProviderConfig record by unique constraint.
+func (a DNSProviderConfigActions) FindUnique(ctx context.Context, where query.DNSProviderConfigWhereClause) (*model.DNSProviderConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at FROM dns_provider_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DNSProviderConfig
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DNSProviderConfig.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DNSProviderConfig record.
+func (a DNSProviderConfigActions) CreateOne(ctx context.Context, sets ...query.DNSProviderConfigSetClause) (*model.DNSProviderConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSProviderConfig.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DNSProviderConfig
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DNSProviderConfig records.
+func (a DNSProviderConfigActions) CreateMany(ctx context.Context, data []query.DNSProviderConfigCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []query.DNSProviderConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DNSProviderConfig record matching the where clause.
+func (a DNSProviderConfigActions) UpdateOne(ctx context.Context, where query.DNSProviderConfigWhereClause, sets ...query.DNSProviderConfigSetClause) (*model.DNSProviderConfig, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSProviderConfig.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_provider_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSProviderConfig
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSProviderConfig.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DNSProviderConfig records matching the where clauses.
+func (a DNSProviderConfigActions) UpdateMany(ctx context.Context, wheres []query.DNSProviderConfigWhereClause, sets ...query.DNSProviderConfigSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DNSProviderConfig.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_provider_configs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSProviderConfig.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DNSProviderConfig record.
+func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNSProviderConfigWhereClause, create []query.DNSProviderConfigSetClause, update []query.DNSProviderConfigSetClause) (*model.DNSProviderConfig, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DNSProviderConfig.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_provider_configs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSProviderConfig
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DNSProviderConfig record matching the where clause.
+func (a DNSProviderConfigActions) DeleteOne(ctx context.Context, where query.DNSProviderConfigWhereClause) (*model.DNSProviderConfig, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSProviderConfigWhere(a.client, []query.DNSProviderConfigWhereClause{where}, &argIdx)
+	q := "DELETE FROM dns_provider_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, provider, zone, zone_id, credentials_encrypted, default_ttl, proxied, enabled, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSProviderConfig
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSProviderConfig.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DNSProviderConfig records matching the where clauses.
+func (a DNSProviderConfigActions) DeleteMany(ctx context.Context, wheres ...query.DNSProviderConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM dns_provider_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSProviderConfig.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DNSProviderConfig records matching the where clauses.
+func (a DNSProviderConfigActions) Count(ctx context.Context, wheres ...query.DNSProviderConfigWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSProviderConfigWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM dns_provider_configs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DNSProviderConfig.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DNSProviderConfig.
+func (a DNSProviderConfigActions) Aggregate(ctx context.Context, opts ...query.DNSProviderConfigAggregateOption) (*query.DNSProviderConfigAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_provider_configs", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DNSProviderConfigAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DNSProviderConfig.
+func (a DNSProviderConfigActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSProviderConfigAggregateOption) ([]query.DNSProviderConfigGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_provider_configs GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DNSProviderConfig.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DNSProviderConfigGroupByResult
+	for rows.Next() {
+		r := query.DNSProviderConfigGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DNSProviderConfig.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+// buildDNSSyncJobWhere recursively builds a WHERE clause string and arguments.
+func buildDNSSyncJobWhere(c *Client, wheres []query.DNSSyncJobWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DNSSyncJobWhereClause); ok {
+				sub, subArgs := buildDNSSyncJobWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DNSSyncJobWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDNSSyncJobWhere(c, []query.DNSSyncJobWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DNSSyncJobWhereClause); ok {
+				sub, subArgs := buildDNSSyncJobWhere(c, []query.DNSSyncJobWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, w.Field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, w.Field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, w.Field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, w.Field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DNSSyncJobActions provides database operations for the DNSSyncJob model.
+type DNSSyncJobActions struct {
+	client *Client
+}
+
+// DNSSyncJobCreateBuilder builds a DNSSyncJob create operation incrementally.
+type DNSSyncJobCreateBuilder struct {
+	action DNSSyncJobActions
+	sets   []query.DNSSyncJobSetClause
+}
+
+// Create starts a staged DNSSyncJob create operation.
+func (a DNSSyncJobActions) Create() DNSSyncJobCreateBuilder {
+	return DNSSyncJobCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DNSSyncJobCreateBuilder) Set(sets ...query.DNSSyncJobSetClause) DNSSyncJobCreateBuilder {
+	next := DNSSyncJobCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DNSSyncJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DNSSyncJobCreateBuilder) Do(ctx context.Context) (*model.DNSSyncJob, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DNSSyncJobCreateManyBuilder builds a bulk DNSSyncJob insert operation.
+type DNSSyncJobCreateManyBuilder struct {
+	action            DNSSyncJobActions
+	data              []query.DNSSyncJobCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DNSSyncJob insert operation.
+func (a DNSSyncJobActions) BulkCreate(data []query.DNSSyncJobCreateInput) DNSSyncJobCreateManyBuilder {
+	return DNSSyncJobCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DNSSyncJobCreateManyBuilder) OnConflictDoNothing(columns ...string) DNSSyncJobCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DNSSyncJobCreateManyBuilder) Returning(columns ...string) DNSSyncJobCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DNSSyncJobCreateManyBuilder) BatchSize(n int) DNSSyncJobCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DNSSyncJobCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DNSSyncJob.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DNSSyncJob.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DNSSyncJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSSyncJob, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DNSSyncJob
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DNSSyncJob
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DNSSyncJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DNSSyncJobQueryBuilder builds a DNSSyncJob query incrementally.
+type DNSSyncJobQueryBuilder struct {
+	action DNSSyncJobActions
+	opts   []query.DNSSyncJobQueryOption
+}
+
+// Query starts a staged DNSSyncJob query.
+func (a DNSSyncJobActions) Query() DNSSyncJobQueryBuilder {
+	return DNSSyncJobQueryBuilder{action: a}
+}
+
+func (b DNSSyncJobQueryBuilder) withOptions(opts ...query.DNSSyncJobQueryOption) DNSSyncJobQueryBuilder {
+	next := DNSSyncJobQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DNSSyncJobQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DNSSyncJobQueryBuilder) Where(clauses ...query.DNSSyncJobWhereClause) DNSSyncJobQueryBuilder {
+	opts := make([]query.DNSSyncJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DNSSyncJobQueryBuilder) OrderBy(clause query.DNSSyncJobOrderByClause) DNSSyncJobQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DNSSyncJobQueryBuilder) Include(clauses ...query.DNSSyncJobIncludeClause) DNSSyncJobQueryBuilder {
+	opts := make([]query.DNSSyncJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DNSSyncJobQueryBuilder) Take(n int) DNSSyncJobQueryBuilder {
+	return b.withOptions(query.DNSSyncJobTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DNSSyncJobQueryBuilder) Skip(n int) DNSSyncJobQueryBuilder {
+	return b.withOptions(query.DNSSyncJobSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DNSSyncJobQueryBuilder) Do(ctx context.Context) ([]model.DNSSyncJob, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DNSSyncJobQueryBuilder) First(ctx context.Context) (*model.DNSSyncJob, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DNSSyncJobQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDNSSyncJobOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DNSSyncJobUpdateBuilder builds a DNSSyncJob update operation incrementally.
+type DNSSyncJobUpdateBuilder struct {
+	action DNSSyncJobActions
+	wheres []query.DNSSyncJobWhereClause
+	sets   []query.DNSSyncJobSetClause
+}
+
+// Update starts a staged DNSSyncJob update operation.
+func (a DNSSyncJobActions) Update() DNSSyncJobUpdateBuilder {
+	return DNSSyncJobUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DNSSyncJobUpdateBuilder) Where(clauses ...query.DNSSyncJobWhereClause) DNSSyncJobUpdateBuilder {
+	next := DNSSyncJobUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DNSSyncJobWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DNSSyncJobSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DNSSyncJobUpdateBuilder) Set(sets ...query.DNSSyncJobSetClause) DNSSyncJobUpdateBuilder {
+	next := DNSSyncJobUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DNSSyncJobWhereClause(nil), b.wheres...),
+		sets:   make([]query.DNSSyncJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DNSSyncJobUpdateBuilder) combinedWhere() (query.DNSSyncJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSSyncJobWhereClause{}, fmt.Errorf("DNSSyncJob.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSSyncJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DNSSyncJobUpdateBuilder) Do(ctx context.Context) (*model.DNSSyncJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DNSSyncJobUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DNSSyncJobDeleteBuilder builds a DNSSyncJob delete operation incrementally.
+type DNSSyncJobDeleteBuilder struct {
+	action DNSSyncJobActions
+	wheres []query.DNSSyncJobWhereClause
+}
+
+// Delete starts a staged DNSSyncJob delete operation.
+func (a DNSSyncJobActions) Delete() DNSSyncJobDeleteBuilder {
+	return DNSSyncJobDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DNSSyncJobDeleteBuilder) Where(clauses ...query.DNSSyncJobWhereClause) DNSSyncJobDeleteBuilder {
+	next := DNSSyncJobDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DNSSyncJobWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DNSSyncJobDeleteBuilder) combinedWhere() (query.DNSSyncJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSSyncJobWhereClause{}, fmt.Errorf("DNSSyncJob.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSSyncJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DNSSyncJobDeleteBuilder) Do(ctx context.Context) (*model.DNSSyncJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DNSSyncJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DNSSyncJob records.
+func (a DNSSyncJobActions) FindMany(ctx context.Context, opts ...query.DNSSyncJobQueryOption) ([]model.DNSSyncJob, error) {
+	cfg := query.ApplyDNSSyncJobOptions(opts)
+	q := "SELECT id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at FROM dns_sync_jobs"
+	argIdx := 0
+	where, args := buildDNSSyncJobWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			obs[i] = ob.Field + " " + ob.Direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DNSSyncJob
+	for rows.Next() {
+		var item model.DNSSyncJob
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DNSSyncJob record.
+func (a DNSSyncJobActions) FindFirst(ctx context.Context, opts ...query.DNSSyncJobQueryOption) (*model.DNSSyncJob, error) {
+	opts = append(opts, query.DNSSyncJobTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DNSSyncJob record by unique constraint.
+func (a DNSSyncJobActions) FindUnique(ctx context.Context, where query.DNSSyncJobWhereClause) (*model.DNSSyncJob, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
+	q := "SELECT id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at FROM dns_sync_jobs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DNSSyncJob
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DNSSyncJob.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DNSSyncJob record.
+func (a DNSSyncJobActions) CreateOne(ctx context.Context, sets ...query.DNSSyncJobSetClause) (*model.DNSSyncJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSSyncJob.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		cols[i] = s.Field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DNSSyncJob
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DNSSyncJob records.
+func (a DNSSyncJobActions) CreateMany(ctx context.Context, data []query.DNSSyncJobCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DNSSyncJobActions) buildDNSSyncJobCreateManySQL(data []query.DNSSyncJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES %s",
+		strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				q += " (" + strings.Join(conflictColumns, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		q += " RETURNING " + strings.Join(returningColumns, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DNSSyncJob record matching the where clause.
+func (a DNSSyncJobActions) UpdateOne(ctx context.Context, where query.DNSSyncJobWhereClause, sets ...query.DNSSyncJobSetClause) (*model.DNSSyncJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSSyncJob.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_sync_jobs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncJob
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSSyncJob.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DNSSyncJob records matching the where clauses.
+func (a DNSSyncJobActions) UpdateMany(ctx context.Context, wheres []query.DNSSyncJobWhereClause, sets ...query.DNSSyncJobSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DNSSyncJob.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		setParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE dns_sync_jobs SET %s", strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSSyncJob.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DNSSyncJob record.
+func (a DNSSyncJobActions) UpsertOne(ctx context.Context, where query.DNSSyncJobWhereClause, create []query.DNSSyncJobSetClause, update []query.DNSSyncJobSetClause) (*model.DNSSyncJob, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DNSSyncJob.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		cols[i] = s.Field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO dns_sync_jobs (%s) VALUES (%s)",
+		strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", where.Field)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				uParts[i] = s.Field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncJob
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DNSSyncJob record matching the where clause.
+func (a DNSSyncJobActions) DeleteOne(ctx context.Context, where query.DNSSyncJobWhereClause) (*model.DNSSyncJob, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncJobWhere(a.client, []query.DNSSyncJobWhereClause{where}, &argIdx)
+	q := "DELETE FROM dns_sync_jobs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts, next_attempt_at, lease_until, result_json, created_at, updated_at"
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncJob
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSSyncJob.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DNSSyncJob records matching the where clauses.
+func (a DNSSyncJobActions) DeleteMany(ctx context.Context, wheres ...query.DNSSyncJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM dns_sync_jobs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSSyncJob.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DNSSyncJob records matching the where clauses.
+func (a DNSSyncJobActions) Count(ctx context.Context, wheres ...query.DNSSyncJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncJobWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM dns_sync_jobs"
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DNSSyncJob.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DNSSyncJob.
+func (a DNSSyncJobActions) Aggregate(ctx context.Context, opts ...query.DNSSyncJobAggregateOption) (*query.DNSSyncJobAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_sync_jobs", strings.Join(selParts, ", "))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DNSSyncJobAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DNSSyncJob.
+func (a DNSSyncJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSSyncJobAggregateOption) ([]query.DNSSyncJobGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	selParts = append(selParts, fields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", strings.ToUpper(opt.Fn), opt.Field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM dns_sync_jobs GROUP BY %s",
+		strings.Join(selParts, ", "), strings.Join(fields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncJob.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DNSSyncJobGroupByResult
+	for rows.Next() {
+		r := query.DNSSyncJobGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DNSSyncJob.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

@@ -30,45 +30,54 @@ func ApplyClusterOptions(opts []ClusterQueryOption) ClusterQueryConfig {
 
 // ClusterQuery is the namespace for Cluster query operations.
 type ClusterQuery struct {
-	Id           clusterIdField
-	CreatorId    clusterCreatorIdField
-	Name         clusterNameField
-	CreatedAt    clusterCreatedAtField
-	UpdatedAt    clusterUpdatedAtField
-	Creator      clusterCreatorRelation
-	Members      clusterMembersRelation
-	Nodes        clusterNodesRelation
-	Groups       clusterGroupsRelation
-	Regions      clusterRegionsRelation
-	DnsLines     clusterDnsLinesRelation
-	Certificates clusterCertificatesRelation
-	OriginPools  clusterOriginPoolsRelation
-	Sites        clusterSitesRelation
+	Id              clusterIdField
+	CreatorId       clusterCreatorIdField
+	Name            clusterNameField
+	PrimaryHostname clusterPrimaryHostnameField
+	CreatedAt       clusterCreatedAtField
+	UpdatedAt       clusterUpdatedAtField
+	Creator         clusterCreatorRelation
+	Members         clusterMembersRelation
+	Nodes           clusterNodesRelation
+	Groups          clusterGroupsRelation
+	Regions         clusterRegionsRelation
+	DnsLines        clusterDnsLinesRelation
+	DnsProvider     clusterDnsProviderRelation
+	DnsRecords      clusterDnsRecordsRelation
+	DnsSyncJobs     clusterDnsSyncJobsRelation
+	Certificates    clusterCertificatesRelation
+	OriginPools     clusterOriginPoolsRelation
+	Sites           clusterSitesRelation
 }
 
 const ClusterTable = "clusters"
 const ClusterIdColumn = "id"
 const ClusterCreatorIdColumn = "creator_id"
 const ClusterNameColumn = "name"
+const ClusterPrimaryHostnameColumn = "primary_hostname"
 const ClusterCreatedAtColumn = "created_at"
 const ClusterUpdatedAtColumn = "updated_at"
 
 // ClusterQuery provides query building methods for the Cluster model.
 var Cluster = ClusterQuery{
-	Id:           clusterIdField{},
-	CreatorId:    clusterCreatorIdField{},
-	Name:         clusterNameField{},
-	CreatedAt:    clusterCreatedAtField{},
-	UpdatedAt:    clusterUpdatedAtField{},
-	Creator:      clusterCreatorRelation{},
-	Members:      clusterMembersRelation{},
-	Nodes:        clusterNodesRelation{},
-	Groups:       clusterGroupsRelation{},
-	Regions:      clusterRegionsRelation{},
-	DnsLines:     clusterDnsLinesRelation{},
-	Certificates: clusterCertificatesRelation{},
-	OriginPools:  clusterOriginPoolsRelation{},
-	Sites:        clusterSitesRelation{},
+	Id:              clusterIdField{},
+	CreatorId:       clusterCreatorIdField{},
+	Name:            clusterNameField{},
+	PrimaryHostname: clusterPrimaryHostnameField{},
+	CreatedAt:       clusterCreatedAtField{},
+	UpdatedAt:       clusterUpdatedAtField{},
+	Creator:         clusterCreatorRelation{},
+	Members:         clusterMembersRelation{},
+	Nodes:           clusterNodesRelation{},
+	Groups:          clusterGroupsRelation{},
+	Regions:         clusterRegionsRelation{},
+	DnsLines:        clusterDnsLinesRelation{},
+	DnsProvider:     clusterDnsProviderRelation{},
+	DnsRecords:      clusterDnsRecordsRelation{},
+	DnsSyncJobs:     clusterDnsSyncJobsRelation{},
+	Certificates:    clusterCertificatesRelation{},
+	OriginPools:     clusterOriginPoolsRelation{},
+	Sites:           clusterSitesRelation{},
 }
 
 // ClusterWhereClause represents a WHERE condition for Cluster.
@@ -343,6 +352,77 @@ func (clusterNameField) Desc() ClusterOrderByClause {
 	return ClusterOrderByClause{Field: "name", Direction: "DESC"}
 }
 
+// PrimaryHostnameField provides query operations for the primaryHostname field.
+type clusterPrimaryHostnameField struct{}
+
+// Equals creates an equality condition.
+func (clusterPrimaryHostnameField) Equals(v *string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (clusterPrimaryHostnameField) Not(v *string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (clusterPrimaryHostnameField) In(vals ...*string) ClusterWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (clusterPrimaryHostnameField) NotIn(vals ...*string) ClusterWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (clusterPrimaryHostnameField) Contains(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (clusterPrimaryHostnameField) StartsWith(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (clusterPrimaryHostnameField) EndsWith(v string) ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (clusterPrimaryHostnameField) IsNull() ClusterWhereClause {
+	return ClusterWhereClause{Field: "primary_hostname", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (clusterPrimaryHostnameField) Set(v string) ClusterSetClause {
+	return ClusterSetClause{Field: "primary_hostname", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (clusterPrimaryHostnameField) SetNull() ClusterSetClause {
+	return ClusterSetClause{Field: "primary_hostname", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (clusterPrimaryHostnameField) Asc() ClusterOrderByClause {
+	return ClusterOrderByClause{Field: "primary_hostname", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (clusterPrimaryHostnameField) Desc() ClusterOrderByClause {
+	return ClusterOrderByClause{Field: "primary_hostname", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type clusterCreatedAtField struct{}
 
@@ -523,6 +603,30 @@ func (clusterDnsLinesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "dnsLines"}
 }
 
+// DnsProviderRelation provides relation query helpers for dnsProvider.
+type clusterDnsProviderRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsProvider.
+func (clusterDnsProviderRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "dnsProvider"}
+}
+
+// DnsRecordsRelation provides relation query helpers for dnsRecords.
+type clusterDnsRecordsRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsRecords.
+func (clusterDnsRecordsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "dnsRecords"}
+}
+
+// DnsSyncJobsRelation provides relation query helpers for dnsSyncJobs.
+type clusterDnsSyncJobsRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsSyncJobs.
+func (clusterDnsSyncJobsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "dnsSyncJobs"}
+}
+
 // CertificatesRelation provides relation query helpers for certificates.
 type clusterCertificatesRelation struct{}
 
@@ -580,25 +684,29 @@ type ClusterGroupByResult struct {
 
 // ClusterCreateInput holds data for creating a Cluster record.
 type ClusterCreateInput struct {
-	Id           string
-	CreatorId    string
-	Name         string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-	Creator      *UserCreateNestedInput
-	Members      *ClusterMemberCreateNestedInput
-	Nodes        *NodeCreateNestedInput
-	Groups       *ClusterGroupCreateNestedInput
-	Regions      *ClusterRegionCreateNestedInput
-	DnsLines     *DNSLineCreateNestedInput
-	Certificates *CertificateCreateNestedInput
-	OriginPools  *OriginPoolCreateNestedInput
-	Sites        *SiteCreateNestedInput
+	Id              string
+	CreatorId       string
+	Name            string
+	PrimaryHostname **string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Creator         *UserCreateNestedInput
+	Members         *ClusterMemberCreateNestedInput
+	Nodes           *NodeCreateNestedInput
+	Groups          *ClusterGroupCreateNestedInput
+	Regions         *ClusterRegionCreateNestedInput
+	DnsLines        *DNSLineCreateNestedInput
+	DnsProvider     *DNSProviderConfigCreateNestedInput
+	DnsRecords      *DNSManagedRecordCreateNestedInput
+	DnsSyncJobs     *DNSSyncJobCreateNestedInput
+	Certificates    *CertificateCreateNestedInput
+	OriginPools     *OriginPoolCreateNestedInput
+	Sites           *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d ClusterCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.CreatorId, d.Name, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.CreatorId, d.Name, d.PrimaryHostname, d.CreatedAt, d.UpdatedAt}
 }
 
 // ClusterCreateNestedInput supports nested creates and connects.
@@ -609,5 +717,6 @@ type ClusterCreateNestedInput struct {
 
 // ClusterWhereUniqueInput identifies a unique Cluster record.
 type ClusterWhereUniqueInput struct {
-	Id *string
+	Id              *string
+	PrimaryHostname **string
 }

@@ -46,6 +46,7 @@ type NodeQuery struct {
 	Region             nodeRegionRelation
 	Addresses          nodeAddressesRelation
 	DnsLines           nodeDnsLinesRelation
+	DnsRecords         nodeDnsRecordsRelation
 	CacheConfig        nodeCacheConfigRelation
 	Credential         nodeCredentialRelation
 	SiteConfigVersions nodeSiteConfigVersionsRelation
@@ -80,6 +81,7 @@ var Node = NodeQuery{
 	Region:             nodeRegionRelation{},
 	Addresses:          nodeAddressesRelation{},
 	DnsLines:           nodeDnsLinesRelation{},
+	DnsRecords:         nodeDnsRecordsRelation{},
 	CacheConfig:        nodeCacheConfigRelation{},
 	Credential:         nodeCredentialRelation{},
 	SiteConfigVersions: nodeSiteConfigVersionsRelation{},
@@ -849,6 +851,14 @@ func (nodeDnsLinesRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "dnsLines"}
 }
 
+// DnsRecordsRelation provides relation query helpers for dnsRecords.
+type nodeDnsRecordsRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsRecords.
+func (nodeDnsRecordsRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "dnsRecords"}
+}
+
 // CacheConfigRelation provides relation query helpers for cacheConfig.
 type nodeCacheConfigRelation struct{}
 
@@ -921,6 +931,7 @@ type NodeCreateInput struct {
 	Region             *ClusterRegionCreateNestedInput
 	Addresses          *NodeAddressCreateNestedInput
 	DnsLines           *NodeDNSLineCreateNestedInput
+	DnsRecords         *DNSManagedRecordCreateNestedInput
 	CacheConfig        *NodeCacheConfigCreateNestedInput
 	Credential         *NodeCredentialCreateNestedInput
 	SiteConfigVersions *NodeSiteConfigVersionCreateNestedInput

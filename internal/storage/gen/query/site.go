@@ -52,6 +52,7 @@ type SiteQuery struct {
 	ConfigVersions     siteConfigVersionsRelation
 	PublishJobs        sitePublishJobsRelation
 	PurgeJobs          sitePurgeJobsRelation
+	DnsSyncJobs        siteDnsSyncJobsRelation
 }
 
 const SiteTable = "sites"
@@ -89,6 +90,7 @@ var Site = SiteQuery{
 	ConfigVersions:     siteConfigVersionsRelation{},
 	PublishJobs:        sitePublishJobsRelation{},
 	PurgeJobs:          sitePurgeJobsRelation{},
+	DnsSyncJobs:        siteDnsSyncJobsRelation{},
 }
 
 // SiteWhereClause represents a WHERE condition for Site.
@@ -888,6 +890,14 @@ func (sitePurgeJobsRelation) Fetch() SiteIncludeClause {
 	return SiteIncludeClause{Relation: "purgeJobs"}
 }
 
+// DnsSyncJobsRelation provides relation query helpers for dnsSyncJobs.
+type siteDnsSyncJobsRelation struct{}
+
+// Fetch creates an include clause to fetch related dnsSyncJobs.
+func (siteDnsSyncJobsRelation) Fetch() SiteIncludeClause {
+	return SiteIncludeClause{Relation: "dnsSyncJobs"}
+}
+
 // SiteSetClause represents a field set operation for create/update.
 type SiteSetClause struct {
 	Field string
@@ -942,6 +952,7 @@ type SiteCreateInput struct {
 	ConfigVersions     *ConfigVersionCreateNestedInput
 	PublishJobs        *PublishJobCreateNestedInput
 	PurgeJobs          *PurgeJobCreateNestedInput
+	DnsSyncJobs        *DNSSyncJobCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

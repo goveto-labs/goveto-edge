@@ -30,6 +30,47 @@ export interface RegistrationConfig {
 export interface DNSLine {
     id: string;
     name: string;
+    providerCode: string;
+}
+
+export type DNSProviderType = 'ALIYUN' | 'CLOUDFLARE';
+
+export interface DNSConfigResponse {
+    primary_hostname: string | null;
+    provider: {
+        type: DNSProviderType;
+        zone: string;
+        zone_id: string | null;
+        default_ttl: number;
+        proxied: boolean;
+        enabled: boolean;
+        credentials_configured: boolean;
+    } | null;
+}
+
+export interface DNSManagedRecord {
+    id: string;
+    hostname: string;
+    type: 'A' | 'AAAA' | 'CNAME';
+    value: string;
+    status: string;
+    dnsLineId: string | null;
+    dnsLineKey: string;
+    providerRecordId: string | null;
+    lastError: string | null;
+    lastSyncedAt: string | null;
+}
+
+export interface DNSSyncJob {
+    id: string;
+    action: string;
+    status: string;
+    attempts: number;
+    maxAttempts: number;
+    nextAttemptAt: string;
+    leaseUntil: string | null;
+    resultJson: { error?: string } | null;
+    createdAt: string;
 }
 
 export interface ClusterChoice {

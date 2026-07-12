@@ -37,6 +37,82 @@ func ValidConfigStatusValues() []ConfigStatus {
 	}
 }
 
+// DNSProviderType represents the DNSProviderType enum type.
+type DNSProviderType string
+
+const (
+	DNSProviderTypeALIYUN     DNSProviderType = "ALIYUN"
+	DNSProviderTypeCLOUDFLARE DNSProviderType = "CLOUDFLARE"
+)
+
+// ValidDNSProviderTypeValues returns all valid values for the DNSProviderType enum.
+func ValidDNSProviderTypeValues() []DNSProviderType {
+	return []DNSProviderType{
+		DNSProviderTypeALIYUN,
+		DNSProviderTypeCLOUDFLARE,
+	}
+}
+
+// DNSRecordStatus represents the DNSRecordStatus enum type.
+type DNSRecordStatus string
+
+const (
+	DNSRecordStatusPENDING  DNSRecordStatus = "PENDING"
+	DNSRecordStatusSYNCED   DNSRecordStatus = "SYNCED"
+	DNSRecordStatusFAILED   DNSRecordStatus = "FAILED"
+	DNSRecordStatusDELETING DNSRecordStatus = "DELETING"
+)
+
+// ValidDNSRecordStatusValues returns all valid values for the DNSRecordStatus enum.
+func ValidDNSRecordStatusValues() []DNSRecordStatus {
+	return []DNSRecordStatus{
+		DNSRecordStatusPENDING,
+		DNSRecordStatusSYNCED,
+		DNSRecordStatusFAILED,
+		DNSRecordStatusDELETING,
+	}
+}
+
+// DNSRecordType represents the DNSRecordType enum type.
+type DNSRecordType string
+
+const (
+	DNSRecordTypeA     DNSRecordType = "A"
+	DNSRecordTypeAAAA  DNSRecordType = "AAAA"
+	DNSRecordTypeCNAME DNSRecordType = "CNAME"
+)
+
+// ValidDNSRecordTypeValues returns all valid values for the DNSRecordType enum.
+func ValidDNSRecordTypeValues() []DNSRecordType {
+	return []DNSRecordType{
+		DNSRecordTypeA,
+		DNSRecordTypeAAAA,
+		DNSRecordTypeCNAME,
+	}
+}
+
+// DNSSyncAction represents the DNSSyncAction enum type.
+type DNSSyncAction string
+
+const (
+	DNSSyncActionRECONCILE      DNSSyncAction = "RECONCILE"
+	DNSSyncActionUPSERT_CLUSTER DNSSyncAction = "UPSERT_CLUSTER"
+	DNSSyncActionUPSERT_SITE    DNSSyncAction = "UPSERT_SITE"
+	DNSSyncActionDELETE_CLUSTER DNSSyncAction = "DELETE_CLUSTER"
+	DNSSyncActionDELETE_SITE    DNSSyncAction = "DELETE_SITE"
+)
+
+// ValidDNSSyncActionValues returns all valid values for the DNSSyncAction enum.
+func ValidDNSSyncActionValues() []DNSSyncAction {
+	return []DNSSyncAction{
+		DNSSyncActionRECONCILE,
+		DNSSyncActionUPSERT_CLUSTER,
+		DNSSyncActionUPSERT_SITE,
+		DNSSyncActionDELETE_CLUSTER,
+		DNSSyncActionDELETE_SITE,
+	}
+}
+
 // JobStatus represents the JobStatus enum type.
 type JobStatus string
 

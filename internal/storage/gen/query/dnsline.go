@@ -30,31 +30,36 @@ func ApplyDNSLineOptions(opts []DNSLineQueryOption) DNSLineQueryConfig {
 
 // DNSLineQuery is the namespace for DNSLine query operations.
 type DNSLineQuery struct {
-	Id        dNSLineIdField
-	ClusterId dNSLineClusterIdField
-	Name      dNSLineNameField
-	CreatedAt dNSLineCreatedAtField
-	UpdatedAt dNSLineUpdatedAtField
-	Cluster   dNSLineClusterRelation
-	Nodes     dNSLineNodesRelation
+	Id           dNSLineIdField
+	ClusterId    dNSLineClusterIdField
+	Name         dNSLineNameField
+	ProviderCode dNSLineProviderCodeField
+	CreatedAt    dNSLineCreatedAtField
+	UpdatedAt    dNSLineUpdatedAtField
+	Cluster      dNSLineClusterRelation
+	Nodes        dNSLineNodesRelation
+	Records      dNSLineRecordsRelation
 }
 
 const DNSLineTable = "dns_lines"
 const DNSLineIdColumn = "id"
 const DNSLineClusterIdColumn = "cluster_id"
 const DNSLineNameColumn = "name"
+const DNSLineProviderCodeColumn = "provider_code"
 const DNSLineCreatedAtColumn = "created_at"
 const DNSLineUpdatedAtColumn = "updated_at"
 
 // DNSLineQuery provides query building methods for the DNSLine model.
 var DNSLine = DNSLineQuery{
-	Id:        dNSLineIdField{},
-	ClusterId: dNSLineClusterIdField{},
-	Name:      dNSLineNameField{},
-	CreatedAt: dNSLineCreatedAtField{},
-	UpdatedAt: dNSLineUpdatedAtField{},
-	Cluster:   dNSLineClusterRelation{},
-	Nodes:     dNSLineNodesRelation{},
+	Id:           dNSLineIdField{},
+	ClusterId:    dNSLineClusterIdField{},
+	Name:         dNSLineNameField{},
+	ProviderCode: dNSLineProviderCodeField{},
+	CreatedAt:    dNSLineCreatedAtField{},
+	UpdatedAt:    dNSLineUpdatedAtField{},
+	Cluster:      dNSLineClusterRelation{},
+	Nodes:        dNSLineNodesRelation{},
+	Records:      dNSLineRecordsRelation{},
 }
 
 // DNSLineWhereClause represents a WHERE condition for DNSLine.
@@ -329,6 +334,67 @@ func (dNSLineNameField) Desc() DNSLineOrderByClause {
 	return DNSLineOrderByClause{Field: "name", Direction: "DESC"}
 }
 
+// ProviderCodeField provides query operations for the providerCode field.
+type dNSLineProviderCodeField struct{}
+
+// Equals creates an equality condition.
+func (dNSLineProviderCodeField) Equals(v string) DNSLineWhereClause {
+	return DNSLineWhereClause{Field: "provider_code", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSLineProviderCodeField) Not(v string) DNSLineWhereClause {
+	return DNSLineWhereClause{Field: "provider_code", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSLineProviderCodeField) In(vals ...string) DNSLineWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSLineWhereClause{Field: "provider_code", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSLineProviderCodeField) NotIn(vals ...string) DNSLineWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSLineWhereClause{Field: "provider_code", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (dNSLineProviderCodeField) Contains(v string) DNSLineWhereClause {
+	return DNSLineWhereClause{Field: "provider_code", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (dNSLineProviderCodeField) StartsWith(v string) DNSLineWhereClause {
+	return DNSLineWhereClause{Field: "provider_code", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (dNSLineProviderCodeField) EndsWith(v string) DNSLineWhereClause {
+	return DNSLineWhereClause{Field: "provider_code", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (dNSLineProviderCodeField) Set(v string) DNSLineSetClause {
+	return DNSLineSetClause{Field: "provider_code", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSLineProviderCodeField) Asc() DNSLineOrderByClause {
+	return DNSLineOrderByClause{Field: "provider_code", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSLineProviderCodeField) Desc() DNSLineOrderByClause {
+	return DNSLineOrderByClause{Field: "provider_code", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type dNSLineCreatedAtField struct{}
 
@@ -477,6 +543,14 @@ func (dNSLineNodesRelation) Fetch() DNSLineIncludeClause {
 	return DNSLineIncludeClause{Relation: "nodes"}
 }
 
+// RecordsRelation provides relation query helpers for records.
+type dNSLineRecordsRelation struct{}
+
+// Fetch creates an include clause to fetch related records.
+func (dNSLineRecordsRelation) Fetch() DNSLineIncludeClause {
+	return DNSLineIncludeClause{Relation: "records"}
+}
+
 // DNSLineSetClause represents a field set operation for create/update.
 type DNSLineSetClause struct {
 	Field string
@@ -510,18 +584,20 @@ type DNSLineGroupByResult struct {
 
 // DNSLineCreateInput holds data for creating a DNSLine record.
 type DNSLineCreateInput struct {
-	Id        string
-	ClusterId string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Cluster   *ClusterCreateNestedInput
-	Nodes     *NodeDNSLineCreateNestedInput
+	Id           string
+	ClusterId    string
+	Name         string
+	ProviderCode string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Cluster      *ClusterCreateNestedInput
+	Nodes        *NodeDNSLineCreateNestedInput
+	Records      *DNSManagedRecordCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d DNSLineCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.ProviderCode, d.CreatedAt, d.UpdatedAt}
 }
 
 // DNSLineCreateNestedInput supports nested creates and connects.

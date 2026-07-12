@@ -127,6 +127,7 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Creatorid` (String)
   - `Name` (String)
+  - `Primaryhostname` (String, optional, unique)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -183,6 +184,63 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Clusterid` (String)
   - `Name` (String)
+  - `Providercode` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### DNSManagedRecord
+
+- Client handle: `c.DNSManagedRecord`
+- Query namespace: `query.DNSManagedRecord`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Sitedomainid` (String, optional)
+  - `Dnslineid` (String, optional)
+  - `Dnslinekey` (String)
+  - `Nodeid` (UUID, optional)
+  - `Hostname` (String)
+  - `Type` ()
+  - `Value` (String)
+  - `Providerrecordid` (String, optional)
+  - `Status` ()
+  - `Lasterror` (String, optional)
+  - `Lastsyncedat` (DateTime, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### DNSProviderConfig
+
+- Client handle: `c.DNSProviderConfig`
+- Query namespace: `query.DNSProviderConfig`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String, unique)
+  - `Provider` ()
+  - `Zone` (String)
+  - `Zoneid` (String, optional)
+  - `Credentialsencrypted` (String)
+  - `Defaultttl` (Int)
+  - `Proxied` (Boolean)
+  - `Enabled` (Boolean)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### DNSSyncJob
+
+- Client handle: `c.DNSSyncJob`
+- Query namespace: `query.DNSSyncJob`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Siteid` (String, optional)
+  - `Action` ()
+  - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseuntil` (DateTime, optional)
+  - `Resultjson` (Json, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

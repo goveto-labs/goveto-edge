@@ -9,10 +9,12 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
+	"goveto-edge/internal/dnssync"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
 	"goveto-edge/internal/httpapi/clusters"
+	dnsapi "goveto-edge/internal/httpapi/dns"
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/nodes"
 	publishapi "goveto-edge/internal/httpapi/publish"
@@ -33,6 +35,7 @@ func New(
 	installQueue *node.InstallQueue,
 	publishService *publisher.Service,
 	purgeService *purge.Service,
+	dnsService *dnssync.Service,
 	analyticsStore ...*analytics.Store,
 ) *echo.Echo {
 	e := echo.New()
@@ -45,10 +48,11 @@ func New(
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm)
-	nodes.Register(e, orm, installQueue, credentialCipher)
+	dnsapi.Register(e, orm, credentialCipher, dnsService)
+	nodes.Register(e, orm, installQueue, credentialCipher, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
-	sites.Register(e, orm, publishService)
+	sites.Register(e, orm, publishService, dnsService)
 
 	if len(analyticsStore) > 0 {
 		analyticsapi.Register(e, orm, analyticsStore[0])

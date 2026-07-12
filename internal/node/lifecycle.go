@@ -15,24 +15,36 @@ import (
 )
 
 type Lifecycle struct {
-	db           *client.Client
-	offlineAfter time.Duration
-	http         *http.Client
-	cipher       *CredentialCipher
+	db             *client.Client
+	offlineAfter   time.Duration
+	http           *http.Client
+	cipher         *CredentialCipher
+	onStatusChange func(context.Context, string)
 }
 
 type healthTarget struct {
-	NodeID  string `json:"node_id"`
-	Address string `json:"address"`
+	NodeID    string `db:"node_id"`
+	ClusterID string `db:"cluster_id"`
+	Address   string `db:"address"`
+	Status    string `db:"status"`
 }
 
-func NewLifecycle(db *client.Client, cipher *CredentialCipher, offlineAfter time.Duration) *Lifecycle {
-	return &Lifecycle{
+func NewLifecycle(
+	db *client.Client,
+	cipher *CredentialCipher,
+	offlineAfter time.Duration,
+	onStatusChange ...func(context.Context, string),
+) *Lifecycle {
+	lifecycle := &Lifecycle{
 		db:           db,
 		cipher:       cipher,
 		offlineAfter: offlineAfter,
 		http:         &http.Client{Timeout: 5 * time.Second},
 	}
+	if len(onStatusChange) > 0 {
+		lifecycle.onStatusChange = onStatusChange[0]
+	}
+	return lifecycle
 }
 func (l *Lifecycle) Run(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
@@ -48,7 +60,7 @@ func (l *Lifecycle) Run(ctx context.Context) {
 }
 
 func (l *Lifecycle) poll(ctx context.Context) {
-	targets, err := client.Raw[healthTarget](ctx, l.db, `SELECT n.id AS node_id, a.address
+	targets, err := client.Raw[healthTarget](ctx, l.db, `SELECT n.id AS node_id, n.cluster_id, n.status, a.address
 		FROM nodes n
 		JOIN node_addresses a ON a.node_id = n.id AND a.primary = TRUE
 		WHERE n.status NOT IN ('PENDING', 'INSTALL_FAILED')`)
@@ -87,6 +99,9 @@ func (l *Lifecycle) poll(ctx context.Context) {
 			`UPDATE nodes SET status = 'ONLINE', heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
 			target.NodeID,
 		)
+		if target.Status != "ONLINE" {
+			l.notifyStatusChange(ctx, target.ClusterID)
+		}
 		l.reconcileCacheConfig(ctx, target, health.CacheConfig)
 	}
 	l.markOffline(ctx)
@@ -127,6 +142,27 @@ func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarge
 	).PushNodeCacheConfig(ctx, desired)
 }
 func (l *Lifecycle) markOffline(ctx context.Context) {
-	_, _ = l.db.RawExec(ctx, `UPDATE nodes SET status = 'OFFLINE', updated_at = NOW()
-		WHERE status = 'ONLINE' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - ($1 * INTERVAL '1 second'))`, l.offlineAfter.Seconds())
+	type changedCluster struct {
+		ClusterID string `db:"cluster_id"`
+	}
+	clusters, err := client.Raw[changedCluster](ctx, l.db, `UPDATE nodes SET status = 'OFFLINE', updated_at = NOW()
+			WHERE status = 'ONLINE' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - ($1 * INTERVAL '1 second'))
+			RETURNING cluster_id`, l.offlineAfter.Seconds())
+	if err != nil {
+		return
+	}
+	notified := map[string]struct{}{}
+	for _, cluster := range clusters {
+		if _, exists := notified[cluster.ClusterID]; exists {
+			continue
+		}
+		notified[cluster.ClusterID] = struct{}{}
+		l.notifyStatusChange(ctx, cluster.ClusterID)
+	}
+}
+
+func (l *Lifecycle) notifyStatusChange(ctx context.Context, clusterID string) {
+	if l.onStatusChange != nil {
+		l.onStatusChange(ctx, clusterID)
+	}
 }

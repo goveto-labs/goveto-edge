@@ -17,6 +17,7 @@ import {
 import {
     BarChart3,
     ChevronDown,
+    Cloud,
     Globe,
     LayoutDashboard,
     LogOut,
@@ -46,6 +47,7 @@ const nav: NavItemConfig[] = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/nodes', label: 'Nodes', icon: Server },
     { path: '/sites', label: 'Sites', icon: Globe },
+    { path: '/dns', label: 'DNS', icon: Cloud },
     { path: '/certificates', label: 'Certificates', icon: ShieldCheck },
     { path: '/publish', label: 'Publish Jobs', icon: Rocket },
     { path: '/purge', label: 'Purge Jobs', icon: Trash2 },

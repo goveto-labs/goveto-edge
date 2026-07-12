@@ -36,20 +36,24 @@ type Certificate struct {
 
 // Cluster represents the Cluster model.
 type Cluster struct {
-	Id           string           `db:"id" json:"id"`
-	CreatorId    string           `db:"creator_id" json:"creatorId"`
-	Name         string           `db:"name" json:"name"`
-	CreatedAt    time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt    time.Time        `db:"updated_at" json:"updatedAt"`
-	Creator      *User            `db:"-" json:"creator,omitempty"`
-	Members      []*ClusterMember `db:"-" json:"members,omitempty"`
-	Nodes        []*Node          `db:"-" json:"nodes,omitempty"`
-	Groups       []*ClusterGroup  `db:"-" json:"groups,omitempty"`
-	Regions      []*ClusterRegion `db:"-" json:"regions,omitempty"`
-	DnsLines     []*DNSLine       `db:"-" json:"dnsLines,omitempty"`
-	Certificates []*Certificate   `db:"-" json:"certificates,omitempty"`
-	OriginPools  []*OriginPool    `db:"-" json:"originPools,omitempty"`
-	Sites        []*Site          `db:"-" json:"sites,omitempty"`
+	Id              string              `db:"id" json:"id"`
+	CreatorId       string              `db:"creator_id" json:"creatorId"`
+	Name            string              `db:"name" json:"name"`
+	PrimaryHostname *string             `db:"primary_hostname" json:"primaryHostname"`
+	CreatedAt       time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time           `db:"updated_at" json:"updatedAt"`
+	Creator         *User               `db:"-" json:"creator,omitempty"`
+	Members         []*ClusterMember    `db:"-" json:"members,omitempty"`
+	Nodes           []*Node             `db:"-" json:"nodes,omitempty"`
+	Groups          []*ClusterGroup     `db:"-" json:"groups,omitempty"`
+	Regions         []*ClusterRegion    `db:"-" json:"regions,omitempty"`
+	DnsLines        []*DNSLine          `db:"-" json:"dnsLines,omitempty"`
+	DnsProvider     *DNSProviderConfig  `db:"-" json:"dnsProvider,omitempty"`
+	DnsRecords      []*DNSManagedRecord `db:"-" json:"dnsRecords,omitempty"`
+	DnsSyncJobs     []*DNSSyncJob       `db:"-" json:"dnsSyncJobs,omitempty"`
+	Certificates    []*Certificate      `db:"-" json:"certificates,omitempty"`
+	OriginPools     []*OriginPool       `db:"-" json:"originPools,omitempty"`
+	Sites           []*Site             `db:"-" json:"sites,omitempty"`
 }
 
 // ClusterGroup represents the ClusterGroup model.
@@ -98,13 +102,72 @@ type ConfigVersion struct {
 
 // DNSLine represents the DNSLine model.
 type DNSLine struct {
-	Id        string         `db:"id" json:"id"`
-	ClusterId string         `db:"cluster_id" json:"clusterId"`
-	Name      string         `db:"name" json:"name"`
-	CreatedAt time.Time      `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time      `db:"updated_at" json:"updatedAt"`
-	Cluster   *Cluster       `db:"-" json:"cluster,omitempty"`
-	Nodes     []*NodeDNSLine `db:"-" json:"nodes,omitempty"`
+	Id           string              `db:"id" json:"id"`
+	ClusterId    string              `db:"cluster_id" json:"clusterId"`
+	Name         string              `db:"name" json:"name"`
+	ProviderCode string              `db:"provider_code" json:"providerCode"`
+	CreatedAt    time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt    time.Time           `db:"updated_at" json:"updatedAt"`
+	Cluster      *Cluster            `db:"-" json:"cluster,omitempty"`
+	Nodes        []*NodeDNSLine      `db:"-" json:"nodes,omitempty"`
+	Records      []*DNSManagedRecord `db:"-" json:"records,omitempty"`
+}
+
+// DNSManagedRecord represents the DNSManagedRecord model.
+type DNSManagedRecord struct {
+	Id               string          `db:"id" json:"id"`
+	ClusterId        string          `db:"cluster_id" json:"clusterId"`
+	SiteDomainId     *string         `db:"site_domain_id" json:"siteDomainId"`
+	DnsLineId        *string         `db:"dns_line_id" json:"dnsLineId"`
+	DnsLineKey       string          `db:"dns_line_key" json:"dnsLineKey"`
+	NodeId           *string         `db:"node_id" json:"nodeId"`
+	Hostname         string          `db:"hostname" json:"hostname"`
+	Type             DNSRecordType   `db:"type" json:"type"`
+	Value            string          `db:"value" json:"value"`
+	ProviderRecordId *string         `db:"provider_record_id" json:"providerRecordId"`
+	Status           DNSRecordStatus `db:"status" json:"status"`
+	LastError        *string         `db:"last_error" json:"lastError"`
+	LastSyncedAt     *time.Time      `db:"last_synced_at" json:"lastSyncedAt"`
+	CreatedAt        time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt        time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster          *Cluster        `db:"-" json:"cluster,omitempty"`
+	SiteDomain       *SiteDomain     `db:"-" json:"siteDomain,omitempty"`
+	DnsLine          *DNSLine        `db:"-" json:"dnsLine,omitempty"`
+	Node             *Node           `db:"-" json:"node,omitempty"`
+}
+
+// DNSProviderConfig represents the DNSProviderConfig model.
+type DNSProviderConfig struct {
+	Id                   string          `db:"id" json:"id"`
+	ClusterId            string          `db:"cluster_id" json:"clusterId"`
+	Provider             DNSProviderType `db:"provider" json:"provider"`
+	Zone                 string          `db:"zone" json:"zone"`
+	ZoneId               *string         `db:"zone_id" json:"zoneId"`
+	CredentialsEncrypted string          `db:"credentials_encrypted" json:"credentialsEncrypted"`
+	DefaultTtl           int             `db:"default_ttl" json:"defaultTtl"`
+	Proxied              bool            `db:"proxied" json:"proxied"`
+	Enabled              bool            `db:"enabled" json:"enabled"`
+	CreatedAt            time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt            time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster              *Cluster        `db:"-" json:"cluster,omitempty"`
+}
+
+// DNSSyncJob represents the DNSSyncJob model.
+type DNSSyncJob struct {
+	Id            string           `db:"id" json:"id"`
+	ClusterId     string           `db:"cluster_id" json:"clusterId"`
+	SiteId        *string          `db:"site_id" json:"siteId"`
+	Action        DNSSyncAction    `db:"action" json:"action"`
+	Status        JobStatus        `db:"status" json:"status"`
+	Attempts      int              `db:"attempts" json:"attempts"`
+	MaxAttempts   int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseUntil    *time.Time       `db:"lease_until" json:"leaseUntil"`
+	ResultJson    *json.RawMessage `db:"result_json" json:"resultJson"`
+	CreatedAt     time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt     time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster       *Cluster         `db:"-" json:"cluster,omitempty"`
+	Site          *Site            `db:"-" json:"site,omitempty"`
 }
 
 // DynamicSetting represents the DynamicSetting model.
@@ -132,6 +195,7 @@ type Node struct {
 	Region             *ClusterRegion           `db:"-" json:"region,omitempty"`
 	Addresses          []*NodeAddress           `db:"-" json:"addresses,omitempty"`
 	DnsLines           []*NodeDNSLine           `db:"-" json:"dnsLines,omitempty"`
+	DnsRecords         []*DNSManagedRecord      `db:"-" json:"dnsRecords,omitempty"`
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
@@ -277,6 +341,7 @@ type Site struct {
 	ConfigVersions     []*ConfigVersion         `db:"-" json:"configVersions,omitempty"`
 	PublishJobs        []*PublishJob            `db:"-" json:"publishJobs,omitempty"`
 	PurgeJobs          []*PurgeJob              `db:"-" json:"purgeJobs,omitempty"`
+	DnsSyncJobs        []*DNSSyncJob            `db:"-" json:"dnsSyncJobs,omitempty"`
 }
 
 // SiteCertificate represents the SiteCertificate model.
@@ -289,11 +354,12 @@ type SiteCertificate struct {
 
 // SiteDomain represents the SiteDomain model.
 type SiteDomain struct {
-	Id        string    `db:"id" json:"id"`
-	SiteId    string    `db:"site_id" json:"siteId"`
-	Hostname  string    `db:"hostname" json:"hostname"`
-	CreatedAt time.Time `db:"created_at" json:"createdAt"`
-	Site      *Site     `db:"-" json:"site,omitempty"`
+	Id         string              `db:"id" json:"id"`
+	SiteId     string              `db:"site_id" json:"siteId"`
+	Hostname   string              `db:"hostname" json:"hostname"`
+	CreatedAt  time.Time           `db:"created_at" json:"createdAt"`
+	Site       *Site               `db:"-" json:"site,omitempty"`
+	DnsRecords []*DNSManagedRecord `db:"-" json:"dnsRecords,omitempty"`
 }
 
 // SiteListenerConfig represents the SiteListenerConfig model.
