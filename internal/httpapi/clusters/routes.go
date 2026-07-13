@@ -9,6 +9,7 @@ import (
 
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -40,7 +41,7 @@ func listDNSLines(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -56,7 +57,7 @@ func listGroups(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -84,7 +85,7 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, item)
 	}
 }
 
@@ -100,7 +101,7 @@ func listRegions(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -128,6 +129,6 @@ func createRegion(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, item)
 	}
 }

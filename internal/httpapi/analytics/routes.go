@@ -10,6 +10,7 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 )
 
@@ -67,7 +68,7 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 			granularity = "day"
 		}
 
-		return c.JSON(http.StatusOK, map[string]any{
+		return types.JSON(c, http.StatusOK, map[string]any{
 			"period":      p,
 			"granularity": granularity,
 			"series":      items,
@@ -111,7 +112,7 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -135,7 +136,7 @@ func nodeRuntime(s *analytics.Store) echo.HandlerFunc {
 			return err
 		}
 
-		return c.JSON(http.StatusOK, map[string]any{
+		return types.JSON(c, http.StatusOK, map[string]any{
 			"period": p,
 			"series": items,
 		})
@@ -182,7 +183,7 @@ func summary(s *analytics.Store) echo.HandlerFunc {
 			return err
 		}
 
-		return c.JSON(http.StatusOK, v)
+		return types.JSON(c, http.StatusOK, v)
 	}
 }
 
@@ -214,6 +215,6 @@ func top(s *analytics.Store, dim string) echo.HandlerFunc {
 			return err
 		}
 
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -60,7 +61,7 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, map[string]any{"node_id": node.Id, "dns_line_ids": input.DNSLineIDs})
+		return types.JSON(c, http.StatusOK, map[string]any{"node_id": node.Id, "dns_line_ids": input.DNSLineIDs})
 	}
 }
 
@@ -88,7 +89,7 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusAccepted, map[string]any{"id": node.Id, "status": model.NodeStatusOFFLINE, "message": "waiting for health check"})
+		return types.JSON(c, http.StatusAccepted, map[string]any{"id": node.Id, "status": model.NodeStatusOFFLINE, "message": "waiting for health check"})
 	}
 }
 
@@ -100,7 +101,7 @@ func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFun
 			return err
 		}
 		if node.Status == model.NodeStatusDISABLED {
-			return c.JSON(http.StatusOK, map[string]any{"id": node.Id, "status": node.Status})
+			return types.JSON(c, http.StatusOK, map[string]any{"id": node.Id, "status": node.Status})
 		}
 		if node.Status != model.NodeStatusONLINE && node.Status != model.NodeStatusOFFLINE && node.Status != model.NodeStatusINSTALL_FAILED {
 			return echo.NewHTTPError(http.StatusConflict, "node cannot be disabled while installation is pending")
@@ -119,7 +120,7 @@ func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFun
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, map[string]any{"id": node.Id, "status": model.NodeStatusDISABLED})
+		return types.JSON(c, http.StatusOK, map[string]any{"id": node.Id, "status": model.NodeStatusDISABLED})
 	}
 }
 

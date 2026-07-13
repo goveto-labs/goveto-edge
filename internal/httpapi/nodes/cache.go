@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
@@ -29,7 +31,7 @@ func getCacheConfig(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, config)
+		return types.JSON(c, http.StatusOK, config)
 	}
 }
 
@@ -103,7 +105,7 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 				}
 			}
 		}
-		return c.JSON(http.StatusOK, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 

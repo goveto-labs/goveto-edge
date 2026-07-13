@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+
+	"goveto-edge/internal/httpapi/types"
 )
 
 func Register(e *echo.Echo, db *sql.DB) {
@@ -20,7 +22,7 @@ func Register(e *echo.Echo, db *sql.DB) {
 // @description Process liveness probe; returns ok when the process is running.
 // @Tags health
 func live(c *echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	return types.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // @summary Readiness
@@ -31,8 +33,8 @@ func ready(db *sql.DB) echo.HandlerFunc {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), time.Second)
 		defer cancel()
 		if err := db.PingContext(ctx); err != nil {
-			return c.JSON(http.StatusServiceUnavailable, map[string]string{"status": "unavailable"})
+			return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
 		}
-		return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+		return types.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }

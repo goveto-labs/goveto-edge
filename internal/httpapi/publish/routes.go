@@ -13,6 +13,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -42,7 +43,7 @@ func clusterStatus(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, snapshot)
+		return types.JSON(c, http.StatusOK, snapshot)
 	}
 }
 
@@ -182,7 +183,7 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, job)
 	}
 }
 
@@ -201,7 +202,7 @@ func getJob(db *client.Client) echo.HandlerFunc {
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "publish job not found")
 		}
-		return c.JSON(http.StatusOK, jobDetails(job))
+		return types.JSON(c, http.StatusOK, jobDetails(job))
 	}
 }
 
@@ -229,7 +230,7 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		for i := range jobs {
 			result = append(result, jobDetails(&jobs[i]))
 		}
-		return c.JSON(http.StatusOK, result)
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 

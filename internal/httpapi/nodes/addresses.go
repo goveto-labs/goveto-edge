@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -88,6 +89,6 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, created)
+		return types.JSON(c, http.StatusCreated, created)
 	}
 }

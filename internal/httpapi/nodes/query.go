@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v5"
+
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -25,7 +27,7 @@ func list(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, nodes)
+		return types.JSON(c, http.StatusOK, nodes)
 	}
 }
 
@@ -46,6 +48,6 @@ func get(db *client.Client) echo.HandlerFunc {
 		if err != nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
-		return c.JSON(http.StatusOK, node)
+		return types.JSON(c, http.StatusOK, node)
 	}
 }

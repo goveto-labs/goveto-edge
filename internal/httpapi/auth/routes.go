@@ -8,9 +8,11 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+
 	"github.com/pquerna/otp/totp"
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -84,7 +86,7 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		}
 
 		sessions.SetCookie(c, token)
-		return c.JSON(http.StatusOK, userResponse{
+		return types.JSON(c, http.StatusOK, userResponse{
 			ID:     user.Id,
 			Email:  user.Email,
 			Name:   user.Name,
@@ -98,5 +100,5 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 // @description Return the authenticated user id from the current session.
 // @Tags auth
 func me(c *echo.Context) error {
-	return c.JSON(http.StatusOK, map[string]string{"uid": authn.CurrentUID(c)})
+	return types.JSON(c, http.StatusOK, map[string]string{"uid": authn.CurrentUID(c)})
 }

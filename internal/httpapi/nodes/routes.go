@@ -13,6 +13,7 @@ import (
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -132,7 +133,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
-		return c.JSON(http.StatusAccepted, map[string]any{"id": nodeID, "status": model.NodeStatusPENDING})
+		return types.JSON(c, http.StatusAccepted, map[string]any{"id": nodeID, "status": model.NodeStatusPENDING})
 	}
 }
 

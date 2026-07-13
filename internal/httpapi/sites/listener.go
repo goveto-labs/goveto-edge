@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -44,7 +45,7 @@ func getListener(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, config)
+		return types.JSON(c, http.StatusOK, config)
 	}
 }
 
@@ -145,7 +146,7 @@ func updateListener(db *client.Client, publishService *publisher.Service) echo.H
 		} else {
 			response["publish_error"] = publishErr.Error()
 		}
-		return c.JSON(http.StatusOK, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 

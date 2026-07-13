@@ -10,7 +10,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
 	"golang.org/x/net/idna"
+	"goveto-edge/internal/httpapi/types"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
@@ -216,7 +218,7 @@ func create(db *client.Client, publishService *publisher.Service, dnsService *dn
 		if dnsJob != nil {
 			response["dns_sync_job"] = dnsJob
 		}
-		return c.JSON(http.StatusCreated, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 

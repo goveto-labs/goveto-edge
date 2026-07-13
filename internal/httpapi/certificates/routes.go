@@ -13,6 +13,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -44,7 +45,7 @@ func list(db *client.Client) echo.HandlerFunc {
 		for index := range items {
 			items[index].PrivateKeyPem = ""
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -89,6 +90,6 @@ func upload(db *client.Client) echo.HandlerFunc {
 		}
 
 		item.PrivateKeyPem = ""
-		return c.JSON(http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, item)
 	}
 }

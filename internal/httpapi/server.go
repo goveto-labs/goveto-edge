@@ -20,6 +20,7 @@ import (
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
 	"goveto-edge/internal/httpapi/sites"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
@@ -39,6 +40,7 @@ func New(
 	analyticsStore ...*analytics.Store,
 ) *echo.Echo {
 	e := echo.New()
+	e.HTTPErrorHandler = types.HTTPErrorHandler
 	e.Use(sessions.Session)
 
 	settingStore := settings.New(orm)

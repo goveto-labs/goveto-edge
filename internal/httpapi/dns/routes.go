@@ -11,7 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
 	"golang.org/x/net/idna"
+	"goveto-edge/internal/httpapi/types"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
@@ -82,12 +84,9 @@ func getConfig(db *client.Client) echo.HandlerFunc {
 			return err
 		}
 		if provider == nil {
-			return c.JSON(
-				http.StatusOK,
-				map[string]any{"primary_hostname": cluster.PrimaryHostname, "provider": nil},
-			)
+			return types.JSON(c, http.StatusOK, map[string]any{"primary_hostname": cluster.PrimaryHostname, "provider": nil})
 		}
-		return c.JSON(http.StatusOK, map[string]any{
+		return types.JSON(c, http.StatusOK, map[string]any{
 			"primary_hostname": cluster.PrimaryHostname,
 			"provider": map[string]any{
 				"type":                   provider.Provider,
@@ -341,10 +340,7 @@ func updateConfig(
 		if err != nil {
 			return err
 		}
-		return c.JSON(
-			http.StatusOK,
-			map[string]any{"primary_hostname": host, "sync_job": job},
-		)
+		return types.JSON(c, http.StatusOK, map[string]any{"primary_hostname": host, "sync_job": job})
 	}
 }
 
@@ -400,7 +396,7 @@ func disableConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, job)
 	}
 }
 
@@ -413,7 +409,7 @@ func listRecords(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -427,7 +423,7 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, items)
 	}
 }
 
@@ -479,7 +475,7 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, job)
 	}
 }
 
@@ -572,7 +568,7 @@ func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, item)
 	}
 }
 
@@ -647,7 +643,7 @@ func deleteLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return c.NoContent(http.StatusNoContent)
+		return types.JSON(c, http.StatusOK, nil)
 	}
 }
 

@@ -6,8 +6,10 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v5"
+
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -48,7 +50,7 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return c.JSON(http.StatusAccepted, details(job))
+		return types.JSON(c, http.StatusAccepted, details(job))
 	}
 }
 
@@ -75,9 +77,10 @@ func list(db *client.Client) echo.HandlerFunc {
 		for i := range jobs {
 			result = append(result, details(&jobs[i]))
 		}
-		return c.JSON(http.StatusOK, result)
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
+
 // @summary Get purge job
 // @description Get a single cache purge job by id.
 // @Tags purge
@@ -92,7 +95,7 @@ func get(db *client.Client) echo.HandlerFunc {
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "purge job not found")
 		}
-		return c.JSON(http.StatusOK, details(job))
+		return types.JSON(c, http.StatusOK, details(job))
 	}
 }
 func siteInCluster(c *echo.Context, db *client.Client) (*model.Site, error) {

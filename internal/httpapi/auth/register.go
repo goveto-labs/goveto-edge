@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/captcha"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -87,7 +88,7 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 		if err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status})
+		return types.JSON(c, http.StatusCreated, userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status})
 	}
 }
 
@@ -109,6 +110,6 @@ func registrationConfig(settingStore *settings.Store) echo.HandlerFunc {
 		if found {
 			response["captcha"] = map[string]string{"provider": config.Provider, "site_key": config.SiteKey}
 		}
-		return c.JSON(http.StatusOK, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }

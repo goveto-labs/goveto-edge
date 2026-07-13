@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
+
+	"goveto-edge/internal/httpapi/types"
 	cachepolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
@@ -39,7 +41,7 @@ func getCache(db *client.Client) echo.HandlerFunc {
 				return err
 			}
 		}
-		return c.JSON(http.StatusOK, result)
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -111,6 +113,6 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 		} else {
 			response["publish_error"] = publishErr.Error()
 		}
-		return c.JSON(http.StatusOK, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }

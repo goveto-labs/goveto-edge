@@ -7,8 +7,10 @@ import (
 	"time"
 
 	"github.com/labstack/echo/v5"
+
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -64,7 +66,7 @@ func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 				_ = sessions.SetSelectedCluster(ctx, c, selected)
 			}
 		}
-		return c.JSON(http.StatusOK, map[string]any{"clusters": items, "selected_cluster_id": selected, "requires_cluster": len(items) == 0})
+		return types.JSON(c, http.StatusOK, map[string]any{"clusters": items, "selected_cluster_id": selected, "requires_cluster": len(items) == 0})
 	}
 }
 
@@ -88,7 +90,7 @@ func create(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, item.Id); err != nil {
 			return err
 		}
-		return c.JSON(http.StatusCreated, map[string]any{"cluster": item, "selected_cluster_id": item.Id})
+		return types.JSON(c, http.StatusCreated, map[string]any{"cluster": item, "selected_cluster_id": item.Id})
 	}
 }
 
@@ -115,6 +117,6 @@ func selectCurrent(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, input.ClusterID); err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, map[string]string{"selected_cluster_id": input.ClusterID})
+		return types.JSON(c, http.StatusOK, map[string]string{"selected_cluster_id": input.ClusterID})
 	}
 }
