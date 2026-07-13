@@ -67,8 +67,6 @@ export interface DNSSyncJob {
     status: string;
     attempts: number;
     maxAttempts: number;
-    nextAttemptAt: string;
-    leaseUntil: string | null;
     resultJson: { error?: string } | null;
     createdAt: string;
 }

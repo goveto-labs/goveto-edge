@@ -23,8 +23,7 @@ export const dnsApi = (clusterId: string) => {
     const base = `/clusters/${clusterId}/dns`;
     return {
         config: () => get<DNSConfigResponse>(base),
-        update: (payload: UpdateDNSConfig) =>
-            put<{ primary_hostname: string; sync_job: DNSSyncJob }>(base, payload),
+        update: (payload: UpdateDNSConfig) => put<DNSSyncJob>(base, payload),
         disable: () => del<DNSSyncJob>(base),
         records: () => get<DNSManagedRecord[]>(`${base}/records`),
         jobs: () => get<DNSSyncJob[]>(`${base}/jobs`),

@@ -12,8 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"golang.org/x/net/idna"
 	"goveto-edge/internal/httpapi/types"
+
+	"golang.org/x/net/idna"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
@@ -340,7 +341,7 @@ func updateConfig(
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, map[string]any{"primary_hostname": host, "sync_job": job})
+		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
 	}
 }
 
@@ -396,7 +397,7 @@ func disableConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
 	}
 }
 
@@ -423,7 +424,11 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, items)
+		result := make([]types.DNSJob, len(items))
+		for index := range items {
+			result[index] = types.NewDNSJob(&items[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -475,7 +480,7 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
 	}
 }
 

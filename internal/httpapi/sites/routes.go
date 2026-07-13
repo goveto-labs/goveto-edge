@@ -17,6 +17,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnssync"
+	httptypes "goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -216,7 +217,7 @@ func create(db *client.Client, publishService *publisher.Service, dnsService *dn
 			response["publish_error"] = publishErr.Error()
 		}
 		if dnsJob != nil {
-			response["dns_sync_job"] = dnsJob
+			response["dns_sync_job"] = httptypes.NewDNSJob(dnsJob)
 		}
 		return types.JSON(c, http.StatusCreated, response)
 	}
