@@ -10,8 +10,7 @@ tags:
     - name: auth
     - name: certificates
     - name: clusters
-    - name: clusters-dns
-    - name: clusters-nodes
+    - name: dns
     - name: health
     - name: nodes
     - name: publish
@@ -212,7 +211,7 @@ paths:
                                                 items:
                                                     $ref: '#/components/schemas/clusters_clusterChoice'
                                             requires_cluster:
-                                                type: object
+                                                type: boolean
                                             selected_cluster_id:
                                                 type: object
                                         required:
@@ -278,12 +277,16 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: dimension
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: limit
                   in: query
                   schema:
@@ -295,7 +298,9 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: sort
                   in: query
                   schema:
@@ -331,11 +336,15 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
                 - name: node_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_NodeRuntimePoint'
                 - name: period
                   in: query
                   schema:
@@ -358,7 +367,9 @@ paths:
                                             period:
                                                 type: string
                                             series:
-                                                type: object
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/analytics_NodeRuntimePoint'
                                         required:
                                             - period
                                             - series
@@ -379,12 +390,16 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: dimension
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: limit
                   in: query
                   schema:
@@ -396,7 +411,9 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_DistributionItem'
                 - name: sort
                   in: query
                   schema:
@@ -480,7 +497,9 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
                 - name: from
                   in: query
                   schema:
@@ -494,7 +513,9 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
                 - name: to
                   in: query
                   schema:
@@ -532,7 +553,9 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
                 - name: from
                   in: query
                   schema:
@@ -546,7 +569,9 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TopItem'
                 - name: to
                   in: query
                   schema:
@@ -584,7 +609,9 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TrafficPoint'
                 - name: period
                   in: query
                   schema:
@@ -592,7 +619,9 @@ paths:
                 - name: site_id
                   in: query
                   schema:
-                    type: string
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_TrafficPoint'
             responses:
                 "200":
                     description: OK
@@ -613,7 +642,9 @@ paths:
                                             period:
                                                 type: string
                                             series:
-                                                type: object
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/analytics_TrafficPoint'
                                         required:
                                             - granularity
                                             - period
@@ -699,9 +730,10 @@ paths:
     /api/v1/clusters/{cluster_id}/dns:
         get:
             operationId: getConfig
-            summary: get /api/v1/clusters/{cluster_id}/dns
+            summary: Get DNS config
+            description: Return cluster primary hostname and managed DNS provider configuration.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -730,24 +762,24 @@ paths:
                                         type: object
                                         properties:
                                             primary_hostname:
-                                                type: object
+                                                type: string
                                             provider:
                                                 type: object
                                                 properties:
                                                     credentials_configured:
-                                                        type: object
+                                                        type: boolean
                                                     default_ttl:
-                                                        type: object
+                                                        type: number
                                                     enabled:
-                                                        type: object
+                                                        type: boolean
                                                     proxied:
-                                                        type: object
+                                                        type: boolean
                                                     type:
-                                                        type: object
+                                                        $ref: '#/components/schemas/model_DNSProviderType'
                                                     zone:
-                                                        type: object
+                                                        type: string
                                                     zone_id:
-                                                        type: object
+                                                        type: string
                                                 required:
                                                     - credentials_configured
                                                     - default_ttl
@@ -761,9 +793,10 @@ paths:
                                             - provider
         put:
             operationId: updateConfig
-            summary: put /api/v1/clusters/{cluster_id}/dns
+            summary: Update DNS config
+            description: Configure or update managed DNS provider settings and enqueue reconciliation.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -802,7 +835,7 @@ paths:
                                 zone_id:
                                     type: string
             responses:
-                "200":
+                "202":
                     description: OK
                     content:
                         application/json:
@@ -814,20 +847,13 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
-                                        properties:
-                                            primary_hostname:
-                                                type: string
-                                            sync_job:
-                                                $ref: '#/components/schemas/model_DNSSyncJob'
-                                        required:
-                                            - primary_hostname
-                                            - sync_job
+                                        $ref: '#/components/schemas/types_DNSJob'
         delete:
             operationId: disableConfig
-            summary: delete /api/v1/clusters/{cluster_id}/dns
+            summary: Disable DNS
+            description: Disable managed DNS for the cluster and enqueue cleanup reconciliation.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -853,7 +879,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        $ref: '#/components/schemas/model_DNSSyncJob'
+                                        $ref: '#/components/schemas/types_DNSJob'
     /api/v1/clusters/{cluster_id}/dns-lines:
         get:
             operationId: listDNSLines
@@ -890,9 +916,10 @@ paths:
     /api/v1/clusters/{cluster_id}/dns/jobs:
         get:
             operationId: listJobs
-            summary: get /api/v1/clusters/{cluster_id}/dns/jobs
+            summary: List DNS sync jobs
+            description: List recent DNS sync jobs for the cluster.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -918,13 +945,16 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_DNSJob'
     /api/v1/clusters/{cluster_id}/dns/lines:
         post:
             operationId: createLine
-            summary: post /api/v1/clusters/{cluster_id}/dns/lines
+            summary: Create DNS line
+            description: Create a DNS line and enqueue reconciliation when managed DNS is enabled.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -967,9 +997,10 @@ paths:
     /api/v1/clusters/{cluster_id}/dns/lines/{line_id}:
         delete:
             operationId: deleteLine
-            summary: delete /api/v1/clusters/{cluster_id}/dns/lines/{line_id}
+            summary: Delete DNS line
+            description: Delete a DNS line and enqueue reconciliation when managed DNS is enabled.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1002,9 +1033,10 @@ paths:
     /api/v1/clusters/{cluster_id}/dns/records:
         get:
             operationId: listRecords
-            summary: get /api/v1/clusters/{cluster_id}/dns/records
+            summary: List DNS records
+            description: List managed DNS records for the cluster.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1034,9 +1066,10 @@ paths:
     /api/v1/clusters/{cluster_id}/dns/sync:
         post:
             operationId: syncNow
-            summary: post /api/v1/clusters/{cluster_id}/dns/sync
+            summary: Sync DNS now
+            description: Enqueue an immediate DNS reconciliation job.
             tags:
-                - clusters-dns
+                - dns
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1062,7 +1095,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        $ref: '#/components/schemas/model_DNSSyncJob'
+                                        $ref: '#/components/schemas/types_DNSJob'
     /api/v1/clusters/{cluster_id}/groups:
         get:
             operationId: listGroups
@@ -1504,9 +1537,10 @@ paths:
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/disable:
         post:
             operationId: disableNode
-            summary: post /api/v1/clusters/{cluster_id}/nodes/{node_id}/disable
+            summary: Disable node
+            description: Disable a node and remove it from DNS scheduling.
             tags:
-                - clusters-nodes
+                - nodes
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1551,9 +1585,10 @@ paths:
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/dns-lines:
         put:
             operationId: updateDNSLines
-            summary: put /api/v1/clusters/{cluster_id}/nodes/{node_id}/dns-lines
+            summary: Update node DNS lines
+            description: Replace the DNS lines assigned to a node and enqueue DNS reconciliation.
             tags:
-                - clusters-nodes
+                - nodes
             security:
                 - cookie_session: []
             x-middlewares:
@@ -1609,9 +1644,10 @@ paths:
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/enable:
         post:
             operationId: enableNode
-            summary: post /api/v1/clusters/{cluster_id}/nodes/{node_id}/enable
+            summary: Enable node
+            description: Re-enable a disabled node and wait for health checks.
             tags:
-                - clusters-nodes
+                - nodes
             security:
                 - cookie_session: []
             x-middlewares:
@@ -2524,6 +2560,77 @@ paths:
                                             - unavailable
 components:
     schemas:
+        analytics_DistributionItem:
+            type: object
+            properties:
+                egress_bytes:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+                value:
+                    type: string
+        analytics_NodeRuntimePoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cpu_usage_percent:
+                    type: number
+                load_1:
+                    type: number
+                load_5:
+                    type: number
+                load_15:
+                    type: number
+                memory_total_bytes:
+                    type: number
+                memory_used_bytes:
+                    type: number
+                node_id:
+                    type: string
+        analytics_Summary:
+            type: object
+            properties:
+                cache_hits:
+                    type: number
+                cache_misses:
+                    type: number
+                egress_bytes:
+                    type: number
+                hit_rate:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+        analytics_TopItem:
+            type: object
+            properties:
+                requests:
+                    type: number
+                traffic_bytes:
+                    type: number
+                value:
+                    type: string
+        analytics_TrafficPoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cache_egress_bytes:
+                    type: number
+                egress_bytes:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
         clusters_clusterChoice:
             type: object
             properties:
@@ -3504,6 +3611,30 @@ components:
                     $ref: '#/components/schemas/model_OriginProtocol'
                 weight:
                     type: number
+        types_DNSJob:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/model_DNSSyncAction'
+                attempts:
+                    type: number
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                maxAttempts:
+                    type: number
+                resultJson:
+                    $ref: '#/components/schemas/types_DNSJobResult'
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+        types_DNSJobResult:
+            type: object
+            properties:
+                error:
+                    type: string
     securitySchemes:
         cookie_session:
             type: apiKey

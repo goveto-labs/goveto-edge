@@ -67,6 +67,9 @@ func Register(
 	group.DELETE("/lines/:line_id", deleteLine(db, service))
 }
 
+// @summary Get DNS config
+// @description Return cluster primary hostname and managed DNS provider configuration.
+// @Tags dns
 func getConfig(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -102,6 +105,9 @@ func getConfig(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Update DNS config
+// @description Configure or update managed DNS provider settings and enqueue reconciliation.
+// @Tags dns
 func updateConfig(
 	db *client.Client,
 	cipher *node.CredentialCipher,
@@ -345,6 +351,9 @@ func updateConfig(
 	}
 }
 
+// @summary Disable DNS
+// @description Disable managed DNS for the cluster and enqueue cleanup reconciliation.
+// @Tags dns
 func disableConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
@@ -401,6 +410,9 @@ func disableConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc
 	}
 }
 
+// @summary List DNS records
+// @description List managed DNS records for the cluster.
+// @Tags dns
 func listRecords(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.DNSManagedRecord.Query().
@@ -414,6 +426,9 @@ func listRecords(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary List DNS sync jobs
+// @description List recent DNS sync jobs for the cluster.
+// @Tags dns
 func listJobs(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.DNSSyncJob.Query().
@@ -432,6 +447,9 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 	}
 }
 
+// @summary Sync DNS now
+// @description Enqueue an immediate DNS reconciliation job.
+// @Tags dns
 func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
@@ -484,6 +502,9 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	}
 }
 
+// @summary Create DNS line
+// @description Create a DNS line and enqueue reconciliation when managed DNS is enabled.
+// @Tags dns
 func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
@@ -577,6 +598,9 @@ func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	}
 }
 
+// @summary Delete DNS line
+// @description Delete a DNS line and enqueue reconciliation when managed DNS is enabled.
+// @Tags dns
 func deleteLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {

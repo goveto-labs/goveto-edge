@@ -17,6 +17,9 @@ type dnsLinesRequest struct {
 	DNSLineIDs []string `json:"dns_line_ids"`
 }
 
+// @summary Update node DNS lines
+// @description Replace the DNS lines assigned to a node and enqueue DNS reconciliation.
+// @Tags nodes
 func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -65,6 +68,9 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 	}
 }
 
+// @summary Enable node
+// @description Re-enable a disabled node and wait for health checks.
+// @Tags nodes
 func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
@@ -93,6 +99,9 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 	}
 }
 
+// @summary Disable node
+// @description Disable a node and remove it from DNS scheduling.
+// @Tags nodes
 func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
