@@ -1,11 +1,20 @@
-import type { ClusterChoice, ClusterGroup, ClusterListResponse, ClusterMember, ClusterRegion, DNSLine } from './types.ts';
+import type {
+    ClusterChoice,
+    ClusterGroup,
+    ClusterListResponse,
+    ClusterMember,
+    ClusterRegion,
+    DNSLine,
+} from './types.ts';
 
 import { get, post, put } from './client.ts';
 
 export const clustersApi = {
     list: () => get<ClusterListResponse>('/clusters'),
-    create: (name: string) => post<{ cluster: ClusterChoice; selected_cluster_id: string }>('/clusters', { name }),
-    select: (clusterId: string) => put<{ selected_cluster_id: string }>('/session/cluster', { cluster_id: clusterId }),
+    create: (name: string) =>
+        post<{ cluster: ClusterChoice; selected_cluster_id: string }>('/clusters', { name }),
+    select: (clusterId: string) =>
+        put<{ selected_cluster_id: string }>('/session/cluster', { cluster_id: clusterId }),
 };
 
 function clusterPath(clusterId: string, path: string) {

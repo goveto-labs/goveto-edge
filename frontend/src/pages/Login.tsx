@@ -1,9 +1,11 @@
-import { Button, Input, InputOTP, Label, Modal, useOverlayState } from '@heroui/react';
-import { Globe, Loader2 } from 'lucide-react';
+import { Button, Input, InputOTP, useOverlayState } from '@heroui/react';
+import { Globe, Loader2, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { ApiError } from '@/api';
+import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
+import { FormError, FormField } from '@/components/FormField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 
 function isTotpRequired(err: unknown): boolean {
@@ -110,8 +112,7 @@ export default function Login() {
                     )}
 
                     <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='login-email'>Email</Label>
+                        <FormField htmlFor='login-email' label='Email' required>
                             <Input
                                 autoComplete='email'
                                 autoFocus
@@ -122,9 +123,8 @@ export default function Login() {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                             />
-                        </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='login-password'>Password</Label>
+                        </FormField>
+                        <FormField htmlFor='login-password' label='Password' required>
                             <Input
                                 autoComplete='current-password'
                                 id='login-password'
@@ -134,7 +134,7 @@ export default function Login() {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                             />
-                        </div>
+                        </FormField>
 
                         <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
                             {loading && !otpModal.isOpen ? (
@@ -164,8 +164,12 @@ export default function Login() {
                 </p>
             </main>
 
-            <Modal
+            <DialogShell
+                icon={<ShieldCheck className='h-5 w-5' />}
                 isOpen={otpModal.isOpen}
+                size='sm'
+                subtitle='Enter the 6-digit code from your authenticator app.'
+                title='Two-factor authentication'
                 onOpenChange={(open) => {
                     if (!open) {
                         setCode('');
@@ -174,75 +178,53 @@ export default function Login() {
                     otpModal.setOpen(open);
                 }}
             >
-                <Modal.Backdrop>
-                    <Modal.Container size='sm'>
-                        <Modal.Dialog>
-                            <form onSubmit={handleOtpSubmit}>
-                                <Modal.Header>
-                                    <Modal.Heading>Two-factor authentication</Modal.Heading>
-                                </Modal.Header>
-                                <Modal.Body className='space-y-4'>
-                                    <p className='text-sm text-muted'>
-                                        Enter the 6-digit code from your authenticator app.
-                                    </p>
-                                    {otpError && (
-                                        <div
-                                            className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'
-                                            role='alert'
-                                        >
-                                            {otpError}
-                                        </div>
-                                    )}
-                                    <div className='flex justify-center'>
-                                        <InputOTP
-                                            autoFocus
-                                            maxLength={6}
-                                            value={code}
-                                            onChange={setCode}
-                                        >
-                                            <InputOTP.Group>
-                                                <InputOTP.Slot index={0} />
-                                                <InputOTP.Slot index={1} />
-                                                <InputOTP.Slot index={2} />
-                                            </InputOTP.Group>
-                                            <InputOTP.Separator />
-                                            <InputOTP.Group>
-                                                <InputOTP.Slot index={3} />
-                                                <InputOTP.Slot index={4} />
-                                                <InputOTP.Slot index={5} />
-                                            </InputOTP.Group>
-                                        </InputOTP>
-                                    </div>
-                                </Modal.Body>
-                                <Modal.Footer>
-                                    <Button
-                                        isDisabled={loading}
-                                        type='button'
-                                        variant='ghost'
-                                        onPress={otpModal.close}
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        isDisabled={loading || code.length !== 6}
-                                        type='submit'
-                                        variant='primary'
-                                    >
-                                        {loading ? (
-                                            <span className='flex items-center justify-center gap-2'>
-                                                <Loader2 className='h-4 w-4 animate-spin' />
-                                                Verifying…
-                                            </span>
-                                        ) : (
-                                            'Verify'
-                                        )}
-                                    </Button>
-                                </Modal.Footer>
-                            </form>
-                        </Modal.Dialog>
-                    </Modal.Container>
-                </Modal.Backdrop>
-            </Modal>
+                <form className='flex flex-col' onSubmit={handleOtpSubmit}>
+                    <div className='space-y-4 p-6'>
+                        {otpError && <FormError message={otpError} />}
+                        <FormField label='Verification code'>
+                            <div className='flex justify-center py-2'>
+                                <InputOTP autoFocus maxLength={6} value={code} onChange={setCode}>
+                                    <InputOTP.Group>
+                                        <InputOTP.Slot index={0} />
+                                        <InputOTP.Slot index={1} />
+                                        <InputOTP.Slot index={2} />
+                                    </InputOTP.Group>
+                                    <InputOTP.Separator />
+                                    <InputOTP.Group>
+                                        <InputOTP.Slot index={3} />
+                                        <InputOTP.Slot index={4} />
+                                        <InputOTP.Slot index={5} />
+                                    </InputOTP.Group>
+                                </InputOTP>
+                            </div>
+                        </FormField>
+                    </div>
+                    <DialogFooter>
+                        <Button
+                            isDisabled={loading}
+                            type='button'
+                            variant='ghost'
+                            onPress={otpModal.close}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            isDisabled={loading || code.length !== 6}
+                            type='submit'
+                            variant='primary'
+                        >
+                            {loading ? (
+                                <span className='flex items-center justify-center gap-2'>
+                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    Verifying…
+                                </span>
+                            ) : (
+                                'Verify'
+                            )}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogShell>
         </div>
     );
 }

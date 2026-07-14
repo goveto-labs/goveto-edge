@@ -1,12 +1,15 @@
 import type { PurgeJob, PurgeType } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select, Spinner, Table } from '@heroui/react';
+import { Button, Input, Label, ListBox, Select, Spinner } from '@heroui/react';
 import { Eraser, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { ApiError, purgeApi } from '@/api';
+import { ContentCard } from '@/components/ContentCard.tsx';
+import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 const purgeTypes: PurgeType[] = ['URL', 'PREFIX', 'TAG', 'ALL'];
@@ -68,11 +71,11 @@ export default function PurgeJobs() {
                     subtitle='Clear cached content by URL, prefix, tag, or site.'
                     title='Purge Jobs'
                 />
-                <Card className='p-8 text-center'>
+                <ContentCard className='p-8 text-center'>
                     <div className='text-sm text-muted'>
                         Select a cluster in the header to manage purge jobs.
                     </div>
-                </Card>
+                </ContentCard>
             </div>
         );
     }
@@ -90,15 +93,15 @@ export default function PurgeJobs() {
                 </div>
             )}
 
-            <Card className='p-5'>
+            <ContentCard title='Enqueue purge'>
                 <form className='space-y-4' onSubmit={handleSubmit}>
                     <div className='flex flex-col gap-4 md:flex-row md:items-end'>
-                        <div className='flex flex-col gap-1 flex-1'>
+                        <div className='flex flex-1 flex-col gap-1'>
                             <Label htmlFor='purge-site-id'>Site ID</Label>
                             <Input
-                                variant='secondary'
                                 id='purge-site-id'
                                 placeholder='Site ID'
+                                variant='secondary'
                                 value={siteId}
                                 onChange={(e) => {
                                     const next = e.target.value;
@@ -138,11 +141,11 @@ export default function PurgeJobs() {
                             </Select.Popover>
                         </Select>
                         <Input
-                            variant='secondary'
-                            className='flex-1'
                             aria-label='Purge value'
+                            className='flex-1'
                             disabled={type === 'ALL'}
                             placeholder={type === 'ALL' ? 'No value needed' : 'Value to purge'}
+                            variant='secondary'
                             value={value}
                             onChange={(e) => setValue(e.target.value)}
                         />
@@ -157,49 +160,41 @@ export default function PurgeJobs() {
                         </Button>
                     </div>
                 </form>
-            </Card>
+            </ContentCard>
 
-            <Card className='overflow-hidden'>
-                <Table>
-                    <Table.ScrollContainer>
-                        <Table.Content aria-label='Purge jobs'>
-                            <Table.Header>
-                                <Table.Column isRowHeader>Job ID</Table.Column>
-                                <Table.Column>Type</Table.Column>
-                                <Table.Column>Value</Table.Column>
-                                <Table.Column>Status</Table.Column>
-                                <Table.Column>Created</Table.Column>
-                            </Table.Header>
-                            <Table.Body>
-                                {loading && jobs.length === 0 && (
-                                    <Table.Row id='loading'>
-                                        <Table.Cell>
-                                            <div className='flex justify-center py-4'>
-                                                <Spinner />
-                                            </div>
-                                        </Table.Cell>
-                                        <Table.Cell />
-                                        <Table.Cell />
-                                        <Table.Cell />
-                                        <Table.Cell />
-                                    </Table.Row>
-                                )}
-                                {jobs.map((job) => (
-                                    <Table.Row key={job.id} id={job.id}>
-                                        <Table.Cell className='font-mono text-xs'>
-                                            {job.id}
-                                        </Table.Cell>
-                                        <Table.Cell>{job.type}</Table.Cell>
-                                        <Table.Cell>{job.value ?? '-'}</Table.Cell>
-                                        <Table.Cell>{job.status}</Table.Cell>
-                                        <Table.Cell>{job.created_at}</Table.Cell>
-                                    </Table.Row>
-                                ))}
-                            </Table.Body>
-                        </Table.Content>
-                    </Table.ScrollContainer>
-                </Table>
-            </Card>
+            <DataTable aria-label='Purge jobs'>
+                <thead>
+                    <tr className='border-b border-border'>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Job ID</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Type</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Value</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Status</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {loading && jobs.length === 0 && (
+                        <tr id='loading'>
+                            <td colSpan={5}>
+                                <div className='flex justify-center py-4'>
+                                    <Spinner />
+                                </div>
+                            </td>
+                        </tr>
+                    )}
+                    {jobs.map((job) => (
+                        <tr className='border-b border-border last:border-0' key={job.id}>
+                            <td className='py-3 font-mono text-xs'>{job.id}</td>
+                            <td className='py-3 text-sm'>{job.type}</td>
+                            <td className='py-3 text-sm text-muted'>{job.value ?? '-'}</td>
+                            <td className='py-3'>
+                                <StatusBadge status={job.status} />
+                            </td>
+                            <td className='py-3 text-sm text-muted'>{job.created_at}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </DataTable>
         </div>
     );
 }

@@ -1,10 +1,14 @@
 import type { Certificate } from '@/api';
 
-import { Button, Card, Input, Label, Modal, Table, TextArea, useOverlayState } from '@heroui/react';
+import { Button, Input, TextArea, useOverlayState } from '@heroui/react';
 import { Plus, ShieldCheck, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, certificatesApi } from '@/api';
+import { ContentCard } from '@/components/ContentCard.tsx';
+import { DataTable } from '@/components/DataTable.tsx';
+import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
+import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -67,11 +71,11 @@ export default function Certificates() {
         return (
             <div className='space-y-6'>
                 <PageHeader subtitle='TLS certificates for site listeners.' title='Certificates' />
-                <Card className='p-8 text-center'>
+                <ContentCard className='p-8 text-center'>
                     <div className='text-sm text-muted'>
                         Select a cluster in the header to manage certificates.
                     </div>
-                </Card>
+                </ContentCard>
             </div>
         );
     }
@@ -96,98 +100,86 @@ export default function Certificates() {
                     Loading certificates...
                 </div>
             ) : (
-                <Card className='overflow-hidden'>
-                    <Table>
-                        <Table.ScrollContainer>
-                            <Table.Content aria-label='Certificates'>
-                                <Table.Header>
-                                    <Table.Column isRowHeader>Name</Table.Column>
-                                    <Table.Column>ID</Table.Column>
-                                    <Table.Column>Created at</Table.Column>
-                                </Table.Header>
-                                <Table.Body>
-                                    {certs.map((cert) => (
-                                        <Table.Row key={cert.id} id={cert.id}>
-                                            <Table.Cell className='flex items-center gap-2 font-medium'>
-                                                <ShieldCheck className='h-4 w-4 text-success' />
-                                                {cert.name}
-                                            </Table.Cell>
-                                            <Table.Cell className='font-mono text-xs'>
-                                                {cert.id}
-                                            </Table.Cell>
-                                            <Table.Cell>{cert.created_at}</Table.Cell>
-                                        </Table.Row>
-                                    ))}
-                                </Table.Body>
-                            </Table.Content>
-                        </Table.ScrollContainer>
-                    </Table>
-                </Card>
+                <DataTable aria-label='Certificates'>
+                    <thead>
+                        <tr className='border-b border-border'>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>ID</th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>
+                                Created at
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {certs.map((cert) => (
+                            <tr className='border-b border-border last:border-0' key={cert.id}>
+                                <td className='flex items-center gap-2 py-3 text-sm font-medium'>
+                                    <ShieldCheck className='h-4 w-4 text-success' />
+                                    {cert.name}
+                                </td>
+                                <td className='py-3 font-mono text-xs text-muted'>{cert.id}</td>
+                                <td className='py-3 text-sm text-muted'>{cert.created_at}</td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </DataTable>
             )}
 
-            <Modal isOpen={modalState.isOpen} onOpenChange={modalState.setOpen}>
-                <Modal.Backdrop>
-                    <Modal.Container size='md'>
-                        <Modal.Dialog>
-                            <form className='space-y-4' onSubmit={handleSubmit}>
-                                <Modal.Header>
-                                    <Modal.Heading className='flex items-center gap-2'>
-                                        <Upload className='h-5 w-5' />
-                                        Upload certificate
-                                    </Modal.Heading>
-                                </Modal.Header>
-                                <Modal.Body className='space-y-4'>
-                                    {submitError && (
-                                        <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
-                                            {submitError}
-                                        </div>
-                                    )}
-                                    <div className='flex flex-col gap-1'>
-                                        <Label htmlFor='cert-name'>Name</Label>
-                                        <Input
-                                            variant='secondary'
-                                            id='cert-name'
-                                            required
-                                            value={name}
-                                            onChange={(e) => setName(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className='flex flex-col gap-1'>
-                                        <Label htmlFor='cert-pem'>Certificate PEM</Label>
-                                        <TextArea
-                                            variant='secondary'
-                                            id='cert-pem'
-                                            required
-                                            rows={6}
-                                            value={certificate}
-                                            onChange={(e) => setCertificate(e.target.value)}
-                                        />
-                                    </div>
-                                    <div className='flex flex-col gap-1'>
-                                        <Label htmlFor='cert-key'>Private key PEM</Label>
-                                        <TextArea
-                                            variant='secondary'
-                                            id='cert-key'
-                                            required
-                                            rows={6}
-                                            value={privateKey}
-                                            onChange={(e) => setPrivateKey(e.target.value)}
-                                        />
-                                    </div>
-                                </Modal.Body>
-                                <Modal.Footer>
-                                    <Button type='button' variant='ghost' onPress={modalState.close}>
-                                        Cancel
-                                    </Button>
-                                    <Button isDisabled={submitting} type='submit' variant='primary'>
-                                        {submitting ? 'Uploading...' : 'Upload'}
-                                    </Button>
-                                </Modal.Footer>
-                            </form>
-                        </Modal.Dialog>
-                    </Modal.Container>
-                </Modal.Backdrop>
-            </Modal>
+            <DialogShell
+                icon={<Upload className='h-5 w-5' />}
+                isOpen={modalState.isOpen}
+                size='md'
+                subtitle='Upload a TLS certificate and its private key.'
+                title='Upload certificate'
+                onOpenChange={modalState.setOpen}
+            >
+                <form className='flex flex-col' onSubmit={handleSubmit}>
+                    <div className='space-y-4 p-6'>
+                        {submitError && <FormError message={submitError} />}
+
+                        <FormField htmlFor='cert-name' label='Name' required>
+                            <Input
+                                autoFocus
+                                id='cert-name'
+                                required
+                                variant='secondary'
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                            />
+                        </FormField>
+
+                        <FormField htmlFor='cert-pem' label='Certificate PEM' required>
+                            <TextArea
+                                id='cert-pem'
+                                required
+                                rows={6}
+                                variant='secondary'
+                                value={certificate}
+                                onChange={(e) => setCertificate(e.target.value)}
+                            />
+                        </FormField>
+
+                        <FormField htmlFor='cert-key' label='Private key PEM' required>
+                            <TextArea
+                                id='cert-key'
+                                required
+                                rows={6}
+                                variant='secondary'
+                                value={privateKey}
+                                onChange={(e) => setPrivateKey(e.target.value)}
+                            />
+                        </FormField>
+                    </div>
+                    <DialogFooter>
+                        <Button type='button' variant='ghost' onPress={modalState.close}>
+                            Cancel
+                        </Button>
+                        <Button isDisabled={submitting} type='submit' variant='primary'>
+                            {submitting ? 'Uploading...' : 'Upload'}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogShell>
         </div>
     );
 }

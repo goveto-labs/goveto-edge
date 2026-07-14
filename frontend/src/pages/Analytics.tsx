@@ -1,10 +1,12 @@
 import type { Summary, TopItem, TrafficPoint } from '@/api';
 
-import { Button, Card, Input, Label, Table } from '@heroui/react';
-import { ArrowDown, ArrowUp, BarChart3, MousePointerClick, Percent, RefreshCw } from 'lucide-react';
+import { Button, Input, Label } from '@heroui/react';
+import { ArrowDown, ArrowUp, MousePointerClick, Percent, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi } from '@/api';
+import { ContentCard } from '@/components/ContentCard.tsx';
+import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
@@ -98,11 +100,11 @@ export default function Analytics() {
         return (
             <div className='space-y-6'>
                 <PageHeader subtitle='Traffic and cache performance metrics.' title='Analytics' />
-                <Card className='p-8 text-center'>
+                <ContentCard className='p-8 text-center'>
                     <div className='text-sm text-muted'>
                         Select a cluster in the header to view analytics.
                     </div>
-                </Card>
+                </ContentCard>
             </div>
         );
     }
@@ -117,14 +119,14 @@ export default function Analytics() {
                 </div>
             )}
 
-            <Card className='p-5'>
+            <ContentCard title='Filters'>
                 <div className='flex flex-wrap items-end gap-4'>
                     <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-site-id'>Site ID (optional)</Label>
                         <Input
-                            variant='secondary'
                             id='analytics-site-id'
                             className='w-64'
+                            variant='secondary'
                             value={siteId}
                             onChange={(e) => setSiteId(e.target.value)}
                         />
@@ -132,9 +134,9 @@ export default function Analytics() {
                     <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-from'>From</Label>
                         <Input
-                            variant='secondary'
                             id='analytics-from'
                             type='datetime-local'
+                            variant='secondary'
                             value={from}
                             onChange={(e) => setFrom(e.target.value)}
                         />
@@ -142,9 +144,9 @@ export default function Analytics() {
                     <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-to'>To</Label>
                         <Input
-                            variant='secondary'
                             id='analytics-to'
                             type='datetime-local'
+                            variant='secondary'
                             value={to}
                             onChange={(e) => setTo(e.target.value)}
                         />
@@ -154,7 +156,7 @@ export default function Analytics() {
                         {loading ? 'Loading...' : 'Refresh'}
                     </Button>
                 </div>
-            </Card>
+            </ContentCard>
 
             {summary && (
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
@@ -185,11 +187,7 @@ export default function Analytics() {
                 </div>
             )}
 
-            <Card className='p-5'>
-                <div className='mb-4 flex items-center gap-2 text-sm font-medium'>
-                    <BarChart3 className='h-4 w-4 text-muted' />
-                    Traffic (requests)
-                </div>
+            <ContentCard title='Traffic (requests)'>
                 {traffic.length === 0 ? (
                     <div className='text-sm text-muted'>No traffic data.</div>
                 ) : (
@@ -222,66 +220,54 @@ export default function Analytics() {
                         ))}
                     </svg>
                 )}
-            </Card>
+            </ContentCard>
 
             <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <Card className='overflow-hidden'>
-                    <div className='p-4 text-sm font-medium'>Top URLs</div>
-                    <Table>
-                        <Table.ScrollContainer>
-                            <Table.Content aria-label='Top URLs'>
-                                <Table.Header>
-                                    <Table.Column isRowHeader>URL</Table.Column>
-                                    <Table.Column>Requests</Table.Column>
-                                    <Table.Column>Bytes</Table.Column>
-                                </Table.Header>
-                                <Table.Body>
-                                    {topUrls.map((item) => (
-                                        <Table.Row key={item.value} id={item.value}>
-                                            <Table.Cell className='max-w-xs truncate'>
-                                                {item.value}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                {item.requests.toLocaleString()}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                {formatBytes(item.traffic_bytes)}
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    ))}
-                                </Table.Body>
-                            </Table.Content>
-                        </Table.ScrollContainer>
-                    </Table>
-                </Card>
+                <DataTable title='Top URLs'>
+                    <thead>
+                        <tr className='border-b border-border'>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>URL</th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>
+                                Requests
+                            </th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>Bytes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {topUrls.map((item: TopItem) => (
+                            <tr className='border-b border-border last:border-0' key={item.value}>
+                                <td className='max-w-xs truncate py-3 text-sm'>{item.value}</td>
+                                <td className='py-3 text-sm'>{item.requests.toLocaleString()}</td>
+                                <td className='py-3 text-sm text-muted'>
+                                    {formatBytes(item.traffic_bytes)}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </DataTable>
 
-                <Card className='overflow-hidden'>
-                    <div className='p-4 text-sm font-medium'>Top IPs</div>
-                    <Table>
-                        <Table.ScrollContainer>
-                            <Table.Content aria-label='Top IPs'>
-                                <Table.Header>
-                                    <Table.Column isRowHeader>IP</Table.Column>
-                                    <Table.Column>Requests</Table.Column>
-                                    <Table.Column>Bytes</Table.Column>
-                                </Table.Header>
-                                <Table.Body>
-                                    {topIps.map((item) => (
-                                        <Table.Row key={item.value} id={item.value}>
-                                            <Table.Cell>{item.value}</Table.Cell>
-                                            <Table.Cell>
-                                                {item.requests.toLocaleString()}
-                                            </Table.Cell>
-                                            <Table.Cell>
-                                                {formatBytes(item.traffic_bytes)}
-                                            </Table.Cell>
-                                        </Table.Row>
-                                    ))}
-                                </Table.Body>
-                            </Table.Content>
-                        </Table.ScrollContainer>
-                    </Table>
-                </Card>
+                <DataTable title='Top IPs'>
+                    <thead>
+                        <tr className='border-b border-border'>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>IP</th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>
+                                Requests
+                            </th>
+                            <th className='py-3 text-left text-xs font-medium text-muted'>Bytes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {topIps.map((item: TopItem) => (
+                            <tr className='border-b border-border last:border-0' key={item.value}>
+                                <td className='py-3 text-sm'>{item.value}</td>
+                                <td className='py-3 text-sm'>{item.requests.toLocaleString()}</td>
+                                <td className='py-3 text-sm text-muted'>
+                                    {formatBytes(item.traffic_bytes)}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </DataTable>
             </div>
         </div>
     );

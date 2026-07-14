@@ -1,4 +1,10 @@
-import type { CachePolicy, Certificate, SiteCreateResponse, SiteListenerConfig, SiteOrigin } from '@/api';
+import type {
+    CachePolicy,
+    Certificate,
+    SiteCreateResponse,
+    SiteListenerConfig,
+    SiteOrigin,
+} from '@/api';
 
 import { Button, Card, Input, Label, ListBox, Select, Spinner, Switch, Tabs } from '@heroui/react';
 import { Plus, Rocket, RotateCcw, Save } from 'lucide-react';

@@ -148,9 +148,20 @@ export interface Node {
     cacheConfig?: NodeCacheConfig;
 }
 
-export interface NodeStatusResponse { id: string; status: string; message?: string; }
-export interface NodeDNSLinesResponse { node_id: string; dns_line_ids: string[]; }
-export interface NodeCacheUpdateResponse { cache_config: NodeCacheConfig; synced: boolean; sync_error?: string; }
+export interface NodeStatusResponse {
+    id: string;
+    status: string;
+    message?: string;
+}
+export interface NodeDNSLinesResponse {
+    node_id: string;
+    dns_line_ids: string[];
+}
+export interface NodeCacheUpdateResponse {
+    cache_config: NodeCacheConfig;
+    synced: boolean;
+    sync_error?: string;
+}
 
 export interface CreateNodeRequest {
     name: string;
@@ -180,9 +191,24 @@ export interface Site {
     dns_sync_job?: DNSSyncJob;
 }
 
-export interface SiteCreateResponse { id: string; name: string; status: string; publish_job?: PublishJob; publish_error?: string; dns_sync_job?: DNSSyncJob; }
-export interface SiteListenerUpdateResponse { listener: SiteListenerConfig; publish_job?: PublishJob; publish_error?: string; }
-export interface SiteCacheUpdateResponse { cache: CachePolicy; publish_job?: PublishJob; publish_error?: string; }
+export interface SiteCreateResponse {
+    id: string;
+    name: string;
+    status: string;
+    publish_job?: PublishJob;
+    publish_error?: string;
+    dns_sync_job?: DNSSyncJob;
+}
+export interface SiteListenerUpdateResponse {
+    listener: SiteListenerConfig;
+    publish_job?: PublishJob;
+    publish_error?: string;
+}
+export interface SiteCacheUpdateResponse {
+    cache: CachePolicy;
+    publish_job?: PublishJob;
+    publish_error?: string;
+}
 
 export interface CreateSiteRequest {
     name: string;

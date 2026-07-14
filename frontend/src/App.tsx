@@ -7,6 +7,7 @@ import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
 import Analytics from '@/pages/Analytics.tsx';
 import Certificates from '@/pages/Certificates.tsx';
+import CreateNode from '@/pages/CreateNode.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
 import DNS from '@/pages/DNS.tsx';
 import Init from '@/pages/Init.tsx';
@@ -36,6 +37,7 @@ export default function App() {
                             >
                                 <Route element={<Dashboard />} path='/' />
                                 <Route element={<Nodes />} path='/nodes' />
+                                <Route element={<CreateNode />} path='/nodes/create' />
                                 <Route element={<Sites />} path='/sites' />
                                 <Route element={<DNS />} path='/dns' />
                                 <Route element={<Certificates />} path='/certificates' />

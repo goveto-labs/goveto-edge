@@ -1,6 +1,14 @@
 import type { ClusterChoice } from '@/api/types.ts';
 
-import { createContext, createElement, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import {
+    createContext,
+    createElement,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+} from 'react';
 
 import { clustersApi } from '@/api';
 import { useAuth } from '@/hooks/useAuth.ts';
@@ -26,7 +34,11 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
     const [error, setError] = useState<string | null>(null);
 
     const refresh = useCallback(async () => {
-        if (!user) { setClusters([]); setCurrentClusterId(''); return; }
+        if (!user) {
+            setClusters([]);
+            setCurrentClusterId('');
+            return;
+        }
         setLoading(true);
         try {
             const result = await clustersApi.list();
@@ -35,23 +47,42 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unable to load clusters');
-        } finally { setLoading(false); }
+        } finally {
+            setLoading(false);
+        }
     }, [user]);
 
-    useEffect(() => { void refresh(); }, [refresh]);
+    useEffect(() => {
+        void refresh();
+    }, [refresh]);
 
     const setClusterId = useCallback(async (id: string) => {
         await clustersApi.select(id);
         setCurrentClusterId(id);
     }, []);
 
-    const createCluster = useCallback(async (name: string) => {
-        const result = await clustersApi.create(name);
-        await refresh();
-        setCurrentClusterId(result.selected_cluster_id);
-    }, [refresh]);
+    const createCluster = useCallback(
+        async (name: string) => {
+            const result = await clustersApi.create(name);
+            await refresh();
+            setCurrentClusterId(result.selected_cluster_id);
+        },
+        [refresh]
+    );
 
-    const value = useMemo(() => ({ clusterId, clusters, loading, error, requiresCluster: !loading && !!user && clusters.length === 0, setClusterId, createCluster, refresh }), [clusterId, clusters, loading, error, user, setClusterId, createCluster, refresh]);
+    const value = useMemo(
+        () => ({
+            clusterId,
+            clusters,
+            loading,
+            error,
+            requiresCluster: !loading && !!user && clusters.length === 0,
+            setClusterId,
+            createCluster,
+            refresh,
+        }),
+        [clusterId, clusters, loading, error, user, setClusterId, createCluster, refresh]
+    );
     return createElement(ClusterContext.Provider, { value }, children);
 }
 

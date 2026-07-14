@@ -1,4 +1,12 @@
-import type { CreateNodeRequest, Node, NodeAddress, NodeCacheConfig, NodeCacheUpdateResponse, NodeDNSLinesResponse, NodeStatusResponse } from './types.ts';
+import type {
+    CreateNodeRequest,
+    Node,
+    NodeAddress,
+    NodeCacheConfig,
+    NodeCacheUpdateResponse,
+    NodeDNSLinesResponse,
+    NodeStatusResponse,
+} from './types.ts';
 
 import { del, get, post, put } from './client.ts';
 
@@ -13,9 +21,13 @@ export const nodesApi = (clusterId: string) => ({
         post<NodeStatusResponse>(clusterPath(clusterId, '/nodes'), payload),
     delete: (nodeId: string) => del<void>(clusterPath(clusterId, `/nodes/${nodeId}`)),
     updateDNSLines: (nodeId: string, dnsLineIds: string[]) =>
-        put<NodeDNSLinesResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), { dns_line_ids: dnsLineIds }),
-    enable: (nodeId: string) => post<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/enable`)),
-    disable: (nodeId: string) => post<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/disable`)),
+        put<NodeDNSLinesResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), {
+            dns_line_ids: dnsLineIds,
+        }),
+    enable: (nodeId: string) =>
+        post<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/enable`)),
+    disable: (nodeId: string) =>
+        post<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/disable`)),
 
     getCacheConfig: (nodeId: string) =>
         get<NodeCacheConfig>(clusterPath(clusterId, `/nodes/${nodeId}/cache-config`)),

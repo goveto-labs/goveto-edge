@@ -15,10 +15,10 @@ interface NavItemProps {
 export function NavItem({ to, icon: Icon, label, active, badge, onClick }: NavItemProps) {
     return (
         <Link
-            className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors ${
+            className={`group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 active
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted hover:bg-surface-tertiary hover:text-foreground'
+                    ? 'bg-surface-secondary text-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-foreground'
+                    : 'text-muted hover:bg-surface-secondary hover:text-foreground'
             }`}
             to={to}
             onClick={onClick}
