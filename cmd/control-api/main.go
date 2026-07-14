@@ -107,7 +107,7 @@ func main() {
 					callbackCtx,
 					clusterID,
 					nil,
-					model.DNSSyncActionRECONCILE,
+					model.DNSSyncActionUPSERT_CLUSTER,
 				)
 			}()
 		},

@@ -1,4 +1,4 @@
-export type { UpdateDNSConfig } from './dns.ts';
+export type { DNSDiscoveryRequest, UpdateDNSConfig } from './dns.ts';
 export type * from './types.ts';
 
 export { analyticsApi } from './analytics.ts';

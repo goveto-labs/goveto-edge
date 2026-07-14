@@ -1,17 +1,18 @@
 import type {
-    DNSLine,
     DNSManagedRecord,
+    DNSProviderDomain,
     DNSProviderType,
     DNSSyncJob,
     UpdateDNSConfig,
 } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select } from '@heroui/react';
-import { Plus, Power, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Button, Card, Input, Label, ListBox, Select, Spinner } from '@heroui/react';
+import { Globe2, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { ApiError, clusterApi, dnsApi } from '@/api';
+import { ApiError, dnsApi } from '@/api';
 import { DataTable } from '@/components/DataTable.tsx';
+import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -22,7 +23,6 @@ function errorMessage(error: unknown, fallback: string) {
 export default function DNS() {
     const { clusterId, clusters } = useCluster();
     const api = useMemo(() => dnsApi(clusterId), [clusterId]);
-    const clusterOptionsApi = useMemo(() => clusterApi(clusterId), [clusterId]);
     const activeClusterRef = useRef(clusterId);
     const loadGenerationRef = useRef(0);
     const statusGenerationRef = useRef(0);
@@ -42,9 +42,9 @@ export default function DNS() {
     const [credentialsConfigured, setCredentialsConfigured] = useState(false);
     const [records, setRecords] = useState<DNSManagedRecord[]>([]);
     const [jobs, setJobs] = useState<DNSSyncJob[]>([]);
-    const [lines, setLines] = useState<DNSLine[]>([]);
-    const [lineName, setLineName] = useState('');
-    const [lineCode, setLineCode] = useState('');
+    const [domainDialogOpen, setDomainDialogOpen] = useState(false);
+    const [providerDomains, setProviderDomains] = useState<DNSProviderDomain[]>([]);
+    const [discoveringDomains, setDiscoveringDomains] = useState(false);
     const [loadedClusterId, setLoadedClusterId] = useState('');
     const [loading, setLoading] = useState(false);
     const [busy, setBusy] = useState(false);
@@ -76,9 +76,9 @@ export default function DNS() {
         setCredentialsConfigured(false);
         setRecords([]);
         setJobs([]);
-        setLines([]);
-        setLineName('');
-        setLineCode('');
+        setDomainDialogOpen(false);
+        setProviderDomains([]);
+        setDiscoveringDomains(false);
         setError('');
     }, []);
 
@@ -91,11 +91,10 @@ export default function DNS() {
             statusGenerationRef.current += 1;
             if (showLoading) setLoading(true);
             try {
-                const [config, recordData, jobData, lineData] = await Promise.all([
+                const [config, recordData, jobData] = await Promise.all([
                     api.config(),
                     api.records(),
                     api.jobs(),
-                    clusterOptionsApi.dnsLines(),
                 ]);
                 if (
                     activeClusterRef.current !== requestedClusterId ||
@@ -129,7 +128,11 @@ export default function DNS() {
                 setApiToken('');
                 setRecords(recordData);
                 setJobs(jobData);
-                setLines(lineData);
+                setProviderDomains(
+                    config.provider
+                        ? [{ name: config.provider.zone, id: config.provider.zone_id ?? undefined }]
+                        : []
+                );
                 setLoadedClusterId(requestedClusterId);
                 setError('');
             } catch (loadError) {
@@ -148,7 +151,7 @@ export default function DNS() {
                 }
             }
         },
-        [api, clusterId, clusterOptionsApi]
+        [api, clusterId]
     );
 
     const refreshStatus = useCallback(async () => {
@@ -173,13 +176,6 @@ export default function DNS() {
             }
         }
     }, [api, clusterId]);
-
-    const refreshLinesAndStatus = useCallback(async () => {
-        const requestedClusterId = clusterId;
-        if (!requestedClusterId || activeClusterRef.current !== requestedClusterId) return;
-        const [lineData] = await Promise.all([clusterOptionsApi.dnsLines(), refreshStatus()]);
-        if (activeClusterRef.current === requestedClusterId) setLines(lineData);
-    }, [clusterId, clusterOptionsApi, refreshStatus]);
 
     useEffect(() => {
         loadGenerationRef.current += 1;
@@ -225,6 +221,7 @@ export default function DNS() {
     const save = async (event: React.FormEvent) => {
         event.preventDefault();
         if (!canEdit) return;
+        if (!zone) return;
 
         let credentials: Record<string, string> | undefined;
         if (provider === 'ALIYUN') {
@@ -268,6 +265,7 @@ export default function DNS() {
                 setAccessKeyId('');
                 setAccessKeySecret('');
                 setApiToken('');
+                setDomainDialogOpen(false);
             }
         );
     };
@@ -279,42 +277,76 @@ export default function DNS() {
         setAccessKeyId('');
         setAccessKeySecret('');
         setApiToken('');
+        setZone('');
+        setZoneId('');
+        setProviderDomains([]);
         if (nextProvider === 'CLOUDFLARE' && configuredProvider !== 'CLOUDFLARE') {
             setZoneId('');
             setProxied(false);
         }
     };
 
+    const discoveryCredentials = (): Record<string, string> | undefined | null => {
+        if (provider === 'ALIYUN') {
+            if ((accessKeyId && !accessKeySecret) || (!accessKeyId && accessKeySecret)) {
+                setError('Both Aliyun AccessKey fields are required when changing credentials.');
+                return null;
+            }
+            if (!credentialsReusable && (!accessKeyId || !accessKeySecret)) {
+                setError('Aliyun AccessKey ID and secret are required.');
+                return null;
+            }
+            return accessKeyId && accessKeySecret
+                ? { access_key_id: accessKeyId, access_key_secret: accessKeySecret }
+                : undefined;
+        }
+        if (!credentialsReusable && !apiToken) {
+            setError('Cloudflare API token is required.');
+            return null;
+        }
+        return apiToken ? { api_token: apiToken } : undefined;
+    };
+
+    const discoverProviderDomains = async () => {
+        const credentials = discoveryCredentials();
+        if (credentials === null) return;
+        setDiscoveringDomains(true);
+        setError('');
+        try {
+            const available = await api.discoverDomains({ provider, credentials });
+            setProviderDomains(available);
+            if (available.length === 0) {
+                setError('No domains are available for this credential.');
+            }
+        } catch (discoverError) {
+            setProviderDomains([]);
+            setError(errorMessage(discoverError, 'Failed to load provider domains'));
+        } finally {
+            setDiscoveringDomains(false);
+        }
+    };
+
+    const selectDomain = (key: React.Key | null) => {
+        if (!key) return;
+        const domain = providerDomains.find((item) => item.name === String(key));
+        if (!domain) return;
+        const previousZone = zone;
+        setZone(domain.name);
+        setZoneId(domain.id ?? '');
+        if (!hostname || hostname === `edge.${previousZone}`) setHostname(`edge.${domain.name}`);
+    };
+
     const sync = async () => {
         await mutate(() => api.sync(), 'Failed to enqueue DNS sync', undefined, refreshStatus);
     };
 
-    const disable = async () => {
-        if (!confirm('Disable managed DNS and remove all records created by Goveto Edge?')) return;
-        await mutate(() => api.disable(), 'Failed to disable managed DNS');
+    const refreshDomain = async () => {
+        await mutate(() => api.refresh(), 'Failed to refresh DNS domain');
     };
 
-    const addLine = async () => {
-        if (!lineName.trim() || !lineCode.trim()) return;
-        await mutate(
-            () => api.createLine({ name: lineName.trim(), provider_code: lineCode.trim() }),
-            'Failed to create DNS line',
-            () => {
-                setLineName('');
-                setLineCode('');
-            },
-            refreshLinesAndStatus
-        );
-    };
-
-    const deleteLine = async (line: DNSLine) => {
-        if (!confirm(`Delete DNS line "${line.name}"?`)) return;
-        await mutate(
-            () => api.deleteLine(line.id),
-            'Failed to delete DNS line',
-            undefined,
-            refreshLinesAndStatus
-        );
+    const deleteDomain = async () => {
+        if (!confirm(`Delete DNS domain "${zone}" and all records managed by Goveto Edge?`)) return;
+        await mutate(() => api.delete(), 'Failed to delete DNS domain');
     };
 
     if (!clusterId) {
@@ -338,6 +370,24 @@ export default function DNS() {
                     <RefreshCw className='mr-2 h-4 w-4' />
                     Refresh
                 </Button>
+                {isOwner && !configured && (
+                    <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Add domain
+                    </Button>
+                )}
+                {configured && isOwner && (
+                    <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
+                        <Pencil className='mr-2 h-4 w-4' />
+                        Edit domain
+                    </Button>
+                )}
+                {configured && isOwner && (
+                    <Button isDisabled={!canEdit} variant='secondary' onPress={refreshDomain}>
+                        <RefreshCw className='mr-2 h-4 w-4' />
+                        Refresh domain
+                    </Button>
+                )}
                 <Button
                     isDisabled={!canEdit || !configured || !enabled}
                     variant='secondary'
@@ -346,10 +396,10 @@ export default function DNS() {
                     <RefreshCw className='mr-2 h-4 w-4' />
                     Sync now
                 </Button>
-                {configured && enabled && isOwner && (
-                    <Button isDisabled={!canEdit} variant='danger' onPress={disable}>
-                        <Power className='mr-2 h-4 w-4' />
-                        Disable
+                {configured && isOwner && (
+                    <Button isDisabled={!canEdit} variant='danger' onPress={deleteDomain}>
+                        <Trash2 className='mr-2 h-4 w-4' />
+                        Delete domain
                     </Button>
                 )}
             </PageHeader>
@@ -365,216 +415,221 @@ export default function DNS() {
                     configuration or records.
                 </div>
             )}
-            {configured && !enabled && (
-                <div className='rounded-lg border border-warning bg-warning/10 px-4 py-3 text-sm'>
-                    Managed DNS is disabled. Record cleanup is processed in the background; save
-                    this form to enable it again.
-                </div>
-            )}
-
             <Card className='p-5'>
-                <form className='grid gap-4 md:grid-cols-2' onSubmit={save}>
-                    <div className='flex flex-col gap-1'>
-                        <Label htmlFor='dns-hostname'>Cluster hostname</Label>
-                        <Input
-                            variant='secondary'
-                            id='dns-hostname'
-                            disabled={!canEdit}
-                            placeholder='edge.example.com'
-                            required
-                            value={hostname}
-                            onChange={(event) => setHostname(event.target.value)}
-                        />
-                    </div>
-                    <Select
-                        variant='secondary'
-                        isDisabled={!canEdit}
-                        value={provider}
-                        onChange={changeProvider}
-                    >
-                        <Label>Provider</Label>
-                        <Select.Trigger>
-                            <Select.Value />
-                        </Select.Trigger>
-                        <Select.Popover>
-                            <ListBox>
-                                <ListBox.Item id='ALIYUN' textValue='Aliyun DNS'>
-                                    Aliyun DNS
-                                </ListBox.Item>
-                                <ListBox.Item id='CLOUDFLARE' textValue='Cloudflare'>
-                                    Cloudflare
-                                </ListBox.Item>
-                            </ListBox>
-                        </Select.Popover>
-                    </Select>
-                    <div className='flex flex-col gap-1'>
-                        <Label htmlFor='dns-zone'>DNS zone</Label>
-                        <Input
-                            variant='secondary'
-                            id='dns-zone'
-                            disabled={!canEdit}
-                            placeholder='example.com'
-                            required
-                            value={zone}
-                            onChange={(event) => setZone(event.target.value)}
-                        />
-                    </div>
-                    {provider === 'CLOUDFLARE' && (
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='dns-zone-id'>Cloudflare zone ID</Label>
-                            <Input
-                                variant='secondary'
-                                id='dns-zone-id'
-                                disabled={!canEdit}
-                                required
-                                value={zoneId}
-                                onChange={(event) => setZoneId(event.target.value)}
-                            />
-                        </div>
-                    )}
-                    {provider === 'ALIYUN' ? (
-                        <>
-                            <div className='flex flex-col gap-1'>
-                                <Label htmlFor='dns-key-id'>AccessKey ID</Label>
-                                <Input
-                                    variant='secondary'
-                                    id='dns-key-id'
-                                    disabled={!canEdit}
-                                    placeholder={
-                                        credentialsReusable
-                                            ? 'Leave blank to keep current credential'
-                                            : ''
-                                    }
-                                    value={accessKeyId}
-                                    onChange={(event) => setAccessKeyId(event.target.value)}
-                                />
+                {configured ? (
+                    <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-center'>
+                        <div>
+                            <div className='flex items-center gap-2 font-semibold'>
+                                <Globe2 className='h-4 w-4' />
+                                {zone}
                             </div>
-                            <div className='flex flex-col gap-1'>
-                                <Label htmlFor='dns-key-secret'>AccessKey secret</Label>
+                            <p className='mt-1 text-sm text-muted'>
+                                {provider === 'ALIYUN' ? 'Aliyun DNS' : 'Cloudflare'} · {hostname} ·
+                                TTL {ttl}
+                            </p>
+                        </div>
+                        <span className='text-sm text-muted'>
+                            {enabled ? 'Enabled' : 'Disabled'}
+                        </span>
+                    </div>
+                ) : (
+                    <div className='py-5 text-center'>
+                        <Globe2 className='mx-auto mb-3 h-8 w-8 text-muted' />
+                        <h2 className='font-semibold'>No DNS domain configured</h2>
+                        <p className='mt-1 text-sm text-muted'>
+                            Add a provider credential, then choose one of its domains.
+                        </p>
+                    </div>
+                )}
+            </Card>
+
+            <DialogShell
+                icon={<Globe2 className='h-5 w-5' />}
+                isDismissable={!busy}
+                isOpen={domainDialogOpen}
+                size='lg'
+                subtitle='Connect a provider and select one of its domains.'
+                title={configured ? 'Edit DNS domain' : 'Add DNS domain'}
+                onOpenChange={setDomainDialogOpen}
+            >
+                <form onSubmit={save}>
+                    <div className='grid max-h-[70vh] gap-4 overflow-y-auto px-6 py-5 md:grid-cols-2'>
+                        <Select
+                            variant='secondary'
+                            isDisabled={!canEdit}
+                            value={provider}
+                            onChange={changeProvider}
+                        >
+                            <Label>Provider</Label>
+                            <Select.Trigger>
+                                <Select.Value />
+                            </Select.Trigger>
+                            <Select.Popover>
+                                <ListBox>
+                                    <ListBox.Item id='ALIYUN' textValue='Aliyun DNS'>
+                                        Aliyun DNS
+                                    </ListBox.Item>
+                                    <ListBox.Item id='CLOUDFLARE' textValue='Cloudflare'>
+                                        Cloudflare
+                                    </ListBox.Item>
+                                </ListBox>
+                            </Select.Popover>
+                        </Select>
+                        <div className='hidden md:block' />
+                        {provider === 'ALIYUN' ? (
+                            <>
+                                <div className='flex flex-col gap-1'>
+                                    <Label htmlFor='dns-key-id'>AccessKey ID</Label>
+                                    <Input
+                                        variant='secondary'
+                                        id='dns-key-id'
+                                        disabled={!canEdit}
+                                        placeholder={
+                                            credentialsReusable
+                                                ? 'Leave blank to use saved credential'
+                                                : ''
+                                        }
+                                        value={accessKeyId}
+                                        onChange={(event) => setAccessKeyId(event.target.value)}
+                                    />
+                                </div>
+                                <div className='flex flex-col gap-1'>
+                                    <Label htmlFor='dns-key-secret'>AccessKey secret</Label>
+                                    <Input
+                                        variant='secondary'
+                                        id='dns-key-secret'
+                                        disabled={!canEdit}
+                                        placeholder={
+                                            credentialsReusable
+                                                ? 'Leave blank to use saved credential'
+                                                : ''
+                                        }
+                                        type='password'
+                                        value={accessKeySecret}
+                                        onChange={(event) => setAccessKeySecret(event.target.value)}
+                                    />
+                                </div>
+                            </>
+                        ) : (
+                            <div className='flex flex-col gap-1 md:col-span-2'>
+                                <Label htmlFor='dns-token'>API token</Label>
                                 <Input
                                     variant='secondary'
-                                    id='dns-key-secret'
+                                    id='dns-token'
                                     disabled={!canEdit}
                                     placeholder={
                                         credentialsReusable
-                                            ? 'Leave blank to keep current credential'
+                                            ? 'Leave blank to use saved credential'
                                             : ''
                                     }
                                     type='password'
-                                    value={accessKeySecret}
-                                    onChange={(event) => setAccessKeySecret(event.target.value)}
+                                    value={apiToken}
+                                    onChange={(event) => setApiToken(event.target.value)}
                                 />
                             </div>
-                        </>
-                    ) : (
+                        )}
+                        <div className='md:col-span-2'>
+                            <Button
+                                isDisabled={!canEdit || discoveringDomains}
+                                variant='secondary'
+                                onPress={() => void discoverProviderDomains()}
+                            >
+                                {discoveringDomains ? (
+                                    <Spinner className='mr-2' size='sm' />
+                                ) : (
+                                    <RefreshCw className='mr-2 h-4 w-4' />
+                                )}
+                                Load domains
+                            </Button>
+                        </div>
+                        <Select
+                            variant='secondary'
+                            isDisabled={!canEdit || providerDomains.length === 0}
+                            value={zone}
+                            onChange={selectDomain}
+                        >
+                            <Label>Domain</Label>
+                            <Select.Trigger>
+                                <Select.Value />
+                            </Select.Trigger>
+                            <Select.Popover>
+                                <ListBox>
+                                    {providerDomains.map((domain) => (
+                                        <ListBox.Item
+                                            key={domain.name}
+                                            id={domain.name}
+                                            textValue={domain.name}
+                                        >
+                                            {domain.name}
+                                        </ListBox.Item>
+                                    ))}
+                                </ListBox>
+                            </Select.Popover>
+                        </Select>
                         <div className='flex flex-col gap-1'>
-                            <Label htmlFor='dns-token'>API token</Label>
+                            <Label htmlFor='dns-hostname'>Cluster hostname</Label>
                             <Input
                                 variant='secondary'
-                                id='dns-token'
-                                disabled={!canEdit}
-                                placeholder={
-                                    credentialsReusable ? 'Leave blank to keep current token' : ''
-                                }
-                                type='password'
-                                value={apiToken}
-                                onChange={(event) => setApiToken(event.target.value)}
+                                id='dns-hostname'
+                                disabled={!canEdit || !zone}
+                                placeholder={zone ? `edge.${zone}` : 'Select a domain first'}
+                                required
+                                value={hostname}
+                                onChange={(event) => setHostname(event.target.value)}
                             />
                         </div>
-                    )}
-                    <div className='flex flex-col gap-1'>
-                        <Label htmlFor='dns-ttl'>TTL</Label>
-                        <Input
-                            variant='secondary'
-                            id='dns-ttl'
-                            disabled={!canEdit}
-                            max={86400}
-                            min={60}
-                            required
-                            type='number'
-                            value={String(ttl)}
-                            onChange={(event) => setTtl(Number(event.target.value))}
-                        />
-                    </div>
-                    {provider === 'CLOUDFLARE' && (
-                        <label className='flex items-center gap-2 pt-7 text-sm'>
-                            <input
-                                checked={proxied}
+                        <div className='flex flex-col gap-1'>
+                            <Label htmlFor='dns-ttl'>TTL</Label>
+                            <Input
+                                variant='secondary'
+                                id='dns-ttl'
                                 disabled={!canEdit}
-                                type='checkbox'
-                                onChange={(event) => setProxied(event.target.checked)}
+                                max={86400}
+                                min={60}
+                                required
+                                type='number'
+                                value={String(ttl)}
+                                onChange={(event) => setTtl(Number(event.target.value))}
                             />
-                            Enable Cloudflare proxy
-                        </label>
-                    )}
-                    <div className='md:col-span-2'>
-                        <Button isDisabled={!canEdit} type='submit'>
-                            <Save className='mr-2 h-4 w-4' />
-                            {busy ? 'Saving…' : enabled ? 'Save and sync' : 'Enable and sync'}
-                        </Button>
+                        </div>
+                        {provider === 'CLOUDFLARE' && (
+                            <label className='flex items-center gap-2 pt-7 text-sm'>
+                                <input
+                                    checked={proxied}
+                                    disabled={!canEdit}
+                                    type='checkbox'
+                                    onChange={(event) => setProxied(event.target.checked)}
+                                />
+                                Enable Cloudflare proxy
+                            </label>
+                        )}
+                        {error && (
+                            <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground md:col-span-2'>
+                                {error}
+                            </div>
+                        )}
                     </div>
-                </form>
-            </Card>
-
-            <Card className='p-5'>
-                <h2 className='mb-1 font-semibold'>Regional DNS lines</h2>
-                <p className='mb-4 text-sm text-muted'>
-                    Aliyun line codes are passed through as-is. The code “default” is reserved for
-                    nodes without a line assignment. Cloudflare ignores lines.
-                </p>
-                {isOwner && (
-                    <div className='mb-4 flex flex-col gap-2 sm:flex-row'>
-                        <Input
-                            variant='secondary'
-                            aria-label='DNS line name'
-                            disabled={!canEdit}
-                            placeholder='China Telecom'
-                            value={lineName}
-                            onChange={(event) => setLineName(event.target.value)}
-                        />
-                        <Input
-                            variant='secondary'
-                            aria-label='DNS line code'
-                            disabled={!canEdit}
-                            placeholder='telecom'
-                            value={lineCode}
-                            onChange={(event) => setLineCode(event.target.value)}
-                        />
+                    <DialogFooter>
                         <Button
-                            isDisabled={!canEdit || !lineName.trim() || !lineCode.trim()}
-                            onPress={addLine}
+                            isDisabled={busy}
+                            variant='ghost'
+                            onPress={() => setDomainDialogOpen(false)}
                         >
-                            <Plus className='mr-2 h-4 w-4' />
-                            Add line
+                            Cancel
                         </Button>
-                    </div>
-                )}
-                <div className='space-y-2'>
-                    {lines.map((line) => (
-                        <div
-                            className='flex items-center justify-between rounded-lg border border-border px-3 py-2'
-                            key={line.id}
-                        >
-                            <span>
-                                {line.name}
-                                <code className='ml-2 text-xs text-muted'>{line.providerCode}</code>
-                            </span>
-                            {isOwner && (
-                                <Button
-                                    aria-label={`Delete DNS line ${line.name}`}
-                                    isDisabled={!canEdit}
-                                    isIconOnly
-                                    size='sm'
-                                    variant='ghost'
-                                    onPress={() => void deleteLine(line)}
-                                >
-                                    <Trash2 className='h-4 w-4' />
-                                </Button>
-                            )}
-                        </div>
-                    ))}
-                </div>
-            </Card>
+                        <Button isDisabled={!canEdit || !zone} type='submit'>
+                            <Save className='mr-2 h-4 w-4' />
+                            {busy
+                                ? 'Saving…'
+                                : configured
+                                  ? enabled
+                                      ? 'Save and sync'
+                                      : 'Enable and sync'
+                                  : 'Add and sync'}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </DialogShell>
 
             <DataTable
                 aria-label='DNS records'
@@ -610,9 +665,9 @@ export default function DNS() {
             <DataTable
                 aria-label='DNS jobs'
                 empty={jobs.length === 0}
-                emptyDescription='DNS synchronization jobs will appear when configuration changes.'
+                emptyDescription='Jobs appear when edge node IP addresses are synchronized to DNS.'
                 emptyTitle='No DNS jobs yet'
-                title='Synchronization jobs'
+                title='Node IP synchronization jobs'
             >
                 <thead>
                     <tr>
@@ -628,7 +683,7 @@ export default function DNS() {
                     {jobs.map((job) => (
                         <tr key={job.id}>
                             <td className='font-mono text-xs'>{job.id}</td>
-                            <td>{job.action}</td>
+                            <td>{job.action === 'UPSERT_CLUSTER' ? 'SYNC_NODE_IP' : job.action}</td>
                             <td>{job.status}</td>
                             <td>
                                 {job.attempts}/{job.maxAttempts}

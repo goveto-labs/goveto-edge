@@ -24,6 +24,8 @@ const (
 	jobRetention = 30 * 24 * time.Hour
 )
 
+var ErrDNSNotConfigured = errors.New("DNS provider is not configured")
+
 type Service struct {
 	db         *client.Client
 	cipher     *node.CredentialCipher
@@ -144,11 +146,135 @@ func (s *Service) EnqueueIfConfigured(
 	return s.Enqueue(ctx, clusterID, siteID, action)
 }
 
-func (s *Service) EnqueueSiteIfConfigured(
-	ctx context.Context,
-	clusterID, siteID string,
-) (*model.DNSSyncJob, error) {
-	return s.EnqueueIfConfigured(ctx, clusterID, &siteID, model.DNSSyncActionUPSERT_SITE)
+// DeleteConfiguration synchronously removes records managed by this service and
+// then deletes the local provider configuration. It intentionally does not
+// create a synchronization job.
+func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) error {
+	unlock, err := s.lockCluster(ctx, clusterID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	config, err := s.db.DNSProviderConfig.FindUnique(
+		ctx,
+		query.DNSProviderConfig.ClusterId.Equals(clusterID),
+	)
+	if err != nil {
+		return err
+	}
+	if config == nil {
+		return ErrDNSNotConfigured
+	}
+	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
+	if err != nil {
+		return fmt.Errorf("decrypt DNS credentials: %w", err)
+	}
+	provider, err := dnsprovider.New(
+		config.Provider,
+		config.Zone,
+		value(config.ZoneId),
+		[]byte(plain),
+		s.httpClient,
+	)
+	if err != nil {
+		return err
+	}
+	records, err := s.db.DNSManagedRecord.Query().
+		Where(query.DNSManagedRecord.ClusterId.Equals(clusterID)).
+		Do(ctx)
+	if err != nil {
+		return err
+	}
+	for index := range records {
+		item := &records[index]
+		if err := provider.Delete(ctx, dnsprovider.Record{
+			ID:       value(item.ProviderRecordId),
+			Hostname: item.Hostname,
+			Type:     item.Type,
+			Value:    item.Value,
+			Line:     item.DnsLineKey,
+		}); err != nil {
+			return fmt.Errorf("delete DNS record %s: %w", item.Hostname, err)
+		}
+		if _, err := s.db.DNSManagedRecord.Delete().
+			Where(query.DNSManagedRecord.Id.Equals(item.Id)).
+			Do(ctx); err != nil {
+			return err
+		}
+	}
+
+	return s.db.Tx(ctx, func(tx *client.Client) error {
+		now := time.Now()
+		payload, _ := json.Marshal(map[string]string{"error": "DNS configuration deleted"})
+		if _, err := tx.DNSSyncJob.Update().
+			Where(
+				query.DNSSyncJob.ClusterId.Equals(clusterID),
+				query.DNSSyncJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
+			).
+			Set(
+				query.DNSSyncJob.Status.Set(model.JobStatusCANCELLED),
+				query.DNSSyncJob.LeaseUntil.SetNull(),
+				query.DNSSyncJob.ResultJson.Set(payload),
+				query.DNSSyncJob.UpdatedAt.Set(now),
+			).
+			DoMany(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.RawExec(
+			ctx,
+			`DELETE FROM node_dns_lines
+			 WHERE dns_line_id IN (SELECT id FROM dns_lines WHERE cluster_id=$1)`,
+			clusterID,
+		); err != nil {
+			return err
+		}
+		if _, err := tx.DNSLine.Delete().
+			Where(query.DNSLine.ClusterId.Equals(clusterID)).
+			DoMany(ctx); err != nil {
+			return err
+		}
+		if _, err := tx.DNSProviderConfig.Delete().
+			Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
+			Do(ctx); err != nil {
+			return err
+		}
+		_, err = tx.Cluster.Update().
+			Where(query.Cluster.Id.Equals(clusterID)).
+			Set(
+				query.Cluster.PrimaryHostname.SetNull(),
+				query.Cluster.UpdatedAt.Set(now),
+			).
+			Do(ctx)
+		return err
+	})
+}
+
+func (s *Service) lockCluster(ctx context.Context, clusterID string) (func(), error) {
+	conn, err := s.db.DB().Conn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var locked bool
+	if err := conn.QueryRowContext(
+		ctx,
+		"SELECT pg_advisory_lock(hashtextextended($1, 0)) IS NULL",
+		clusterID,
+	).Scan(&locked); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		var released bool
+		_ = conn.QueryRowContext(
+			cleanupCtx,
+			"SELECT pg_advisory_unlock(hashtextextended($1, 0))",
+			clusterID,
+		).Scan(&released)
+		_ = conn.Close()
+	}, nil
 }
 
 func (s *Service) Run(ctx context.Context) {
@@ -183,7 +309,7 @@ func (s *Service) enqueuePeriodic(ctx context.Context) {
 		return
 	}
 	for _, config := range configs {
-		_, _ = s.Enqueue(ctx, config.ClusterId, nil, model.DNSSyncActionRECONCILE)
+		_, _ = s.Enqueue(ctx, config.ClusterId, nil, model.DNSSyncActionUPSERT_CLUSTER)
 	}
 }
 

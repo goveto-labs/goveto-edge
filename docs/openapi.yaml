@@ -72,7 +72,7 @@ paths:
         get:
             operationId: me
             summary: Current user
-            description: Return the authenticated user id from the current session.
+            description: Return the authenticated user's profile.
             tags:
                 - auth
             security:
@@ -95,8 +95,16 @@ paths:
                                     data:
                                         type: object
                                         properties:
-                                            uid:
+                                            email:
                                                 type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            role:
+                                                $ref: '#/components/schemas/model_UserRole'
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
     /api/v1/auth/register:
         post:
             operationId: register
@@ -801,7 +809,7 @@ paths:
                                 zone_id:
                                     type: string
             responses:
-                "202":
+                "200":
                     description: OK
                     content:
                         application/json:
@@ -813,11 +821,11 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        $ref: '#/components/schemas/types_DNSJob'
+                                        $ref: '#/components/schemas/types_DNSConfig'
         delete:
-            operationId: disableConfig
-            summary: Disable DNS
-            description: Disable managed DNS for the cluster and enqueue cleanup reconciliation.
+            operationId: deleteConfig
+            summary: Delete DNS config
+            description: Delete provider-managed records and remove the cluster DNS configuration.
             tags:
                 - dns
             security:
@@ -833,7 +841,7 @@ paths:
                   schema:
                     type: string
             responses:
-                "202":
+                "200":
                     description: OK
                     content:
                         application/json:
@@ -844,8 +852,6 @@ paths:
                                         type: string
                                         enum:
                                             - ok
-                                    data:
-                                        $ref: '#/components/schemas/types_DNSJob'
     /api/v1/clusters/{cluster_id}/dns-lines:
         get:
             operationId: listDNSLines
@@ -881,6 +887,60 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/types_DNSLine'
+    /api/v1/clusters/{cluster_id}/dns/discovery/domains:
+        post:
+            operationId: discoverDomains
+            summary: Discover provider domains
+            description: Validate DNS provider credentials and return domains available to the account.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: array
+                    items:
+                        type: object
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                credentials:
+                                    type: object
+                                    additionalProperties:
+                                        type: string
+                                provider:
+                                    $ref: '#/components/schemas/model_DNSProviderType'
+                                zone:
+                                    type: string
+                                zone_id:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/dnsprovider_Domain'
     /api/v1/clusters/{cluster_id}/dns/jobs:
         get:
             operationId: listJobs
@@ -1040,6 +1100,39 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/types_DNSRecord'
+    /api/v1/clusters/{cluster_id}/dns/refresh:
+        post:
+            operationId: refreshConfig
+            summary: Refresh DNS domain
+            description: Re-fetch the configured domain and all provider DNS lines without creating a sync job.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSConfig'
     /api/v1/clusters/{cluster_id}/dns/sync:
         post:
             operationId: syncNow
@@ -1277,12 +1370,16 @@ paths:
                                     type: array
                                     items:
                                         type: string
-                                group_id:
-                                    type: string
+                                group_ids:
+                                    type: array
+                                    items:
+                                        type: string
                                 name:
                                     type: string
-                                region_id:
-                                    type: string
+                                region_ids:
+                                    type: array
+                                    items:
+                                        type: string
                                 ssh:
                                     $ref: '#/components/schemas/node_SSHInstallInput'
             responses:
@@ -2866,6 +2963,20 @@ components:
                     type: string
                 role:
                     type: string
+        dnsprovider_Domain:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+        dnsprovider_Line:
+            type: object
+            properties:
+                code:
+                    type: string
+                name:
+                    type: string
         model_AuditLog:
             type: object
             properties:
@@ -3000,6 +3111,10 @@ components:
                     type: string
                 name:
                     type: string
+                nodeMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeGroupMembership'
                 nodes:
                     type: array
                     items:
@@ -3042,6 +3157,10 @@ components:
                     type: string
                 name:
                     type: string
+                nodeMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeRegionMembership'
                 nodes:
                     type: array
                     items:
@@ -3260,6 +3379,10 @@ components:
                     $ref: '#/components/schemas/model_ClusterGroup'
                 groupId:
                     type: string
+                groupMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeGroupMembership'
                 heartbeatAt:
                     type: string
                     format: date-time
@@ -3272,6 +3395,10 @@ components:
                     $ref: '#/components/schemas/model_ClusterRegion'
                 regionId:
                     type: string
+                regionMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_NodeRegionMembership'
                 siteConfigVersions:
                     type: array
                     items:
@@ -3345,6 +3472,28 @@ components:
                 node:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
+                    type: string
+        model_NodeGroupMembership:
+            type: object
+            properties:
+                group:
+                    $ref: '#/components/schemas/model_ClusterGroup'
+                groupId:
+                    type: string
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+        model_NodeRegionMembership:
+            type: object
+            properties:
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                region:
+                    $ref: '#/components/schemas/model_ClusterRegion'
+                regionId:
                     type: string
         model_NodeSiteConfigVersion:
             type: object
@@ -4033,10 +4182,18 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/types_NodeDNSLine'
+                groupMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_NodeGroupMembership'
                 id:
                     type: string
                 name:
                     type: string
+                regionMemberships:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/types_NodeRegionMembership'
                 siteConfigVersions:
                     type: array
                     items:
@@ -4069,6 +4226,20 @@ components:
                 dnsLineId:
                     type: string
                 nodeId:
+                    type: string
+        types_NodeGroupMembership:
+            type: object
+            properties:
+                groupId:
+                    type: string
+                nodeId:
+                    type: string
+        types_NodeRegionMembership:
+            type: object
+            properties:
+                nodeId:
+                    type: string
+                regionId:
                     type: string
         types_PublishJob:
             type: object

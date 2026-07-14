@@ -1,7 +1,7 @@
 import type {
     DNSConfigResponse,
-    DNSLine,
     DNSManagedRecord,
+    DNSProviderDomain,
     DNSProviderType,
     DNSSyncJob,
 } from './types.ts';
@@ -19,17 +19,24 @@ export interface UpdateDNSConfig {
     enabled: boolean;
 }
 
+export interface DNSDiscoveryRequest {
+    provider: DNSProviderType;
+    zone?: string;
+    zone_id?: string;
+    credentials?: Record<string, string>;
+}
+
 export const dnsApi = (clusterId: string) => {
     const base = `/clusters/${clusterId}/dns`;
     return {
         config: () => get<DNSConfigResponse>(base),
-        update: (payload: UpdateDNSConfig) => put<DNSSyncJob>(base, payload),
-        disable: () => del<DNSSyncJob>(base),
+        update: (payload: UpdateDNSConfig) => put<DNSConfigResponse>(base, payload),
+        delete: () => del(base),
+        refresh: () => post<DNSConfigResponse>(`${base}/refresh`),
         records: () => get<DNSManagedRecord[]>(`${base}/records`),
         jobs: () => get<DNSSyncJob[]>(`${base}/jobs`),
         sync: () => post<DNSSyncJob>(`${base}/sync`),
-        createLine: (payload: { name: string; provider_code: string }) =>
-            post<DNSLine>(`${base}/lines`, payload),
-        deleteLine: (lineId: string) => del(`${base}/lines/${lineId}`),
+        discoverDomains: (payload: DNSDiscoveryRequest) =>
+            post<DNSProviderDomain[]>(`${base}/discovery/domains`, payload),
     };
 };

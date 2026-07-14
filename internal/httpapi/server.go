@@ -56,7 +56,7 @@ func New(
 	nodes.Register(e, orm, installQueue, credentialCipher, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
-	sites.Register(e, orm, publishService, dnsService)
+	sites.Register(e, orm, publishService)
 
 	if len(analyticsStore) > 0 {
 		analyticsapi.Register(e, orm, analyticsStore[0])

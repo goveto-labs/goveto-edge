@@ -2,6 +2,7 @@
 package dns
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -18,6 +19,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/dnsprovider"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -42,6 +44,13 @@ type lineRequest struct {
 	ProviderCode string `json:"provider_code"`
 }
 
+type discoveryRequest struct {
+	Provider    model.DNSProviderType `json:"provider"`
+	Zone        string                `json:"zone"`
+	ZoneID      string                `json:"zone_id"`
+	Credentials map[string]string     `json:"credentials"`
+}
+
 type countRow struct {
 	Count int `db:"count"`
 }
@@ -58,13 +67,73 @@ func Register(
 		clusteraccess.Require(db),
 	)
 	group.GET("", getConfig(db))
-	group.PUT("", updateConfig(db, cipher, service))
-	group.DELETE("", disableConfig(db, service))
+	group.PUT("", updateConfig(db, cipher))
+	group.DELETE("", deleteConfig(db, service))
+	group.POST("/refresh", refreshConfig(db, cipher))
 	group.GET("/records", listRecords(db))
 	group.GET("/jobs", listJobs(db))
 	group.POST("/sync", syncNow(db, service))
-	group.POST("/lines", createLine(db, service))
-	group.DELETE("/lines/:line_id", deleteLine(db, service))
+	group.POST("/discovery/domains", discoverDomains(db, cipher))
+	group.POST("/lines", createLine(db))
+	group.DELETE("/lines/:line_id", deleteLine(db))
+}
+
+// @summary Discover provider domains
+// @description Validate DNS provider credentials and return domains available to the account.
+// @Tags dns
+func discoverDomains(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if err := requireOwner(c, db); err != nil {
+			return err
+		}
+		var input discoveryRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		raw, err := discoveryCredentials(c, db, cipher, input)
+		if err != nil {
+			return err
+		}
+		items, err := dnsprovider.ListDomains(c.Request().Context(), input.Provider, raw, nil)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "failed to list provider domains: "+err.Error())
+		}
+		return types.JSON(c, http.StatusOK, items)
+	}
+}
+
+func discoveryCredentials(
+	c *echo.Context,
+	db *client.Client,
+	cipher *node.CredentialCipher,
+	input discoveryRequest,
+) ([]byte, error) {
+	if input.Provider != model.DNSProviderTypeALIYUN &&
+		input.Provider != model.DNSProviderTypeCLOUDFLARE {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
+	}
+	if len(input.Credentials) > 0 {
+		raw, err := json.Marshal(input.Credentials)
+		if err != nil {
+			return nil, err
+		}
+		return raw, nil
+	}
+	config, err := db.DNSProviderConfig.FindUnique(
+		c.Request().Context(),
+		query.DNSProviderConfig.ClusterId.Equals(c.Param("cluster_id")),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if config == nil || config.Provider != input.Provider || config.CredentialsEncrypted == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "DNS provider credentials are required")
+	}
+	plain, err := cipher.Decrypt(config.CredentialsEncrypted)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(plain), nil
 }
 
 // @summary Get DNS config
@@ -97,7 +166,6 @@ func getConfig(db *client.Client) echo.HandlerFunc {
 func updateConfig(
 	db *client.Client,
 	cipher *node.CredentialCipher,
-	service *dnssync.Service,
 ) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
@@ -137,8 +205,11 @@ func updateConfig(
 			)
 		}
 
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
 		credentialsProvided := len(input.Credentials) > 0
 		encryptedInput := ""
+		var credentialsRaw []byte
 		if credentialsProvided {
 			sanitized := map[string]string{}
 			switch input.Provider {
@@ -167,19 +238,48 @@ func updateConfig(
 			if marshalErr != nil {
 				return marshalErr
 			}
+			credentialsRaw = raw
 			encryptedInput, err = cipher.Encrypt(string(raw))
 			if err != nil {
 				return err
 			}
+		} else {
+			existing, findErr := db.DNSProviderConfig.FindUnique(
+				ctx,
+				query.DNSProviderConfig.ClusterId.Equals(clusterID),
+			)
+			if findErr != nil {
+				return findErr
+			}
+			if existing == nil || existing.Provider != input.Provider || existing.CredentialsEncrypted == "" {
+				return echo.NewHTTPError(http.StatusBadRequest, "DNS provider credentials are required")
+			}
+			plain, decryptErr := cipher.Decrypt(existing.CredentialsEncrypted)
+			if decryptErr != nil {
+				return decryptErr
+			}
+			credentialsRaw = []byte(plain)
+		}
+
+		providerLines, err := dnsprovider.ListLines(
+			ctx,
+			input.Provider,
+			zone,
+			zoneID,
+			credentialsRaw,
+			nil,
+		)
+		if err != nil {
+			return echo.NewHTTPError(
+				http.StatusBadGateway,
+				"failed to list provider DNS lines: "+err.Error(),
+			)
 		}
 
 		enabled := true
 		if input.Enabled != nil {
 			enabled = *input.Enabled
 		}
-		ctx := c.Request().Context()
-		clusterID := c.Param("cluster_id")
-		var job *model.DNSSyncJob
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
 				return lockErr
@@ -273,14 +373,6 @@ func updateConfig(
 				)
 			}
 
-			if cancelErr := service.CancelActiveTx(
-				ctx,
-				tx,
-				clusterID,
-				"DNS configuration changed",
-			); cancelErr != nil {
-				return cancelErr
-			}
 			now := time.Now()
 			if _, updateErr := tx.Cluster.Update().
 				Where(query.Cluster.Id.Equals(clusterID)).
@@ -321,78 +413,137 @@ func updateConfig(
 					return createErr
 				}
 			}
-
-			action := model.DNSSyncActionRECONCILE
-			if !enabled {
-				action = model.DNSSyncActionDELETE_CLUSTER
+			if storeErr := storeProviderLines(ctx, tx, clusterID, providerLines, now); storeErr != nil {
+				return storeErr
 			}
-			var enqueueErr error
-			job, enqueueErr = service.EnqueueTx(ctx, tx, clusterID, nil, action)
-			return enqueueErr
+
+			return nil
 		})
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
+		cluster, findErr := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		if findErr != nil {
+			return findErr
+		}
+		config, findErr := db.DNSProviderConfig.FindUnique(
+			ctx,
+			query.DNSProviderConfig.ClusterId.Equals(clusterID),
+		)
+		if findErr != nil {
+			return findErr
+		}
+		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, config))
 	}
 }
 
-// @summary Disable DNS
-// @description Disable managed DNS for the cluster and enqueue cleanup reconciliation.
+// @summary Delete DNS config
+// @description Delete provider-managed records and remove the cluster DNS configuration.
 // @Tags dns
-func disableConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
+func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if err := requireOwner(c, db); err != nil {
+			return err
+		}
+		if err := service.DeleteConfiguration(c.Request().Context(), c.Param("cluster_id")); err != nil {
+			if errors.Is(err, dnssync.ErrDNSNotConfigured) {
+				return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			}
+			return err
+		}
+		return types.JSON(c, http.StatusOK, nil)
+	}
+}
+
+// @summary Refresh DNS domain
+// @description Re-fetch the configured domain and all provider DNS lines without creating a sync job.
+// @Tags dns
+func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
 			return err
 		}
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
-		var job *model.DNSSyncJob
-		err := db.Tx(ctx, func(tx *client.Client) error {
-			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
-				return lockErr
+		config, err := db.DNSProviderConfig.FindUnique(
+			ctx,
+			query.DNSProviderConfig.ClusterId.Equals(clusterID),
+		)
+		if err != nil {
+			return err
+		}
+		if config == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
+		}
+		plain, err := cipher.Decrypt(config.CredentialsEncrypted)
+		if err != nil {
+			return err
+		}
+		raw := []byte(plain)
+		domains, err := dnsprovider.ListDomains(ctx, config.Provider, raw, nil)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "failed to list provider domains: "+err.Error())
+		}
+		var domain *dnsprovider.Domain
+		for index := range domains {
+			if strings.EqualFold(domains[index].Name, config.Zone) {
+				domain = &domains[index]
+				break
 			}
-			config, findErr := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
-			if findErr != nil {
-				return findErr
+		}
+		if domain == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "configured domain is no longer available from the provider")
+		}
+		zoneID := value(config.ZoneId)
+		if config.Provider == model.DNSProviderTypeCLOUDFLARE {
+			zoneID = domain.ID
+		}
+		providerLines, err := dnsprovider.ListLines(
+			ctx,
+			config.Provider,
+			config.Zone,
+			zoneID,
+			raw,
+			nil,
+		)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "failed to list provider DNS lines: "+err.Error())
+		}
+		err = db.Tx(ctx, func(tx *client.Client) error {
+			if err := dnssync.LockClusterTx(ctx, tx, clusterID); err != nil {
+				return err
 			}
-			if config == nil {
-				return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
+			now := time.Now()
+			if err := storeProviderLines(ctx, tx, clusterID, providerLines, now); err != nil {
+				return err
 			}
-			if cancelErr := service.CancelActiveTx(
-				ctx,
-				tx,
-				clusterID,
-				"DNS was disabled",
-			); cancelErr != nil {
-				return cancelErr
+			if config.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID != value(config.ZoneId) {
+				_, err = tx.DNSProviderConfig.Update().
+					Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
+					Set(
+						query.DNSProviderConfig.ZoneId.Set(zoneID),
+						query.DNSProviderConfig.UpdatedAt.Set(now),
+					).
+					Do(ctx)
+				return err
 			}
-			if _, updateErr := tx.DNSProviderConfig.Update().
-				Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
-				Set(
-					query.DNSProviderConfig.Enabled.Set(false),
-					query.DNSProviderConfig.UpdatedAt.Set(time.Now()),
-				).
-				Do(ctx); updateErr != nil {
-				return updateErr
-			}
-			var enqueueErr error
-			job, enqueueErr = service.EnqueueTx(
-				ctx,
-				tx,
-				clusterID,
-				nil,
-				model.DNSSyncActionDELETE_CLUSTER,
-			)
-			return enqueueErr
+			return nil
 		})
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
+		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		config, err = db.DNSProviderConfig.FindUnique(
+			ctx,
+			query.DNSProviderConfig.ClusterId.Equals(clusterID),
+		)
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, config))
 	}
 }
 
@@ -422,7 +573,11 @@ func listRecords(db *client.Client) echo.HandlerFunc {
 func listJobs(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.DNSSyncJob.Query().
-			Where(query.DNSSyncJob.ClusterId.Equals(c.Param("cluster_id"))).
+			Where(
+				query.DNSSyncJob.ClusterId.Equals(c.Param("cluster_id")),
+				query.DNSSyncJob.Action.Equals(model.DNSSyncActionUPSERT_CLUSTER),
+				query.DNSSyncJob.SiteId.IsNull(),
+			).
 			OrderBy(query.DNSSyncJob.CreatedAt.Desc()).
 			Take(100).
 			Do(c.Request().Context())
@@ -481,7 +636,7 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 				tx,
 				clusterID,
 				nil,
-				model.DNSSyncActionRECONCILE,
+				model.DNSSyncActionUPSERT_CLUSTER,
 			)
 			return enqueueErr
 		})
@@ -493,9 +648,9 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 }
 
 // @summary Create DNS line
-// @description Create a DNS line and enqueue reconciliation when managed DNS is enabled.
+// @description Create a DNS line without creating a synchronization job.
 // @Tags dns
-func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
+func createLine(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
 			return err
@@ -563,23 +718,7 @@ func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 			if createErr != nil {
 				return createErr
 			}
-			config, findErr := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
-			if findErr != nil {
-				return findErr
-			}
-			if config != nil && config.Enabled {
-				_, createErr = service.EnqueueTx(
-					ctx,
-					tx,
-					clusterID,
-					nil,
-					model.DNSSyncActionRECONCILE,
-				)
-			}
-			return createErr
+			return nil
 		})
 		if err != nil {
 			return err
@@ -589,9 +728,9 @@ func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 }
 
 // @summary Delete DNS line
-// @description Delete a DNS line and enqueue reconciliation when managed DNS is enabled.
+// @description Delete a DNS line without creating a synchronization job.
 // @Tags dns
-func deleteLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
+func deleteLine(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
 			return err
@@ -641,23 +780,7 @@ func deleteLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 				Do(ctx); deleteErr != nil {
 				return deleteErr
 			}
-			config, findErr := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
-			if findErr != nil {
-				return findErr
-			}
-			if config != nil && config.Enabled {
-				_, findErr = service.EnqueueTx(
-					ctx,
-					tx,
-					clusterID,
-					nil,
-					model.DNSSyncActionRECONCILE,
-				)
-			}
-			return findErr
+			return nil
 		})
 		if err != nil {
 			return err
@@ -707,6 +830,59 @@ func validProviderCode(code string) bool {
 		}
 	}
 	return true
+}
+
+func storeProviderLines(
+	ctx context.Context,
+	tx *client.Client,
+	clusterID string,
+	providerLines []dnsprovider.Line,
+	now time.Time,
+) error {
+	existing, err := tx.DNSLine.Query().
+		Where(query.DNSLine.ClusterId.Equals(clusterID)).
+		Do(ctx)
+	if err != nil {
+		return err
+	}
+	codes := make(map[string]bool, len(existing)+len(providerLines))
+	names := make(map[string]bool, len(existing)+len(providerLines))
+	for _, line := range existing {
+		codes[strings.ToLower(strings.TrimSpace(line.ProviderCode))] = true
+		names[line.Name] = true
+	}
+	items := make([]query.DNSLineCreateInput, 0, len(providerLines))
+	for _, line := range providerLines {
+		code := strings.ToLower(strings.TrimSpace(line.Code))
+		if code == "" || code == "default" || codes[code] {
+			continue
+		}
+		name := strings.TrimSpace(line.Name)
+		if name == "" {
+			name = code
+		}
+		if names[name] {
+			name += " (" + code + ")"
+		}
+		for names[name] {
+			name += "-"
+		}
+		codes[code] = true
+		names[name] = true
+		items = append(items, query.DNSLineCreateInput{
+			Id:           uuid.NewString(),
+			ClusterId:    clusterID,
+			Name:         name,
+			ProviderCode: code,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		})
+	}
+	_, err = tx.DNSLine.BulkCreate(items).
+		OnConflictDoNothing("cluster_id", "name").
+		BatchSize(100).
+		Do(ctx)
+	return err
 }
 
 func value(input *string) string {

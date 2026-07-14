@@ -111,3 +111,48 @@ func TestAliyunRequestIsSigned(t *testing.T) {
 		t.Fatal("Aliyun should support regional lines")
 	}
 }
+
+func TestAliyunDiscovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		var body string
+		switch request.URL.Query().Get("Action") {
+		case "DescribeDomains":
+			body = `{"TotalCount":1,"Domains":{"Domain":[{"DomainName":"Example.com","DomainId":"domain-1"}]}}`
+		case "DescribeSupportLines":
+			if request.URL.Query().Get("DomainName") != "example.com" {
+				t.Fatalf("domain=%q", request.URL.Query().Get("DomainName"))
+			}
+			body = `{"RecordLines":{"RecordLine":[{"LineCode":"default","LineDisplayName":"Default"},{"LineCode":"telecom","LineDisplayName":"China Telecom"}]}}`
+		default:
+			t.Fatalf("unexpected action %q", request.URL.Query().Get("Action"))
+		}
+		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	raw := []byte(`{"access_key_id":"key","access_key_secret":"secret"}`)
+	domains, err := ListDomains(context.Background(), model.DNSProviderTypeALIYUN, raw, client)
+	if err != nil || len(domains) != 1 || domains[0].Name != "example.com" {
+		t.Fatalf("domains=%#v err=%v", domains, err)
+	}
+	lines, err := ListLines(context.Background(), model.DNSProviderTypeALIYUN, domains[0].Name, domains[0].ID, raw, client)
+	if err != nil || len(lines) != 2 || lines[1].Code != "telecom" {
+		t.Fatalf("lines=%#v err=%v", lines, err)
+	}
+}
+
+func TestCloudflareDiscovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Authorization") != "Bearer secret" {
+			t.Fatalf("authorization=%q", request.Header.Get("Authorization"))
+		}
+		body := `{"success":true,"result":[{"id":"zone-1","name":"example.com"}],"result_info":{"total_pages":1}}`
+		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	domains, err := ListDomains(context.Background(), model.DNSProviderTypeCLOUDFLARE, []byte(`{"api_token":"secret"}`), client)
+	if err != nil || len(domains) != 1 || domains[0].ID != "zone-1" {
+		t.Fatalf("domains=%#v err=%v", domains, err)
+	}
+	lines, err := ListLines(context.Background(), model.DNSProviderTypeCLOUDFLARE, domains[0].Name, domains[0].ID, []byte(`{"api_token":"secret"}`), client)
+	if err != nil || len(lines) != 1 || lines[0].Code != "default" {
+		t.Fatalf("lines=%#v err=%v", lines, err)
+	}
+}

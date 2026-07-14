@@ -25,6 +25,74 @@ type aliyun struct {
 
 func (*aliyun) SupportsLines() bool { return true }
 
+func (a *aliyun) ListDomains(ctx context.Context) ([]Domain, error) {
+	result := make([]Domain, 0)
+	for page := 1; ; page++ {
+		var response struct {
+			TotalCount int `json:"TotalCount"`
+			Domains    struct {
+				Domain []struct {
+					Name string `json:"DomainName"`
+					ID   string `json:"DomainId"`
+				} `json:"Domain"`
+			} `json:"Domains"`
+		}
+		if err := a.call(ctx, "DescribeDomains", url.Values{
+			"PageNumber": {fmt.Sprint(page)},
+			"PageSize":   {"100"},
+		}, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.Domains.Domain {
+			result = append(result, Domain{Name: strings.ToLower(item.Name), ID: item.ID})
+		}
+		if len(response.Domains.Domain) == 0 || len(result) >= response.TotalCount {
+			break
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
+
+func (a *aliyun) ListLines(ctx context.Context) ([]Line, error) {
+	var response struct {
+		RecordLines struct {
+			RecordLine []struct {
+				Code        string `json:"LineCode"`
+				Name        string `json:"LineName"`
+				DisplayName string `json:"LineDisplayName"`
+			} `json:"RecordLine"`
+		} `json:"RecordLines"`
+	}
+	if err := a.call(ctx, "DescribeSupportLines", url.Values{
+		"DomainName": {a.zone},
+		"Lang":       {"en"},
+	}, &response); err != nil {
+		return nil, err
+	}
+	result := make([]Line, 0, len(response.RecordLines.RecordLine))
+	seen := map[string]bool{}
+	for _, item := range response.RecordLines.RecordLine {
+		code := strings.ToLower(strings.TrimSpace(item.Code))
+		if code == "" || seen[code] {
+			continue
+		}
+		name := strings.TrimSpace(item.DisplayName)
+		if name == "" {
+			name = strings.TrimSpace(item.Name)
+		}
+		if name == "" {
+			name = code
+		}
+		seen[code] = true
+		result = append(result, Line{Name: name, Code: code})
+	}
+	if !seen["default"] {
+		result = append([]Line{{Name: "Default", Code: "default"}}, result...)
+	}
+	return result, nil
+}
+
 func (a *aliyun) Upsert(ctx context.Context, record Record) (string, error) {
 	rr, err := RelativeName(record.Hostname, a.zone)
 	if err != nil {

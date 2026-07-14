@@ -82,7 +82,7 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *d
 				tx,
 				node.ClusterId,
 				nil,
-				model.DNSSyncActionRECONCILE,
+				model.DNSSyncActionUPSERT_CLUSTER,
 			)
 			return err
 		}); err != nil {

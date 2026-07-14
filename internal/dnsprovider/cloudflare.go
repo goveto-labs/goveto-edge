@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 )
 
 type cloudflare struct {
@@ -16,6 +17,33 @@ type cloudflare struct {
 }
 
 func (*cloudflare) SupportsLines() bool { return false }
+
+func (c *cloudflare) ListDomains(ctx context.Context) ([]Domain, error) {
+	result := make([]Domain, 0)
+	for page := 1; ; page++ {
+		var response struct {
+			Result []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"result"`
+			ResultInfo struct {
+				TotalPages int `json:"total_pages"`
+			} `json:"result_info"`
+		}
+		path := fmt.Sprintf("/zones?per_page=50&page=%d", page)
+		if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.Result {
+			result = append(result, Domain{Name: item.Name, ID: item.ID})
+		}
+		if len(response.Result) == 0 || response.ResultInfo.TotalPages == 0 || page >= response.ResultInfo.TotalPages {
+			break
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result, nil
+}
 
 func (c *cloudflare) Upsert(ctx context.Context, record Record) (string, error) {
 	if _, err := RelativeName(record.Hostname, c.zone); err != nil {

@@ -161,6 +161,6 @@ func enqueueDNSIfConfiguredTx(ctx context.Context, tx *client.Client, service *d
 	if err != nil || config == nil || !config.Enabled {
 		return err
 	}
-	_, err = service.EnqueueTx(ctx, tx, clusterID, nil, model.DNSSyncActionRECONCILE)
+	_, err = service.EnqueueTx(ctx, tx, clusterID, nil, model.DNSSyncActionUPSERT_CLUSTER)
 	return err
 }

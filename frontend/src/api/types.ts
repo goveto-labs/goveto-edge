@@ -45,6 +45,11 @@ export interface DNSLine {
 
 export type DNSProviderType = 'ALIYUN' | 'CLOUDFLARE';
 
+export interface DNSProviderDomain {
+    name: string;
+    id?: string;
+}
+
 export interface DNSConfigResponse {
     primary_hostname: string | null;
     provider: {
@@ -190,7 +195,6 @@ export interface Site {
     status: string;
     publish_job?: PublishJob;
     publish_error?: string;
-    dns_sync_job?: DNSSyncJob;
 }
 
 export interface SiteCreateResponse {
@@ -199,7 +203,6 @@ export interface SiteCreateResponse {
     status: string;
     publish_job?: PublishJob;
     publish_error?: string;
-    dns_sync_job?: DNSSyncJob;
 }
 export interface SiteListenerUpdateResponse {
     listener: SiteListenerConfig;

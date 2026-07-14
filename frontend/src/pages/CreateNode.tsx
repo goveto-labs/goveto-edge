@@ -1,11 +1,13 @@
 import type { ClusterGroup, ClusterRegion, DNSLine } from '@/api';
 
-import { Button, Input, Spinner } from '@heroui/react';
+import { Button, Input, Spinner, TextArea } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
     ChevronDown,
     ChevronRight,
+    KeyRound,
+    LockKeyhole,
     Plus,
     Server,
     Trash2,
@@ -23,6 +25,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 type CreationMode = 'single' | 'batch';
+type SSHAuthMethod = 'password' | 'private_key';
 
 interface MultiAddOption {
     id: string;
@@ -192,6 +195,7 @@ export default function CreateNode() {
     const [sshIp, setSshIp] = useState('');
     const [sshPort, setSshPort] = useState('22');
     const [sshUser, setSshUser] = useState('');
+    const [sshAuthMethod, setSshAuthMethod] = useState<SSHAuthMethod>('password');
     const [sshPassword, setSshPassword] = useState('');
     const [sshKey, setSshKey] = useState('');
     const [sshPassphrase, setSshPassphrase] = useState('');
@@ -245,9 +249,10 @@ export default function CreateNode() {
                     entry_ip: sshIp,
                     port: Number(sshPort) || 22,
                     user: sshUser,
-                    password: sshPassword || undefined,
-                    private_key: sshKey || undefined,
-                    passphrase: sshPassphrase || undefined,
+                    password: sshAuthMethod === 'password' ? sshPassword || undefined : undefined,
+                    private_key: sshAuthMethod === 'private_key' ? sshKey || undefined : undefined,
+                    passphrase:
+                        sshAuthMethod === 'private_key' ? sshPassphrase || undefined : undefined,
                 },
             });
             navigate('/nodes');
@@ -331,10 +336,7 @@ export default function CreateNode() {
                                         />
                                     </FormRow>
 
-                                    <FormRow
-                                        label='IP'
-                                        required
-                                    >
+                                    <FormRow label='IP' required>
                                         <div className='space-y-2'>
                                             {addresses.map((item, index) => (
                                                 <div
@@ -492,44 +494,113 @@ export default function CreateNode() {
                                             />
                                         </FormRow>
 
-                                        <FormRow htmlFor='node-ssh-password' label='Password'>
-                                            <Input
-                                                id='node-ssh-password'
-                                                type='password'
-                                                className='w-full'
-                                                variant='secondary'
-                                                value={sshPassword}
-                                                onChange={(e) => setSshPassword(e.target.value)}
-                                            />
+                                        <FormRow label='Authentication method' required>
+                                            <div className='grid gap-3 sm:grid-cols-2'>
+                                                <button
+                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
+                                                        sshAuthMethod === 'password'
+                                                            ? 'border-accent bg-accent/10'
+                                                            : 'border-border bg-surface hover:bg-surface-secondary'
+                                                    }`}
+                                                    type='button'
+                                                    onClick={() => {
+                                                        setSshAuthMethod('password');
+                                                        setSshKey('');
+                                                        setSshPassphrase('');
+                                                    }}
+                                                >
+                                                    <LockKeyhole className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
+                                                    <span>
+                                                        <span className='block text-sm font-semibold'>
+                                                            Password
+                                                        </span>
+                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
+                                                            Authenticate with the SSH account
+                                                            password.
+                                                        </span>
+                                                    </span>
+                                                </button>
+                                                <button
+                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
+                                                        sshAuthMethod === 'private_key'
+                                                            ? 'border-accent bg-accent/10'
+                                                            : 'border-border bg-surface hover:bg-surface-secondary'
+                                                    }`}
+                                                    type='button'
+                                                    onClick={() => {
+                                                        setSshAuthMethod('private_key');
+                                                        setSshPassword('');
+                                                    }}
+                                                >
+                                                    <KeyRound className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
+                                                    <span>
+                                                        <span className='block text-sm font-semibold'>
+                                                            Private key
+                                                        </span>
+                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
+                                                            Authenticate with a PEM-encoded private
+                                                            key.
+                                                        </span>
+                                                    </span>
+                                                </button>
+                                            </div>
                                         </FormRow>
 
-                                        <FormRow
-                                            hint='PEM-encoded private key used to connect to the node.'
-                                            htmlFor='node-ssh-key'
-                                            label='Private key'
-                                        >
-                                            <Input
-                                                id='node-ssh-key'
-                                                className='w-full'
-                                                variant='secondary'
-                                                value={sshKey}
-                                                onChange={(e) => setSshKey(e.target.value)}
-                                            />
-                                        </FormRow>
+                                        {sshAuthMethod === 'password' && (
+                                            <FormRow
+                                                htmlFor='node-ssh-password'
+                                                label='Password'
+                                                required
+                                            >
+                                                <Input
+                                                    id='node-ssh-password'
+                                                    className='w-full'
+                                                    required
+                                                    type='password'
+                                                    variant='secondary'
+                                                    value={sshPassword}
+                                                    onChange={(e) => setSshPassword(e.target.value)}
+                                                />
+                                            </FormRow>
+                                        )}
 
-                                        <FormRow
-                                            htmlFor='node-ssh-passphrase'
-                                            label='Private key passphrase'
-                                        >
-                                            <Input
-                                                id='node-ssh-passphrase'
-                                                type='password'
-                                                className='w-full'
-                                                variant='secondary'
-                                                value={sshPassphrase}
-                                                onChange={(e) => setSshPassphrase(e.target.value)}
-                                            />
-                                        </FormRow>
+                                        {sshAuthMethod === 'private_key' && (
+                                            <>
+                                                <FormRow
+                                                    hint='Paste the complete PEM key, including the BEGIN and END lines.'
+                                                    htmlFor='node-ssh-key'
+                                                    label='Private key PEM'
+                                                    required
+                                                >
+                                                    <TextArea
+                                                        id='node-ssh-key'
+                                                        className='w-full font-mono text-xs'
+                                                        required
+                                                        rows={8}
+                                                        spellCheck={false}
+                                                        variant='secondary'
+                                                        value={sshKey}
+                                                        onChange={(e) => setSshKey(e.target.value)}
+                                                    />
+                                                </FormRow>
+
+                                                <FormRow
+                                                    htmlFor='node-ssh-passphrase'
+                                                    label='Private key passphrase'
+                                                >
+                                                    <Input
+                                                        id='node-ssh-passphrase'
+                                                        className='w-full'
+                                                        type='password'
+                                                        variant='secondary'
+                                                        value={sshPassphrase}
+                                                        onChange={(e) =>
+                                                            setSshPassphrase(e.target.value)
+                                                        }
+                                                    />
+                                                </FormRow>
+                                            </>
+                                        )}
                                     </div>
                                 )}
                             </ContentCard>

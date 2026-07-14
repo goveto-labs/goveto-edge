@@ -82,7 +82,7 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 				tx,
 				node.ClusterId,
 				nil,
-				model.DNSSyncActionRECONCILE,
+				model.DNSSyncActionUPSERT_CLUSTER,
 			)
 			return err
 		})
