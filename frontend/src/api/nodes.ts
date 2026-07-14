@@ -5,7 +5,9 @@ import type {
     NodeCacheConfig,
     NodeCacheUpdateResponse,
     NodeDNSLinesResponse,
+    NodeSSH,
     NodeStatusResponse,
+    SSHConnectionTestResponse,
 } from './types.ts';
 
 import { del, get, post, put } from './client.ts';
@@ -17,8 +19,9 @@ function clusterPath(clusterId: string, path: string) {
 export const nodesApi = (clusterId: string) => ({
     list: () => get<Node[]>(clusterPath(clusterId, '/nodes')),
     get: (nodeId: string) => get<Node>(clusterPath(clusterId, `/nodes/${nodeId}`)),
-    create: (payload: CreateNodeRequest) =>
-        post<NodeStatusResponse>(clusterPath(clusterId, '/nodes'), payload),
+    create: (payload: CreateNodeRequest) => post<Node>(clusterPath(clusterId, '/nodes'), payload),
+    testConnection: (ssh: NodeSSH) =>
+        post<SSHConnectionTestResponse>(clusterPath(clusterId, '/nodes/test-connection'), { ssh }),
     delete: (nodeId: string) => del<void>(clusterPath(clusterId, `/nodes/${nodeId}`)),
     updateDNSLines: (nodeId: string, dnsLineIds: string[]) =>
         put<NodeDNSLinesResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), {

@@ -269,6 +269,7 @@ query.PostAuthorIdColumn
   - `Version` (String, optional)
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
+  - `Installerror` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

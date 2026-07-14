@@ -89,7 +89,11 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 			return echo.NewHTTPError(http.StatusConflict, "only a disabled node can be enabled")
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusOFFLINE), query.Node.HeartbeatAt.SetNull()).Do(ctx); err != nil {
+			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
+				query.Node.Status.Set(model.NodeStatusOFFLINE),
+				query.Node.HeartbeatAt.SetNull(),
+				query.Node.InstallError.SetNull(),
+			).Do(ctx); err != nil {
 				return err
 			}
 			return nil

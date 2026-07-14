@@ -19,3 +19,12 @@ func TestNormalizeArchitecture(t *testing.T) {
 		t.Fatal("expected unsupported architecture error")
 	}
 }
+
+func TestCommandOutputSuffix(t *testing.T) {
+	if got := commandOutputSuffix([]byte("\npermission denied\n")); got != ": permission denied" {
+		t.Fatalf("commandOutputSuffix() = %q", got)
+	}
+	if got := commandOutputSuffix(nil); got != "" {
+		t.Fatalf("empty commandOutputSuffix() = %q", got)
+	}
+}

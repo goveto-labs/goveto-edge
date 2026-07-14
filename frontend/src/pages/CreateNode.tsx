@@ -1,4 +1,4 @@
-import type { ClusterGroup, ClusterRegion, DNSLine } from '@/api';
+import type { ClusterGroup, ClusterRegion, DNSLine, NodeSSH } from '@/api';
 
 import { Button, Input, TextArea } from '@heroui/react';
 import {
@@ -487,6 +487,26 @@ export default function CreateNode() {
     const [sshPassword, setSshPassword] = useState('');
     const [sshKey, setSshKey] = useState('');
     const [sshPassphrase, setSshPassphrase] = useState('');
+    const [testingConnection, setTestingConnection] = useState(false);
+    const [testedSSHFingerprint, setTestedSSHFingerprint] = useState('');
+    const [sshTestAttemptFingerprint, setSSHTestAttemptFingerprint] = useState('');
+    const [sshTestMessage, setSSHTestMessage] = useState('');
+    const [sshTestError, setSSHTestError] = useState('');
+    const sshPayload = useMemo<NodeSSH>(
+        () => ({
+            entry_ip: sshIp.trim(),
+            port: Number(sshPort) || 22,
+            user: sshUser.trim(),
+            password: sshAuthMethod === 'password' ? sshPassword || undefined : undefined,
+            private_key: sshAuthMethod === 'private_key' ? sshKey || undefined : undefined,
+            passphrase: sshAuthMethod === 'private_key' ? sshPassphrase || undefined : undefined,
+        }),
+        [sshAuthMethod, sshIp, sshKey, sshPassphrase, sshPassword, sshPort, sshUser]
+    );
+    const sshFingerprint = useMemo(() => JSON.stringify(sshPayload), [sshPayload]);
+    const sshFingerprintRef = useRef(sshFingerprint);
+    sshFingerprintRef.current = sshFingerprint;
+    const sshConnectionVerified = testedSSHFingerprint === sshFingerprint;
     const dnsLineOptions = useMemo(
         () =>
             dnsLines.map((line) => ({
@@ -564,6 +584,12 @@ export default function CreateNode() {
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!clusterId) return;
+        if (!sshConnectionVerified) {
+            setSubmitError(
+                'Test the current SSH connection successfully before creating the node.'
+            );
+            return;
+        }
         setSubmitting(true);
         setSubmitError('');
         try {
@@ -573,21 +599,36 @@ export default function CreateNode() {
                 dns_line_ids: Array.from(dnsLineIds),
                 group_ids: Array.from(groupIds),
                 region_ids: Array.from(regionIds),
-                ssh: {
-                    entry_ip: sshIp,
-                    port: Number(sshPort) || 22,
-                    user: sshUser,
-                    password: sshAuthMethod === 'password' ? sshPassword || undefined : undefined,
-                    private_key: sshAuthMethod === 'private_key' ? sshKey || undefined : undefined,
-                    passphrase:
-                        sshAuthMethod === 'private_key' ? sshPassphrase || undefined : undefined,
-                },
+                ssh: sshPayload,
             });
             navigate('/nodes');
         } catch (err) {
             setSubmitError(err instanceof ApiError ? err.message : 'Failed to create node');
         } finally {
             setSubmitting(false);
+        }
+    };
+
+    const testSSHConnection = async () => {
+        if (!clusterId || testingConnection) return;
+        const fingerprint = sshFingerprint;
+        setTestingConnection(true);
+        setTestedSSHFingerprint('');
+        setSSHTestAttemptFingerprint(fingerprint);
+        setSSHTestMessage('');
+        setSSHTestError('');
+        try {
+            const result = await nodeApi.testConnection(sshPayload);
+            if (fingerprint !== sshFingerprintRef.current) return;
+            setTestedSSHFingerprint(fingerprint);
+            setSSHTestMessage(`Connected successfully · ${result.architecture}`);
+        } catch (testError) {
+            setTestedSSHFingerprint('');
+            setSSHTestError(
+                testError instanceof ApiError ? testError.message : 'Failed to test SSH connection'
+            );
+        } finally {
+            setTestingConnection(false);
         }
     };
 
@@ -924,6 +965,46 @@ export default function CreateNode() {
                                                 </FormRow>
                                             </>
                                         )}
+
+                                        <div className='border-t border-border py-4'>
+                                            <div className='flex flex-wrap items-center gap-3'>
+                                                <Button
+                                                    isDisabled={
+                                                        testingConnection ||
+                                                        !sshIp.trim() ||
+                                                        !sshUser.trim() ||
+                                                        (sshAuthMethod === 'password'
+                                                            ? !sshPassword
+                                                            : !sshKey)
+                                                    }
+                                                    type='button'
+                                                    variant='secondary'
+                                                    onPress={() => void testSSHConnection()}
+                                                >
+                                                    {testingConnection
+                                                        ? 'Testing connection…'
+                                                        : 'Test SSH connection'}
+                                                </Button>
+                                                {sshConnectionVerified && (
+                                                    <span className='inline-flex items-center gap-1.5 text-sm text-success'>
+                                                        <Check className='h-4 w-4' />
+                                                        {sshTestMessage}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {sshTestAttemptFingerprint === sshFingerprint &&
+                                                sshTestError && (
+                                                    <div className='mt-3'>
+                                                        <FormError message={sshTestError} />
+                                                    </div>
+                                                )}
+                                            {testedSSHFingerprint && !sshConnectionVerified && (
+                                                <p className='mt-2 text-sm text-warning'>
+                                                    SSH settings changed. Test the connection again
+                                                    before creating the node.
+                                                </p>
+                                            )}
+                                        </div>
                                     </div>
                                 )}
                             </ContentCard>
@@ -936,7 +1017,11 @@ export default function CreateNode() {
                                 >
                                     Cancel
                                 </Button>
-                                <Button isDisabled={submitting} type='submit' variant='primary'>
+                                <Button
+                                    isDisabled={submitting || !sshConnectionVerified}
+                                    type='submit'
+                                    variant='primary'
+                                >
                                     {submitting ? 'Creating…' : 'Create node'}
                                 </Button>
                             </div>

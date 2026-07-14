@@ -48,7 +48,10 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 			query.Node.Id.Equals(payload.NodeID),
 			query.Node.Status.Equals(model.NodeStatusPENDING),
 		).
-		Set(query.Node.Status.Set(model.NodeStatusINSTALLING)).
+		Set(
+			query.Node.Status.Set(model.NodeStatusINSTALLING),
+			query.Node.InstallError.SetNull(),
+		).
 		DoMany(ctx)
 	if err == nil && claimed == 0 {
 		return
@@ -58,38 +61,18 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 		err = w.install(ctx, *payload)
 	}
 	if err != nil {
+		message := installErrorMessage(err)
 		_, _ = w.db.Node.Update().
 			Where(query.Node.Id.Equals(payload.NodeID)).
-			Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).
+			Set(
+				query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+				query.Node.InstallError.Set(message),
+			).
 			DoMany(ctx)
 	}
 }
 func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) error {
-	auth := []ssh.AuthMethod{}
-	if payload.SSH.UsesPassword() {
-		auth = append(auth, ssh.Password(payload.SSH.Password))
-	} else {
-		key := []byte(payload.SSH.PrivateKeyPEM)
-		var signer ssh.Signer
-		var err error
-		if payload.SSH.Passphrase != "" {
-			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(payload.SSH.Passphrase))
-		} else {
-			signer, err = ssh.ParsePrivateKey(key)
-		}
-		if err != nil {
-			return err
-		}
-		auth = append(auth, ssh.PublicKeys(signer))
-	}
-
-	config := &ssh.ClientConfig{
-		User:            payload.SSH.User,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         20 * time.Second,
-	}
-	connection, err := ssh.Dial("tcp", net.JoinHostPort(payload.SSH.EntryIP, fmt.Sprint(payload.SSH.Port)), config)
+	connection, err := connectSSH(payload.SSH)
 	if err != nil {
 		return err
 	}
@@ -97,12 +80,12 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 
 	arch, err := remoteArchitecture(connection)
 	if err != nil {
-		return err
+		return fmt.Errorf("detect remote architecture: %w", err)
 	}
 
 	binary, err := staticassets.AgentBinary(arch)
 	if err != nil {
-		return err
+		return fmt.Errorf("load agent binary for %s: %w", arch, err)
 	}
 
 	identity, _ := json.Marshal(map[string]string{
@@ -121,13 +104,13 @@ WantedBy=multi-user.target
 	`
 
 	if err := upload(connection, "/tmp/goveto-edge-agent", binary, 0755); err != nil {
-		return err
+		return fmt.Errorf("upload agent binary: %w", err)
 	}
 	if err := upload(connection, "/tmp/goveto-edge-identity.json", identity, 0600); err != nil {
-		return err
+		return fmt.Errorf("upload node identity: %w", err)
 	}
 	if err := upload(connection, "/tmp/goveto-edge-agent.service", []byte(unit), 0644); err != nil {
-		return err
+		return fmt.Errorf("upload systemd service: %w", err)
 	}
 
 	script := `set -eu
@@ -141,19 +124,102 @@ sudo systemctl enable --now goveto-edge-agent
 
 	session, err := connection.NewSession()
 	if err != nil {
-		return err
+		return fmt.Errorf("open installation SSH session: %w", err)
 	}
 	defer session.Close()
 
-	done := make(chan error, 1)
-	go func() { done <- session.Run("sh -c " + shellQuote(script)) }()
+	type commandResult struct {
+		output []byte
+		err    error
+	}
+	done := make(chan commandResult, 1)
+	go func() {
+		output, runErr := session.CombinedOutput("sh -c " + shellQuote(script))
+		done <- commandResult{output: output, err: runErr}
+	}()
 	select {
 	case <-ctx.Done():
 		_ = session.Signal(ssh.SIGKILL)
 		return ctx.Err()
-	case err := <-done:
-		return err
+	case result := <-done:
+		if result.err != nil {
+			return fmt.Errorf(
+				"install and start agent service: %w%s",
+				result.err,
+				commandOutputSuffix(result.output),
+			)
+		}
+		return nil
 	}
+}
+
+func connectSSH(input SSHInstallInput) (*ssh.Client, error) {
+	auth := []ssh.AuthMethod{}
+	if input.UsesPassword() {
+		auth = append(
+			auth,
+			ssh.Password(input.Password),
+			ssh.KeyboardInteractive(func(
+				_ string,
+				_ string,
+				questions []string,
+				echo []bool,
+			) ([]string, error) {
+				answers := make([]string, len(questions))
+				for index := range questions {
+					if index >= len(echo) || !echo[index] {
+						answers[index] = input.Password
+					}
+				}
+				return answers, nil
+			}),
+		)
+	} else {
+		key := []byte(input.PrivateKeyPEM)
+		var signer ssh.Signer
+		var err error
+		if input.Passphrase != "" {
+			signer, err = ssh.ParsePrivateKeyWithPassphrase(key, []byte(input.Passphrase))
+		} else {
+			signer, err = ssh.ParsePrivateKey(key)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("parse SSH private key: %w", err)
+		}
+		auth = append(auth, ssh.PublicKeys(signer))
+	}
+
+	config := &ssh.ClientConfig{
+		User:            input.User,
+		Auth:            auth,
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         20 * time.Second,
+	}
+	endpoint := net.JoinHostPort(input.EntryIP, fmt.Sprint(input.Port))
+	connection, err := ssh.Dial("tcp", endpoint, config)
+	if err != nil {
+		return nil, fmt.Errorf("connect to %s as %s: %w", endpoint, input.User, err)
+	}
+	return connection, nil
+}
+
+func TestSSHConnection(ctx context.Context, input SSHInstallInput) (string, error) {
+	if err := input.Validate(); err != nil {
+		return "", err
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	connection, err := connectSSH(input)
+	if err != nil {
+		return "", err
+	}
+	defer connection.Close()
+	architecture, err := remoteArchitecture(connection)
+	if err != nil {
+		return "", fmt.Errorf("detect remote architecture: %w", err)
+	}
+	return architecture, nil
 }
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
@@ -164,9 +230,9 @@ func remoteArchitecture(connection *ssh.Client) (string, error) {
 	}
 	defer session.Close()
 
-	output, err := session.Output("uname -m")
+	output, err := session.CombinedOutput("uname -m")
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("run uname -m: %w%s", err, commandOutputSuffix(output))
 	}
 	return normalizeArchitecture(string(output))
 }
@@ -181,6 +247,27 @@ func normalizeArchitecture(output string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported remote architecture %q", value)
 	}
+}
+
+func commandOutputSuffix(output []byte) string {
+	value := strings.TrimSpace(string(output))
+	if value == "" {
+		return ""
+	}
+	runes := []rune(value)
+	if len(runes) > 2048 {
+		value = string(runes[len(runes)-2048:])
+	}
+	return ": " + value
+}
+
+func installErrorMessage(err error) string {
+	value := strings.TrimSpace(err.Error())
+	runes := []rune(value)
+	if len(runes) > 4096 {
+		value = string(runes[:4096])
+	}
+	return value
 }
 
 func upload(connection *ssh.Client, path string, content []byte, mode uint32) error {
@@ -203,8 +290,9 @@ func upload(connection *ssh.Client, path string, content []byte, mode uint32) er
 	}()
 
 	cmd := fmt.Sprintf("umask 077; cat > %s; chmod %04o %s", shellQuote(path), mode, shellQuote(path))
-	if err := session.Run(cmd); err != nil {
-		return err
+	output, err := session.CombinedOutput(cmd)
+	if err != nil {
+		return fmt.Errorf("write remote file %s: %w%s", path, err, commandOutputSuffix(output))
 	}
 	return <-copyDone
 }

@@ -328,6 +328,7 @@ model Node {
   version            String?
   heartbeatAt        DateTime?               @map("heartbeat_at")
   status             NodeStatus              @default(PENDING)
+  installError       String?                 @map("install_error") @db.Text
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])

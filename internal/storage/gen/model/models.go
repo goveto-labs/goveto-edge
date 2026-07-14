@@ -192,6 +192,7 @@ type Node struct {
 	Version            *string                  `db:"version" json:"version"`
 	HeartbeatAt        *time.Time               `db:"heartbeat_at" json:"heartbeatAt"`
 	Status             NodeStatus               `db:"status" json:"status"`
+	InstallError       *string                  `db:"install_error" json:"installError"`
 	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
 	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
 	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`

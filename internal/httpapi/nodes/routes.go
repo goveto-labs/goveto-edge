@@ -22,6 +22,7 @@ import (
 
 func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, dnsService *dnssync.Service) {
 	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
@@ -33,9 +34,33 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 
-type nodeCreatedResponse struct {
-	ID     string           `json:"id"`
-	Status model.NodeStatus `json:"status"`
+type testConnectionRequest struct {
+	SSH nodedomain.SSHInstallInput `json:"ssh"`
+}
+
+type testConnectionResponse struct {
+	OK           bool   `json:"ok"`
+	Architecture string `json:"architecture"`
+}
+
+// @summary Test node SSH connection
+// @description Validate SSH credentials and detect the remote architecture without creating a node.
+// @Tags nodes
+func testConnection() echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input testConnectionRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		architecture, err := nodedomain.TestSSHConnection(c.Request().Context(), input.SSH)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
+		}
+		return types.JSON(c, http.StatusOK, testConnectionResponse{
+			OK:           true,
+			Architecture: architecture,
+		})
+	}
 }
 
 // @summary Create node
@@ -145,14 +170,33 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			CommunicationKey: communicationKey,
 			SSH:              input.SSH,
 		}); err != nil {
+			message := "unable to queue node installation: " + err.Error()
 			_, _ = db.Node.Update().
 				Where(query.Node.Id.Equals(nodeID)).
-				Set(query.Node.Status.Set(model.NodeStatusINSTALL_FAILED)).
+				Set(
+					query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+					query.Node.InstallError.Set(message),
+				).
 				DoMany(ctx)
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
-		return types.JSON(c, http.StatusAccepted, nodeCreatedResponse{ID: nodeID, Status: model.NodeStatusPENDING})
+		created, err := db.Node.Query().
+			Where(query.Node.Id.Equals(nodeID)).
+			Include(
+				query.Node.Addresses.Fetch(),
+				query.Node.DnsLines.Fetch(),
+				query.Node.GroupMemberships.Fetch(),
+				query.Node.RegionMemberships.Fetch(),
+			).
+			First(ctx)
+		if err != nil {
+			return err
+		}
+		if created == nil {
+			return echo.NewHTTPError(http.StatusInternalServerError, "created node was not found")
+		}
+		return types.JSON(c, http.StatusAccepted, types.NewNode(created))
 	}
 }
 

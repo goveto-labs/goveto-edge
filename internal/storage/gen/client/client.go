@@ -12018,7 +12018,7 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 
 func quotedNodeTable(c *Client) string { return c.quoteIdentifier("nodes") }
 func quotedNodeColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -12042,6 +12042,8 @@ func quoteNodeField(c *Client, field string) (string, error) {
 	case "heartbeat_at":
 		return c.quoteIdentifier(field), nil
 	case "status":
+		return c.quoteIdentifier(field), nil
+	case "install_error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -12256,14 +12258,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -12290,7 +12292,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -12542,7 +12544,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -12574,7 +12576,7 @@ func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -12605,7 +12607,7 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -12624,7 +12626,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -12697,7 +12699,7 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -12802,7 +12804,7 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -12826,7 +12828,7 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

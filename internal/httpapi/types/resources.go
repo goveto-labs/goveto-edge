@@ -114,6 +114,7 @@ type Node struct {
 	ID                 string                 `json:"id"`
 	Name               string                 `json:"name"`
 	Status             model.NodeStatus       `json:"status"`
+	InstallError       *string                `json:"installError,omitempty"`
 	Addresses          []NodeAddress          `json:"addresses"`
 	DNSLines           []NodeDNSLine          `json:"dnsLines,omitempty"`
 	GroupMemberships   []NodeGroupMembership  `json:"groupMemberships,omitempty"`
@@ -123,7 +124,7 @@ type Node struct {
 }
 
 func NewNode(value *model.Node) Node {
-	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), GroupMemberships: make([]NodeGroupMembership, len(value.GroupMemberships)), RegionMemberships: make([]NodeRegionMembership, len(value.RegionMemberships)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
+	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, InstallError: value.InstallError, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), GroupMemberships: make([]NodeGroupMembership, len(value.GroupMemberships)), RegionMemberships: make([]NodeRegionMembership, len(value.RegionMemberships)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
 	for index, item := range value.Addresses {
 		result.Addresses[index] = NewNodeAddress(item)
 	}

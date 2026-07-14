@@ -56,16 +56,25 @@ func (i *CreateInput) Validate() error {
 		seen[address] = struct{}{}
 		i.Addresses[index] = address
 	}
-	if net.ParseIP(strings.TrimSpace(i.SSH.EntryIP)) == nil {
+	if err := i.SSH.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SSHInstallInput) Validate() error {
+	s.EntryIP = strings.TrimSpace(s.EntryIP)
+	s.User = strings.TrimSpace(s.User)
+	if net.ParseIP(s.EntryIP) == nil {
 		return errors.New("ssh.entry_ip must be a valid IP address")
 	}
-	if i.SSH.Port == 0 {
-		i.SSH.Port = 22
+	if s.Port == 0 {
+		s.Port = 22
 	}
-	if strings.TrimSpace(i.SSH.User) == "" {
+	if s.User == "" {
 		return errors.New("ssh.user is required")
 	}
-	if i.SSH.UsesPassword() == i.SSH.UsesPrivateKey() {
+	if s.UsesPassword() == s.UsesPrivateKey() {
 		return errors.New("exactly one of ssh.password or ssh.private_key is required")
 	}
 	return nil

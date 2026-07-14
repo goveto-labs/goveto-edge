@@ -39,6 +39,7 @@ type NodeQuery struct {
 	Version            nodeVersionField
 	HeartbeatAt        nodeHeartbeatAtField
 	Status             nodeStatusField
+	InstallError       nodeInstallErrorField
 	CreatedAt          nodeCreatedAtField
 	UpdatedAt          nodeUpdatedAtField
 	Cluster            nodeClusterRelation
@@ -63,6 +64,7 @@ const NodeNameColumn = "name"
 const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
 const NodeStatusColumn = "status"
+const NodeInstallErrorColumn = "install_error"
 const NodeCreatedAtColumn = "created_at"
 const NodeUpdatedAtColumn = "updated_at"
 
@@ -76,6 +78,7 @@ var Node = NodeQuery{
 	Version:            nodeVersionField{},
 	HeartbeatAt:        nodeHeartbeatAtField{},
 	Status:             nodeStatusField{},
+	InstallError:       nodeInstallErrorField{},
 	CreatedAt:          nodeCreatedAtField{},
 	UpdatedAt:          nodeUpdatedAtField{},
 	Cluster:            nodeClusterRelation{},
@@ -683,6 +686,77 @@ func (nodeStatusField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "status", Direction: "DESC"}
 }
 
+// InstallErrorField provides query operations for the installError field.
+type nodeInstallErrorField struct{}
+
+// Equals creates an equality condition.
+func (nodeInstallErrorField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeInstallErrorField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeInstallErrorField) In(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "install_error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeInstallErrorField) NotIn(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "install_error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (nodeInstallErrorField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (nodeInstallErrorField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (nodeInstallErrorField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeInstallErrorField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "install_error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeInstallErrorField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "install_error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeInstallErrorField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "install_error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeInstallErrorField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "install_error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeInstallErrorField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "install_error", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type nodeCreatedAtField struct{}
 
@@ -944,6 +1018,7 @@ type NodeCreateInput struct {
 	Version            **string
 	HeartbeatAt        **time.Time
 	Status             model.NodeStatus
+	InstallError       **string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	Cluster            *ClusterCreateNestedInput
@@ -961,7 +1036,7 @@ type NodeCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

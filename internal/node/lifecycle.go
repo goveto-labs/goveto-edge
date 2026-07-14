@@ -96,7 +96,7 @@ func (l *Lifecycle) poll(ctx context.Context) {
 
 		_, _ = l.db.RawExec(
 			ctx,
-			`UPDATE nodes SET status = 'ONLINE', heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
+			`UPDATE nodes SET status = 'ONLINE', install_error = NULL, heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
 			target.NodeID,
 		)
 		if target.Status != "ONLINE" {

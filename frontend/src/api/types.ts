@@ -131,6 +131,11 @@ export interface NodeSSH {
     passphrase?: string;
 }
 
+export interface SSHConnectionTestResponse {
+    ok: boolean;
+    architecture: string;
+}
+
 export interface NodeCacheConfig {
     cache_directory: string;
     auto_max_size: boolean;
@@ -147,6 +152,7 @@ export interface Node {
     id: string;
     name: string;
     status: string;
+    installError?: string;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     groupMemberships?: Array<{ nodeId: string; groupId: string }>;
