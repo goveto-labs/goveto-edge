@@ -98,23 +98,29 @@ export default function Certificates() {
             ) : (
                 <Card className='overflow-hidden'>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>Name</Table.Column>
-                            <Table.Column>ID</Table.Column>
-                            <Table.Column>Created at</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {certs.map((cert) => (
-                                <Table.Row key={cert.id} id={cert.id}>
-                                    <Table.Cell className='flex items-center gap-2 font-medium'>
-                                        <ShieldCheck className='h-4 w-4 text-success' />
-                                        {cert.name}
-                                    </Table.Cell>
-                                    <Table.Cell className='font-mono text-xs'>{cert.id}</Table.Cell>
-                                    <Table.Cell>{cert.created_at}</Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Certificates'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>Name</Table.Column>
+                                    <Table.Column>ID</Table.Column>
+                                    <Table.Column>Created at</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {certs.map((cert) => (
+                                        <Table.Row key={cert.id} id={cert.id}>
+                                            <Table.Cell className='flex items-center gap-2 font-medium'>
+                                                <ShieldCheck className='h-4 w-4 text-success' />
+                                                {cert.name}
+                                            </Table.Cell>
+                                            <Table.Cell className='font-mono text-xs'>
+                                                {cert.id}
+                                            </Table.Cell>
+                                            <Table.Cell>{cert.created_at}</Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
             )}
@@ -136,18 +142,20 @@ export default function Certificates() {
                                             {submitError}
                                         </div>
                                     )}
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='cert-name'>Name</Label>
                                         <Input
+                                            variant='secondary'
                                             id='cert-name'
                                             required
                                             value={name}
                                             onChange={(e) => setName(e.target.value)}
                                         />
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='cert-pem'>Certificate PEM</Label>
                                         <TextArea
+                                            variant='secondary'
                                             id='cert-pem'
                                             required
                                             rows={6}
@@ -155,9 +163,10 @@ export default function Certificates() {
                                             onChange={(e) => setCertificate(e.target.value)}
                                         />
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='cert-key'>Private key PEM</Label>
                                         <TextArea
+                                            variant='secondary'
                                             id='cert-key'
                                             required
                                             rows={6}

@@ -114,18 +114,20 @@ export default function Register() {
                                 {error}
                             </div>
                         )}
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='register-name'>Name</Label>
                             <Input
+                                variant='secondary'
                                 id='register-name'
                                 required
                                 value={name}
                                 onChange={(e) => setName(e.target.value)}
                             />
                         </div>
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='register-email'>Email</Label>
                             <Input
+                                variant='secondary'
                                 id='register-email'
                                 required
                                 type='email'
@@ -133,9 +135,10 @@ export default function Register() {
                                 onChange={(e) => setEmail(e.target.value)}
                             />
                         </div>
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='register-password'>Password</Label>
                             <Input
+                                variant='secondary'
                                 id='register-password'
                                 required
                                 type='password'
@@ -143,9 +146,10 @@ export default function Register() {
                                 onChange={(e) => setPassword(e.target.value)}
                             />
                         </div>
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='register-captcha'>Captcha token</Label>
                             <Input
+                                variant='secondary'
                                 id='register-captcha'
                                 required
                                 value={captchaToken}

@@ -93,9 +93,10 @@ export default function PurgeJobs() {
             <Card className='p-5'>
                 <form className='space-y-4' onSubmit={handleSubmit}>
                     <div className='flex flex-col gap-4 md:flex-row md:items-end'>
-                        <div className='flex-1'>
+                        <div className='flex flex-col gap-1 flex-1'>
                             <Label htmlFor='purge-site-id'>Site ID</Label>
                             <Input
+                                variant='secondary'
                                 id='purge-site-id'
                                 placeholder='Site ID'
                                 value={siteId}
@@ -116,29 +117,30 @@ export default function PurgeJobs() {
                     </div>
 
                     <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
-                        <div className='w-full sm:w-40'>
-                            <Label htmlFor='purge-type'>Type</Label>
-                            <Select
-                                id='purge-type'
-                                value={type}
-                                onChange={(key) => setType(String(key ?? '') as PurgeType)}
-                            >
-                                <Select.Trigger>
-                                    <Select.Value />
-                                </Select.Trigger>
-                                <Select.Popover>
-                                    <ListBox>
-                                        {purgeTypes.map((t) => (
-                                            <ListBox.Item key={t} id={t}>
-                                                {t}
-                                            </ListBox.Item>
-                                        ))}
-                                    </ListBox>
-                                </Select.Popover>
-                            </Select>
-                        </div>
+                        <Select
+                            className='w-full sm:w-40'
+                            variant='secondary'
+                            value={type}
+                            onChange={(key) => setType(String(key ?? '') as PurgeType)}
+                        >
+                            <Label>Type</Label>
+                            <Select.Trigger>
+                                <Select.Value />
+                            </Select.Trigger>
+                            <Select.Popover>
+                                <ListBox>
+                                    {purgeTypes.map((t) => (
+                                        <ListBox.Item key={t} id={t} textValue={t}>
+                                            {t}
+                                        </ListBox.Item>
+                                    ))}
+                                </ListBox>
+                            </Select.Popover>
+                        </Select>
                         <Input
+                            variant='secondary'
                             className='flex-1'
+                            aria-label='Purge value'
                             disabled={type === 'ALL'}
                             placeholder={type === 'ALL' ? 'No value needed' : 'Value to purge'}
                             value={value}
@@ -159,33 +161,43 @@ export default function PurgeJobs() {
 
             <Card className='overflow-hidden'>
                 <Table>
-                    <Table.Header>
-                        <Table.Column>Job ID</Table.Column>
-                        <Table.Column>Type</Table.Column>
-                        <Table.Column>Value</Table.Column>
-                        <Table.Column>Status</Table.Column>
-                        <Table.Column>Created</Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                        {loading && jobs.length === 0 && (
-                            <Table.Row id='loading'>
-                                <Table.Cell colSpan={5}>
-                                    <div className='flex justify-center py-4'>
-                                        <Spinner />
-                                    </div>
-                                </Table.Cell>
-                            </Table.Row>
-                        )}
-                        {jobs.map((job) => (
-                            <Table.Row key={job.id} id={job.id}>
-                                <Table.Cell className='font-mono text-xs'>{job.id}</Table.Cell>
-                                <Table.Cell>{job.type}</Table.Cell>
-                                <Table.Cell>{job.value ?? '-'}</Table.Cell>
-                                <Table.Cell>{job.status}</Table.Cell>
-                                <Table.Cell>{job.created_at}</Table.Cell>
-                            </Table.Row>
-                        ))}
-                    </Table.Body>
+                    <Table.ScrollContainer>
+                        <Table.Content aria-label='Purge jobs'>
+                            <Table.Header>
+                                <Table.Column isRowHeader>Job ID</Table.Column>
+                                <Table.Column>Type</Table.Column>
+                                <Table.Column>Value</Table.Column>
+                                <Table.Column>Status</Table.Column>
+                                <Table.Column>Created</Table.Column>
+                            </Table.Header>
+                            <Table.Body>
+                                {loading && jobs.length === 0 && (
+                                    <Table.Row id='loading'>
+                                        <Table.Cell>
+                                            <div className='flex justify-center py-4'>
+                                                <Spinner />
+                                            </div>
+                                        </Table.Cell>
+                                        <Table.Cell />
+                                        <Table.Cell />
+                                        <Table.Cell />
+                                        <Table.Cell />
+                                    </Table.Row>
+                                )}
+                                {jobs.map((job) => (
+                                    <Table.Row key={job.id} id={job.id}>
+                                        <Table.Cell className='font-mono text-xs'>
+                                            {job.id}
+                                        </Table.Cell>
+                                        <Table.Cell>{job.type}</Table.Cell>
+                                        <Table.Cell>{job.value ?? '-'}</Table.Cell>
+                                        <Table.Cell>{job.status}</Table.Cell>
+                                        <Table.Cell>{job.created_at}</Table.Cell>
+                                    </Table.Row>
+                                ))}
+                            </Table.Body>
+                        </Table.Content>
+                    </Table.ScrollContainer>
                 </Table>
             </Card>
         </div>

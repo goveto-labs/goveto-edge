@@ -119,27 +119,30 @@ export default function Analytics() {
 
             <Card className='p-5'>
                 <div className='flex flex-wrap items-end gap-4'>
-                    <div>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-site-id'>Site ID (optional)</Label>
                         <Input
+                            variant='secondary'
                             id='analytics-site-id'
                             className='w-64'
                             value={siteId}
                             onChange={(e) => setSiteId(e.target.value)}
                         />
                     </div>
-                    <div>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-from'>From</Label>
                         <Input
+                            variant='secondary'
                             id='analytics-from'
                             type='datetime-local'
                             value={from}
                             onChange={(e) => setFrom(e.target.value)}
                         />
                     </div>
-                    <div>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-to'>To</Label>
                         <Input
+                            variant='secondary'
                             id='analytics-to'
                             type='datetime-local'
                             value={to}
@@ -225,42 +228,58 @@ export default function Analytics() {
                 <Card className='overflow-hidden'>
                     <div className='p-4 text-sm font-medium'>Top URLs</div>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>URL</Table.Column>
-                            <Table.Column>Requests</Table.Column>
-                            <Table.Column>Bytes</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {topUrls.map((item) => (
-                                <Table.Row key={item.value} id={item.value}>
-                                    <Table.Cell className='max-w-xs truncate'>
-                                        {item.value}
-                                    </Table.Cell>
-                                    <Table.Cell>{item.requests.toLocaleString()}</Table.Cell>
-                                    <Table.Cell>{formatBytes(item.traffic_bytes)}</Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Top URLs'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>URL</Table.Column>
+                                    <Table.Column>Requests</Table.Column>
+                                    <Table.Column>Bytes</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {topUrls.map((item) => (
+                                        <Table.Row key={item.value} id={item.value}>
+                                            <Table.Cell className='max-w-xs truncate'>
+                                                {item.value}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {item.requests.toLocaleString()}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {formatBytes(item.traffic_bytes)}
+                                            </Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
 
                 <Card className='overflow-hidden'>
                     <div className='p-4 text-sm font-medium'>Top IPs</div>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>IP</Table.Column>
-                            <Table.Column>Requests</Table.Column>
-                            <Table.Column>Bytes</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {topIps.map((item) => (
-                                <Table.Row key={item.value} id={item.value}>
-                                    <Table.Cell>{item.value}</Table.Cell>
-                                    <Table.Cell>{item.requests.toLocaleString()}</Table.Cell>
-                                    <Table.Cell>{formatBytes(item.traffic_bytes)}</Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Top IPs'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>IP</Table.Column>
+                                    <Table.Column>Requests</Table.Column>
+                                    <Table.Column>Bytes</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {topIps.map((item) => (
+                                        <Table.Row key={item.value} id={item.value}>
+                                            <Table.Cell>{item.value}</Table.Cell>
+                                            <Table.Cell>
+                                                {item.requests.toLocaleString()}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {formatBytes(item.traffic_bytes)}
+                                            </Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
             </div>

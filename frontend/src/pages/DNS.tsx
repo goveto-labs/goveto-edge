@@ -373,9 +373,10 @@ export default function DNS() {
 
             <Card className='p-5'>
                 <form className='grid gap-4 md:grid-cols-2' onSubmit={save}>
-                    <div>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='dns-hostname'>Cluster hostname</Label>
                         <Input
+                            variant='secondary'
                             id='dns-hostname'
                             disabled={!canEdit}
                             placeholder='edge.example.com'
@@ -384,23 +385,31 @@ export default function DNS() {
                             onChange={(event) => setHostname(event.target.value)}
                         />
                     </div>
-                    <div>
+                    <Select
+                        variant='secondary'
+                        isDisabled={!canEdit}
+                        value={provider}
+                        onChange={changeProvider}
+                    >
                         <Label>Provider</Label>
-                        <Select isDisabled={!canEdit} value={provider} onChange={changeProvider}>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    <ListBox.Item id='ALIYUN'>Aliyun DNS</ListBox.Item>
-                                    <ListBox.Item id='CLOUDFLARE'>Cloudflare</ListBox.Item>
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
-                    </div>
-                    <div>
+                        <Select.Trigger>
+                            <Select.Value />
+                        </Select.Trigger>
+                        <Select.Popover>
+                            <ListBox>
+                                <ListBox.Item id='ALIYUN' textValue='Aliyun DNS'>
+                                    Aliyun DNS
+                                </ListBox.Item>
+                                <ListBox.Item id='CLOUDFLARE' textValue='Cloudflare'>
+                                    Cloudflare
+                                </ListBox.Item>
+                            </ListBox>
+                        </Select.Popover>
+                    </Select>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='dns-zone'>DNS zone</Label>
                         <Input
+                            variant='secondary'
                             id='dns-zone'
                             disabled={!canEdit}
                             placeholder='example.com'
@@ -410,9 +419,10 @@ export default function DNS() {
                         />
                     </div>
                     {provider === 'CLOUDFLARE' && (
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='dns-zone-id'>Cloudflare zone ID</Label>
                             <Input
+                                variant='secondary'
                                 id='dns-zone-id'
                                 disabled={!canEdit}
                                 required
@@ -423,9 +433,10 @@ export default function DNS() {
                     )}
                     {provider === 'ALIYUN' ? (
                         <>
-                            <div>
+                            <div className='flex flex-col gap-1'>
                                 <Label htmlFor='dns-key-id'>AccessKey ID</Label>
                                 <Input
+                                    variant='secondary'
                                     id='dns-key-id'
                                     disabled={!canEdit}
                                     placeholder={
@@ -437,9 +448,10 @@ export default function DNS() {
                                     onChange={(event) => setAccessKeyId(event.target.value)}
                                 />
                             </div>
-                            <div>
+                            <div className='flex flex-col gap-1'>
                                 <Label htmlFor='dns-key-secret'>AccessKey secret</Label>
                                 <Input
+                                    variant='secondary'
                                     id='dns-key-secret'
                                     disabled={!canEdit}
                                     placeholder={
@@ -454,9 +466,10 @@ export default function DNS() {
                             </div>
                         </>
                     ) : (
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='dns-token'>API token</Label>
                             <Input
+                                variant='secondary'
                                 id='dns-token'
                                 disabled={!canEdit}
                                 placeholder={
@@ -468,9 +481,10 @@ export default function DNS() {
                             />
                         </div>
                     )}
-                    <div>
+                    <div className='flex flex-col gap-1'>
                         <Label htmlFor='dns-ttl'>TTL</Label>
                         <Input
+                            variant='secondary'
                             id='dns-ttl'
                             disabled={!canEdit}
                             max={86400}
@@ -510,12 +524,16 @@ export default function DNS() {
                 {isOwner && (
                     <div className='mb-4 flex flex-col gap-2 sm:flex-row'>
                         <Input
+                            variant='secondary'
+                            aria-label='DNS line name'
                             disabled={!canEdit}
                             placeholder='China Telecom'
                             value={lineName}
                             onChange={(event) => setLineName(event.target.value)}
                         />
                         <Input
+                            variant='secondary'
+                            aria-label='DNS line code'
                             disabled={!canEdit}
                             placeholder='telecom'
                             value={lineCode}
@@ -559,59 +577,69 @@ export default function DNS() {
 
             <Card className='overflow-hidden'>
                 <Table>
-                    <Table.Header>
-                        <Table.Column>Hostname</Table.Column>
-                        <Table.Column>Type</Table.Column>
-                        <Table.Column>Value</Table.Column>
-                        <Table.Column>Line</Table.Column>
-                        <Table.Column>Status</Table.Column>
-                        <Table.Column>Detail</Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                        {records.map((record) => (
-                            <Table.Row id={record.id} key={record.id}>
-                                <Table.Cell className='font-mono text-xs'>
-                                    {record.hostname}
-                                </Table.Cell>
-                                <Table.Cell>{record.type}</Table.Cell>
-                                <Table.Cell className='font-mono text-xs'>
-                                    {record.value}
-                                </Table.Cell>
-                                <Table.Cell>{record.dnsLineKey}</Table.Cell>
-                                <Table.Cell>{record.status}</Table.Cell>
-                                <Table.Cell>
-                                    {record.lastError ?? record.lastSyncedAt ?? '—'}
-                                </Table.Cell>
-                            </Table.Row>
-                        ))}
-                    </Table.Body>
+                    <Table.ScrollContainer>
+                        <Table.Content aria-label='DNS records'>
+                            <Table.Header>
+                                <Table.Column isRowHeader>Hostname</Table.Column>
+                                <Table.Column>Type</Table.Column>
+                                <Table.Column>Value</Table.Column>
+                                <Table.Column>Line</Table.Column>
+                                <Table.Column>Status</Table.Column>
+                                <Table.Column>Detail</Table.Column>
+                            </Table.Header>
+                            <Table.Body>
+                                {records.map((record) => (
+                                    <Table.Row id={record.id} key={record.id}>
+                                        <Table.Cell className='font-mono text-xs'>
+                                            {record.hostname}
+                                        </Table.Cell>
+                                        <Table.Cell>{record.type}</Table.Cell>
+                                        <Table.Cell className='font-mono text-xs'>
+                                            {record.value}
+                                        </Table.Cell>
+                                        <Table.Cell>{record.dnsLineKey}</Table.Cell>
+                                        <Table.Cell>{record.status}</Table.Cell>
+                                        <Table.Cell>
+                                            {record.lastError ?? record.lastSyncedAt ?? '—'}
+                                        </Table.Cell>
+                                    </Table.Row>
+                                ))}
+                            </Table.Body>
+                        </Table.Content>
+                    </Table.ScrollContainer>
                 </Table>
             </Card>
 
             <Card className='overflow-hidden'>
                 <Table>
-                    <Table.Header>
-                        <Table.Column>Job</Table.Column>
-                        <Table.Column>Action</Table.Column>
-                        <Table.Column>Status</Table.Column>
-                        <Table.Column>Attempts</Table.Column>
-                        <Table.Column>Error</Table.Column>
-                        <Table.Column>Created</Table.Column>
-                    </Table.Header>
-                    <Table.Body>
-                        {jobs.map((job) => (
-                            <Table.Row id={job.id} key={job.id}>
-                                <Table.Cell className='font-mono text-xs'>{job.id}</Table.Cell>
-                                <Table.Cell>{job.action}</Table.Cell>
-                                <Table.Cell>{job.status}</Table.Cell>
-                                <Table.Cell>
-                                    {job.attempts}/{job.maxAttempts}
-                                </Table.Cell>
-                                <Table.Cell>{job.resultJson?.error || '—'}</Table.Cell>
-                                <Table.Cell>{job.createdAt}</Table.Cell>
-                            </Table.Row>
-                        ))}
-                    </Table.Body>
+                    <Table.ScrollContainer>
+                        <Table.Content aria-label='DNS jobs'>
+                            <Table.Header>
+                                <Table.Column isRowHeader>Job</Table.Column>
+                                <Table.Column>Action</Table.Column>
+                                <Table.Column>Status</Table.Column>
+                                <Table.Column>Attempts</Table.Column>
+                                <Table.Column>Error</Table.Column>
+                                <Table.Column>Created</Table.Column>
+                            </Table.Header>
+                            <Table.Body>
+                                {jobs.map((job) => (
+                                    <Table.Row id={job.id} key={job.id}>
+                                        <Table.Cell className='font-mono text-xs'>
+                                            {job.id}
+                                        </Table.Cell>
+                                        <Table.Cell>{job.action}</Table.Cell>
+                                        <Table.Cell>{job.status}</Table.Cell>
+                                        <Table.Cell>
+                                            {job.attempts}/{job.maxAttempts}
+                                        </Table.Cell>
+                                        <Table.Cell>{job.resultJson?.error || '—'}</Table.Cell>
+                                        <Table.Cell>{job.createdAt}</Table.Cell>
+                                    </Table.Row>
+                                ))}
+                            </Table.Body>
+                        </Table.Content>
+                    </Table.ScrollContainer>
                 </Table>
             </Card>
         </div>

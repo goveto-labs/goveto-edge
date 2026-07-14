@@ -259,45 +259,61 @@ export default function Nodes() {
             ) : (
                 <Card className='overflow-hidden'>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>Name</Table.Column>
-                            <Table.Column>Status</Table.Column>
-                            <Table.Column>DNS lines</Table.Column>
-                            <Table.Column>Addresses</Table.Column>
-                            <Table.Column>Actions</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {nodes.map((node) => (
-                                <Table.Row key={node.id} id={node.id}>
-                                    <Table.Cell className='font-medium'>{node.name}</Table.Cell>
-                                    <Table.Cell>{node.status}</Table.Cell>
-                                    <Table.Cell>{(node.dnsLines || []).map((link) => dnsLines.find((line) => line.id === link.dnsLineId)?.name || link.dnsLineId).join(', ') || 'Default'}</Table.Cell>
-                                    <Table.Cell>
-                                        {node.addresses.map((a) => a.address).join(', ')}
-                                    </Table.Cell>
-                                    <Table.Cell>
-                                        <div className='flex justify-end gap-2'>
-                                            <Button
-                                                size='sm'
-                                                variant='secondary'
-                                                onPress={() => openDetail(node.id)}
-                                            >
-                                                <Eye className='mr-1.5 h-3.5 w-3.5' />
-                                                View
-                                            </Button>
-                                            <Button
-                                                size='sm'
-                                                variant='danger'
-                                                onPress={() => handleDelete(node.id)}
-                                            >
-                                                <Trash2 className='mr-1.5 h-3.5 w-3.5' />
-                                                Delete
-                                            </Button>
-                                        </div>
-                                    </Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Nodes'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>Name</Table.Column>
+                                    <Table.Column>Status</Table.Column>
+                                    <Table.Column>DNS lines</Table.Column>
+                                    <Table.Column>Addresses</Table.Column>
+                                    <Table.Column>Actions</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {nodes.map((node) => (
+                                        <Table.Row key={node.id} id={node.id}>
+                                            <Table.Cell className='font-medium'>
+                                                {node.name}
+                                            </Table.Cell>
+                                            <Table.Cell>{node.status}</Table.Cell>
+                                            <Table.Cell>
+                                                {(node.dnsLines || [])
+                                                    .map(
+                                                        (link) =>
+                                                            dnsLines.find(
+                                                                (line) =>
+                                                                    line.id === link.dnsLineId,
+                                                            )?.name || link.dnsLineId,
+                                                    )
+                                                    .join(', ') || 'Default'}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {node.addresses.map((a) => a.address).join(', ')}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <div className='flex justify-end gap-2'>
+                                                    <Button
+                                                        size='sm'
+                                                        variant='secondary'
+                                                        onPress={() => openDetail(node.id)}
+                                                    >
+                                                        <Eye className='mr-1.5 h-3.5 w-3.5' />
+                                                        View
+                                                    </Button>
+                                                    <Button
+                                                        size='sm'
+                                                        variant='danger'
+                                                        onPress={() => handleDelete(node.id)}
+                                                    >
+                                                        <Trash2 className='mr-1.5 h-3.5 w-3.5' />
+                                                        Delete
+                                                    </Button>
+                                                </div>
+                                            </Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
             )}
@@ -316,105 +332,115 @@ export default function Nodes() {
                                             {createError}
                                         </div>
                                     )}
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='node-name'>Name</Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-name'
                                             required
                                             value={name}
                                             onChange={(e) => setName(e.target.value)}
                                         />
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='node-addresses'>
                                             Addresses (comma separated)
                                         </Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-addresses'
                                             required
                                             value={addresses}
                                             onChange={(e) => setAddresses(e.target.value)}
                                         />
                                     </div>
-                                    <div>
-                                        <Label htmlFor='node-dns-lines'>DNS lines</Label>
-                                        <Select
-                                            id='node-dns-lines'
-                                            value={Array.from(dnsLineIds)}
-                                            selectionMode='multiple'
-                                            onChange={(keys) =>
-                                                setDnsLineIds(new Set(keys as string[]))
-                                            }
-                                        >
-                                            <Select.Trigger>
-                                                <Select.Value />
-                                            </Select.Trigger>
-                                            <Select.Popover>
-                                                <ListBox>
-                                                    {dnsLines.map((line) => (
-                                                        <ListBox.Item key={line.id} id={line.id}>
-                                                            {line.name}
-                                                        </ListBox.Item>
-                                                    ))}
-                                                </ListBox>
-                                            </Select.Popover>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label htmlFor='node-group'>Group (optional)</Label>
-                                        <Select
-                                            id='node-group'
-                                            value={groupId || null}
-                                            onChange={(key) => setGroupId(String(key ?? ''))}
-                                        >
-                                            <Select.Trigger>
-                                                <Select.Value />
-                                            </Select.Trigger>
-                                            <Select.Popover>
-                                                <ListBox>
-                                                    {groups.map((g) => (
-                                                        <ListBox.Item key={g.id} id={g.id}>
-                                                            {g.name}
-                                                        </ListBox.Item>
-                                                    ))}
-                                                </ListBox>
-                                            </Select.Popover>
-                                        </Select>
-                                    </div>
-                                    <div>
-                                        <Label htmlFor='node-region'>Region (optional)</Label>
-                                        <Select
-                                            id='node-region'
-                                            value={regionId || null}
-                                            onChange={(key) => setRegionId(String(key ?? ''))}
-                                        >
-                                            <Select.Trigger>
-                                                <Select.Value />
-                                            </Select.Trigger>
-                                            <Select.Popover>
-                                                <ListBox>
-                                                    {regions.map((r) => (
-                                                        <ListBox.Item key={r.id} id={r.id}>
-                                                            {r.name}
-                                                        </ListBox.Item>
-                                                    ))}
-                                                </ListBox>
-                                            </Select.Popover>
-                                        </Select>
-                                    </div>
+                                    <Select
+                                        variant='secondary'
+                                        value={Array.from(dnsLineIds)}
+                                        selectionMode='multiple'
+                                        onChange={(keys) =>
+                                            setDnsLineIds(new Set(keys as string[]))
+                                        }
+                                    >
+                                        <Label>DNS lines</Label>
+                                        <Select.Trigger>
+                                            <Select.Value />
+                                        </Select.Trigger>
+                                        <Select.Popover>
+                                            <ListBox>
+                                                {dnsLines.map((line) => (
+                                                    <ListBox.Item
+                                                        key={line.id}
+                                                        id={line.id}
+                                                        textValue={line.name}
+                                                    >
+                                                        {line.name}
+                                                    </ListBox.Item>
+                                                ))}
+                                            </ListBox>
+                                        </Select.Popover>
+                                    </Select>
+                                    <Select
+                                        variant='secondary'
+                                        value={groupId || null}
+                                        onChange={(key) => setGroupId(String(key ?? ''))}
+                                    >
+                                        <Label>Group (optional)</Label>
+                                        <Select.Trigger>
+                                            <Select.Value />
+                                        </Select.Trigger>
+                                        <Select.Popover>
+                                            <ListBox>
+                                                {groups.map((g) => (
+                                                    <ListBox.Item
+                                                        key={g.id}
+                                                        id={g.id}
+                                                        textValue={g.name}
+                                                    >
+                                                        {g.name}
+                                                    </ListBox.Item>
+                                                ))}
+                                            </ListBox>
+                                        </Select.Popover>
+                                    </Select>
+                                    <Select
+                                        variant='secondary'
+                                        value={regionId || null}
+                                        onChange={(key) => setRegionId(String(key ?? ''))}
+                                    >
+                                        <Label>Region (optional)</Label>
+                                        <Select.Trigger>
+                                            <Select.Value />
+                                        </Select.Trigger>
+                                        <Select.Popover>
+                                            <ListBox>
+                                                {regions.map((r) => (
+                                                    <ListBox.Item
+                                                        key={r.id}
+                                                        id={r.id}
+                                                        textValue={r.name}
+                                                    >
+                                                        {r.name}
+                                                    </ListBox.Item>
+                                                ))}
+                                            </ListBox>
+                                        </Select.Popover>
+                                    </Select>
                                     <div className='grid grid-cols-2 gap-4'>
-                                        <div>
+                                        <div className='flex flex-col gap-1'>
                                             <Label htmlFor='node-ssh-ip'>SSH entry IP</Label>
                                             <Input
+                                                variant='secondary'
                                                 id='node-ssh-ip'
                                                 required
                                                 value={sshIp}
                                                 onChange={(e) => setSshIp(e.target.value)}
                                             />
                                         </div>
-                                        <div>
+                                        <div className='flex flex-col gap-1'>
                                             <Label htmlFor='node-ssh-port'>SSH port</Label>
                                             <Input
+                                                variant='secondary'
                                                 id='node-ssh-port'
                                                 required
                                                 type='number'
@@ -423,35 +449,41 @@ export default function Nodes() {
                                             />
                                         </div>
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='node-ssh-user'>SSH user</Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-ssh-user'
                                             required
                                             value={sshUser}
                                             onChange={(e) => setSshUser(e.target.value)}
                                         />
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='node-ssh-password'>SSH password</Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-ssh-password'
                                             type='password'
                                             value={sshPassword}
                                             onChange={(e) => setSshPassword(e.target.value)}
                                         />
                                     </div>
-                                    <div>
+                                    <div className='flex flex-col gap-1'>
                                         <Label htmlFor='node-ssh-key'>SSH private key path</Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-ssh-key'
                                             value={sshKey}
                                             onChange={(e) => setSshKey(e.target.value)}
                                         />
                                     </div>
-                                    <div>
-                                        <Label htmlFor='node-ssh-passphrase'>SSH key passphrase</Label>
+                                    <div className='flex flex-col gap-1'>
+                                        <Label htmlFor='node-ssh-passphrase'>
+                                            SSH key passphrase
+                                        </Label>
                                         <Input
+                                            variant='secondary'
                                             id='node-ssh-passphrase'
                                             type='password'
                                             value={sshPassphrase}
@@ -504,12 +536,41 @@ export default function Nodes() {
                                 </div>
 
                                 <div className='space-y-2 border-t border-border pt-4'>
-                                    <Label htmlFor='node-detail-dns-lines'>Regional DNS lines</Label>
-                                    <Select id='node-detail-dns-lines' selectionMode='multiple' value={Array.from(detailDNSLineIds)} onChange={(keys) => setDetailDNSLineIds(new Set(keys as string[]))}>
-                                        <Select.Trigger><Select.Value /></Select.Trigger>
-                                        <Select.Popover><ListBox>{dnsLines.map((line) => <ListBox.Item key={line.id} id={line.id}>{line.name} ({line.providerCode})</ListBox.Item>)}</ListBox></Select.Popover>
+                                    <Select
+                                        variant='secondary'
+                                        selectionMode='multiple'
+                                        value={Array.from(detailDNSLineIds)}
+                                        onChange={(keys) =>
+                                            setDetailDNSLineIds(new Set(keys as string[]))
+                                        }
+                                    >
+                                        <Label>Regional DNS lines</Label>
+                                        <Select.Trigger>
+                                            <Select.Value />
+                                        </Select.Trigger>
+                                        <Select.Popover>
+                                            <ListBox>
+                                                {dnsLines.map((line) => (
+                                                    <ListBox.Item
+                                                        key={line.id}
+                                                        id={line.id}
+                                                        textValue={`${line.name} ${line.providerCode}`}
+                                                    >
+                                                        {line.name} ({line.providerCode})
+                                                    </ListBox.Item>
+                                                ))}
+                                            </ListBox>
+                                        </Select.Popover>
                                     </Select>
-                                    <Button isDisabled={nodeActionLoading} size='sm' variant='secondary' onPress={saveDNSLines}><Save className='mr-1.5 h-4 w-4' />Save DNS lines</Button>
+                                    <Button
+                                        isDisabled={nodeActionLoading}
+                                        size='sm'
+                                        variant='secondary'
+                                        onPress={saveDNSLines}
+                                    >
+                                        <Save className='mr-1.5 h-4 w-4' />
+                                        Save DNS lines
+                                    </Button>
                                 </div>
                                 <div className='space-y-1'>
                                     <div className='text-sm text-muted'>Addresses</div>
@@ -526,7 +587,9 @@ export default function Nodes() {
                                     <div className='text-sm font-medium'>Add address</div>
                                     <div className='flex items-center gap-2'>
                                         <Input
+                                            variant='secondary'
                                             className='flex-1'
+                                            aria-label='New address'
                                             placeholder='Address'
                                             value={newAddress}
                                             onChange={(e) => setNewAddress(e.target.value)}
@@ -553,9 +616,10 @@ export default function Nodes() {
                                 {cache && (
                                     <div className='space-y-4 border-t border-border pt-4'>
                                         <div className='text-sm font-medium'>Cache config</div>
-                                        <div>
+                                        <div className='flex flex-col gap-1'>
                                             <Label htmlFor='node-cache-dir'>Cache directory</Label>
                                             <Input
+                                                variant='secondary'
                                                 id='node-cache-dir'
                                                 value={cache.cache_directory}
                                                 onChange={(e) =>
@@ -579,11 +643,12 @@ export default function Nodes() {
                                             />
                                             Auto max size
                                         </label>
-                                        <div>
+                                        <div className='flex flex-col gap-1'>
                                             <Label htmlFor='node-cache-max-size'>
                                                 Max size bytes
                                             </Label>
                                             <Input
+                                                variant='secondary'
                                                 id='node-cache-max-size'
                                                 type='number'
                                                 value={String(cache.max_size_bytes)}
@@ -595,11 +660,12 @@ export default function Nodes() {
                                                 }
                                             />
                                         </div>
-                                        <div>
+                                        <div className='flex flex-col gap-1'>
                                             <Label htmlFor='node-cache-disk-usage'>
                                                 Max disk usage percent
                                             </Label>
                                             <Input
+                                                variant='secondary'
                                                 id='node-cache-disk-usage'
                                                 type='number'
                                                 value={String(cache.max_disk_usage_percent)}
@@ -607,7 +673,7 @@ export default function Nodes() {
                                                     setCache({
                                                         ...cache,
                                                         max_disk_usage_percent: Number(
-                                                            e.target.value
+                                                            e.target.value,
                                                         ),
                                                     })
                                                 }

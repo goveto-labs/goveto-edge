@@ -224,7 +224,7 @@ export function Layout() {
                                                         </Label>
                                                         <Input
                                                             autoFocus
-                                                            variant="secondary"
+                                                            variant='secondary'
                                                             id='cluster-name'
                                                             maxLength={80}
                                                             placeholder='Production edge'

@@ -133,7 +133,9 @@ export default function PublishJobs() {
                 <div className='mb-4 text-sm font-medium'>Enqueue publish</div>
                 <div className='flex flex-col gap-3 sm:flex-row'>
                     <Input
+                        variant='secondary'
                         className='flex-1'
+                        aria-label='Site ID'
                         placeholder='Site ID'
                         value={siteId}
                         onChange={(e) => setSiteId(e.target.value)}
@@ -155,34 +157,42 @@ export default function PublishJobs() {
                 <div className='text-sm font-medium'>Recent tasks</div>
                 <Card className='overflow-hidden'>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>Task</Table.Column>
-                            <Table.Column>Status</Table.Column>
-                            <Table.Column>Updated</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {recentTasks.map((task) => (
-                                <Table.Row key={task.id} id={task.id}>
-                                    <Table.Cell className='font-mono text-xs'>{task.id}</Table.Cell>
-                                    <Table.Cell>
-                                        <Chip
-                                            color={
-                                                task.status === 'failed'
-                                                    ? 'danger'
-                                                    : task.status === 'completed'
-                                                      ? 'success'
-                                                      : 'warning'
-                                            }
-                                            size='sm'
-                                            variant='soft'
-                                        >
-                                            {task.status}
-                                        </Chip>
-                                    </Table.Cell>
-                                    <Table.Cell>{task.updated_at ?? task.created_at}</Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Recent tasks'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>Task</Table.Column>
+                                    <Table.Column>Status</Table.Column>
+                                    <Table.Column>Updated</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {recentTasks.map((task) => (
+                                        <Table.Row key={task.id} id={task.id}>
+                                            <Table.Cell className='font-mono text-xs'>
+                                                {task.id}
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                <Chip
+                                                    color={
+                                                        task.status === 'failed'
+                                                            ? 'danger'
+                                                            : task.status === 'completed'
+                                                              ? 'success'
+                                                              : 'warning'
+                                                    }
+                                                    size='sm'
+                                                    variant='soft'
+                                                >
+                                                    {task.status}
+                                                </Chip>
+                                            </Table.Cell>
+                                            <Table.Cell>
+                                                {task.updated_at ?? task.created_at}
+                                            </Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
             </div>
@@ -191,24 +201,30 @@ export default function PublishJobs() {
                 <div className='text-sm font-medium'>Site jobs{loading && ' (loading)'}</div>
                 <Card className='overflow-hidden'>
                     <Table>
-                        <Table.Header>
-                            <Table.Column>Job ID</Table.Column>
-                            <Table.Column>Site ID</Table.Column>
-                            <Table.Column>Status</Table.Column>
-                            <Table.Column>Created</Table.Column>
-                        </Table.Header>
-                        <Table.Body>
-                            {jobs.map((job) => (
-                                <Table.Row key={job.id} id={job.id}>
-                                    <Table.Cell className='font-mono text-xs'>{job.id}</Table.Cell>
-                                    <Table.Cell className='font-mono text-xs'>
-                                        {job.site_id}
-                                    </Table.Cell>
-                                    <Table.Cell>{job.status}</Table.Cell>
-                                    <Table.Cell>{job.created_at}</Table.Cell>
-                                </Table.Row>
-                            ))}
-                        </Table.Body>
+                        <Table.ScrollContainer>
+                            <Table.Content aria-label='Site jobs'>
+                                <Table.Header>
+                                    <Table.Column isRowHeader>Job ID</Table.Column>
+                                    <Table.Column>Site ID</Table.Column>
+                                    <Table.Column>Status</Table.Column>
+                                    <Table.Column>Created</Table.Column>
+                                </Table.Header>
+                                <Table.Body>
+                                    {jobs.map((job) => (
+                                        <Table.Row key={job.id} id={job.id}>
+                                            <Table.Cell className='font-mono text-xs'>
+                                                {job.id}
+                                            </Table.Cell>
+                                            <Table.Cell className='font-mono text-xs'>
+                                                {job.site_id}
+                                            </Table.Cell>
+                                            <Table.Cell>{job.status}</Table.Cell>
+                                            <Table.Cell>{job.created_at}</Table.Cell>
+                                        </Table.Row>
+                                    ))}
+                                </Table.Body>
+                            </Table.Content>
+                        </Table.ScrollContainer>
                     </Table>
                 </Card>
             </div>

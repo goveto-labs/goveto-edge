@@ -181,53 +181,59 @@ export default function Sites() {
                 )}
                 <Card className='p-5'>
                     <form className='space-y-5' onSubmit={handleCreate}>
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='site-name'>Site name</Label>
                             <Input
+                                variant='secondary'
                                 id='site-name'
                                 required
                                 value={createName}
                                 onChange={(e) => setCreateName(e.target.value)}
                             />
                         </div>
-                        <div>
+                        <div className='flex flex-col gap-1'>
                             <Label htmlFor='site-domains'>Domains (comma separated)</Label>
                             <Input
+                                variant='secondary'
                                 id='site-domains'
                                 required
                                 value={createDomains}
                                 onChange={(e) => setCreateDomains(e.target.value)}
                             />
                         </div>
-                        <div>
-                            <Label htmlFor='site-certificates'>Certificates</Label>
-                            <Select
-                                id='site-certificates'
-                                value={Array.from(certIds)}
-                                selectionMode='multiple'
-                                onChange={(keys) => setCertIds(new Set(keys as string[]))}
-                            >
-                                <Select.Trigger>
-                                    <Select.Value />
-                                </Select.Trigger>
-                                <Select.Popover>
-                                    <ListBox>
-                                        {certs.map((cert) => (
-                                            <ListBox.Item key={cert.id} id={cert.id}>
-                                                {cert.name}
-                                            </ListBox.Item>
-                                        ))}
-                                    </ListBox>
-                                </Select.Popover>
-                            </Select>
-                        </div>
+                        <Select
+                            variant='secondary'
+                            value={Array.from(certIds)}
+                            selectionMode='multiple'
+                            onChange={(keys) => setCertIds(new Set(keys as string[]))}
+                        >
+                            <Label>Certificates</Label>
+                            <Select.Trigger>
+                                <Select.Value />
+                            </Select.Trigger>
+                            <Select.Popover>
+                                <ListBox>
+                                    {certs.map((cert) => (
+                                        <ListBox.Item
+                                            key={cert.id}
+                                            id={cert.id}
+                                            textValue={cert.name}
+                                        >
+                                            {cert.name}
+                                        </ListBox.Item>
+                                    ))}
+                                </ListBox>
+                            </Select.Popover>
+                        </Select>
 
                         <div className='space-y-3'>
                             <div className='text-sm font-medium'>Origins</div>
                             {origins.map((origin, idx) => (
                                 <div key={origin.localId} className='grid grid-cols-12 gap-2'>
                                     <Select
+                                        variant='secondary'
                                         className='col-span-2'
+                                        aria-label='Origin protocol'
                                         value={origin.protocol}
                                         onChange={(key) =>
                                             updateOrigin(idx, {
@@ -240,13 +246,19 @@ export default function Sites() {
                                         </Select.Trigger>
                                         <Select.Popover>
                                             <ListBox>
-                                                <ListBox.Item id='HTTP'>HTTP</ListBox.Item>
-                                                <ListBox.Item id='HTTPS'>HTTPS</ListBox.Item>
+                                                <ListBox.Item id='HTTP' textValue='HTTP'>
+                                                    HTTP
+                                                </ListBox.Item>
+                                                <ListBox.Item id='HTTPS' textValue='HTTPS'>
+                                                    HTTPS
+                                                </ListBox.Item>
                                             </ListBox>
                                         </Select.Popover>
                                     </Select>
                                     <Input
+                                        variant='secondary'
                                         className='col-span-5'
+                                        aria-label='Origin address'
                                         placeholder='Address'
                                         value={origin.address}
                                         onChange={(e) =>
@@ -254,7 +266,9 @@ export default function Sites() {
                                         }
                                     />
                                     <Input
+                                        variant='secondary'
                                         className='col-span-3'
+                                        aria-label='Origin host header'
                                         placeholder='Host header'
                                         value={origin.host_header}
                                         onChange={(e) =>
@@ -262,7 +276,9 @@ export default function Sites() {
                                         }
                                     />
                                     <Input
+                                        variant='secondary'
                                         className='col-span-1'
+                                        aria-label='Origin weight'
                                         placeholder='W'
                                         type='number'
                                         value={String(origin.weight ?? 1)}
@@ -337,9 +353,10 @@ export default function Sites() {
                         <Card className='p-5'>
                             <div className='mb-4 text-sm font-medium'>Listener settings</div>
                             <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <div>
+                                <div className='flex flex-col gap-1'>
                                     <Label htmlFor='listener-http-port'>HTTP port</Label>
                                     <Input
+                                        variant='secondary'
                                         id='listener-http-port'
                                         type='number'
                                         value={String(listener.http_port ?? 80)}
@@ -351,9 +368,10 @@ export default function Sites() {
                                         }
                                     />
                                 </div>
-                                <div>
+                                <div className='flex flex-col gap-1'>
                                     <Label htmlFor='listener-https-port'>HTTPS port</Label>
                                     <Input
+                                        variant='secondary'
                                         id='listener-https-port'
                                         type='number'
                                         value={String(listener.https_port ?? 443)}
@@ -435,9 +453,10 @@ export default function Sites() {
                                 Enable caching
                             </label>
                             <div className='mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <div>
+                                <div className='flex flex-col gap-1'>
                                     <Label htmlFor='cache-ttl'>TTL seconds</Label>
                                     <Input
+                                        variant='secondary'
                                         id='cache-ttl'
                                         type='number'
                                         value={String(cache.ttl?.default_seconds ?? 0)}
@@ -452,11 +471,12 @@ export default function Sites() {
                                         }
                                     />
                                 </div>
-                                <div>
+                                <div className='flex flex-col gap-1'>
                                     <Label htmlFor='cache-stale'>
                                         Stale while revalidate seconds
                                     </Label>
                                     <Input
+                                        variant='secondary'
                                         id='cache-stale'
                                         type='number'
                                         value={String(cache.stale?.if_error_seconds ?? 0)}
