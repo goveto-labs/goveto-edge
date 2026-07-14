@@ -14,6 +14,12 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+type cacheUpdateResponse struct {
+	Cache        cachepolicy.CachePolicy `json:"cache"`
+	PublishJob   *types.PublishJob       `json:"publish_job,omitempty"`
+	PublishError string                  `json:"publish_error,omitempty"`
+}
+
 // @summary Get site cache policy
 // @description Get the site cache policy (defaults when none stored).
 // @Tags sites
@@ -107,11 +113,12 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 			return err
 		}
 
-		response := map[string]any{"cache": input}
+		response := cacheUpdateResponse{Cache: input}
 		if job, publishErr := publishService.Enqueue(ctx, site.Id); publishErr == nil {
-			response["publish_job"] = job
+			value := types.NewPublishJob(job)
+			response.PublishJob = &value
 		} else {
-			response["publish_error"] = publishErr.Error()
+			response.PublishError = publishErr.Error()
 		}
 		return types.JSON(c, http.StatusOK, response)
 	}

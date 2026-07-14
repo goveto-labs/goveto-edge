@@ -1,7 +1,6 @@
 package purge
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -50,7 +49,7 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return types.JSON(c, http.StatusAccepted, details(job))
+		return types.JSON(c, http.StatusAccepted, types.NewPurgeJob(job))
 	}
 }
 
@@ -73,9 +72,9 @@ func list(db *client.Client) echo.HandlerFunc {
 			return err
 		}
 
-		result := make([]map[string]any, 0, len(jobs))
+		result := make([]types.PurgeJob, 0, len(jobs))
 		for i := range jobs {
-			result = append(result, details(&jobs[i]))
+			result = append(result, types.NewPurgeJob(&jobs[i]))
 		}
 		return types.JSON(c, http.StatusOK, result)
 	}
@@ -95,7 +94,7 @@ func get(db *client.Client) echo.HandlerFunc {
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "purge job not found")
 		}
-		return types.JSON(c, http.StatusOK, details(job))
+		return types.JSON(c, http.StatusOK, types.NewPurgeJob(job))
 	}
 }
 func siteInCluster(c *echo.Context, db *client.Client) (*model.Site, error) {
@@ -104,22 +103,4 @@ func siteInCluster(c *echo.Context, db *client.Client) (*model.Site, error) {
 		return nil, echo.NewHTTPError(http.StatusNotFound, "site not found")
 	}
 	return site, nil
-}
-func details(job *model.PurgeJob) map[string]any {
-	result := map[string]any{
-		"id":         job.Id,
-		"site_id":    job.SiteId,
-		"type":       job.Type,
-		"value":      job.Value,
-		"status":     job.Status,
-		"created_at": job.CreatedAt,
-		"updated_at": job.UpdatedAt,
-	}
-	if job.ResultJson != nil {
-		var value any
-		if json.Unmarshal(*job.ResultJson, &value) == nil {
-			result["details"] = value
-		}
-	}
-	return result
 }

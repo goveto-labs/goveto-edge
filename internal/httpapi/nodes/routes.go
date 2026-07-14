@@ -33,6 +33,11 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 
+type nodeCreatedResponse struct {
+	ID     string           `json:"id"`
+	Status model.NodeStatus `json:"status"`
+}
+
 // @summary Create node
 // @description Create a node and enqueue remote installation with SSH credentials.
 // @Tags nodes
@@ -133,7 +138,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
-		return types.JSON(c, http.StatusAccepted, map[string]any{"id": nodeID, "status": model.NodeStatusPENDING})
+		return types.JSON(c, http.StatusAccepted, nodeCreatedResponse{ID: nodeID, Status: model.NodeStatusPENDING})
 	}
 }
 

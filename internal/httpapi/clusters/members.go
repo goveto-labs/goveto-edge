@@ -63,6 +63,6 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, types.NewClusterMember(item))
 	}
 }

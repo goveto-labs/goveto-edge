@@ -28,6 +28,11 @@ type listenerUpdateRequest struct {
 	HSTSPreload           *bool                `json:"hsts_preload"`
 	OCSPStaplingEnabled   *bool                `json:"ocsp_stapling_enabled"`
 }
+type listenerUpdateResponse struct {
+	Listener     types.SiteListener `json:"listener"`
+	PublishJob   *types.PublishJob  `json:"publish_job,omitempty"`
+	PublishError string             `json:"publish_error,omitempty"`
+}
 
 // @summary Get site listener
 // @description Get HTTP/HTTPS listener and TLS settings for a site.
@@ -45,7 +50,7 @@ func getListener(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, config)
+		return types.JSON(c, http.StatusOK, types.NewSiteListener(config))
 	}
 }
 
@@ -140,11 +145,12 @@ func updateListener(db *client.Client, publishService *publisher.Service) echo.H
 			return err
 		}
 
-		response := map[string]any{"listener": updated}
+		response := listenerUpdateResponse{Listener: types.NewSiteListener(updated)}
 		if job, publishErr := publishService.Enqueue(c.Request().Context(), c.Param("site_id")); publishErr == nil {
-			response["publish_job"] = job
+			value := types.NewPublishJob(job)
+			response.PublishJob = &value
 		} else {
-			response["publish_error"] = publishErr.Error()
+			response.PublishError = publishErr.Error()
 		}
 		return types.JSON(c, http.StatusOK, response)
 	}

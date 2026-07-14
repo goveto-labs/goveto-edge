@@ -27,7 +27,11 @@ func list(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, nodes)
+		result := make([]types.Node, len(nodes))
+		for index := range nodes {
+			result[index] = types.NewNode(&nodes[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -48,6 +52,6 @@ func get(db *client.Client) echo.HandlerFunc {
 		if err != nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
-		return types.JSON(c, http.StatusOK, node)
+		return types.JSON(c, http.StatusOK, types.NewNode(node))
 	}
 }

@@ -1,4 +1,4 @@
-import type { CachePolicy, Certificate, Site, SiteListenerConfig, SiteOrigin } from '@/api';
+import type { CachePolicy, Certificate, SiteCreateResponse, SiteListenerConfig, SiteOrigin } from '@/api';
 
 import { Button, Card, Input, Label, ListBox, Select, Spinner, Switch, Tabs } from '@heroui/react';
 import { Plus, Rocket, RotateCcw, Save } from 'lucide-react';
@@ -50,7 +50,7 @@ export default function Sites() {
     const [createLoading, setCreateLoading] = useState(false);
     const [createError, setCreateError] = useState('');
 
-    const [site, setSite] = useState<Site | null>(null);
+    const [site, setSite] = useState<SiteCreateResponse | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
     const [detailLoading, setDetailLoading] = useState(false);

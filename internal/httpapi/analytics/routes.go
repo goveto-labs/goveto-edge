@@ -30,6 +30,16 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime", nodeRuntime(store), require...)
 }
 
+type trafficResponse struct {
+	Period      string                   `json:"period"`
+	Granularity string                   `json:"granularity"`
+	Series      []analytics.TrafficPoint `json:"series"`
+}
+type nodeRuntimeResponse struct {
+	Period string                       `json:"period"`
+	Series []analytics.NodeRuntimePoint `json:"series"`
+}
+
 func chartPeriod(c *echo.Context) (string, error) {
 	value := c.QueryParam("period")
 	if value == "" {
@@ -68,11 +78,7 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 			granularity = "day"
 		}
 
-		return types.JSON(c, http.StatusOK, map[string]any{
-			"period":      p,
-			"granularity": granularity,
-			"series":      items,
-		})
+		return types.JSON(c, http.StatusOK, trafficResponse{Period: p, Granularity: granularity, Series: items})
 	}
 }
 
@@ -136,10 +142,7 @@ func nodeRuntime(s *analytics.Store) echo.HandlerFunc {
 			return err
 		}
 
-		return types.JSON(c, http.StatusOK, map[string]any{
-			"period": p,
-			"series": items,
-		})
+		return types.JSON(c, http.StatusOK, nodeRuntimeResponse{Period: p, Series: items})
 	}
 }
 

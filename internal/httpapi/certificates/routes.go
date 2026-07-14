@@ -42,10 +42,11 @@ func list(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		result := make([]types.Certificate, len(items))
 		for index := range items {
-			items[index].PrivateKeyPem = ""
+			result[index] = types.NewCertificate(&items[index])
 		}
-		return types.JSON(c, http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -89,7 +90,6 @@ func upload(db *client.Client) echo.HandlerFunc {
 			return err
 		}
 
-		item.PrivateKeyPem = ""
-		return types.JSON(c, http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, types.NewCertificate(item))
 	}
 }

@@ -22,6 +22,17 @@ type clusterChoice struct {
 	CreatedAt time.Time `db:"created_at" json:"created_at"`
 }
 
+type clusterListResponse struct {
+	Clusters          []clusterChoice `json:"clusters"`
+	SelectedClusterID string          `json:"selected_cluster_id"`
+	RequiresCluster   bool            `json:"requires_cluster"`
+}
+
+type clusterCreateResponse struct {
+	Cluster           clusterChoice `json:"cluster"`
+	SelectedClusterID string        `json:"selected_cluster_id"`
+}
+
 func registerSelection(e *echo.Echo, db *client.Client, sessions *auth.SessionStore) {
 	e.GET("/api/v1/clusters", listAvailable(db, sessions), auth.RequireAuth)
 	e.POST("/api/v1/clusters", create(db, sessions), auth.RequireAuth)
@@ -66,7 +77,7 @@ func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 				_ = sessions.SetSelectedCluster(ctx, c, selected)
 			}
 		}
-		return types.JSON(c, http.StatusOK, map[string]any{"clusters": items, "selected_cluster_id": selected, "requires_cluster": len(items) == 0})
+		return types.JSON(c, http.StatusOK, clusterListResponse{Clusters: items, SelectedClusterID: selected, RequiresCluster: len(items) == 0})
 	}
 }
 
@@ -90,12 +101,15 @@ func create(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, item.Id); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, map[string]any{"cluster": item, "selected_cluster_id": item.Id})
+		return types.JSON(c, http.StatusCreated, clusterCreateResponse{Cluster: clusterChoice{ID: item.Id, Name: item.Name, Role: "OWNER", CreatedAt: item.CreatedAt}, SelectedClusterID: item.Id})
 	}
 }
 
 type selectRequest struct {
 	ClusterID string `json:"cluster_id"`
+}
+type selectResponse struct {
+	SelectedClusterID string `json:"selected_cluster_id"`
 }
 
 // @summary Select cluster
@@ -117,6 +131,6 @@ func selectCurrent(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, input.ClusterID); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, map[string]string{"selected_cluster_id": input.ClusterID})
+		return types.JSON(c, http.StatusOK, selectResponse{SelectedClusterID: input.ClusterID})
 	}
 }

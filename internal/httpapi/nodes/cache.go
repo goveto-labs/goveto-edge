@@ -15,6 +15,12 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+type cacheUpdateResponse struct {
+	CacheConfig types.NodeCacheConfig `json:"cache_config"`
+	Synced      bool                  `json:"synced"`
+	SyncError   string                `json:"sync_error,omitempty"`
+}
+
 // @summary Get node cache config
 // @description Get disk cache configuration for a node.
 // @Tags nodes
@@ -31,7 +37,7 @@ func getCacheConfig(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, config)
+		return types.JSON(c, http.StatusOK, types.NewNodeCacheConfig(config))
 	}
 }
 
@@ -80,7 +86,7 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 			return err
 		}
 
-		response := map[string]any{"cache_config": updated, "synced": false}
+		response := cacheUpdateResponse{CacheConfig: types.NewNodeCacheConfig(updated)}
 		address, addressErr := db.NodeAddress.Query().
 			Where(
 				query.NodeAddress.NodeId.Equals(nodeID),
@@ -99,9 +105,9 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 					key,
 				).PushNodeCacheConfig(ctx, input)
 				if syncErr == nil {
-					response["synced"] = true
+					response.Synced = true
 				} else {
-					response["sync_error"] = syncErr.Error()
+					response.SyncError = syncErr.Error()
 				}
 			}
 		}

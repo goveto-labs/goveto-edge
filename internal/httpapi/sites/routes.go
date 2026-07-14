@@ -12,12 +12,11 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"golang.org/x/net/idna"
-	"goveto-edge/internal/httpapi/types"
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnssync"
-	httptypes "goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -35,6 +34,14 @@ type createRequest struct {
 	Domains        []string      `json:"domains"`
 	CertificateIDs []string      `json:"certificate_ids"`
 	Origins        []originInput `json:"origins"`
+}
+type createResponse struct {
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Status       model.SiteStatus  `json:"status"`
+	PublishJob   *types.PublishJob `json:"publish_job,omitempty"`
+	PublishError string            `json:"publish_error,omitempty"`
+	DNSJob       *types.DNSJob     `json:"dns_sync_job,omitempty"`
 }
 
 func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, dnsService *dnssync.Service) {
@@ -210,14 +217,16 @@ func create(db *client.Client, publishService *publisher.Service, dnsService *dn
 			return err
 		}
 
-		response := map[string]any{"id": siteID, "name": input.Name, "status": model.SiteStatusACTIVE}
+		response := createResponse{ID: siteID, Name: input.Name, Status: model.SiteStatusACTIVE}
 		if job, publishErr := publishService.Enqueue(ctx, siteID); publishErr == nil {
-			response["publish_job"] = job
+			value := types.NewPublishJob(job)
+			response.PublishJob = &value
 		} else {
-			response["publish_error"] = publishErr.Error()
+			response.PublishError = publishErr.Error()
 		}
 		if dnsJob != nil {
-			response["dns_sync_job"] = httptypes.NewDNSJob(dnsJob)
+			value := types.NewDNSJob(dnsJob)
+			response.DNSJob = &value
 		}
 		return types.JSON(c, http.StatusCreated, response)
 	}

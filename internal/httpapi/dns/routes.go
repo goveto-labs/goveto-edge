@@ -87,21 +87,7 @@ func getConfig(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		if provider == nil {
-			return types.JSON(c, http.StatusOK, map[string]any{"primary_hostname": cluster.PrimaryHostname, "provider": nil})
-		}
-		return types.JSON(c, http.StatusOK, map[string]any{
-			"primary_hostname": cluster.PrimaryHostname,
-			"provider": map[string]any{
-				"type":                   provider.Provider,
-				"zone":                   provider.Zone,
-				"zone_id":                provider.ZoneId,
-				"default_ttl":            provider.DefaultTtl,
-				"proxied":                provider.Proxied,
-				"enabled":                provider.Enabled,
-				"credentials_configured": provider.CredentialsEncrypted != "",
-			},
-		})
+		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, provider))
 	}
 }
 
@@ -422,7 +408,11 @@ func listRecords(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, items)
+		result := make([]types.DNSRecord, len(items))
+		for index := range items {
+			result[index] = types.NewDNSRecord(&items[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -594,7 +584,7 @@ func createLine(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, types.NewDNSLine(item))
 	}
 }
 

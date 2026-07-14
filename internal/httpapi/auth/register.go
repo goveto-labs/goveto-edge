@@ -24,6 +24,15 @@ type registerRequest struct {
 	CaptchaToken string `json:"captcha_token"`
 }
 
+type captchaPublicResponse struct {
+	Provider string `json:"provider"`
+	SiteKey  string `json:"site_key"`
+}
+type registrationConfigResponse struct {
+	Enabled bool                   `json:"enabled"`
+	Captcha *captchaPublicResponse `json:"captcha,omitempty"`
+}
+
 // @summary Register
 // @description Create a new user account when registration is enabled; requires captcha.
 // @Tags auth
@@ -106,9 +115,9 @@ func registrationConfig(settingStore *settings.Store) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		response := map[string]any{"enabled": enabled}
+		response := registrationConfigResponse{Enabled: enabled}
 		if found {
-			response["captcha"] = map[string]string{"provider": config.Provider, "site_key": config.SiteKey}
+			response.Captcha = &captchaPublicResponse{Provider: config.Provider, SiteKey: config.SiteKey}
 		}
 		return types.JSON(c, http.StatusOK, response)
 	}

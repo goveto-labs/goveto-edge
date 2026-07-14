@@ -33,6 +33,15 @@ type clusterPublishCounts struct {
 	Running int64 `db:"running"`
 	Failed  int64 `db:"failed"`
 }
+type clusterPublishStatus struct {
+	State          string             `json:"state"`
+	HasActiveTasks bool               `json:"has_active_tasks"`
+	HasFailedTasks bool               `json:"has_failed_tasks"`
+	PendingCount   int64              `json:"pending_count"`
+	RunningCount   int64              `json:"running_count"`
+	FailedCount    int64              `json:"failed_count"`
+	RecentTasks    []types.PublishJob `json:"recent_tasks"`
+}
 
 // @summary Cluster publish status
 // @description Aggregate publish job counts and recent tasks for the cluster.
@@ -47,14 +56,14 @@ func clusterStatus(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string) (map[string]any, error) {
+func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string) (clusterPublishStatus, error) {
 	counts, err := client.Raw[clusterPublishCounts](ctx, db, `SELECT
 			COUNT(*) FILTER (WHERE pj.status = 'PENDING') AS pending,
 			COUNT(*) FILTER (WHERE pj.status = 'RUNNING') AS running,
 			COUNT(*) FILTER (WHERE pj.status = 'FAILED') AS failed
 			FROM publish_jobs pj JOIN sites s ON s.id = pj.site_id WHERE s.cluster_id = $1`, clusterID)
 	if err != nil {
-		return nil, err
+		return clusterPublishStatus{}, err
 	}
 
 	count := clusterPublishCounts{}
@@ -67,12 +76,12 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 			FROM publish_jobs pj JOIN sites s ON s.id = pj.site_id
 			WHERE s.cluster_id = $1 ORDER BY pj.created_at DESC LIMIT 50`, clusterID)
 	if err != nil {
-		return nil, err
+		return clusterPublishStatus{}, err
 	}
 
-	recent := make([]map[string]any, 0, len(jobs))
+	recent := make([]types.PublishJob, 0, len(jobs))
 	for i := range jobs {
-		recent = append(recent, jobDetails(&jobs[i]))
+		recent = append(recent, types.NewPublishJob(&jobs[i]))
 	}
 
 	active := count.Pending+count.Running > 0
@@ -84,15 +93,7 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 		state = "syncing"
 	}
 
-	return map[string]any{
-		"state":            state,
-		"has_active_tasks": active,
-		"has_failed_tasks": count.Failed > 0,
-		"pending_count":    count.Pending,
-		"running_count":    count.Running,
-		"failed_count":     count.Failed,
-		"recent_tasks":     recent,
-	}, nil
+	return clusterPublishStatus{State: state, HasActiveTasks: active, HasFailedTasks: count.Failed > 0, PendingCount: count.Pending, RunningCount: count.Running, FailedCount: count.Failed, RecentTasks: recent}, nil
 }
 
 // @summary Cluster publish events
@@ -183,7 +184,7 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, job)
+		return types.JSON(c, http.StatusAccepted, types.NewPublishJob(job))
 	}
 }
 
@@ -202,7 +203,7 @@ func getJob(db *client.Client) echo.HandlerFunc {
 		if err != nil || job.SiteId != site.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "publish job not found")
 		}
-		return types.JSON(c, http.StatusOK, jobDetails(job))
+		return types.JSON(c, http.StatusOK, types.NewPublishJob(job))
 	}
 }
 
@@ -226,28 +227,10 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 			return err
 		}
 
-		result := make([]map[string]any, 0, len(jobs))
+		result := make([]types.PublishJob, 0, len(jobs))
 		for i := range jobs {
-			result = append(result, jobDetails(&jobs[i]))
+			result = append(result, types.NewPublishJob(&jobs[i]))
 		}
 		return types.JSON(c, http.StatusOK, result)
 	}
-}
-
-func jobDetails(job *model.PublishJob) map[string]any {
-	result := map[string]any{
-		"id":         job.Id,
-		"site_id":    job.SiteId,
-		"version":    job.Version,
-		"status":     job.Status,
-		"created_at": job.CreatedAt,
-		"updated_at": job.UpdatedAt,
-	}
-	if job.ResultJson != nil && len(*job.ResultJson) != 0 {
-		var details any
-		if json.Unmarshal(*job.ResultJson, &details) == nil {
-			result["details"] = details
-		}
-	}
-	return result
 }

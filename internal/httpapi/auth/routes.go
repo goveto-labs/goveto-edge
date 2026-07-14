@@ -34,6 +34,10 @@ type userResponse struct {
 	Status model.UserStatus `json:"status"`
 }
 
+type meResponse struct {
+	UID string `json:"uid"`
+}
+
 func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, captchaVerifier *captcha.Verifier) {
 	group := e.Group("/api/v1/auth")
 	group.POST("/login", login(db, sessions))
@@ -100,5 +104,5 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 // @description Return the authenticated user id from the current session.
 // @Tags auth
 func me(c *echo.Context) error {
-	return types.JSON(c, http.StatusOK, map[string]string{"uid": authn.CurrentUID(c)})
+	return types.JSON(c, http.StatusOK, meResponse{UID: authn.CurrentUID(c)})
 }

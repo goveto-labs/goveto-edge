@@ -43,7 +43,7 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
 
-		var created any
+		var created *model.NodeAddress
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if input.Primary && dnsService != nil {
 				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
@@ -89,6 +89,6 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, created)
+		return types.JSON(c, http.StatusCreated, types.NewNodeAddress(created))
 	}
 }

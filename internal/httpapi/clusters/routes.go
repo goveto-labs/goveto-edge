@@ -41,7 +41,11 @@ func listDNSLines(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, items)
+		result := make([]types.DNSLine, len(items))
+		for index := range items {
+			result[index] = types.NewDNSLine(&items[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -57,7 +61,11 @@ func listGroups(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, items)
+		result := make([]types.ClusterGroup, len(items))
+		for index := range items {
+			result[index] = types.NewClusterGroup(&items[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -85,7 +93,7 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, types.NewClusterGroup(item))
 	}
 }
 
@@ -101,7 +109,11 @@ func listRegions(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, items)
+		result := make([]types.ClusterRegion, len(items))
+		for index := range items {
+			result[index] = types.NewClusterRegion(&items[index])
+		}
+		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
@@ -129,6 +141,6 @@ func createRegion(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, item)
+		return types.JSON(c, http.StatusCreated, types.NewClusterRegion(item))
 	}
 }

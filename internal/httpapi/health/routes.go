@@ -18,11 +18,15 @@ func Register(e *echo.Echo, db *sql.DB) {
 	group.GET("/ready", ready(db))
 }
 
+type statusResponse struct {
+	Status string `json:"status"`
+}
+
 // @summary Liveness
 // @description Process liveness probe; returns ok when the process is running.
 // @Tags health
 func live(c *echo.Context) error {
-	return types.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
+	return types.JSON(c, http.StatusOK, statusResponse{Status: "ok"})
 }
 
 // @summary Readiness
@@ -35,6 +39,6 @@ func ready(db *sql.DB) echo.HandlerFunc {
 		if err := db.PingContext(ctx); err != nil {
 			return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
 		}
-		return types.JSON(c, http.StatusOK, map[string]string{"status": "ok"})
+		return types.JSON(c, http.StatusOK, statusResponse{Status: "ok"})
 	}
 }
