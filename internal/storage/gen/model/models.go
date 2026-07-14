@@ -104,15 +104,17 @@ type ConfigVersion struct {
 
 // DNSLine represents the DNSLine model.
 type DNSLine struct {
-	Id           string              `db:"id" json:"id"`
-	ClusterId    string              `db:"cluster_id" json:"clusterId"`
-	Name         string              `db:"name" json:"name"`
-	ProviderCode string              `db:"provider_code" json:"providerCode"`
-	CreatedAt    time.Time           `db:"created_at" json:"createdAt"`
-	UpdatedAt    time.Time           `db:"updated_at" json:"updatedAt"`
-	Cluster      *Cluster            `db:"-" json:"cluster,omitempty"`
-	Nodes        []*NodeDNSLine      `db:"-" json:"nodes,omitempty"`
-	Records      []*DNSManagedRecord `db:"-" json:"records,omitempty"`
+	Id                 string              `db:"id" json:"id"`
+	ClusterId          string              `db:"cluster_id" json:"clusterId"`
+	Name               string              `db:"name" json:"name"`
+	ProviderCode       string              `db:"provider_code" json:"providerCode"`
+	ProviderParentCode *string             `db:"provider_parent_code" json:"providerParentCode"`
+	SortOrder          int                 `db:"sort_order" json:"sortOrder"`
+	CreatedAt          time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt          time.Time           `db:"updated_at" json:"updatedAt"`
+	Cluster            *Cluster            `db:"-" json:"cluster,omitempty"`
+	Nodes              []*NodeDNSLine      `db:"-" json:"nodes,omitempty"`
+	Records            []*DNSManagedRecord `db:"-" json:"records,omitempty"`
 }
 
 // DNSManagedRecord represents the DNSManagedRecord model.

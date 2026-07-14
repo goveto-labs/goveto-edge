@@ -39,8 +39,10 @@ type Domain struct {
 }
 
 type Line struct {
-	Name string `json:"name"`
-	Code string `json:"code"`
+	Name       string `json:"name"`
+	Code       string `json:"code"`
+	ParentCode string `json:"parent_code,omitempty"`
+	SortOrder  int    `json:"sort_order"`
 }
 
 func credentials(kind model.DNSProviderType, raw []byte) (Credentials, error) {
@@ -93,7 +95,7 @@ func ListLines(ctx context.Context, kind model.DNSProviderType, zone, zoneID str
 	case model.DNSProviderTypeALIYUN:
 		return (&aliyun{zone: zone, credentials: value, client: client}).ListLines(ctx)
 	case model.DNSProviderTypeCLOUDFLARE:
-		return []Line{{Name: "Default", Code: "default"}}, nil
+		return []Line{{Name: "Default", Code: "default", SortOrder: 0}}, nil
 	default:
 		return nil, fmt.Errorf("unsupported DNS provider %q", kind)
 	}

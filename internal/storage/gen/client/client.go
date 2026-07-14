@@ -7118,7 +7118,7 @@ func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts
 
 func quotedDNSLineTable(c *Client) string { return c.quoteIdentifier("dns_lines") }
 func quotedDNSLineColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "provider_code", "provider_parent_code", "sort_order", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -7134,6 +7134,10 @@ func quoteDNSLineField(c *Client, field string) (string, error) {
 	case "name":
 		return c.quoteIdentifier(field), nil
 	case "provider_code":
+		return c.quoteIdentifier(field), nil
+	case "provider_parent_code":
+		return c.quoteIdentifier(field), nil
+	case "sort_order":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -7348,14 +7352,14 @@ func (b DNSLineCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSL
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"})
+		q, args := b.action.buildDNSLineCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "provider_code", "provider_parent_code", "sort_order", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.DNSLine
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("DNSLine.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -7382,7 +7386,7 @@ func (b DNSLineCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "provider_code", "provider_parent_code", "sort_order", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -7634,7 +7638,7 @@ func (a DNSLineActions) FindMany(ctx context.Context, opts ...query.DNSLineQuery
 	var results []model.DNSLine
 	for rows.Next() {
 		var item model.DNSLine
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -7666,7 +7670,7 @@ func (a DNSLineActions) FindUnique(ctx context.Context, where query.DNSLineWhere
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.DNSLine
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -7697,7 +7701,7 @@ func (a DNSLineActions) CreateOne(ctx context.Context, sets ...query.DNSLineSetC
 		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -7716,7 +7720,7 @@ func (a DNSLineActions) CreateMany(ctx context.Context, data []query.DNSLineCrea
 }
 
 func (a DNSLineActions) buildDNSLineCreateManySQL(data []query.DNSLineCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "provider_code", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "provider_code", "provider_parent_code", "sort_order", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -7789,7 +7793,7 @@ func (a DNSLineActions) UpdateOne(ctx context.Context, where query.DNSLineWhereC
 		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -7894,7 +7898,7 @@ func (a DNSLineActions) UpsertOne(ctx context.Context, where query.DNSLineWhereC
 		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSLine.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -7918,7 +7922,7 @@ func (a DNSLineActions) DeleteOne(ctx context.Context, where query.DNSLineWhereC
 		q += " RETURNING " + quotedDNSLineColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSLine
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ProviderCode, &item.ProviderParentCode, &item.SortOrder, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

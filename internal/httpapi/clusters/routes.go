@@ -36,7 +36,7 @@ func listDNSLines(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.DNSLine.Query().
 			Where(query.DNSLine.ClusterId.Equals(c.Param("cluster_id"))).
-			OrderBy(query.DNSLine.Name.Asc()).
+			OrderBy(query.DNSLine.SortOrder.Asc()).
 			Do(c.Request().Context())
 		if err != nil {
 			return err

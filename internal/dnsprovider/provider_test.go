@@ -122,7 +122,10 @@ func TestAliyunDiscovery(t *testing.T) {
 			if request.URL.Query().Get("DomainName") != "example.com" {
 				t.Fatalf("domain=%q", request.URL.Query().Get("DomainName"))
 			}
-			body = `{"RecordLines":{"RecordLine":[{"LineCode":"default","LineDisplayName":"Default"},{"LineCode":"telecom","LineDisplayName":"China Telecom"}]}}`
+			if request.URL.Query().Get("Lang") != "zh" {
+				t.Fatalf("lang=%q", request.URL.Query().Get("Lang"))
+			}
+			body = `{"RecordLines":{"RecordLine":[{"LineCode":"default","LineDisplayName":"默认"},{"LineCode":"search","FatherCode":"default","LineDisplayName":"搜索引擎"},{"LineCode":"telecom","FatherCode":"cn","LineDisplayName":"中国电信"}]}}`
 		default:
 			t.Fatalf("unexpected action %q", request.URL.Query().Get("Action"))
 		}
@@ -134,7 +137,12 @@ func TestAliyunDiscovery(t *testing.T) {
 		t.Fatalf("domains=%#v err=%v", domains, err)
 	}
 	lines, err := ListLines(context.Background(), model.DNSProviderTypeALIYUN, domains[0].Name, domains[0].ID, raw, client)
-	if err != nil || len(lines) != 2 || lines[1].Code != "telecom" {
+	if err != nil || len(lines) != 3 ||
+		lines[0].Code != "default" ||
+		lines[1].Code != "search" ||
+		lines[1].ParentCode != "default" ||
+		lines[2].Code != "telecom" ||
+		lines[2].SortOrder != 2 {
 		t.Fatalf("lines=%#v err=%v", lines, err)
 	}
 }

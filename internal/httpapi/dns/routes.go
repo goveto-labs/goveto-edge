@@ -845,37 +845,65 @@ func storeProviderLines(
 	if err != nil {
 		return err
 	}
-	codes := make(map[string]bool, len(existing)+len(providerLines))
-	names := make(map[string]bool, len(existing)+len(providerLines))
-	for _, line := range existing {
-		codes[strings.ToLower(strings.TrimSpace(line.ProviderCode))] = true
-		names[line.Name] = true
+	byCode := make(map[string]*model.DNSLine, len(existing)+len(providerLines))
+	names := make(map[string]string, len(existing)+len(providerLines))
+	for index := range existing {
+		code := strings.ToLower(strings.TrimSpace(existing[index].ProviderCode))
+		byCode[code] = &existing[index]
+		names[existing[index].Name] = code
 	}
 	items := make([]query.DNSLineCreateInput, 0, len(providerLines))
 	for _, line := range providerLines {
 		code := strings.ToLower(strings.TrimSpace(line.Code))
-		if code == "" || code == "default" || codes[code] {
+		if code == "" {
 			continue
 		}
 		name := strings.TrimSpace(line.Name)
 		if name == "" {
 			name = code
 		}
-		if names[name] {
-			name += " (" + code + ")"
+		if code == "default" {
+			name = "默认"
 		}
-		for names[name] {
-			name += "-"
+		if current := byCode[code]; current != nil {
+			if names[current.Name] == code {
+				delete(names, current.Name)
+			}
+			name = uniqueLineName(name, code, names)
+			names[name] = code
+			if current.Name != name ||
+				value(current.ProviderParentCode) != line.ParentCode ||
+				current.SortOrder != line.SortOrder {
+				sets := []query.DNSLineSetClause{
+					query.DNSLine.Name.Set(name),
+					query.DNSLine.SortOrder.Set(line.SortOrder),
+					query.DNSLine.UpdatedAt.Set(now),
+				}
+				if line.ParentCode == "" {
+					sets = append(sets, query.DNSLine.ProviderParentCode.SetNull())
+				} else {
+					sets = append(sets, query.DNSLine.ProviderParentCode.Set(line.ParentCode))
+				}
+				if _, err := tx.DNSLine.Update().
+					Where(query.DNSLine.Id.Equals(current.Id)).
+					Set(sets...).
+					Do(ctx); err != nil {
+					return err
+				}
+			}
+			continue
 		}
-		codes[code] = true
-		names[name] = true
+		name = uniqueLineName(name, code, names)
+		names[name] = code
 		items = append(items, query.DNSLineCreateInput{
-			Id:           uuid.NewString(),
-			ClusterId:    clusterID,
-			Name:         name,
-			ProviderCode: code,
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			Id:                 uuid.NewString(),
+			ClusterId:          clusterID,
+			Name:               name,
+			ProviderCode:       code,
+			ProviderParentCode: optionalCreateString(line.ParentCode),
+			SortOrder:          line.SortOrder,
+			CreatedAt:          now,
+			UpdatedAt:          now,
 		})
 	}
 	_, err = tx.DNSLine.BulkCreate(items).
@@ -883,6 +911,26 @@ func storeProviderLines(
 		BatchSize(100).
 		Do(ctx)
 	return err
+}
+
+func optionalCreateString(input string) **string {
+	if input == "" {
+		return nil
+	}
+	value := input
+	pointer := &value
+	return &pointer
+}
+
+func uniqueLineName(name, code string, names map[string]string) string {
+	if owner := names[name]; owner == "" || owner == code {
+		return name
+	}
+	name += " (" + code + ")"
+	for names[name] != "" && names[name] != code {
+		name += "-"
+	}
+	return name
 }
 
 func value(input *string) string {

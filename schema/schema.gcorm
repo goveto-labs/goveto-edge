@@ -222,15 +222,17 @@ model ConfigVersion {
 }
 
 model DNSLine {
-  id           String             @id
-  clusterId    String             @map("cluster_id")
-  name         String
-  providerCode String             @default("default") @map("provider_code")
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @default(now()) @updatedAt @map("updated_at")
-  cluster      Cluster            @relation(fields: [clusterId], references: [id])
-  nodes        NodeDNSLine[]
-  records      DNSManagedRecord[]
+  id                 String             @id
+  clusterId          String             @map("cluster_id")
+  name               String
+  providerCode       String             @default("default") @map("provider_code")
+  providerParentCode String?            @map("provider_parent_code")
+  sortOrder          Int                @default(0) @map("sort_order")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @default(now()) @updatedAt @map("updated_at")
+  cluster            Cluster            @relation(fields: [clusterId], references: [id])
+  nodes              NodeDNSLine[]
+  records            DNSManagedRecord[]
 
   @@unique([clusterId, name])
   @@index([clusterId])

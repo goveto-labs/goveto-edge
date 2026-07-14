@@ -185,6 +185,8 @@ query.PostAuthorIdColumn
   - `Clusterid` (String)
   - `Name` (String)
   - `Providercode` (String)
+  - `Providerparentcode` (String, optional)
+  - `Sortorder` (Int)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

@@ -59,6 +59,7 @@ func (a *aliyun) ListLines(ctx context.Context) ([]Line, error) {
 		RecordLines struct {
 			RecordLine []struct {
 				Code        string `json:"LineCode"`
+				ParentCode  string `json:"FatherCode"`
 				Name        string `json:"LineName"`
 				DisplayName string `json:"LineDisplayName"`
 			} `json:"RecordLine"`
@@ -66,13 +67,13 @@ func (a *aliyun) ListLines(ctx context.Context) ([]Line, error) {
 	}
 	if err := a.call(ctx, "DescribeSupportLines", url.Values{
 		"DomainName": {a.zone},
-		"Lang":       {"en"},
+		"Lang":       {"zh"},
 	}, &response); err != nil {
 		return nil, err
 	}
 	result := make([]Line, 0, len(response.RecordLines.RecordLine))
 	seen := map[string]bool{}
-	for _, item := range response.RecordLines.RecordLine {
+	for index, item := range response.RecordLines.RecordLine {
 		code := strings.ToLower(strings.TrimSpace(item.Code))
 		if code == "" || seen[code] {
 			continue
@@ -84,11 +85,19 @@ func (a *aliyun) ListLines(ctx context.Context) ([]Line, error) {
 		if name == "" {
 			name = code
 		}
+		if code == "default" {
+			name = "默认"
+		}
 		seen[code] = true
-		result = append(result, Line{Name: name, Code: code})
+		result = append(result, Line{
+			Name:       name,
+			Code:       code,
+			ParentCode: strings.ToLower(strings.TrimSpace(item.ParentCode)),
+			SortOrder:  index,
+		})
 	}
 	if !seen["default"] {
-		result = append([]Line{{Name: "Default", Code: "default"}}, result...)
+		result = append([]Line{{Name: "默认", Code: "default", SortOrder: -1}}, result...)
 	}
 	return result, nil
 }
