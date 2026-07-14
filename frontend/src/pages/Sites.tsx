@@ -6,7 +6,7 @@ import type {
     SiteOrigin,
 } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select, Spinner, Switch, Tabs } from '@heroui/react';
+import { Button, Card, Input, Label, ListBox, Select, Switch, Tabs } from '@heroui/react';
 import { Plus, Rocket, RotateCcw, Save } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -59,7 +59,6 @@ export default function Sites() {
     const [site, setSite] = useState<SiteCreateResponse | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
-    const [detailLoading, setDetailLoading] = useState(false);
     const [detailError, setDetailError] = useState('');
     const [saveLoading, setSaveLoading] = useState(false);
     const [publishLoading, setPublishLoading] = useState(false);
@@ -76,7 +75,6 @@ export default function Sites() {
 
     useEffect(() => {
         if (!clusterId || !siteId) return;
-        setDetailLoading(true);
         Promise.all([siteApi.getListener(siteId), siteApi.getCache(siteId)])
             .then(([l, c]) => {
                 setListener(l);
@@ -87,8 +85,7 @@ export default function Sites() {
                 setDetailError(
                     err instanceof ApiError ? err.message : 'Failed to load site config'
                 );
-            })
-            .finally(() => setDetailLoading(false));
+            });
     }, [siteApi, clusterId, siteId]);
 
     const handleCreate = async (e: React.FormEvent) => {
@@ -345,167 +342,149 @@ export default function Sites() {
                 </div>
             )}
 
-            {detailLoading ? (
-                <div className='flex h-64 items-center justify-center'>
-                    <Spinner />
-                </div>
-            ) : (
-                <Tabs>
-                    <Tabs.List>
-                        <Tabs.Tab id='listener'>Listener</Tabs.Tab>
-                        <Tabs.Tab id='cache'>Cache</Tabs.Tab>
-                    </Tabs.List>
-                    <Tabs.Panel className='space-y-4 pt-4' id='listener'>
-                        <Card className='p-5'>
-                            <div className='mb-4 text-sm font-medium'>Listener settings</div>
-                            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='listener-http-port'>HTTP port</Label>
-                                    <Input
-                                        variant='secondary'
-                                        id='listener-http-port'
-                                        type='number'
-                                        value={String(listener.http_port ?? 80)}
-                                        onChange={(e) =>
-                                            setListener({
-                                                ...listener,
-                                                http_port: Number(e.target.value),
-                                            })
-                                        }
-                                    />
-                                </div>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='listener-https-port'>HTTPS port</Label>
-                                    <Input
-                                        variant='secondary'
-                                        id='listener-https-port'
-                                        type='number'
-                                        value={String(listener.https_port ?? 443)}
-                                        onChange={(e) =>
-                                            setListener({
-                                                ...listener,
-                                                https_port: Number(e.target.value),
-                                            })
-                                        }
-                                    />
-                                </div>
+            <Tabs>
+                <Tabs.List>
+                    <Tabs.Tab id='listener'>Listener</Tabs.Tab>
+                    <Tabs.Tab id='cache'>Cache</Tabs.Tab>
+                </Tabs.List>
+                <Tabs.Panel className='space-y-4 pt-4' id='listener'>
+                    <Card className='p-5'>
+                        <div className='mb-4 text-sm font-medium'>Listener settings</div>
+                        <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                            <div className='flex flex-col gap-1'>
+                                <Label htmlFor='listener-http-port'>HTTP port</Label>
+                                <Input
+                                    variant='secondary'
+                                    id='listener-http-port'
+                                    type='number'
+                                    value={String(listener.http_port ?? 80)}
+                                    onChange={(e) =>
+                                        setListener({
+                                            ...listener,
+                                            http_port: Number(e.target.value),
+                                        })
+                                    }
+                                />
                             </div>
-                            <div className='mt-5 flex flex-wrap gap-4'>
-                                <label
-                                    className='flex items-center gap-2 text-sm'
-                                    htmlFor='site-http2'
-                                >
-                                    <Switch
-                                        id='site-http2'
-                                        isSelected={!!listener.http2_enabled}
-                                        onChange={(checked) =>
-                                            setListener({ ...listener, http2_enabled: checked })
-                                        }
-                                    />
-                                    HTTP/2
-                                </label>
-                                <label
-                                    className='flex items-center gap-2 text-sm'
-                                    htmlFor='site-http3'
-                                >
-                                    <Switch
-                                        id='site-http3'
-                                        isSelected={!!listener.http3_enabled}
-                                        onChange={(checked) =>
-                                            setListener({ ...listener, http3_enabled: checked })
-                                        }
-                                    />
-                                    HTTP/3
-                                </label>
-                                <label
-                                    className='flex items-center gap-2 text-sm'
-                                    htmlFor='site-redirect-http'
-                                >
-                                    <Switch
-                                        id='site-redirect-http'
-                                        isSelected={!!listener.redirect_http_to_https}
-                                        onChange={(checked) =>
-                                            setListener({
-                                                ...listener,
-                                                redirect_http_to_https: checked,
-                                            })
-                                        }
-                                    />
-                                    Redirect HTTP to HTTPS
-                                </label>
+                            <div className='flex flex-col gap-1'>
+                                <Label htmlFor='listener-https-port'>HTTPS port</Label>
+                                <Input
+                                    variant='secondary'
+                                    id='listener-https-port'
+                                    type='number'
+                                    value={String(listener.https_port ?? 443)}
+                                    onChange={(e) =>
+                                        setListener({
+                                            ...listener,
+                                            https_port: Number(e.target.value),
+                                        })
+                                    }
+                                />
                             </div>
-                            <Button
-                                className='mt-5'
-                                isDisabled={saveLoading}
-                                onPress={saveListener}
-                            >
-                                <Save className='mr-2 h-4 w-4' />
-                                {saveLoading ? 'Saving...' : 'Save listener'}
-                            </Button>
-                        </Card>
-                    </Tabs.Panel>
-                    <Tabs.Panel className='space-y-4 pt-4' id='cache'>
-                        <Card className='p-5'>
-                            <div className='mb-4 text-sm font-medium'>Cache policy</div>
+                        </div>
+                        <div className='mt-5 flex flex-wrap gap-4'>
+                            <label className='flex items-center gap-2 text-sm' htmlFor='site-http2'>
+                                <Switch
+                                    id='site-http2'
+                                    isSelected={!!listener.http2_enabled}
+                                    onChange={(checked) =>
+                                        setListener({ ...listener, http2_enabled: checked })
+                                    }
+                                />
+                                HTTP/2
+                            </label>
+                            <label className='flex items-center gap-2 text-sm' htmlFor='site-http3'>
+                                <Switch
+                                    id='site-http3'
+                                    isSelected={!!listener.http3_enabled}
+                                    onChange={(checked) =>
+                                        setListener({ ...listener, http3_enabled: checked })
+                                    }
+                                />
+                                HTTP/3
+                            </label>
                             <label
                                 className='flex items-center gap-2 text-sm'
-                                htmlFor='site-cache-enabled'
+                                htmlFor='site-redirect-http'
                             >
                                 <Switch
-                                    id='site-cache-enabled'
-                                    isSelected={!!cache.enabled}
-                                    onChange={(checked) => setCache({ ...cache, enabled: checked })}
+                                    id='site-redirect-http'
+                                    isSelected={!!listener.redirect_http_to_https}
+                                    onChange={(checked) =>
+                                        setListener({
+                                            ...listener,
+                                            redirect_http_to_https: checked,
+                                        })
+                                    }
                                 />
-                                Enable caching
+                                Redirect HTTP to HTTPS
                             </label>
-                            <div className='mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='cache-ttl'>TTL seconds</Label>
-                                    <Input
-                                        variant='secondary'
-                                        id='cache-ttl'
-                                        type='number'
-                                        value={String(cache.ttl?.default_seconds ?? 0)}
-                                        onChange={(e) =>
-                                            setCache({
-                                                ...cache,
-                                                ttl: {
-                                                    ...(cache.ttl ?? {}),
-                                                    default_seconds: Number(e.target.value),
-                                                },
-                                            })
-                                        }
-                                    />
-                                </div>
-                                <div className='flex flex-col gap-1'>
-                                    <Label htmlFor='cache-stale'>
-                                        Stale while revalidate seconds
-                                    </Label>
-                                    <Input
-                                        variant='secondary'
-                                        id='cache-stale'
-                                        type='number'
-                                        value={String(cache.stale?.if_error_seconds ?? 0)}
-                                        onChange={(e) =>
-                                            setCache({
-                                                ...cache,
-                                                stale: {
-                                                    ...(cache.stale ?? {}),
-                                                    if_error_seconds: Number(e.target.value),
-                                                },
-                                            })
-                                        }
-                                    />
-                                </div>
+                        </div>
+                        <Button className='mt-5' isDisabled={saveLoading} onPress={saveListener}>
+                            <Save className='mr-2 h-4 w-4' />
+                            {saveLoading ? 'Saving...' : 'Save listener'}
+                        </Button>
+                    </Card>
+                </Tabs.Panel>
+                <Tabs.Panel className='space-y-4 pt-4' id='cache'>
+                    <Card className='p-5'>
+                        <div className='mb-4 text-sm font-medium'>Cache policy</div>
+                        <label
+                            className='flex items-center gap-2 text-sm'
+                            htmlFor='site-cache-enabled'
+                        >
+                            <Switch
+                                id='site-cache-enabled'
+                                isSelected={!!cache.enabled}
+                                onChange={(checked) => setCache({ ...cache, enabled: checked })}
+                            />
+                            Enable caching
+                        </label>
+                        <div className='mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                            <div className='flex flex-col gap-1'>
+                                <Label htmlFor='cache-ttl'>TTL seconds</Label>
+                                <Input
+                                    variant='secondary'
+                                    id='cache-ttl'
+                                    type='number'
+                                    value={String(cache.ttl?.default_seconds ?? 0)}
+                                    onChange={(e) =>
+                                        setCache({
+                                            ...cache,
+                                            ttl: {
+                                                ...(cache.ttl ?? {}),
+                                                default_seconds: Number(e.target.value),
+                                            },
+                                        })
+                                    }
+                                />
                             </div>
-                            <Button className='mt-5' isDisabled={saveLoading} onPress={saveCache}>
-                                <Save className='mr-2 h-4 w-4' />
-                                {saveLoading ? 'Saving...' : 'Save cache'}
-                            </Button>
-                        </Card>
-                    </Tabs.Panel>
-                </Tabs>
-            )}
+                            <div className='flex flex-col gap-1'>
+                                <Label htmlFor='cache-stale'>Stale while revalidate seconds</Label>
+                                <Input
+                                    variant='secondary'
+                                    id='cache-stale'
+                                    type='number'
+                                    value={String(cache.stale?.if_error_seconds ?? 0)}
+                                    onChange={(e) =>
+                                        setCache({
+                                            ...cache,
+                                            stale: {
+                                                ...(cache.stale ?? {}),
+                                                if_error_seconds: Number(e.target.value),
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                        </div>
+                        <Button className='mt-5' isDisabled={saveLoading} onPress={saveCache}>
+                            <Save className='mr-2 h-4 w-4' />
+                            {saveLoading ? 'Saving...' : 'Save cache'}
+                        </Button>
+                    </Card>
+                </Tabs.Panel>
+            </Tabs>
         </div>
     );
 }

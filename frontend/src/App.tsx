@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout.tsx';
 import { ProtectedRoute } from '@/components/ProtectedRoute.tsx';
+import { ApiLoadingProvider } from '@/hooks/useApiLoading.tsx';
 import { AuthProvider } from '@/hooks/useAuth.ts';
 import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
@@ -20,35 +21,37 @@ import Sites from '@/pages/Sites.tsx';
 
 export default function App() {
     return (
-        <InitializationProvider>
-            <InitializationGate>
-                <AuthProvider>
-                    <ClusterProvider>
-                        <Routes>
-                            <Route element={<Init />} path='/init' />
-                            <Route element={<Login />} path='/login' />
-                            <Route element={<Register />} path='/register' />
-                            <Route
-                                element={
-                                    <ProtectedRoute>
-                                        <Layout />
-                                    </ProtectedRoute>
-                                }
-                            >
-                                <Route element={<Dashboard />} path='/' />
-                                <Route element={<Nodes />} path='/nodes' />
-                                <Route element={<CreateNode />} path='/nodes/create' />
-                                <Route element={<Sites />} path='/sites' />
-                                <Route element={<DNS />} path='/dns' />
-                                <Route element={<Certificates />} path='/certificates' />
-                                <Route element={<PublishJobs />} path='/publish' />
-                                <Route element={<PurgeJobs />} path='/purge' />
-                                <Route element={<Analytics />} path='/analytics' />
-                            </Route>
-                        </Routes>
-                    </ClusterProvider>
-                </AuthProvider>
-            </InitializationGate>
-        </InitializationProvider>
+        <ApiLoadingProvider>
+            <InitializationProvider>
+                <InitializationGate>
+                    <AuthProvider>
+                        <ClusterProvider>
+                            <Routes>
+                                <Route element={<Init />} path='/init' />
+                                <Route element={<Login />} path='/login' />
+                                <Route element={<Register />} path='/register' />
+                                <Route
+                                    element={
+                                        <ProtectedRoute>
+                                            <Layout />
+                                        </ProtectedRoute>
+                                    }
+                                >
+                                    <Route element={<Dashboard />} path='/' />
+                                    <Route element={<Nodes />} path='/nodes' />
+                                    <Route element={<CreateNode />} path='/nodes/create' />
+                                    <Route element={<Sites />} path='/sites' />
+                                    <Route element={<DNS />} path='/dns' />
+                                    <Route element={<Certificates />} path='/certificates' />
+                                    <Route element={<PublishJobs />} path='/publish' />
+                                    <Route element={<PurgeJobs />} path='/purge' />
+                                    <Route element={<Analytics />} path='/analytics' />
+                                </Route>
+                            </Routes>
+                        </ClusterProvider>
+                    </AuthProvider>
+                </InitializationGate>
+            </InitializationProvider>
+        </ApiLoadingProvider>
     );
 }

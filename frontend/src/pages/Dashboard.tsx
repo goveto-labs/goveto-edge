@@ -1,6 +1,6 @@
 import type { Certificate, Node, PublishStatus, PublishTask } from '@/api';
 
-import { Button, Spinner } from '@heroui/react';
+import { Button } from '@heroui/react';
 import { ArrowRight, Globe, Rocket, Server, ShieldCheck } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -35,12 +35,10 @@ export default function Dashboard() {
     const [nodes, setNodes] = useState<Node[]>([]);
     const [certs, setCerts] = useState<Certificate[]>([]);
     const [status, setStatus] = useState<PublishStatus | null>(null);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     useEffect(() => {
         if (!clusterId) return;
-        setLoading(true);
         Promise.all([
             nodesApi(clusterId).list(),
             certificatesApi(clusterId).list(),
@@ -54,8 +52,7 @@ export default function Dashboard() {
             })
             .catch((err) => {
                 setError(err instanceof ApiError ? err.message : 'Failed to load dashboard');
-            })
-            .finally(() => setLoading(false));
+            });
     }, [clusterId]);
 
     const stats = useMemo(
@@ -125,123 +122,105 @@ export default function Dashboard() {
                 </div>
             )}
 
-            {loading ? (
-                <div className='flex h-64 items-center justify-center'>
-                    <Spinner />
-                </div>
-            ) : (
-                <>
-                    <section className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-                        {stats.map((stat) => (
-                            <StatCard
-                                key={stat.label}
-                                color={stat.color}
-                                footer={stat.footer}
-                                icon={stat.icon}
-                                label={stat.label}
-                                value={stat.value}
-                            />
-                        ))}
-                    </section>
+            <section className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
+                {stats.map((stat) => (
+                    <StatCard
+                        key={stat.label}
+                        color={stat.color}
+                        footer={stat.footer}
+                        icon={stat.icon}
+                        label={stat.label}
+                        value={stat.value}
+                    />
+                ))}
+            </section>
 
-                    <section className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
-                        <ContentCard className='lg:col-span-8' title='Publish activity'>
-                            <DataTable
-                                aria-label='Recent publish tasks'
-                                className='border-0 shadow-none'
-                                empty={recentTasks.length === 0}
-                                emptyDescription='Publish tasks will appear after a site is deployed.'
-                                emptyTitle='No recent publish tasks'
-                            >
-                                <thead>
-                                    <tr>
-                                        <th>Task</th>
-                                        <th>Target</th>
-                                        <th>Status</th>
-                                        <th>Updated</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {recentTasks.map((task: PublishTask) => (
-                                        <tr key={task.id}>
-                                            <td className='font-mono text-xs'>
-                                                {task.id.slice(0, 12)}
-                                            </td>
-                                            <td className='text-sm text-muted'>
-                                                {taskTarget(task)}
-                                            </td>
-                                            <td>
-                                                <StatusBadge status={task.status} />
-                                            </td>
-                                            <td className='text-sm text-muted'>
-                                                {formatDateTime(task.updated_at ?? task.created_at)}
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </DataTable>
-                        </ContentCard>
+            <section className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
+                <ContentCard className='lg:col-span-8' title='Publish activity'>
+                    <DataTable
+                        aria-label='Recent publish tasks'
+                        className='border-0 shadow-none'
+                        empty={recentTasks.length === 0}
+                        emptyDescription='Publish tasks will appear after a site is deployed.'
+                        emptyTitle='No recent publish tasks'
+                    >
+                        <thead>
+                            <tr>
+                                <th>Task</th>
+                                <th>Target</th>
+                                <th>Status</th>
+                                <th>Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {recentTasks.map((task: PublishTask) => (
+                                <tr key={task.id}>
+                                    <td className='font-mono text-xs'>{task.id.slice(0, 12)}</td>
+                                    <td className='text-sm text-muted'>{taskTarget(task)}</td>
+                                    <td>
+                                        <StatusBadge status={task.status} />
+                                    </td>
+                                    <td className='text-sm text-muted'>
+                                        {formatDateTime(task.updated_at ?? task.created_at)}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </DataTable>
+                </ContentCard>
 
-                        <div className='flex flex-col gap-4 lg:col-span-4'>
-                            <ContentCard
-                                action={
-                                    <Button
-                                        size='sm'
-                                        variant='ghost'
-                                        onPress={() => navigate('/publish')}
-                                    >
-                                        View all
-                                    </Button>
-                                }
-                                className='flex-1'
-                                title='Quick actions'
-                            >
-                                <div className='grid grid-cols-1 gap-1'>
-                                    {quickActions.map((action) => (
-                                        <Button
-                                            key={action.path}
-                                            className='h-auto justify-between px-3 py-2.5'
-                                            variant='ghost'
-                                            onPress={() => navigate(action.path)}
-                                        >
-                                            <span className='flex items-center gap-2'>
-                                                <action.icon className='h-4 w-4' />
-                                                {action.label}
-                                            </span>
-                                            <ArrowRight className='h-4 w-4 text-muted' />
-                                        </Button>
-                                    ))}
-                                </div>
-                            </ContentCard>
-
-                            <ContentCard title='Cluster snapshot'>
-                                <dl className='space-y-3 text-sm'>
-                                    <div className='flex justify-between'>
-                                        <dt className='text-muted'>Active nodes</dt>
-                                        <dd className='font-medium'>{nodes.length}</dd>
-                                    </div>
-                                    <div className='flex justify-between'>
-                                        <dt className='text-muted'>Certificates</dt>
-                                        <dd className='font-medium'>{certs.length}</dd>
-                                    </div>
-                                    <div className='flex justify-between'>
-                                        <dt className='text-muted'>Pending tasks</dt>
-                                        <dd className='font-medium'>
-                                            {status?.pending_count ?? 0}
-                                        </dd>
-                                    </div>
-                                    <div className='flex justify-between'>
-                                        <dt className='text-muted'>Failed tasks</dt>
-                                        <dd className='font-medium text-danger'>
-                                            {status?.failed_count ?? 0}
-                                        </dd>
-                                    </div>
-                                </dl>
-                            </ContentCard>
+                <div className='flex flex-col gap-4 lg:col-span-4'>
+                    <ContentCard
+                        action={
+                            <Button size='sm' variant='ghost' onPress={() => navigate('/publish')}>
+                                View all
+                            </Button>
+                        }
+                        className='flex-1'
+                        title='Quick actions'
+                    >
+                        <div className='grid grid-cols-1 gap-1'>
+                            {quickActions.map((action) => (
+                                <Button
+                                    key={action.path}
+                                    className='h-auto justify-between px-3 py-2.5'
+                                    variant='ghost'
+                                    onPress={() => navigate(action.path)}
+                                >
+                                    <span className='flex items-center gap-2'>
+                                        <action.icon className='h-4 w-4' />
+                                        {action.label}
+                                    </span>
+                                    <ArrowRight className='h-4 w-4 text-muted' />
+                                </Button>
+                            ))}
                         </div>
-                    </section>
-                </>
-            )}
+                    </ContentCard>
+
+                    <ContentCard title='Cluster snapshot'>
+                        <dl className='space-y-3 text-sm'>
+                            <div className='flex justify-between'>
+                                <dt className='text-muted'>Active nodes</dt>
+                                <dd className='font-medium'>{nodes.length}</dd>
+                            </div>
+                            <div className='flex justify-between'>
+                                <dt className='text-muted'>Certificates</dt>
+                                <dd className='font-medium'>{certs.length}</dd>
+                            </div>
+                            <div className='flex justify-between'>
+                                <dt className='text-muted'>Pending tasks</dt>
+                                <dd className='font-medium'>{status?.pending_count ?? 0}</dd>
+                            </div>
+                            <div className='flex justify-between'>
+                                <dt className='text-muted'>Failed tasks</dt>
+                                <dd className='font-medium text-danger'>
+                                    {status?.failed_count ?? 0}
+                                </dd>
+                            </div>
+                        </dl>
+                    </ContentCard>
+                </div>
+            </section>
         </div>
     );
 }

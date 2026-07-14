@@ -24,7 +24,7 @@ export function NavItem({
 }: NavItemProps) {
     const link = (
         <Link
-            className={`group relative flex items-center rounded-lg text-sm font-medium transition-colors ${
+            className={`group relative flex items-center rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                 collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
             } ${
                 active

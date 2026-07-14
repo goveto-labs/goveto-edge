@@ -1,6 +1,6 @@
 import type { ClusterGroup, ClusterRegion, DNSLine } from '@/api';
 
-import { Button, Input, Spinner, TextArea } from '@heroui/react';
+import { Button, Input, TextArea } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
@@ -178,7 +178,6 @@ export default function CreateNode() {
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
     const [groups, setGroups] = useState<ClusterGroup[]>([]);
     const [regions, setRegions] = useState<ClusterRegion[]>([]);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     const [submitting, setSubmitting] = useState(false);
@@ -202,7 +201,6 @@ export default function CreateNode() {
 
     const loadOptions = useCallback(async () => {
         if (!clusterId) return;
-        setLoading(true);
         try {
             const [d, g, r] = await Promise.all([
                 cluster.dnsLines(),
@@ -215,8 +213,6 @@ export default function CreateNode() {
             setError('');
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Failed to load options');
-        } finally {
-            setLoading(false);
         }
     }, [cluster, clusterId]);
 
@@ -292,11 +288,7 @@ export default function CreateNode() {
 
             {error && <FormError message={error} />}
 
-            {loading ? (
-                <div className='flex h-64 items-center justify-center'>
-                    <Spinner />
-                </div>
-            ) : mode === 'batch' ? (
+            {mode === 'batch' ? (
                 <ContentCard className='p-8 text-center'>
                     <div className='space-y-3'>
                         <Users className='mx-auto h-10 w-10 text-muted' />

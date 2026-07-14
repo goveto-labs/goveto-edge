@@ -10,7 +10,13 @@ interface ContentCardProps {
     noPadding?: boolean;
 }
 
-export function ContentCard({ children, title, action, noPadding = false, className = '' }: ContentCardProps) {
+export function ContentCard({
+    children,
+    title,
+    action,
+    noPadding = false,
+    className = '',
+}: ContentCardProps) {
     return (
         <Card className={`overflow-hidden ${className}`}>
             {(title || action) && (

@@ -16,7 +16,6 @@ export default function Certificates() {
     const { clusterId } = useCluster();
     const api = useMemo(() => certificatesApi(clusterId), [clusterId]);
     const [certs, setCerts] = useState<Certificate[]>([]);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     const modalState = useOverlayState();
@@ -28,15 +27,12 @@ export default function Certificates() {
 
     const load = useCallback(async () => {
         if (!clusterId) return;
-        setLoading(true);
         try {
             const data = await api.list();
             setCerts(data);
             setError('');
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Failed to load certificates');
-        } finally {
-            setLoading(false);
         }
     }, [api, clusterId]);
 
@@ -95,46 +91,40 @@ export default function Certificates() {
                 </div>
             )}
 
-            {loading ? (
-                <div className='flex h-64 items-center justify-center text-sm text-muted'>
-                    Loading certificates...
-                </div>
-            ) : (
-                <DataTable
-                    aria-label='Certificates'
-                    empty={certs.length === 0}
-                    emptyAction={
-                        <Button onPress={open}>
-                            <Plus className='mr-2 h-4 w-4' />
-                            Upload certificate
-                        </Button>
-                    }
-                    emptyDescription='Upload a TLS certificate before enabling HTTPS for a site.'
-                    emptyTitle='No certificates yet'
-                >
-                    <thead>
-                        <tr className='border-b border-border'>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>ID</th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                Created at
-                            </th>
+            <DataTable
+                aria-label='Certificates'
+                empty={certs.length === 0}
+                emptyAction={
+                    <Button onPress={open}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Upload certificate
+                    </Button>
+                }
+                emptyDescription='Upload a TLS certificate before enabling HTTPS for a site.'
+                emptyTitle='No certificates yet'
+            >
+                <thead>
+                    <tr className='border-b border-border'>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>ID</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>
+                            Created at
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {certs.map((cert) => (
+                        <tr className='border-b border-border last:border-0' key={cert.id}>
+                            <td className='flex items-center gap-2 py-3 text-sm font-medium'>
+                                <ShieldCheck className='h-4 w-4 text-success' />
+                                {cert.name}
+                            </td>
+                            <td className='py-3 font-mono text-xs text-muted'>{cert.id}</td>
+                            <td className='py-3 text-sm text-muted'>{cert.created_at}</td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {certs.map((cert) => (
-                            <tr className='border-b border-border last:border-0' key={cert.id}>
-                                <td className='flex items-center gap-2 py-3 text-sm font-medium'>
-                                    <ShieldCheck className='h-4 w-4 text-success' />
-                                    {cert.name}
-                                </td>
-                                <td className='py-3 font-mono text-xs text-muted'>{cert.id}</td>
-                                <td className='py-3 text-sm text-muted'>{cert.created_at}</td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </DataTable>
-            )}
+                    ))}
+                </tbody>
+            </DataTable>
 
             <DialogShell
                 icon={<Upload className='h-5 w-5' />}

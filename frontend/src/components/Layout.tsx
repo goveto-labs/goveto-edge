@@ -1,10 +1,12 @@
 import { Alert, Avatar, Button, Drawer, Input, useOverlayState, useTheme } from '@heroui/react';
 import { Bell, ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
+import { ApiSpinner } from '@/components/ApiSpinner.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
+import { PageTransition } from '@/components/PageTransition.tsx';
 import { ClusterPicker, nav, Sidebar } from '@/components/Sidebar.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
@@ -176,7 +178,8 @@ export function Layout() {
                 </header>
 
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
-                    <div className='mx-auto max-w-[1600px]'>
+                    <div className='relative mx-auto min-h-full max-w-[1600px]'>
+                        <ApiSpinner />
                         {clustersReady &&
                             !clusterId &&
                             !requiresCluster &&
@@ -191,7 +194,7 @@ export function Layout() {
                                     </Alert.Content>
                                 </Alert>
                             )}
-                        <Outlet />
+                        <PageTransition />
                     </div>
                 </main>
             </div>

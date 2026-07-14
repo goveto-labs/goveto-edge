@@ -29,7 +29,6 @@ export default function Nodes() {
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
     const [nodes, setNodes] = useState<Node[]>([]);
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
-    const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
     const drawerState = useOverlayState();
@@ -46,7 +45,6 @@ export default function Nodes() {
 
     const load = useCallback(async () => {
         if (!clusterId) return;
-        setLoading(true);
         try {
             const [n, d] = await Promise.all([nodeApi.list(), cluster.dnsLines()]);
             setNodes(n);
@@ -54,8 +52,6 @@ export default function Nodes() {
             setError('');
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Failed to load nodes');
-        } finally {
-            setLoading(false);
         }
     }, [cluster, nodeApi, clusterId]);
 
@@ -181,84 +177,70 @@ export default function Nodes() {
                 </div>
             )}
 
-            {loading ? (
-                <div className='flex h-64 items-center justify-center'>
-                    <Spinner />
-                </div>
-            ) : (
-                <DataTable
-                    aria-label='Nodes'
-                    empty={nodes.length === 0}
-                    emptyAction={
-                        <Button onPress={() => navigate('/nodes/create')}>
-                            <Plus className='mr-2 h-4 w-4' />
-                            Create node
-                        </Button>
-                    }
-                    emptyDescription='Create a node to start serving traffic from this cluster.'
-                    emptyTitle='No nodes yet'
-                >
-                    <thead>
-                        <tr className='border-b border-border'>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                Status
-                            </th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                DNS lines
-                            </th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                Addresses
-                            </th>
-                            <th className='py-3 text-right text-xs font-medium text-muted'>
-                                Actions
-                            </th>
+            <DataTable
+                aria-label='Nodes'
+                empty={nodes.length === 0}
+                emptyAction={
+                    <Button onPress={() => navigate('/nodes/create')}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Create node
+                    </Button>
+                }
+                emptyDescription='Create a node to start serving traffic from this cluster.'
+                emptyTitle='No nodes yet'
+            >
+                <thead>
+                    <tr className='border-b border-border'>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Status</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>DNS lines</th>
+                        <th className='py-3 text-left text-xs font-medium text-muted'>Addresses</th>
+                        <th className='py-3 text-right text-xs font-medium text-muted'>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {nodes.map((node) => (
+                        <tr className='border-b border-border last:border-0' key={node.id}>
+                            <td className='py-3 text-sm font-medium'>{node.name}</td>
+                            <td className='py-3'>
+                                <StatusBadge status={node.status} />
+                            </td>
+                            <td className='py-3 text-sm text-muted'>
+                                {(node.dnsLines || [])
+                                    .map(
+                                        (link) =>
+                                            dnsLines.find((line) => line.id === link.dnsLineId)
+                                                ?.name || link.dnsLineId
+                                    )
+                                    .join(', ') || 'Default'}
+                            </td>
+                            <td className='py-3 text-sm text-muted'>
+                                {node.addresses.map((a) => a.address).join(', ')}
+                            </td>
+                            <td className='py-3'>
+                                <div className='flex justify-end gap-2'>
+                                    <Button
+                                        size='sm'
+                                        variant='secondary'
+                                        onPress={() => openDetail(node.id)}
+                                    >
+                                        <Eye className='mr-1.5 h-3.5 w-3.5' />
+                                        View
+                                    </Button>
+                                    <Button
+                                        size='sm'
+                                        variant='danger'
+                                        onPress={() => handleDelete(node.id)}
+                                    >
+                                        <Trash2 className='mr-1.5 h-3.5 w-3.5' />
+                                        Delete
+                                    </Button>
+                                </div>
+                            </td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {nodes.map((node) => (
-                            <tr className='border-b border-border last:border-0' key={node.id}>
-                                <td className='py-3 text-sm font-medium'>{node.name}</td>
-                                <td className='py-3'>
-                                    <StatusBadge status={node.status} />
-                                </td>
-                                <td className='py-3 text-sm text-muted'>
-                                    {(node.dnsLines || [])
-                                        .map(
-                                            (link) =>
-                                                dnsLines.find((line) => line.id === link.dnsLineId)
-                                                    ?.name || link.dnsLineId
-                                        )
-                                        .join(', ') || 'Default'}
-                                </td>
-                                <td className='py-3 text-sm text-muted'>
-                                    {node.addresses.map((a) => a.address).join(', ')}
-                                </td>
-                                <td className='py-3'>
-                                    <div className='flex justify-end gap-2'>
-                                        <Button
-                                            size='sm'
-                                            variant='secondary'
-                                            onPress={() => openDetail(node.id)}
-                                        >
-                                            <Eye className='mr-1.5 h-3.5 w-3.5' />
-                                            View
-                                        </Button>
-                                        <Button
-                                            size='sm'
-                                            variant='danger'
-                                            onPress={() => handleDelete(node.id)}
-                                        >
-                                            <Trash2 className='mr-1.5 h-3.5 w-3.5' />
-                                            Delete
-                                        </Button>
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </DataTable>
-            )}
+                    ))}
+                </tbody>
+            </DataTable>
 
             <Drawer isOpen={drawerState.isOpen} onOpenChange={drawerState.setOpen}>
                 <Drawer.Content className='w-full max-w-lg'>
