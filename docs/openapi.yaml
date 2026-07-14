@@ -1484,7 +1484,7 @@ paths:
         post:
             operationId: addAddress
             summary: Add node address
-            description: Add an IP address to a node; optionally mark it as primary.
+            description: Add an IP address to a node.
             tags:
                 - nodes
             security:
@@ -1513,8 +1513,6 @@ paths:
                             properties:
                                 address:
                                     type: string
-                                primary:
-                                    type: boolean
             responses:
                 "201":
                     description: OK
@@ -1534,8 +1532,97 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
-                                            primary:
-                                                type: boolean
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/addresses/{address_id}:
+        put:
+            operationId: updateAddress
+            summary: Update node address
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: address_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                address:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            address:
+                                                type: string
+                                            id:
+                                                type: string
+        delete:
+            operationId: deleteAddress
+            summary: Delete node address
+            description: Delete an address. Nodes are allowed to have no addresses.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: address_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/cache-config:
         get:
             operationId: getCacheConfig
@@ -3538,8 +3625,6 @@ components:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
                     type: string
-                primary:
-                    type: boolean
         model_NodeCacheConfig:
             type: object
             properties:
@@ -4319,8 +4404,6 @@ components:
                     type: string
                 id:
                     type: string
-                primary:
-                    type: boolean
         types_NodeCacheConfig:
             type: object
             properties:

@@ -88,15 +88,13 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 
 		response := cacheUpdateResponse{CacheConfig: types.NewNodeCacheConfig(updated)}
 		address, addressErr := db.NodeAddress.Query().
-			Where(
-				query.NodeAddress.NodeId.Equals(nodeID),
-				query.NodeAddress.Primary.Equals(true),
-			).
+			Where(query.NodeAddress.NodeId.Equals(nodeID)).
+			OrderBy(query.NodeAddress.CreatedAt.Asc()).
 			First(ctx)
 		credential, credentialErr := db.NodeCredential.FindUnique(
 			ctx, query.NodeCredential.NodeId.Equals(nodeID),
 		)
-		if addressErr == nil && credentialErr == nil {
+		if addressErr == nil && address != nil && credentialErr == nil {
 			key, decryptErr := cipher.Decrypt(credential.CommunicationKeyEncrypted)
 			if decryptErr == nil {
 				syncErr := edgecontrol.New(

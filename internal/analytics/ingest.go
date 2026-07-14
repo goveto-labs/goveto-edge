@@ -75,11 +75,11 @@ func (i *Ingest) pull(ctx context.Context, nodeID, clusterID string) {
 		i.mu.Unlock()
 	}()
 
-	a, err := i.db.NodeAddress.Query().Where(
-		query.NodeAddress.NodeId.Equals(nodeID),
-		query.NodeAddress.Primary.Equals(true),
-	).First(ctx)
-	if err != nil {
+	a, err := i.db.NodeAddress.Query().
+		Where(query.NodeAddress.NodeId.Equals(nodeID)).
+		OrderBy(query.NodeAddress.CreatedAt.Asc()).
+		First(ctx)
+	if err != nil || a == nil {
 		return
 	}
 

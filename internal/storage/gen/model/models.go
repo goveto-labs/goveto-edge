@@ -213,7 +213,6 @@ type NodeAddress struct {
 	Id        string    `db:"id" json:"id"`
 	NodeId    string    `db:"node_id" json:"nodeId"`
 	Address   string    `db:"address" json:"address"`
-	Primary   bool      `db:"primary" json:"primary"`
 	CreatedAt time.Time `db:"created_at" json:"createdAt"`
 	Node      *Node     `db:"-" json:"node,omitempty"`
 }

@@ -281,7 +281,6 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Nodeid` (UUID)
   - `Address` (String, unique)
-  - `Primary` (Boolean)
   - `Createdat` (DateTime)
 
 ### NodeCacheConfig

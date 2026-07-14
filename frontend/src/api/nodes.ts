@@ -42,6 +42,13 @@ export const nodesApi = (clusterId: string) => ({
             payload
         ),
 
-    addAddress: (nodeId: string, payload: { address: string; primary: boolean }) =>
+    addAddress: (nodeId: string, payload: { address: string }) =>
         post<NodeAddress>(clusterPath(clusterId, `/nodes/${nodeId}/addresses`), payload),
+    updateAddress: (nodeId: string, addressId: string, payload: { address: string }) =>
+        put<NodeAddress>(
+            clusterPath(clusterId, `/nodes/${nodeId}/addresses/${addressId}`),
+            payload
+        ),
+    deleteAddress: (nodeId: string, addressId: string) =>
+        del<void>(clusterPath(clusterId, `/nodes/${nodeId}/addresses/${addressId}`)),
 });

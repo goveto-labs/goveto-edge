@@ -33,7 +33,6 @@ type NodeAddressQuery struct {
 	Id        nodeAddressIdField
 	NodeId    nodeAddressNodeIdField
 	Address   nodeAddressAddressField
-	Primary   nodeAddressPrimaryField
 	CreatedAt nodeAddressCreatedAtField
 	Node      nodeAddressNodeRelation
 }
@@ -42,7 +41,6 @@ const NodeAddressTable = "node_addresses"
 const NodeAddressIdColumn = "id"
 const NodeAddressNodeIdColumn = "node_id"
 const NodeAddressAddressColumn = "address"
-const NodeAddressPrimaryColumn = "primary"
 const NodeAddressCreatedAtColumn = "created_at"
 
 // NodeAddressQuery provides query building methods for the NodeAddress model.
@@ -50,7 +48,6 @@ var NodeAddress = NodeAddressQuery{
 	Id:        nodeAddressIdField{},
 	NodeId:    nodeAddressNodeIdField{},
 	Address:   nodeAddressAddressField{},
-	Primary:   nodeAddressPrimaryField{},
 	CreatedAt: nodeAddressCreatedAtField{},
 	Node:      nodeAddressNodeRelation{},
 }
@@ -312,52 +309,6 @@ func (nodeAddressAddressField) Desc() NodeAddressOrderByClause {
 	return NodeAddressOrderByClause{Field: "address", Direction: "DESC"}
 }
 
-// PrimaryField provides query operations for the primary field.
-type nodeAddressPrimaryField struct{}
-
-// Equals creates an equality condition.
-func (nodeAddressPrimaryField) Equals(v bool) NodeAddressWhereClause {
-	return NodeAddressWhereClause{Field: "primary", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (nodeAddressPrimaryField) Not(v bool) NodeAddressWhereClause {
-	return NodeAddressWhereClause{Field: "primary", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (nodeAddressPrimaryField) In(vals ...bool) NodeAddressWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeAddressWhereClause{Field: "primary", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (nodeAddressPrimaryField) NotIn(vals ...bool) NodeAddressWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeAddressWhereClause{Field: "primary", Operator: "NOT IN", Value: iVals}
-}
-
-// Set creates a set operation for create/update.
-func (nodeAddressPrimaryField) Set(v bool) NodeAddressSetClause {
-	return NodeAddressSetClause{Field: "primary", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (nodeAddressPrimaryField) Asc() NodeAddressOrderByClause {
-	return NodeAddressOrderByClause{Field: "primary", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (nodeAddressPrimaryField) Desc() NodeAddressOrderByClause {
-	return NodeAddressOrderByClause{Field: "primary", Direction: "DESC"}
-}
-
 // CreatedAtField provides query operations for the createdAt field.
 type nodeAddressCreatedAtField struct{}
 
@@ -468,14 +419,13 @@ type NodeAddressCreateInput struct {
 	Id        string
 	NodeId    string
 	Address   string
-	Primary   bool
 	CreatedAt time.Time
 	Node      *NodeCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeAddressCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.NodeId, d.Address, d.Primary, d.CreatedAt}
+	return []any{d.Id, d.NodeId, d.Address, d.CreatedAt}
 }
 
 // NodeAddressCreateNestedInput supports nested creates and connects.

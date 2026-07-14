@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"time"
 
 	"goveto-edge/internal/edgecontrol"
@@ -30,6 +31,11 @@ type healthTarget struct {
 	ClusterID string `db:"cluster_id"`
 	Address   string `db:"address"`
 	Status    string `db:"status"`
+}
+
+type healthResponse struct {
+	NodeID      string                       `json:"node_id"`
+	CacheConfig edgeprotocol.NodeCacheConfig `json:"cache_config"`
 }
 
 func NewLifecycle(
@@ -66,72 +72,88 @@ func (l *Lifecycle) Run(ctx context.Context) {
 func (l *Lifecycle) poll(ctx context.Context) {
 	targets, err := client.Raw[healthTarget](ctx, l.db, `SELECT n.id AS node_id, n.cluster_id, n.status, a.address
 		FROM nodes n
-		JOIN node_addresses a ON a.node_id = n.id AND a.primary = TRUE
-		WHERE n.status NOT IN ('PENDING', 'INSTALLING', 'INSTALL_FAILED', 'DISABLED')`)
+		JOIN node_addresses a ON a.node_id = n.id
+		WHERE n.status NOT IN ('PENDING', 'INSTALLING', 'INSTALL_FAILED', 'DISABLED')
+		ORDER BY n.id, a.created_at`)
 	if err != nil {
 		slog.Error("query node health targets", "error", err)
 		return
 	}
 
-	for _, target := range targets {
-		request, err := newHealthRequest(ctx, target)
-		if err != nil {
-			l.logHealthFailure(target, "build request: "+err.Error())
-			continue
+	for start := 0; start < len(targets); {
+		end := start + 1
+		for end < len(targets) && targets[end].NodeID == targets[start].NodeID {
+			end++
 		}
 
-		response, err := l.http.Do(request)
-		if err != nil {
-			l.logHealthFailure(target, "request failed: "+err.Error())
+		var active *healthTarget
+		var health *healthResponse
+		failures := make([]string, 0, end-start)
+		for index := start; index < end; index++ {
+			candidate := targets[index]
+			result, checkErr := l.checkHealth(ctx, candidate)
+			if checkErr != nil {
+				failures = append(failures, candidate.Address+": "+checkErr.Error())
+				continue
+			}
+			active = &candidate
+			health = result
+			break
+		}
+		if active == nil {
+			l.logHealthFailure(targets[start], strings.Join(failures, "; "))
+			start = end
 			continue
 		}
-
-		var health struct {
-			NodeID      string                       `json:"node_id"`
-			CacheConfig edgeprotocol.NodeCacheConfig `json:"cache_config"`
-		}
-		decodeErr := json.NewDecoder(response.Body).Decode(&health)
-		response.Body.Close()
-		if response.StatusCode != http.StatusOK {
-			l.logHealthFailure(target, fmt.Sprintf("unexpected HTTP status %s", response.Status))
-			continue
-		}
-		if decodeErr != nil {
-			l.logHealthFailure(target, "decode response: "+decodeErr.Error())
-			continue
-		}
-		if health.NodeID != target.NodeID {
-			l.logHealthFailure(
-				target,
-				fmt.Sprintf("node ID mismatch: got %q", health.NodeID),
-			)
-			continue
-		}
-		if _, failed := l.healthFailures[target.NodeID]; failed {
+		if _, failed := l.healthFailures[active.NodeID]; failed {
 			slog.Info(
 				"node health check recovered",
-				"node_id", target.NodeID,
-				"address", target.Address,
+				"node_id", active.NodeID,
+				"address", active.Address,
 			)
-			delete(l.healthFailures, target.NodeID)
+			delete(l.healthFailures, active.NodeID)
 		}
 
 		_, _ = l.db.RawExec(
 			ctx,
 			`UPDATE nodes SET status = 'ONLINE', install_error = NULL, heartbeat_at = NOW(), updated_at = NOW() WHERE id = $1`,
-			target.NodeID,
+			active.NodeID,
 		)
-		if target.Status != "ONLINE" {
+		if active.Status != "ONLINE" {
 			slog.Info(
 				"node is online",
-				"node_id", target.NodeID,
-				"address", target.Address,
+				"node_id", active.NodeID,
+				"address", active.Address,
 			)
-			l.notifyStatusChange(ctx, target.ClusterID)
+			l.notifyStatusChange(ctx, active.ClusterID)
 		}
-		l.reconcileCacheConfig(ctx, target, health.CacheConfig)
+		l.reconcileCacheConfig(ctx, *active, health.CacheConfig)
+		start = end
 	}
 	l.markOffline(ctx)
+}
+
+func (l *Lifecycle) checkHealth(ctx context.Context, target healthTarget) (*healthResponse, error) {
+	request, err := newHealthRequest(ctx, target)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	response, err := l.http.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected HTTP status %s", response.Status)
+	}
+	var health healthResponse
+	if err := json.NewDecoder(response.Body).Decode(&health); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	if health.NodeID != target.NodeID {
+		return nil, fmt.Errorf("node ID mismatch: got %q", health.NodeID)
+	}
+	return &health, nil
 }
 
 func newHealthRequest(ctx context.Context, target healthTarget) (*http.Request, error) {

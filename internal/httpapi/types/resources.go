@@ -68,11 +68,10 @@ func NewDNSRecord(value *model.DNSManagedRecord) DNSRecord {
 type NodeAddress struct {
 	ID      string `json:"id"`
 	Address string `json:"address"`
-	Primary bool   `json:"primary"`
 }
 
 func NewNodeAddress(value *model.NodeAddress) NodeAddress {
-	return NodeAddress{ID: value.Id, Address: value.Address, Primary: value.Primary}
+	return NodeAddress{ID: value.Id, Address: value.Address}
 }
 
 type NodeDNSLine struct {

@@ -355,7 +355,6 @@ model NodeAddress {
   id        String   @id @default(uuid())
   nodeId    UUID     @map("node_id")
   address   String   @unique
-  primary   Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
   node      Node     @relation(fields: [nodeId], references: [id])
 

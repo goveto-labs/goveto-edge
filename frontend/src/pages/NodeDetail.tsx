@@ -11,10 +11,13 @@ import {
     LockKeyhole,
     MapPin,
     Network,
+    Pencil,
     Plus,
     RefreshCw,
     Save,
     Server,
+    Trash2,
+    X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -102,8 +105,10 @@ export default function NodeDetail() {
     const [dnsLineIds, setDnsLineIds] = useState<Set<string>>(new Set());
     const [dnsSaving, setDnsSaving] = useState(false);
     const [newAddress, setNewAddress] = useState('');
-    const [newAddressPrimary, setNewAddressPrimary] = useState(false);
     const [addressAdding, setAddressAdding] = useState(false);
+    const [editingAddressId, setEditingAddressId] = useState('');
+    const [editingAddress, setEditingAddress] = useState('');
+    const [addressBusyId, setAddressBusyId] = useState('');
     const [cache, setCache] = useState<NodeCacheConfig | null>(null);
     const [cacheSaving, setCacheSaving] = useState(false);
     const [cacheMessage, setCacheMessage] = useState('');
@@ -126,10 +131,7 @@ export default function NodeDetail() {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
         setCache(value.cacheConfig ?? null);
-        setSshIp(
-            (current) =>
-                current || value.addresses.find((address) => address.primary)?.address || ''
-        );
+        setSshIp((current) => current || value.addresses[0]?.address || '');
     }, []);
 
     const load = useCallback(async () => {
@@ -215,10 +217,8 @@ export default function NodeDetail() {
         try {
             await api.addAddress(node.id, {
                 address: newAddress.trim(),
-                primary: newAddressPrimary,
             });
             setNewAddress('');
-            setNewAddressPrimary(false);
             await refreshNode();
         } catch (addressError) {
             setError(
@@ -226,6 +226,40 @@ export default function NodeDetail() {
             );
         } finally {
             setAddressAdding(false);
+        }
+    };
+
+    const saveAddress = async (addressId: string) => {
+        if (!node || !editingAddress.trim()) return;
+        setAddressBusyId(addressId);
+        setError('');
+        try {
+            await api.updateAddress(node.id, addressId, { address: editingAddress.trim() });
+            setEditingAddressId('');
+            setEditingAddress('');
+            await refreshNode();
+        } catch (addressError) {
+            setError(
+                addressError instanceof ApiError ? addressError.message : 'Failed to update address'
+            );
+        } finally {
+            setAddressBusyId('');
+        }
+    };
+
+    const removeAddress = async (addressId: string, address: string) => {
+        if (!node || !window.confirm(`Delete IP address ${address}?`)) return;
+        setAddressBusyId(addressId);
+        setError('');
+        try {
+            await api.deleteAddress(node.id, addressId);
+            await refreshNode();
+        } catch (addressError) {
+            setError(
+                addressError instanceof ApiError ? addressError.message : 'Failed to delete address'
+            );
+        } finally {
+            setAddressBusyId('');
         }
     };
 
@@ -325,7 +359,9 @@ export default function NodeDetail() {
 
     if (!clusterId) return <FormError message='Select a cluster to view this node.' />;
 
-    const primaryAddress = node?.addresses.find((address) => address.primary)?.address || '—';
+    const addressSummary = node?.addresses.length
+        ? node.addresses.map((item) => item.address).join(', ')
+        : '—';
     const cacheIsValid = Boolean(
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
@@ -394,7 +430,7 @@ export default function NodeDetail() {
                                     label='Status'
                                     value={<StatusBadge status={node.status} />}
                                 />
-                                <Metric label='Primary address' value={primaryAddress} />
+                                <Metric label='IP addresses' value={addressSummary} />
                                 <Metric label='DNS lines' value={dnsLineIds.size || 'Default'} />
                                 <Metric
                                     label='Site configurations'
@@ -503,16 +539,91 @@ export default function NodeDetail() {
                                             className='flex items-center justify-between gap-3 px-5 py-3'
                                             key={address.id}
                                         >
-                                            <span className='font-mono text-sm'>
-                                                {address.address}
-                                            </span>
-                                            {address.primary && (
-                                                <span className='rounded-full bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary'>
-                                                    Primary
+                                            {editingAddressId === address.id ? (
+                                                <Input
+                                                    autoFocus
+                                                    aria-label='IP address'
+                                                    className='max-w-md flex-1 font-mono'
+                                                    value={editingAddress}
+                                                    variant='secondary'
+                                                    onChange={(event) =>
+                                                        setEditingAddress(event.target.value)
+                                                    }
+                                                />
+                                            ) : (
+                                                <span className='font-mono text-sm'>
+                                                    {address.address}
                                                 </span>
                                             )}
+                                            <div className='flex shrink-0 items-center gap-1'>
+                                                {editingAddressId === address.id ? (
+                                                    <>
+                                                        <Button
+                                                            isIconOnly
+                                                            aria-label='Save IP address'
+                                                            isDisabled={
+                                                                !editingAddress.trim() ||
+                                                                addressBusyId === address.id
+                                                            }
+                                                            size='sm'
+                                                            onPress={() =>
+                                                                void saveAddress(address.id)
+                                                            }
+                                                        >
+                                                            <Check className='h-4 w-4' />
+                                                        </Button>
+                                                        <Button
+                                                            isIconOnly
+                                                            aria-label='Cancel editing'
+                                                            size='sm'
+                                                            variant='ghost'
+                                                            onPress={() => setEditingAddressId('')}
+                                                        >
+                                                            <X className='h-4 w-4' />
+                                                        </Button>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <Button
+                                                            isIconOnly
+                                                            aria-label='Edit IP address'
+                                                            size='sm'
+                                                            variant='ghost'
+                                                            onPress={() => {
+                                                                setEditingAddressId(address.id);
+                                                                setEditingAddress(address.address);
+                                                            }}
+                                                        >
+                                                            <Pencil className='h-4 w-4' />
+                                                        </Button>
+                                                        <Button
+                                                            isIconOnly
+                                                            aria-label='Delete IP address'
+                                                            isDisabled={
+                                                                addressBusyId === address.id
+                                                            }
+                                                            size='sm'
+                                                            variant='ghost'
+                                                            onPress={() =>
+                                                                void removeAddress(
+                                                                    address.id,
+                                                                    address.address
+                                                                )
+                                                            }
+                                                        >
+                                                            <Trash2 className='h-4 w-4 text-danger' />
+                                                        </Button>
+                                                    </>
+                                                )}
+                                            </div>
                                         </div>
                                     ))}
+                                    {node.addresses.length === 0 && (
+                                        <div className='px-5 py-6 text-sm text-muted'>
+                                            No IP addresses. This node is excluded from DNS
+                                            resolution.
+                                        </div>
+                                    )}
                                 </div>
                                 <div className='space-y-3 border-t border-border bg-surface-secondary/20 p-5'>
                                     <div className='text-sm font-medium'>Add address</div>
@@ -525,17 +636,6 @@ export default function NodeDetail() {
                                             variant='secondary'
                                             onChange={(event) => setNewAddress(event.target.value)}
                                         />
-                                        <label
-                                            className='flex shrink-0 items-center gap-2 text-sm'
-                                            htmlFor='new-address-primary'
-                                        >
-                                            <Switch
-                                                id='new-address-primary'
-                                                isSelected={newAddressPrimary}
-                                                onChange={setNewAddressPrimary}
-                                            />
-                                            Primary
-                                        </label>
                                         <Button
                                             isDisabled={!newAddress.trim() || addressAdding}
                                             onPress={() => void addAddress()}

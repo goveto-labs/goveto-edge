@@ -119,7 +119,6 @@ export interface ClusterMember {
 export interface NodeAddress {
     id: string;
     address: string;
-    primary: boolean;
 }
 
 export interface NodeSSH {

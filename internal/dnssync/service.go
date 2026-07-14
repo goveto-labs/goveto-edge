@@ -555,21 +555,12 @@ func (s *Service) desiredNodeRecords(
 		return nil, err
 	}
 	for _, currentNode := range nodes {
-		address, err := s.db.NodeAddress.Query().
-			Where(
-				query.NodeAddress.NodeId.Equals(currentNode.Id),
-				query.NodeAddress.Primary.Equals(true),
-			).
-			First(ctx)
+		addresses, err := s.db.NodeAddress.Query().
+			Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
+			OrderBy(query.NodeAddress.CreatedAt.Asc()).
+			Do(ctx)
 		if err != nil {
 			return nil, err
-		}
-		if address == nil || net.ParseIP(address.Address) == nil {
-			continue
-		}
-		recordType := model.DNSRecordTypeA
-		if strings.Contains(address.Address, ":") {
-			recordType = model.DNSRecordTypeAAAA
 		}
 		lineCodes := []string{"default"}
 		if supportsLines {
@@ -596,19 +587,28 @@ func (s *Service) desiredNodeRecords(
 				}
 			}
 		}
-		for _, lineCode := range lineCodes {
-			record := dnsprovider.Record{
-				Hostname: *cluster.PrimaryHostname,
-				Type:     recordType,
-				Value:    address.Address,
-				Line:     lineCode,
-				TTL:      config.DefaultTtl,
-				Proxied:  config.Proxied,
+		for _, address := range addresses {
+			if net.ParseIP(address.Address) == nil {
+				continue
 			}
-			key := nodeRecordKey(record)
-			if !seen[key] {
-				seen[key] = true
-				result = append(result, record)
+			recordType := model.DNSRecordTypeA
+			if strings.Contains(address.Address, ":") {
+				recordType = model.DNSRecordTypeAAAA
+			}
+			for _, lineCode := range lineCodes {
+				record := dnsprovider.Record{
+					Hostname: *cluster.PrimaryHostname,
+					Type:     recordType,
+					Value:    address.Address,
+					Line:     lineCode,
+					TTL:      config.DefaultTtl,
+					Proxied:  config.Proxied,
+				}
+				key := nodeRecordKey(record)
+				if !seen[key] {
+					seen[key] = true
+					result = append(result, record)
+				}
 			}
 		}
 	}
@@ -825,25 +825,12 @@ func (s *Service) desired(
 		if err := s.renewLease(ctx, jobID); err != nil {
 			return nil, err
 		}
-		address, err := s.db.NodeAddress.Query().
-			Where(
-				query.NodeAddress.NodeId.Equals(currentNode.Id),
-				query.NodeAddress.Primary.Equals(true),
-			).
-			First(ctx)
+		addresses, err := s.db.NodeAddress.Query().
+			Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
+			OrderBy(query.NodeAddress.CreatedAt.Asc()).
+			Do(ctx)
 		if err != nil {
 			return nil, err
-		}
-		if address == nil {
-			continue
-		}
-		ip := net.ParseIP(address.Address)
-		if ip == nil {
-			continue
-		}
-		recordType := model.DNSRecordTypeA
-		if strings.Contains(address.Address, ":") {
-			recordType = model.DNSRecordTypeAAAA
 		}
 
 		lines := []*model.DNSLine{nil}
@@ -871,26 +858,35 @@ func (s *Service) desired(
 				}
 			}
 		}
-		for _, line := range lines {
-			var lineID *string
-			lineCode := "default"
-			if line != nil {
-				lineID = &line.Id
-				lineCode = normalizeLineKey(line.ProviderCode)
+		for _, address := range addresses {
+			if net.ParseIP(address.Address) == nil {
+				continue
 			}
-			nodeID := currentNode.Id
-			result = append(result, desiredRecord{
-				Record: dnsprovider.Record{
-					Hostname: *cluster.PrimaryHostname,
-					Type:     recordType,
-					Value:    address.Address,
-					Line:     lineCode,
-					TTL:      config.DefaultTtl,
-					Proxied:  config.Proxied,
-				},
-				DNSLineID: lineID,
-				NodeID:    &nodeID,
-			})
+			recordType := model.DNSRecordTypeA
+			if strings.Contains(address.Address, ":") {
+				recordType = model.DNSRecordTypeAAAA
+			}
+			for _, line := range lines {
+				var lineID *string
+				lineCode := "default"
+				if line != nil {
+					lineID = &line.Id
+					lineCode = normalizeLineKey(line.ProviderCode)
+				}
+				nodeID := currentNode.Id
+				result = append(result, desiredRecord{
+					Record: dnsprovider.Record{
+						Hostname: *cluster.PrimaryHostname,
+						Type:     recordType,
+						Value:    address.Address,
+						Line:     lineCode,
+						TTL:      config.DefaultTtl,
+						Proxied:  config.Proxied,
+					},
+					DNSLineID: lineID,
+					NodeID:    &nodeID,
+				})
+			}
 		}
 	}
 

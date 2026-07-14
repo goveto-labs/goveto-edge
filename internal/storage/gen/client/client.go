@@ -13000,7 +13000,7 @@ func (a NodeActions) GroupBy(ctx context.Context, fields []string, opts ...query
 
 func quotedNodeAddressTable(c *Client) string { return c.quoteIdentifier("node_addresses") }
 func quotedNodeAddressColumns(c *Client) string {
-	cols := []string{"id", "node_id", "address", "primary", "created_at"}
+	cols := []string{"id", "node_id", "address", "created_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -13014,8 +13014,6 @@ func quoteNodeAddressField(c *Client, field string) (string, error) {
 	case "node_id":
 		return c.quoteIdentifier(field), nil
 	case "address":
-		return c.quoteIdentifier(field), nil
-	case "primary":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -13228,14 +13226,14 @@ func (b NodeAddressCreateManyBuilder) DoReturning(ctx context.Context) ([]model.
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeAddressCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "address", "primary", "created_at"})
+		q, args := b.action.buildNodeAddressCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "address", "created_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.NodeAddress
-			if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("NodeAddress.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -13262,7 +13260,7 @@ func (b NodeAddressCreateManyBuilder) DoReturningValues(ctx context.Context) ([]
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "node_id", "address", "primary", "created_at"}
+		returningColumns = []string{"id", "node_id", "address", "created_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -13514,7 +13512,7 @@ func (a NodeAddressActions) FindMany(ctx context.Context, opts ...query.NodeAddr
 	var results []model.NodeAddress
 	for rows.Next() {
 		var item model.NodeAddress
-		if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("NodeAddress.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -13546,7 +13544,7 @@ func (a NodeAddressActions) FindUnique(ctx context.Context, where query.NodeAddr
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.NodeAddress
-	if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -13577,7 +13575,7 @@ func (a NodeAddressActions) CreateOne(ctx context.Context, sets ...query.NodeAdd
 		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeAddress
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("NodeAddress.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -13596,7 +13594,7 @@ func (a NodeAddressActions) CreateMany(ctx context.Context, data []query.NodeAdd
 }
 
 func (a NodeAddressActions) buildNodeAddressCreateManySQL(data []query.NodeAddressCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "node_id", "address", "primary", "created_at"}
+	cols := []string{"id", "node_id", "address", "created_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -13669,7 +13667,7 @@ func (a NodeAddressActions) UpdateOne(ctx context.Context, where query.NodeAddre
 		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -13774,7 +13772,7 @@ func (a NodeAddressActions) UpsertOne(ctx context.Context, where query.NodeAddre
 		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("NodeAddress.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -13798,7 +13796,7 @@ func (a NodeAddressActions) DeleteOne(ctx context.Context, where query.NodeAddre
 		q += " RETURNING " + quotedNodeAddressColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeAddress
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.Primary, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Address, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

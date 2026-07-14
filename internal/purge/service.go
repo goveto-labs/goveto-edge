@@ -147,13 +147,14 @@ func (s *Service) targets(ctx context.Context, clusterID string) ([]target, erro
 		}
 
 		address, err := s.db.NodeAddress.Query().
-			Where(
-				query.NodeAddress.NodeId.Equals(n.Id),
-				query.NodeAddress.Primary.Equals(true),
-			).
+			Where(query.NodeAddress.NodeId.Equals(n.Id)).
+			OrderBy(query.NodeAddress.CreatedAt.Asc()).
 			First(ctx)
 		if err != nil {
 			return nil, err
+		}
+		if address == nil {
+			continue
 		}
 
 		credential, err := s.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))

@@ -496,15 +496,16 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		}
 
 		addresses, addressErr := db.NodeAddress.Query().
-			Where(
-				query.NodeAddress.NodeId.Equals(n.Id),
-				query.NodeAddress.Primary.Equals(true),
-			).
+			Where(query.NodeAddress.NodeId.Equals(n.Id)).
+			OrderBy(query.NodeAddress.CreatedAt.Asc()).
 			First(ctx)
-		_, credentialErr := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
-		if addressErr != nil || addresses == nil {
-			return config, nil, errors.New("node " + n.Id + " has no primary address")
+		if addressErr != nil {
+			return config, nil, addressErr
 		}
+		if addresses == nil {
+			continue
+		}
+		_, credentialErr := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
 		if credentialErr != nil {
 			return config, nil, errors.New("node " + n.Id + " has no communication credential")
 		}
