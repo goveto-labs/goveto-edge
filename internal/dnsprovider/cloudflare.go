@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+
+	"goveto-edge/internal/storage/gen/model"
 )
 
 type cloudflare struct {
@@ -17,6 +19,50 @@ type cloudflare struct {
 }
 
 func (*cloudflare) SupportsLines() bool { return false }
+
+func (c *cloudflare) ListRecords(ctx context.Context, hostname string) ([]Record, error) {
+	if _, err := RelativeName(hostname, c.zone); err != nil {
+		return nil, err
+	}
+	result := make([]Record, 0)
+	for page := 1; ; page++ {
+		var response struct {
+			Result []struct {
+				ID      string `json:"id"`
+				Name    string `json:"name"`
+				Type    string `json:"type"`
+				Content string `json:"content"`
+				TTL     int    `json:"ttl"`
+				Proxied bool   `json:"proxied"`
+			} `json:"result"`
+			ResultInfo struct {
+				TotalPages int `json:"total_pages"`
+			} `json:"result_info"`
+		}
+		path := fmt.Sprintf(
+			"/zones/%s/dns_records?per_page=100&page=%d&name=%s",
+			c.zoneID,
+			page,
+			url.QueryEscape(hostname),
+		)
+		if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.Result {
+			if item.Name != hostname || (item.Type != string(model.DNSRecordTypeA) && item.Type != string(model.DNSRecordTypeAAAA)) {
+				continue
+			}
+			result = append(result, Record{
+				ID: item.ID, Hostname: hostname, Type: model.DNSRecordType(item.Type),
+				Value: item.Content, Line: "default", TTL: item.TTL, Proxied: item.Proxied,
+			})
+		}
+		if len(response.Result) == 0 || response.ResultInfo.TotalPages == 0 || page >= response.ResultInfo.TotalPages {
+			break
+		}
+	}
+	return result, nil
+}
 
 func (c *cloudflare) ListDomains(ctx context.Context) ([]Domain, error) {
 	result := make([]Domain, 0)

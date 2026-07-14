@@ -45,11 +45,6 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 
 		var created *model.NodeAddress
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			if input.Primary && dnsService != nil {
-				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
-					return err
-				}
-			}
 			if input.Primary {
 				if _, err := tx.NodeAddress.Update().
 					Where(query.NodeAddress.NodeId.Equals(node.Id)).
@@ -67,27 +62,15 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 				).
 				Do(ctx)
 			created = item
-			if err != nil || !input.Primary || dnsService == nil {
-				return err
-			}
-			config, err := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(node.ClusterId),
-			)
-			if err != nil || config == nil || !config.Enabled {
-				return err
-			}
-			_, err = dnsService.EnqueueTx(
-				ctx,
-				tx,
-				node.ClusterId,
-				nil,
-				model.DNSSyncActionUPSERT_CLUSTER,
-			)
 			return err
 		})
 		if err != nil {
 			return err
+		}
+		if input.Primary && dnsService != nil {
+			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
+				return err
+			}
 		}
 		return types.JSON(c, http.StatusCreated, types.NewNodeAddress(created))
 	}

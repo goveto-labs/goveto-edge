@@ -24,6 +24,7 @@ type Record struct {
 type Provider interface {
 	Upsert(context.Context, Record) (string, error)
 	Delete(context.Context, Record) error
+	ListRecords(context.Context, string) ([]Record, error)
 	SupportsLines() bool
 }
 

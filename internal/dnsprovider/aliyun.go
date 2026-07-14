@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"goveto-edge/internal/storage/gen/model"
 )
 
 type aliyun struct {
@@ -24,6 +26,50 @@ type aliyun struct {
 }
 
 func (*aliyun) SupportsLines() bool { return true }
+
+func (a *aliyun) ListRecords(ctx context.Context, hostname string) ([]Record, error) {
+	rr, err := RelativeName(hostname, a.zone)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]Record, 0)
+	for page := 1; ; page++ {
+		var response struct {
+			TotalCount    int `json:"TotalCount"`
+			DomainRecords struct {
+				Record []struct {
+					ID    string `json:"RecordId"`
+					RR    string `json:"RR"`
+					Type  string `json:"Type"`
+					Value string `json:"Value"`
+					Line  string `json:"Line"`
+					TTL   int    `json:"TTL"`
+				} `json:"Record"`
+			} `json:"DomainRecords"`
+		}
+		if err := a.call(ctx, "DescribeDomainRecords", url.Values{
+			"DomainName": {a.zone},
+			"PageNumber": {fmt.Sprint(page)},
+			"PageSize":   {"500"},
+			"RRKeyWord":  {rr},
+		}, &response); err != nil {
+			return nil, err
+		}
+		for _, item := range response.DomainRecords.Record {
+			if item.RR != rr || (item.Type != string(model.DNSRecordTypeA) && item.Type != string(model.DNSRecordTypeAAAA)) {
+				continue
+			}
+			result = append(result, Record{
+				ID: item.ID, Hostname: hostname, Type: model.DNSRecordType(item.Type),
+				Value: item.Value, Line: lineOrDefault(item.Line), TTL: item.TTL,
+			})
+		}
+		if len(response.DomainRecords.Record) == 0 || page*500 >= response.TotalCount {
+			break
+		}
+	}
+	return result, nil
+}
 
 func (a *aliyun) ListDomains(ctx context.Context) ([]Domain, error) {
 	result := make([]Domain, 0)

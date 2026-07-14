@@ -127,12 +127,20 @@ func (s *Service) CancelActiveTx(ctx context.Context, db *client.Client, cluster
 	return err
 }
 
-func (s *Service) EnqueueIfConfigured(
+// EnqueueNodeIPIfChanged compares the desired node A/AAAA records with the
+// provider before creating a job. Equal sets, including two empty sets, are a
+// no-op.
+func (s *Service) EnqueueNodeIPIfChanged(
 	ctx context.Context,
 	clusterID string,
-	siteID *string,
-	action model.DNSSyncAction,
 ) (*model.DNSSyncJob, error) {
+	cluster, err := s.db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+	if err != nil {
+		return nil, err
+	}
+	if cluster == nil || cluster.PrimaryHostname == nil || *cluster.PrimaryHostname == "" {
+		return nil, nil
+	}
 	config, err := s.db.DNSProviderConfig.FindUnique(
 		ctx,
 		query.DNSProviderConfig.ClusterId.Equals(clusterID),
@@ -143,7 +151,32 @@ func (s *Service) EnqueueIfConfigured(
 	if config == nil || !config.Enabled {
 		return nil, nil
 	}
-	return s.Enqueue(ctx, clusterID, siteID, action)
+	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt DNS credentials: %w", err)
+	}
+	provider, err := dnsprovider.New(
+		config.Provider,
+		config.Zone,
+		value(config.ZoneId),
+		[]byte(plain),
+		s.httpClient,
+	)
+	if err != nil {
+		return nil, err
+	}
+	desired, err := s.desiredNodeRecords(ctx, cluster, config, provider.SupportsLines())
+	if err != nil {
+		return nil, err
+	}
+	remote, err := provider.ListRecords(ctx, *cluster.PrimaryHostname)
+	if err != nil {
+		return nil, err
+	}
+	if sameRecordSet(desired, remote) {
+		return nil, nil
+	}
+	return s.Enqueue(ctx, clusterID, nil, model.DNSSyncActionUPSERT_CLUSTER)
 }
 
 // DeleteConfiguration synchronously removes records managed by this service and
@@ -309,7 +342,7 @@ func (s *Service) enqueuePeriodic(ctx context.Context) {
 		return
 	}
 	for _, config := range configs {
-		_, _ = s.Enqueue(ctx, config.ClusterId, nil, model.DNSSyncActionUPSERT_CLUSTER)
+		_, _ = s.EnqueueNodeIPIfChanged(ctx, config.ClusterId)
 	}
 }
 
@@ -504,6 +537,145 @@ type desiredRecord struct {
 	SiteDomainID, DNSLineID, NodeID *string
 }
 
+func (s *Service) desiredNodeRecords(
+	ctx context.Context,
+	cluster *model.Cluster,
+	config *model.DNSProviderConfig,
+	supportsLines bool,
+) ([]dnsprovider.Record, error) {
+	result := make([]dnsprovider.Record, 0)
+	seen := map[string]bool{}
+	nodes, err := s.db.Node.Query().
+		Where(
+			query.Node.ClusterId.Equals(cluster.Id),
+			query.Node.Status.Equals(model.NodeStatusONLINE),
+		).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, currentNode := range nodes {
+		address, err := s.db.NodeAddress.Query().
+			Where(
+				query.NodeAddress.NodeId.Equals(currentNode.Id),
+				query.NodeAddress.Primary.Equals(true),
+			).
+			First(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if address == nil || net.ParseIP(address.Address) == nil {
+			continue
+		}
+		recordType := model.DNSRecordTypeA
+		if strings.Contains(address.Address, ":") {
+			recordType = model.DNSRecordTypeAAAA
+		}
+		lineCodes := []string{"default"}
+		if supportsLines {
+			links, err := s.db.NodeDNSLine.Query().
+				Where(query.NodeDNSLine.NodeId.Equals(currentNode.Id)).
+				Do(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if len(links) > 0 {
+				lineCodes = make([]string, 0, len(links))
+				for _, link := range links {
+					line, err := s.db.DNSLine.FindUnique(
+						ctx,
+						query.DNSLine.Id.Equals(link.DnsLineId),
+					)
+					if err != nil {
+						return nil, err
+					}
+					if line == nil {
+						return nil, fmt.Errorf("DNS line %q not found", link.DnsLineId)
+					}
+					lineCodes = append(lineCodes, normalizeLineKey(line.ProviderCode))
+				}
+			}
+		}
+		for _, lineCode := range lineCodes {
+			record := dnsprovider.Record{
+				Hostname: *cluster.PrimaryHostname,
+				Type:     recordType,
+				Value:    address.Address,
+				Line:     lineCode,
+				TTL:      config.DefaultTtl,
+				Proxied:  config.Proxied,
+			}
+			key := nodeRecordKey(record)
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, record)
+			}
+		}
+	}
+	return result, nil
+}
+
+func sameRecordSet(desired, remote []dnsprovider.Record) bool {
+	desiredSet := map[string]bool{}
+	for _, record := range desired {
+		desiredSet[nodeRecordKey(record)] = true
+	}
+	remoteCounts := map[string]int{}
+	for _, record := range remote {
+		remoteCounts[nodeRecordKey(record)]++
+	}
+	if len(desiredSet) != len(remoteCounts) {
+		return false
+	}
+	for key := range desiredSet {
+		if remoteCounts[key] != 1 {
+			return false
+		}
+	}
+	return true
+}
+
+func syncRemoteNodeRecords(
+	ctx context.Context,
+	provider dnsprovider.Provider,
+	hostname string,
+	desired []dnsprovider.Record,
+) error {
+	remote, err := provider.ListRecords(ctx, hostname)
+	if err != nil {
+		return err
+	}
+	desiredSet := map[string]bool{}
+	for _, record := range desired {
+		desiredSet[nodeRecordKey(record)] = true
+	}
+	kept := map[string]bool{}
+	var errs []error
+	for _, record := range remote {
+		key := nodeRecordKey(record)
+		if desiredSet[key] && !kept[key] {
+			kept[key] = true
+			continue
+		}
+		if err := provider.Delete(ctx, record); err != nil {
+			errs = append(errs, fmt.Errorf("delete stale node DNS record %s: %w", record.Value, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func nodeRecordKey(record dnsprovider.Record) string {
+	value := strings.TrimSpace(record.Value)
+	if ip := net.ParseIP(value); ip != nil {
+		value = ip.String()
+	}
+	return strings.Join([]string{
+		string(record.Type),
+		value,
+		normalizeLineKey(record.Line),
+	}, "\x00")
+}
+
 func (s *Service) reconcile(ctx context.Context, jobID, clusterID string) error {
 	cluster, err := s.db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
 	if err != nil {
@@ -546,7 +718,16 @@ func (s *Service) reconcile(ctx context.Context, jobID, clusterID string) error 
 	if err != nil {
 		return err
 	}
-	return s.apply(ctx, jobID, clusterID, provider, desired)
+	if err := s.apply(ctx, jobID, clusterID, provider, desired); err != nil {
+		return err
+	}
+	nodeRecords := make([]dnsprovider.Record, 0)
+	for _, record := range desired {
+		if record.NodeID != nil {
+			nodeRecords = append(nodeRecords, record.Record)
+		}
+	}
+	return syncRemoteNodeRecords(ctx, provider, *cluster.PrimaryHostname, nodeRecords)
 }
 
 func (s *Service) deleteAll(ctx context.Context, jobID, clusterID string) error {

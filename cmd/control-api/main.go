@@ -19,7 +19,6 @@ import (
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/storage"
-	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/schema"
 )
 
@@ -103,12 +102,7 @@ func main() {
 		45*time.Second,
 		func(callbackCtx context.Context, clusterID string) {
 			go func() {
-				_, _ = dnsService.EnqueueIfConfigured(
-					callbackCtx,
-					clusterID,
-					nil,
-					model.DNSSyncActionUPSERT_CLUSTER,
-				)
+				_, _ = dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID)
 			}()
 		},
 	).Run(ctx)

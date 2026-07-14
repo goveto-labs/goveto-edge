@@ -79,6 +79,21 @@ func TestCloudflareRejectsRecordOutsideZone(t *testing.T) {
 	}
 }
 
+func TestCloudflareListsNodeRecords(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		body := `{"success":true,"result":[{"id":"a-1","name":"edge.example.com","type":"A","content":"192.0.2.1","ttl":300,"proxied":false},{"id":"txt-1","name":"edge.example.com","type":"TXT","content":"ignore"}],"result_info":{"total_pages":1}}`
+		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	provider, err := New(model.DNSProviderTypeCLOUDFLARE, "example.com", "zone-1", []byte(`{"api_token":"secret"}`), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := provider.ListRecords(context.Background(), "edge.example.com")
+	if err != nil || len(records) != 1 || records[0].Value != "192.0.2.1" {
+		t.Fatalf("records=%#v err=%v", records, err)
+	}
+}
+
 func TestAliyunRequestIsSigned(t *testing.T) {
 	requests := 0
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -109,6 +124,25 @@ func TestAliyunRequestIsSigned(t *testing.T) {
 	}
 	if !provider.SupportsLines() {
 		t.Fatal("Aliyun should support regional lines")
+	}
+}
+
+func TestAliyunListsNodeRecords(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		query := request.URL.Query()
+		if query.Get("Action") != "DescribeDomainRecords" || query.Get("RRKeyWord") != "edge" {
+			t.Fatalf("unexpected request: %s", request.URL.String())
+		}
+		body := `{"TotalCount":2,"DomainRecords":{"Record":[{"RecordId":"a-1","RR":"edge","Type":"A","Value":"192.0.2.1","Line":"telecom","TTL":300},{"RecordId":"txt-1","RR":"edge","Type":"TXT","Value":"ignore"}]}}`
+		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	provider, err := New(model.DNSProviderTypeALIYUN, "example.com", "", []byte(`{"access_key_id":"key","access_key_secret":"secret"}`), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err := provider.ListRecords(context.Background(), "edge.example.com")
+	if err != nil || len(records) != 1 || records[0].Line != "telecom" {
+		t.Fatalf("records=%#v err=%v", records, err)
 	}
 }
 

@@ -35,7 +35,7 @@ export const dnsApi = (clusterId: string) => {
         refresh: () => post<DNSConfigResponse>(`${base}/refresh`),
         records: () => get<DNSManagedRecord[]>(`${base}/records`),
         jobs: () => get<DNSSyncJob[]>(`${base}/jobs`),
-        sync: () => post<DNSSyncJob>(`${base}/sync`),
+        sync: () => post<DNSSyncJob | null>(`${base}/sync`),
         discoverDomains: (payload: DNSDiscoveryRequest) =>
             post<DNSProviderDomain[]>(`${base}/discovery/domains`, payload),
     };

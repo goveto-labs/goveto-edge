@@ -10,7 +10,6 @@ import (
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
-	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
@@ -29,11 +28,6 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *d
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
 		if err := db.Tx(ctx, func(tx *client.Client) error {
-			if dnsService != nil {
-				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
-					return err
-				}
-			}
 			if _, err := tx.DNSManagedRecord.Update().
 				Where(query.DNSManagedRecord.NodeId.Equals(&nodeID)).
 				Set(
@@ -67,26 +61,14 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *d
 			if _, err := tx.Node.Delete().Where(query.Node.Id.Equals(nodeID)).DoMany(ctx); err != nil {
 				return err
 			}
-			if dnsService == nil {
-				return nil
-			}
-			config, err := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(node.ClusterId),
-			)
-			if err != nil || config == nil || !config.Enabled {
-				return err
-			}
-			_, err = dnsService.EnqueueTx(
-				ctx,
-				tx,
-				node.ClusterId,
-				nil,
-				model.DNSSyncActionUPSERT_CLUSTER,
-			)
-			return err
+			return nil
 		}); err != nil {
 			return err
+		}
+		if dnsService != nil {
+			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
+				return err
+			}
 		}
 		_ = queue.Delete(ctx, nodeID)
 		return types.JSON(c, http.StatusOK, nil)

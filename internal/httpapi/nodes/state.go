@@ -55,11 +55,6 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 			}
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			if dnsService != nil {
-				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
-					return err
-				}
-			}
 			if _, err := tx.NodeDNSLine.Delete().Where(query.NodeDNSLine.NodeId.Equals(node.Id)).DoMany(ctx); err != nil {
 				return err
 			}
@@ -68,9 +63,12 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 					return err
 				}
 			}
-			return enqueueDNSIfConfiguredTx(ctx, tx, dnsService, node.ClusterId)
+			return nil
 		})
 		if err != nil {
+			return err
+		}
+		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, dnsLinesResponse{NodeID: node.Id, DNSLineIDs: input.DNSLineIDs})
@@ -91,17 +89,15 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 			return echo.NewHTTPError(http.StatusConflict, "only a disabled node can be enabled")
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			if dnsService != nil {
-				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
-					return err
-				}
-			}
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusOFFLINE), query.Node.HeartbeatAt.SetNull()).Do(ctx); err != nil {
 				return err
 			}
-			return enqueueDNSIfConfiguredTx(ctx, tx, dnsService, node.ClusterId)
+			return nil
 		})
 		if err != nil {
+			return err
+		}
+		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusAccepted, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "waiting for health check"})
@@ -125,17 +121,15 @@ func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFun
 			return echo.NewHTTPError(http.StatusConflict, "node cannot be disabled while installation is pending")
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			if dnsService != nil {
-				if err := dnssync.LockClusterTx(ctx, tx, node.ClusterId); err != nil {
-					return err
-				}
-			}
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusDISABLED)).Do(ctx); err != nil {
 				return err
 			}
-			return enqueueDNSIfConfiguredTx(ctx, tx, dnsService, node.ClusterId)
+			return nil
 		})
 		if err != nil {
+			return err
+		}
+		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusDISABLED})
@@ -153,14 +147,10 @@ func nodeInCluster(ctx context.Context, db *client.Client, clusterID, nodeID str
 	return node, nil
 }
 
-func enqueueDNSIfConfiguredTx(ctx context.Context, tx *client.Client, service *dnssync.Service, clusterID string) error {
+func enqueueDNSIfChanged(ctx context.Context, service *dnssync.Service, clusterID string) error {
 	if service == nil {
 		return nil
 	}
-	config, err := tx.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
-	if err != nil || config == nil || !config.Enabled {
-		return err
-	}
-	_, err = service.EnqueueTx(ctx, tx, clusterID, nil, model.DNSSyncActionUPSERT_CLUSTER)
+	_, err := service.EnqueueNodeIPIfChanged(ctx, clusterID)
 	return err
 }

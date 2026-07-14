@@ -593,55 +593,19 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 }
 
 // @summary Sync DNS now
-// @description Enqueue an immediate DNS reconciliation job.
+// @description Compare desired node IP records with the provider and enqueue only when they differ.
 // @Tags dns
 func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := requireOwner(c, db); err != nil {
 			return err
 		}
-		ctx := c.Request().Context()
-		clusterID := c.Param("cluster_id")
-		var job *model.DNSSyncJob
-		err := db.Tx(ctx, func(tx *client.Client) error {
-			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
-				return lockErr
-			}
-			config, findErr := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
-			if findErr != nil {
-				return findErr
-			}
-			if config == nil {
-				return echo.NewHTTPError(http.StatusConflict, "DNS provider is not configured")
-			}
-			if !config.Enabled {
-				return echo.NewHTTPError(http.StatusConflict, "DNS provider is disabled")
-			}
-			cluster, findErr := tx.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
-			if findErr != nil {
-				return findErr
-			}
-			if cluster == nil || cluster.PrimaryHostname == nil || *cluster.PrimaryHostname == "" {
-				return echo.NewHTTPError(
-					http.StatusConflict,
-					"cluster primary hostname is not configured",
-				)
-			}
-			var enqueueErr error
-			job, enqueueErr = service.EnqueueTx(
-				ctx,
-				tx,
-				clusterID,
-				nil,
-				model.DNSSyncActionUPSERT_CLUSTER,
-			)
-			return enqueueErr
-		})
+		job, err := service.EnqueueNodeIPIfChanged(c.Request().Context(), c.Param("cluster_id"))
 		if err != nil {
 			return err
+		}
+		if job == nil {
+			return types.JSON(c, http.StatusOK, nil)
 		}
 		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
 	}
