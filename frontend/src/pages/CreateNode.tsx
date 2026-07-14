@@ -112,7 +112,7 @@ export default function CreateNode() {
     }
 
     return (
-        <div className='mx-auto max-w-3xl space-y-6'>
+        <div className='space-y-6'>
             <PageHeader
                 actions={
                     <Button variant='ghost' onPress={() => navigate('/nodes')}>
