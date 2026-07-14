@@ -980,7 +980,7 @@ paths:
         post:
             operationId: createLine
             summary: Create DNS line
-            description: Create a DNS line and enqueue reconciliation when managed DNS is enabled.
+            description: Create a DNS line without creating a synchronization job.
             tags:
                 - dns
             security:
@@ -1033,7 +1033,7 @@ paths:
         delete:
             operationId: deleteLine
             summary: Delete DNS line
-            description: Delete a DNS line and enqueue reconciliation when managed DNS is enabled.
+            description: Delete a DNS line without creating a synchronization job.
             tags:
                 - dns
             security:
@@ -1137,7 +1137,7 @@ paths:
         post:
             operationId: syncNow
             summary: Sync DNS now
-            description: Enqueue an immediate DNS reconciliation job.
+            description: Compare desired node IP records with the provider and enqueue only when they differ.
             tags:
                 - dns
             security:
@@ -1153,6 +1153,17 @@ paths:
                   schema:
                     type: string
             responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
                 "202":
                     description: OK
                     content:
@@ -1395,14 +1406,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: object
-                                        properties:
-                                            id:
-                                                type: string
-                                            status:
-                                                type: string
-                                                enum:
-                                                    - PENDING
+                                        $ref: '#/components/schemas/types_Node'
     /api/v1/clusters/{cluster_id}/nodes/{node_id}:
         get:
             operationId: get
@@ -1777,6 +1781,104 @@ paths:
                                                 type: string
                                                 enum:
                                                     - OFFLINE
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/reinstall:
+        post:
+            operationId: reinstall
+            summary: Reinstall node agent
+            description: Test one-time SSH credentials and enqueue agent reinstallation for an existing node.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                force:
+                                    type: boolean
+                                ssh:
+                                    $ref: '#/components/schemas/node_SSHInstallInput'
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_Node'
+    /api/v1/clusters/{cluster_id}/nodes/test-connection:
+        post:
+            operationId: testConnection
+            summary: Test node SSH connection
+            description: Validate SSH credentials and detect the remote architecture without creating a node.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                ssh:
+                                    $ref: '#/components/schemas/node_SSHInstallInput'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            architecture:
+                                                type: string
+                                            ok:
+                                                type: boolean
+                                                enum:
+                                                    - true
     /api/v1/clusters/{cluster_id}/publish/events:
         get:
             operationId: clusterEvents
@@ -2977,6 +3079,10 @@ components:
                     type: string
                 name:
                     type: string
+                parent_code:
+                    type: string
+                sort_order:
+                    type: number
         model_AuditLog:
             type: object
             properties:
@@ -3213,10 +3319,14 @@ components:
                         $ref: '#/components/schemas/model_NodeDNSLine'
                 providerCode:
                     type: string
+                providerParentCode:
+                    type: string
                 records:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_DNSManagedRecord'
+                sortOrder:
+                    type: number
                 updatedAt:
                     type: string
                     format: date-time
@@ -3388,6 +3498,8 @@ components:
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 id:
+                    type: string
+                installError:
                     type: string
                 name:
                     type: string
@@ -4020,8 +4132,6 @@ components:
         sites_createResponse:
             type: object
             properties:
-                dns_sync_job:
-                    $ref: '#/components/schemas/types_DNSJob'
                 id:
                     type: string
                 name:
@@ -4187,6 +4297,8 @@ components:
                     items:
                         $ref: '#/components/schemas/types_NodeGroupMembership'
                 id:
+                    type: string
+                installError:
                     type: string
                 name:
                     type: string

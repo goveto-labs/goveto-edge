@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -31,6 +32,7 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", updateDNSLines(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 
@@ -41,6 +43,11 @@ type testConnectionRequest struct {
 type testConnectionResponse struct {
 	OK           bool   `json:"ok"`
 	Architecture string `json:"architecture"`
+}
+
+type reinstallRequest struct {
+	SSH   nodedomain.SSHInstallInput `json:"ssh"`
+	Force bool                       `json:"force"`
 }
 
 // @summary Test node SSH connection
@@ -60,6 +67,85 @@ func testConnection() echo.HandlerFunc {
 			OK:           true,
 			Architecture: architecture,
 		})
+	}
+}
+
+// @summary Reinstall node agent
+// @description Test one-time SSH credentials and enqueue agent reinstallation for an existing node.
+// @Tags nodes
+func reinstall(
+	db *client.Client,
+	queue *nodedomain.InstallQueue,
+	cipher *nodedomain.CredentialCipher,
+) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input reinstallRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		ctx := c.Request().Context()
+		node, err := db.Node.FindUnique(ctx, query.Node.Id.Equals(c.Param("node_id")))
+		if err != nil {
+			return err
+		}
+		if node == nil || node.ClusterId != c.Param("cluster_id") {
+			return echo.NewHTTPError(http.StatusNotFound, "node not found")
+		}
+		if (node.Status == model.NodeStatusPENDING || node.Status == model.NodeStatusINSTALLING) && !input.Force {
+			return echo.NewHTTPError(http.StatusConflict, "node installation is already in progress")
+		}
+		if _, err := nodedomain.TestSSHConnection(ctx, input.SSH); err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
+		}
+		credential, err := db.NodeCredential.FindUnique(
+			ctx,
+			query.NodeCredential.NodeId.Equals(node.Id),
+		)
+		if err != nil {
+			return err
+		}
+		if credential == nil {
+			return echo.NewHTTPError(http.StatusConflict, "node communication credential is missing")
+		}
+		communicationKey, err := cipher.Decrypt(credential.CommunicationKeyEncrypted)
+		if err != nil {
+			return err
+		}
+		if input.Force {
+			_ = queue.Delete(ctx, node.Id)
+		}
+		if _, err := db.Node.Update().
+			Where(query.Node.Id.Equals(node.Id)).
+			Set(
+				query.Node.Status.Set(model.NodeStatusPENDING),
+				query.Node.InstallError.SetNull(),
+				query.Node.HeartbeatAt.SetNull(),
+			).
+			Do(ctx); err != nil {
+			return err
+		}
+		if err := queue.Enqueue(ctx, node.Id, nodedomain.InstallPayload{
+			NodeID:           node.Id,
+			CommunicationKey: communicationKey,
+			SSH:              input.SSH,
+		}); err != nil {
+			message := "unable to queue node reinstallation: " + err.Error()
+			_, _ = db.Node.Update().
+				Where(query.Node.Id.Equals(node.Id)).
+				Set(
+					query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+					query.Node.InstallError.Set(message),
+				).
+				DoMany(ctx)
+			return echo.NewHTTPError(http.StatusServiceUnavailable, message)
+		}
+		node.Status = model.NodeStatusPENDING
+		node.InstallError = nil
+		node.HeartbeatAt = nil
+		if err := loadNodeRelations(ctx, db, node, true); err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusAccepted, types.NewNode(node))
 	}
 }
 
@@ -181,21 +267,24 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "unable to queue node installation")
 		}
 
-		created, err := db.Node.Query().
-			Where(query.Node.Id.Equals(nodeID)).
-			Include(
-				query.Node.Addresses.Fetch(),
-				query.Node.DnsLines.Fetch(),
-				query.Node.GroupMemberships.Fetch(),
-				query.Node.RegionMemberships.Fetch(),
-			).
-			First(ctx)
+		created, err := db.Node.FindUnique(ctx, query.Node.Id.Equals(nodeID))
 		if err != nil {
 			return err
 		}
 		if created == nil {
 			return echo.NewHTTPError(http.StatusInternalServerError, "created node was not found")
 		}
+		if err := loadNodeRelations(ctx, db, created, true); err != nil {
+			return err
+		}
+		slog.Info(
+			"node created with relations",
+			"node_id", created.Id,
+			"address_count", len(created.Addresses),
+			"dns_line_count", len(created.DnsLines),
+			"group_count", len(created.GroupMemberships),
+			"region_count", len(created.RegionMemberships),
+		)
 		return types.JSON(c, http.StatusAccepted, types.NewNode(created))
 	}
 }

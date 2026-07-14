@@ -1,6 +1,11 @@
 package node
 
-import "testing"
+import (
+	"bufio"
+	"bytes"
+	"strings"
+	"testing"
+)
 
 func TestShellQuote(t *testing.T) {
 	if got, want := shellQuote("it's safe"), `'it'\''s safe'`; got != want {
@@ -26,5 +31,24 @@ func TestCommandOutputSuffix(t *testing.T) {
 	}
 	if got := commandOutputSuffix(nil); got != "" {
 		t.Fatalf("empty commandOutputSuffix() = %q", got)
+	}
+}
+
+func TestPrivilegedCommandPrefix(t *testing.T) {
+	if got := privilegedCommandPrefix("root"); got != "" {
+		t.Fatalf("root prefix=%q", got)
+	}
+	if got := privilegedCommandPrefix("ubuntu"); got != "sudo " {
+		t.Fatalf("non-root prefix=%q", got)
+	}
+}
+
+func TestReadSCPAck(t *testing.T) {
+	if err := readSCPAck(bufio.NewReader(bytes.NewReader([]byte{0}))); err != nil {
+		t.Fatal(err)
+	}
+	err := readSCPAck(bufio.NewReader(strings.NewReader("\x01scp unavailable\n")))
+	if err == nil || !strings.Contains(err.Error(), "scp unavailable") {
+		t.Fatalf("unexpected SCP error: %v", err)
 	}
 }

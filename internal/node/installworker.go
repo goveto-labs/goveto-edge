@@ -1,12 +1,14 @@
 package node
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
+	"log/slog"
 	"net"
+	"path"
 	"strings"
 	"time"
 
@@ -56,12 +58,20 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 	if err == nil && claimed == 0 {
 		return
 	}
+	slog.Info(
+		"node installation claimed",
+		"node_id", payload.NodeID,
+		"ssh_host", payload.SSH.EntryIP,
+		"ssh_port", payload.SSH.Port,
+		"ssh_user", payload.SSH.User,
+	)
 
 	if err == nil {
 		err = w.install(ctx, *payload)
 	}
 	if err != nil {
 		message := installErrorMessage(err)
+		slog.Error("node installation failed", "node_id", payload.NodeID, "error", message)
 		_, _ = w.db.Node.Update().
 			Where(query.Node.Id.Equals(payload.NodeID)).
 			Set(
@@ -69,19 +79,45 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 				query.Node.InstallError.Set(message),
 			).
 			DoMany(ctx)
+		return
 	}
+	if _, updateErr := w.db.Node.Update().
+		Where(query.Node.Id.Equals(payload.NodeID)).
+		Set(
+			query.Node.Status.Set(model.NodeStatusOFFLINE),
+			query.Node.InstallError.SetNull(),
+		).
+		DoMany(ctx); updateErr != nil {
+		slog.Error(
+			"node installation completed but status update failed",
+			"node_id", payload.NodeID,
+			"error", updateErr,
+		)
+		return
+	}
+	slog.Info("node installation commands completed", "node_id", payload.NodeID)
 }
 func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) error {
-	connection, err := connectSSH(payload.SSH)
+	logger := slog.With(
+		"node_id", payload.NodeID,
+		"ssh_target", net.JoinHostPort(payload.SSH.EntryIP, fmt.Sprint(payload.SSH.Port)),
+	)
+	installCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+	defer cancel()
+	logger.Info("connecting to node over SSH")
+	connection, err := connectSSH(installCtx, payload.SSH)
 	if err != nil {
 		return err
 	}
 	defer connection.Close()
+	logger.Info("SSH connection established")
 
-	arch, err := remoteArchitecture(connection)
+	logger.Info("detecting remote architecture", "command", "uname -m")
+	arch, err := remoteArchitecture(installCtx, connection)
 	if err != nil {
 		return fmt.Errorf("detect remote architecture: %w", err)
 	}
+	logger.Info("remote architecture detected", "architecture", arch)
 
 	binary, err := staticassets.AgentBinary(arch)
 	if err != nil {
@@ -103,57 +139,50 @@ RestartSec=3
 WantedBy=multi-user.target
 	`
 
-	if err := upload(connection, "/tmp/goveto-edge-agent", binary, 0755); err != nil {
+	logger.Info("uploading agent with SCP", "path", "/tmp/goveto-edge-agent", "bytes", len(binary))
+	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-agent", binary, 0755, 5*time.Minute); err != nil {
 		return fmt.Errorf("upload agent binary: %w", err)
 	}
-	if err := upload(connection, "/tmp/goveto-edge-identity.json", identity, 0600); err != nil {
+	logger.Info("agent upload completed", "path", "/tmp/goveto-edge-agent")
+	logger.Info("uploading node identity with SCP", "path", "/tmp/goveto-edge-identity.json", "bytes", len(identity))
+	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-identity.json", identity, 0600, 30*time.Second); err != nil {
 		return fmt.Errorf("upload node identity: %w", err)
 	}
-	if err := upload(connection, "/tmp/goveto-edge-agent.service", []byte(unit), 0644); err != nil {
+	logger.Info("node identity upload completed", "path", "/tmp/goveto-edge-identity.json")
+	logger.Info("uploading systemd unit with SCP", "path", "/tmp/goveto-edge-agent.service", "bytes", len(unit))
+	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-agent.service", []byte(unit), 0644, 30*time.Second); err != nil {
 		return fmt.Errorf("upload systemd service: %w", err)
 	}
+	logger.Info("systemd unit upload completed", "path", "/tmp/goveto-edge-agent.service")
 
-	script := `set -eu
-sudo install -d -m 0700 /opt/goveto-edge/agent
-sudo install -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
-sudo install -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
-sudo install -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now goveto-edge-agent
-`
+	privileged := privilegedCommandPrefix(payload.SSH.User)
+	script := fmt.Sprintf(`set -eu
+%sinstall -d -m 0700 /opt/goveto-edge/agent
+%sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
+%sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
+%sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
+%ssystemctl daemon-reload
+%ssystemctl enable --now goveto-edge-agent
+`, privileged, privileged, privileged, privileged, privileged, privileged)
+	logger.Info("running remote installation script", "command", script)
 
-	session, err := connection.NewSession()
+	output, err := runRemoteCommand(
+		installCtx,
+		connection,
+		2*time.Minute,
+		"sh -c "+shellQuote(script),
+	)
 	if err != nil {
-		return fmt.Errorf("open installation SSH session: %w", err)
+		return fmt.Errorf("install and start agent service: %w%s", err, commandOutputSuffix(output))
 	}
-	defer session.Close()
-
-	type commandResult struct {
-		output []byte
-		err    error
+	if strings.TrimSpace(string(output)) != "" {
+		logger.Info("remote installation output", "output", strings.TrimSpace(string(output)))
 	}
-	done := make(chan commandResult, 1)
-	go func() {
-		output, runErr := session.CombinedOutput("sh -c " + shellQuote(script))
-		done <- commandResult{output: output, err: runErr}
-	}()
-	select {
-	case <-ctx.Done():
-		_ = session.Signal(ssh.SIGKILL)
-		return ctx.Err()
-	case result := <-done:
-		if result.err != nil {
-			return fmt.Errorf(
-				"install and start agent service: %w%s",
-				result.err,
-				commandOutputSuffix(result.output),
-			)
-		}
-		return nil
-	}
+	logger.Info("remote installation script completed")
+	return nil
 }
 
-func connectSSH(input SSHInstallInput) (*ssh.Client, error) {
+func connectSSH(ctx context.Context, input SSHInstallInput) (*ssh.Client, error) {
 	auth := []ssh.AuthMethod{}
 	if input.UsesPassword() {
 		auth = append(
@@ -196,11 +225,35 @@ func connectSSH(input SSHInstallInput) (*ssh.Client, error) {
 		Timeout:         20 * time.Second,
 	}
 	endpoint := net.JoinHostPort(input.EntryIP, fmt.Sprint(input.Port))
-	connection, err := ssh.Dial("tcp", endpoint, config)
+	dialer := net.Dialer{Timeout: 20 * time.Second}
+	raw, err := dialer.DialContext(ctx, "tcp", endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("connect to %s as %s: %w", endpoint, input.User, err)
 	}
-	return connection, nil
+	handshakeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	type handshakeResult struct {
+		connection ssh.Conn
+		channels   <-chan ssh.NewChannel
+		requests   <-chan *ssh.Request
+		err        error
+	}
+	done := make(chan handshakeResult, 1)
+	go func() {
+		connection, channels, requests, handshakeErr := ssh.NewClientConn(raw, endpoint, config)
+		done <- handshakeResult{connection, channels, requests, handshakeErr}
+	}()
+	select {
+	case <-handshakeCtx.Done():
+		_ = raw.Close()
+		return nil, fmt.Errorf("SSH handshake with %s: %w", endpoint, handshakeCtx.Err())
+	case result := <-done:
+		if result.err != nil {
+			_ = raw.Close()
+			return nil, fmt.Errorf("connect to %s as %s: %w", endpoint, input.User, result.err)
+		}
+		return ssh.NewClient(result.connection, result.channels, result.requests), nil
+	}
 }
 
 func TestSSHConnection(ctx context.Context, input SSHInstallInput) (string, error) {
@@ -210,12 +263,12 @@ func TestSSHConnection(ctx context.Context, input SSHInstallInput) (string, erro
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	connection, err := connectSSH(input)
+	connection, err := connectSSH(ctx, input)
 	if err != nil {
 		return "", err
 	}
 	defer connection.Close()
-	architecture, err := remoteArchitecture(connection)
+	architecture, err := remoteArchitecture(ctx, connection)
 	if err != nil {
 		return "", fmt.Errorf("detect remote architecture: %w", err)
 	}
@@ -223,14 +276,15 @@ func TestSSHConnection(ctx context.Context, input SSHInstallInput) (string, erro
 }
 func shellQuote(value string) string { return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'" }
 
-func remoteArchitecture(connection *ssh.Client) (string, error) {
-	session, err := connection.NewSession()
-	if err != nil {
-		return "", err
+func privilegedCommandPrefix(user string) string {
+	if strings.TrimSpace(user) == "root" {
+		return ""
 	}
-	defer session.Close()
+	return "sudo "
+}
 
-	output, err := session.CombinedOutput("uname -m")
+func remoteArchitecture(ctx context.Context, connection *ssh.Client) (string, error) {
+	output, err := runRemoteCommand(ctx, connection, 30*time.Second, "uname -m")
 	if err != nil {
 		return "", fmt.Errorf("run uname -m: %w%s", err, commandOutputSuffix(output))
 	}
@@ -270,29 +324,129 @@ func installErrorMessage(err error) string {
 	return value
 }
 
-func upload(connection *ssh.Client, path string, content []byte, mode uint32) error {
+func uploadSCP(
+	ctx context.Context,
+	connection *ssh.Client,
+	remotePath string,
+	content []byte,
+	mode uint32,
+	timeout time.Duration,
+) error {
 	session, err := connection.NewSession()
 	if err != nil {
-		return err
+		return fmt.Errorf("open SCP session: %w", err)
 	}
 	defer session.Close()
-
 	stdin, err := session.StdinPipe()
 	if err != nil {
-		return err
+		return fmt.Errorf("open SCP stdin: %w", err)
 	}
-
-	copyDone := make(chan error, 1)
-	go func() {
-		defer stdin.Close()
-		_, err := io.Copy(stdin, bytes.NewReader(content))
-		copyDone <- err
-	}()
-
-	cmd := fmt.Sprintf("umask 077; cat > %s; chmod %04o %s", shellQuote(path), mode, shellQuote(path))
-	output, err := session.CombinedOutput(cmd)
+	stdout, err := session.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("write remote file %s: %w%s", path, err, commandOutputSuffix(output))
+		return fmt.Errorf("open SCP stdout: %w", err)
 	}
-	return <-copyDone
+	var stderr bytes.Buffer
+	session.Stderr = &stderr
+	targetDir := path.Dir(remotePath)
+	filename := path.Base(remotePath)
+	if err := session.Start("scp -t -- " + shellQuote(targetDir)); err != nil {
+		return fmt.Errorf("start remote SCP: %w", err)
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		reader := bufio.NewReader(stdout)
+		if err := readSCPAck(reader); err != nil {
+			result <- err
+			return
+		}
+		if _, err := fmt.Fprintf(stdin, "C%04o %d %s\n", mode, len(content), filename); err != nil {
+			result <- err
+			return
+		}
+		if err := readSCPAck(reader); err != nil {
+			result <- err
+			return
+		}
+		if _, err := stdin.Write(content); err != nil {
+			result <- err
+			return
+		}
+		if _, err := stdin.Write([]byte{0}); err != nil {
+			result <- err
+			return
+		}
+		if err := readSCPAck(reader); err != nil {
+			result <- err
+			return
+		}
+		if err := stdin.Close(); err != nil {
+			result <- err
+			return
+		}
+		result <- session.Wait()
+	}()
+	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-operationCtx.Done():
+		_ = session.Close()
+		return fmt.Errorf("SCP upload %s timed out: %w", remotePath, operationCtx.Err())
+	case err := <-result:
+		if err != nil {
+			return fmt.Errorf("SCP upload %s: %w%s", remotePath, err, commandOutputSuffix(stderr.Bytes()))
+		}
+		return nil
+	}
+}
+
+func readSCPAck(reader *bufio.Reader) error {
+	code, err := reader.ReadByte()
+	if err != nil {
+		return fmt.Errorf("read SCP acknowledgement: %w", err)
+	}
+	switch code {
+	case 0:
+		return nil
+	case 1, 2:
+		message, readErr := reader.ReadString('\n')
+		if readErr != nil {
+			return fmt.Errorf("remote SCP error %d", code)
+		}
+		return fmt.Errorf("remote SCP error: %s", strings.TrimSpace(message))
+	default:
+		return fmt.Errorf("unexpected SCP acknowledgement %d", code)
+	}
+}
+
+func runRemoteCommand(
+	ctx context.Context,
+	connection *ssh.Client,
+	timeout time.Duration,
+	command string,
+) ([]byte, error) {
+	session, err := connection.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("open SSH session: %w", err)
+	}
+	defer session.Close()
+	type commandResult struct {
+		output []byte
+		err    error
+	}
+	result := make(chan commandResult, 1)
+	go func() {
+		output, runErr := session.CombinedOutput(command)
+		result <- commandResult{output: output, err: runErr}
+	}()
+	operationCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	select {
+	case <-operationCtx.Done():
+		_ = session.Signal(ssh.SIGKILL)
+		_ = session.Close()
+		return nil, fmt.Errorf("remote command timed out: %w", operationCtx.Err())
+	case value := <-result:
+		return value.output, value.err
+	}
 }

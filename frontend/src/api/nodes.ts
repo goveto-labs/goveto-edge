@@ -22,6 +22,8 @@ export const nodesApi = (clusterId: string) => ({
     create: (payload: CreateNodeRequest) => post<Node>(clusterPath(clusterId, '/nodes'), payload),
     testConnection: (ssh: NodeSSH) =>
         post<SSHConnectionTestResponse>(clusterPath(clusterId, '/nodes/test-connection'), { ssh }),
+    reinstall: (nodeId: string, ssh: NodeSSH, force = false) =>
+        post<Node>(clusterPath(clusterId, `/nodes/${nodeId}/reinstall`), { ssh, force }),
     delete: (nodeId: string) => del<void>(clusterPath(clusterId, `/nodes/${nodeId}`)),
     updateDNSLines: (nodeId: string, dnsLineIds: string[]) =>
         put<NodeDNSLinesResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), {

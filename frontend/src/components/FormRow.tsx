@@ -11,7 +11,7 @@ interface FormRowProps {
 
 export function FormRow({ label, children, htmlFor, hint, error, required }: FormRowProps) {
     return (
-        <div className='grid grid-cols-1 gap-2 border-b border-border py-4 last:border-0 grid-cols-[5.5rem_1fr] md:items-start md:gap-6'>
+        <div className='grid grid-cols-1 gap-2 border-b border-border py-4 last:border-0 grid-cols-[8rem_1fr] md:items-start md:gap-6'>
             <label className='text-sm font-medium md:pt-2 md:text-right' htmlFor={htmlFor}>
                 {label}
                 {required && <span className='ml-0.5 text-danger'>*</span>}

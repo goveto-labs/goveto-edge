@@ -146,6 +146,7 @@ export interface NodeCacheConfig {
 export interface SiteConfigVersion {
     site_id: string;
     version: number;
+    status: string;
 }
 
 export interface Node {

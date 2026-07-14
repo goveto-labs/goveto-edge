@@ -13,6 +13,7 @@ import Dashboard from '@/pages/Dashboard.tsx';
 import DNS from '@/pages/DNS.tsx';
 import Init from '@/pages/Init.tsx';
 import Login from '@/pages/Login.tsx';
+import NodeDetail from '@/pages/NodeDetail.tsx';
 import Nodes from '@/pages/Nodes.tsx';
 import PublishJobs from '@/pages/PublishJobs.tsx';
 import PurgeJobs from '@/pages/PurgeJobs.tsx';
@@ -40,6 +41,7 @@ export default function App() {
                                     <Route element={<Dashboard />} path='/' />
                                     <Route element={<Nodes />} path='/nodes' />
                                     <Route element={<CreateNode />} path='/nodes/create' />
+                                    <Route element={<NodeDetail />} path='/nodes/:nodeId' />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
