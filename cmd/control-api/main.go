@@ -20,6 +20,7 @@ import (
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/storage"
 	"goveto-edge/internal/storage/gen/model"
+	"goveto-edge/schema"
 )
 
 // @title Goveto Edge Control API
@@ -43,6 +44,19 @@ func main() {
 	}
 	defer db.Close()
 	defer orm.Close()
+
+	schemaCtx, cancelSchema := context.WithTimeout(ctx, 5*time.Minute)
+	schemaResult, err := storage.InitSchema(schemaCtx, db, schema.FS, cfg.DatabaseURL)
+	cancelSchema()
+	if err != nil {
+		slog.Error("initialize database schema", "error", err)
+		os.Exit(1)
+	}
+	if schemaResult.Noop {
+		slog.Info("database schema is up to date", "models", schemaResult.ModelCount, "hash", schemaResult.SchemaHash)
+	} else {
+		slog.Info("database schema updated", "models", schemaResult.ModelCount, "changes", schemaResult.ChangeCount, "hash", schemaResult.SchemaHash)
+	}
 
 	redisClient, err := storage.OpenRedis(ctx, cfg.RedisURL)
 	if err != nil {

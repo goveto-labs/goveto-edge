@@ -30,8 +30,8 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
         setLoading(true);
         try {
             const result = await clustersApi.list();
-            setClusters(result.clusters);
-            setCurrentClusterId(result.selected_cluster_id);
+            setClusters(result.clusters ?? []);
+            setCurrentClusterId(result.selected_cluster_id ?? '');
             setError(null);
         } catch (err) {
             setError(err instanceof Error ? err.message : 'Unable to load clusters');

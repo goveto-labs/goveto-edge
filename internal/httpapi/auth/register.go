@@ -1,8 +1,6 @@
 package auth
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -39,6 +37,13 @@ type registrationConfigResponse struct {
 func register(db *client.Client, settingStore *settings.Store, verifier *captcha.Verifier) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
+		initialized, err := settingStore.Initialized(ctx)
+		if err != nil {
+			return err
+		}
+		if !initialized {
+			return echo.NewHTTPError(http.StatusConflict, "instance initialization is required")
+		}
 		enabled, err := settingStore.RegistrationEnabled(ctx)
 		if err != nil {
 			return err
@@ -75,12 +80,12 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid captcha")
 		}
 
-		_, err = db.User.FindUnique(ctx, query.User.Email.Equals(input.Email))
-		if err == nil {
-			return echo.NewHTTPError(http.StatusConflict, "email is already registered")
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
+		existing, err := db.User.FindUnique(ctx, query.User.Email.Equals(input.Email))
+		if err != nil {
 			return err
+		}
+		if existing != nil {
+			return echo.NewHTTPError(http.StatusConflict, "email is already registered")
 		}
 
 		hash, err := password.Hash(input.Password)

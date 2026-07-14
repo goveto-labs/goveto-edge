@@ -59,6 +59,9 @@ func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 		if err != nil {
 			return err
 		}
+		if items == nil {
+			items = make([]clusterChoice, 0)
+		}
 		selected, err := sessions.SelectedCluster(ctx, c)
 		if err != nil {
 			return err

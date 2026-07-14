@@ -19,6 +19,16 @@ export interface RegisterRequest {
     captcha_token: string;
 }
 
+export interface InitializeRequest {
+    email: string;
+    password: string;
+    name: string;
+}
+
+export interface InitializationStatus {
+    initialized: boolean;
+}
+
 export interface RegistrationConfig {
     enabled: boolean;
     captcha?: {

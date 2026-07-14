@@ -120,62 +120,64 @@ export default function Certificates() {
             )}
 
             <Modal isOpen={modalState.isOpen} onOpenChange={modalState.setOpen}>
-                <Modal.Container size='md'>
-                    <Modal.Dialog>
-                        <form className='space-y-4' onSubmit={handleSubmit}>
-                            <Modal.Header>
-                                <Modal.Heading className='flex items-center gap-2'>
-                                    <Upload className='h-5 w-5' />
-                                    Upload certificate
-                                </Modal.Heading>
-                            </Modal.Header>
-                            <Modal.Body className='space-y-4'>
-                                {submitError && (
-                                    <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
-                                        {submitError}
+                <Modal.Backdrop>
+                    <Modal.Container size='md'>
+                        <Modal.Dialog>
+                            <form className='space-y-4' onSubmit={handleSubmit}>
+                                <Modal.Header>
+                                    <Modal.Heading className='flex items-center gap-2'>
+                                        <Upload className='h-5 w-5' />
+                                        Upload certificate
+                                    </Modal.Heading>
+                                </Modal.Header>
+                                <Modal.Body className='space-y-4'>
+                                    {submitError && (
+                                        <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
+                                            {submitError}
+                                        </div>
+                                    )}
+                                    <div>
+                                        <Label htmlFor='cert-name'>Name</Label>
+                                        <Input
+                                            id='cert-name'
+                                            required
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                        />
                                     </div>
-                                )}
-                                <div>
-                                    <Label htmlFor='cert-name'>Name</Label>
-                                    <Input
-                                        id='cert-name'
-                                        required
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='cert-pem'>Certificate PEM</Label>
-                                    <TextArea
-                                        id='cert-pem'
-                                        required
-                                        rows={6}
-                                        value={certificate}
-                                        onChange={(e) => setCertificate(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='cert-key'>Private key PEM</Label>
-                                    <TextArea
-                                        id='cert-key'
-                                        required
-                                        rows={6}
-                                        value={privateKey}
-                                        onChange={(e) => setPrivateKey(e.target.value)}
-                                    />
-                                </div>
-                            </Modal.Body>
-                            <Modal.Footer>
-                                <Button type='button' variant='ghost' onPress={modalState.close}>
-                                    Cancel
-                                </Button>
-                                <Button isDisabled={submitting} type='submit' variant='primary'>
-                                    {submitting ? 'Uploading...' : 'Upload'}
-                                </Button>
-                            </Modal.Footer>
-                        </form>
-                    </Modal.Dialog>
-                </Modal.Container>
+                                    <div>
+                                        <Label htmlFor='cert-pem'>Certificate PEM</Label>
+                                        <TextArea
+                                            id='cert-pem'
+                                            required
+                                            rows={6}
+                                            value={certificate}
+                                            onChange={(e) => setCertificate(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='cert-key'>Private key PEM</Label>
+                                        <TextArea
+                                            id='cert-key'
+                                            required
+                                            rows={6}
+                                            value={privateKey}
+                                            onChange={(e) => setPrivateKey(e.target.value)}
+                                        />
+                                    </div>
+                                </Modal.Body>
+                                <Modal.Footer>
+                                    <Button type='button' variant='ghost' onPress={modalState.close}>
+                                        Cancel
+                                    </Button>
+                                    <Button isDisabled={submitting} type='submit' variant='primary'>
+                                        {submitting ? 'Uploading...' : 'Upload'}
+                                    </Button>
+                                </Modal.Footer>
+                            </form>
+                        </Modal.Dialog>
+                    </Modal.Container>
+                </Modal.Backdrop>
             </Modal>
         </div>
     );

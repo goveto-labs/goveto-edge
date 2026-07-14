@@ -128,7 +128,7 @@ model Certificate {
   fingerprint   String
   expiresAt     DateTime          @map("expires_at")
   createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
+  updatedAt     DateTime          @default(now()) @updatedAt @map("updated_at")
   cluster       Cluster           @relation(fields: [clusterId], references: [id])
   sites         SiteCertificate[]
 
@@ -143,7 +143,7 @@ model Cluster {
   name            String
   primaryHostname String?            @unique @map("primary_hostname")
   createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @updatedAt @map("updated_at")
+  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at")
   creator         User               @relation(fields: [creatorId], references: [id])
   members         ClusterMember[]
   nodes           Node[]
@@ -167,7 +167,7 @@ model ClusterGroup {
   clusterId String   @map("cluster_id")
   name      String
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
   cluster   Cluster  @relation(fields: [clusterId], references: [id])
   nodes     Node[]
 
@@ -194,7 +194,7 @@ model ClusterRegion {
   clusterId String   @map("cluster_id")
   name      String
   createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
   cluster   Cluster  @relation(fields: [clusterId], references: [id])
   nodes     Node[]
 
@@ -310,7 +310,7 @@ model DynamicSetting {
   key         String   @id
   valueJson   Json     @map("value_json")
   description String?
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("dynamic_settings")
 }
@@ -325,7 +325,7 @@ model Node {
   heartbeatAt        DateTime?               @map("heartbeat_at")
   status             NodeStatus              @default(PENDING)
   createdAt          DateTime                @default(now()) @map("created_at")
-  updatedAt          DateTime                @updatedAt @map("updated_at")
+  updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])
   group              ClusterGroup?           @relation(fields: [groupId], references: [id])
   region             ClusterRegion?          @relation(fields: [regionId], references: [id])
@@ -364,7 +364,7 @@ model NodeCacheConfig {
   maxSizeBytes        BigInt?  @map("max_size_bytes")
   maxDiskUsagePercent Int      @default(80) @map("max_disk_usage_percent")
   createdAt           DateTime @default(now()) @map("created_at")
-  updatedAt           DateTime @updatedAt @map("updated_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
   node                Node     @relation(fields: [nodeId], references: [id])
 
   @@map("node_cache_configs")
@@ -394,7 +394,7 @@ model NodeSiteConfigVersion {
   siteId    String       @map("site_id")
   version   BigInt
   status    ConfigStatus @default(PUBLISHED)
-  updatedAt DateTime     @updatedAt @map("updated_at")
+  updatedAt DateTime     @default(now()) @updatedAt @map("updated_at")
   node      Node         @relation(fields: [nodeId], references: [id])
   site      Site         @relation(fields: [siteId], references: [id])
 
@@ -427,7 +427,7 @@ model OriginPool {
   timeout   Int             @default(10000)
   headers   Json
   createdAt DateTime        @default(now()) @map("created_at")
-  updatedAt DateTime        @updatedAt @map("updated_at")
+  updatedAt DateTime        @default(now()) @updatedAt @map("updated_at")
   cluster   Cluster         @relation(fields: [clusterId], references: [id])
   backends  OriginBackend[]
   sites     Site[]
@@ -444,7 +444,7 @@ model Policy {
   ccJson     Json     @map("cc_json")
   accessJson Json     @map("access_json")
   createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
   sites      Site[]
 
   @@map("policies")
@@ -458,7 +458,7 @@ model PublishJob {
   status     JobStatus @default(PENDING)
   resultJson Json?     @map("result_json")
   createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
   site       Site      @relation(fields: [siteId], references: [id])
 
   @@index([siteId, version])
@@ -474,7 +474,7 @@ model PurgeJob {
   status     JobStatus @default(PENDING)
   resultJson Json?     @map("result_json")
   createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @updatedAt @map("updated_at")
+  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
   site       Site      @relation(fields: [siteId], references: [id])
 
   @@index([siteId, status])
@@ -492,7 +492,7 @@ model Site {
   policyId           String?                 @map("policy_id")
   version            BigInt                  @default(1)
   createdAt          DateTime                @default(now()) @map("created_at")
-  updatedAt          DateTime                @updatedAt @map("updated_at")
+  updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])
   creator            User                    @relation(fields: [creatorId], references: [id])
   originPool         OriginPool              @relation(fields: [originPoolId], references: [id])
@@ -554,7 +554,7 @@ model SiteListenerConfig {
   hstsPreload           Boolean       @default(false) @map("hsts_preload")
   ocspStaplingEnabled   Boolean       @default(true) @map("ocsp_stapling_enabled")
   createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
+  updatedAt             DateTime      @default(now()) @updatedAt @map("updated_at")
   site                  Site          @relation(fields: [siteId], references: [id])
 
   @@map("site_listener_configs")
@@ -570,7 +570,7 @@ model User {
   totpSecret         String?         @map("totp_secret")
   lastLoginAt        DateTime?       @map("last_login_at")
   createdAt          DateTime        @default(now()) @map("created_at")
-  updatedAt          DateTime        @updatedAt @map("updated_at")
+  updatedAt          DateTime        @default(now()) @updatedAt @map("updated_at")
   sessions           UserSession[]
   auditLogs          AuditLog[]
   createdClusters    Cluster[]

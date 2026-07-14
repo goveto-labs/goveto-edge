@@ -7,6 +7,7 @@ export { certificatesApi } from './certificates.ts';
 export { ApiError, apiClient, buildQuery } from './client.ts';
 export { clusterApi, clustersApi } from './clusters.ts';
 export { dnsApi } from './dns.ts';
+export { initializationApi } from './initialization.ts';
 export { nodesApi } from './nodes.ts';
 export { publishApi } from './publish.ts';
 export { purgeApi } from './purge.ts';

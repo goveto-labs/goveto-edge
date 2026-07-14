@@ -1,8 +1,6 @@
 package clusters
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -44,13 +42,15 @@ func addMember(db *client.Client) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "only OPERATOR permission can be assigned")
 		}
 
-		if _, err := db.User.FindUnique(
+		user, err := db.User.FindUnique(
 			c.Request().Context(),
 			query.User.Id.Equals(input.UserID),
-		); errors.Is(err, sql.ErrNoRows) {
-			return echo.NewHTTPError(http.StatusBadRequest, "user not found")
-		} else if err != nil {
+		)
+		if err != nil {
 			return err
+		}
+		if user == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "user not found")
 		}
 
 		item, err := db.ClusterMember.Create().

@@ -2,6 +2,7 @@ package types
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v5"
@@ -47,6 +48,12 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 			msg = http.StatusText(status)
 		}
 		code = httpStatusCode(status)
+	} else {
+		slog.Error("http request failed",
+			"method", c.Request().Method,
+			"path", c.Request().URL.Path,
+			"error", err,
+		)
 	}
 
 	if c.Request().Method == http.MethodHead {

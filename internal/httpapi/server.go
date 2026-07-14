@@ -16,6 +16,7 @@ import (
 	"goveto-edge/internal/httpapi/clusters"
 	dnsapi "goveto-edge/internal/httpapi/dns"
 	"goveto-edge/internal/httpapi/health"
+	"goveto-edge/internal/httpapi/initialization"
 	"goveto-edge/internal/httpapi/nodes"
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
@@ -47,6 +48,7 @@ func New(
 	captchaVerifier := captcha.New()
 
 	health.Register(e, db)
+	initialization.Register(e, orm, settingStore)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm)

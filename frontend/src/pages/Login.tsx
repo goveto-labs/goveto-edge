@@ -174,72 +174,74 @@ export default function Login() {
                     otpModal.setOpen(open);
                 }}
             >
-                <Modal.Container size='sm'>
-                    <Modal.Dialog>
-                        <form onSubmit={handleOtpSubmit}>
-                            <Modal.Header>
-                                <Modal.Heading>Two-factor authentication</Modal.Heading>
-                            </Modal.Header>
-                            <Modal.Body className='space-y-4'>
-                                <p className='text-sm text-muted'>
-                                    Enter the 6-digit code from your authenticator app.
-                                </p>
-                                {otpError && (
-                                    <div
-                                        className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'
-                                        role='alert'
-                                    >
-                                        {otpError}
-                                    </div>
-                                )}
-                                <div className='flex justify-center'>
-                                    <InputOTP
-                                        autoFocus
-                                        maxLength={6}
-                                        value={code}
-                                        onChange={setCode}
-                                    >
-                                        <InputOTP.Group>
-                                            <InputOTP.Slot index={0} />
-                                            <InputOTP.Slot index={1} />
-                                            <InputOTP.Slot index={2} />
-                                        </InputOTP.Group>
-                                        <InputOTP.Separator />
-                                        <InputOTP.Group>
-                                            <InputOTP.Slot index={3} />
-                                            <InputOTP.Slot index={4} />
-                                            <InputOTP.Slot index={5} />
-                                        </InputOTP.Group>
-                                    </InputOTP>
-                                </div>
-                            </Modal.Body>
-                            <Modal.Footer>
-                                <Button
-                                    isDisabled={loading}
-                                    type='button'
-                                    variant='ghost'
-                                    onPress={otpModal.close}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    isDisabled={loading || code.length !== 6}
-                                    type='submit'
-                                    variant='primary'
-                                >
-                                    {loading ? (
-                                        <span className='flex items-center justify-center gap-2'>
-                                            <Loader2 className='h-4 w-4 animate-spin' />
-                                            Verifying…
-                                        </span>
-                                    ) : (
-                                        'Verify'
+                <Modal.Backdrop>
+                    <Modal.Container size='sm'>
+                        <Modal.Dialog>
+                            <form onSubmit={handleOtpSubmit}>
+                                <Modal.Header>
+                                    <Modal.Heading>Two-factor authentication</Modal.Heading>
+                                </Modal.Header>
+                                <Modal.Body className='space-y-4'>
+                                    <p className='text-sm text-muted'>
+                                        Enter the 6-digit code from your authenticator app.
+                                    </p>
+                                    {otpError && (
+                                        <div
+                                            className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'
+                                            role='alert'
+                                        >
+                                            {otpError}
+                                        </div>
                                     )}
-                                </Button>
-                            </Modal.Footer>
-                        </form>
-                    </Modal.Dialog>
-                </Modal.Container>
+                                    <div className='flex justify-center'>
+                                        <InputOTP
+                                            autoFocus
+                                            maxLength={6}
+                                            value={code}
+                                            onChange={setCode}
+                                        >
+                                            <InputOTP.Group>
+                                                <InputOTP.Slot index={0} />
+                                                <InputOTP.Slot index={1} />
+                                                <InputOTP.Slot index={2} />
+                                            </InputOTP.Group>
+                                            <InputOTP.Separator />
+                                            <InputOTP.Group>
+                                                <InputOTP.Slot index={3} />
+                                                <InputOTP.Slot index={4} />
+                                                <InputOTP.Slot index={5} />
+                                            </InputOTP.Group>
+                                        </InputOTP>
+                                    </div>
+                                </Modal.Body>
+                                <Modal.Footer>
+                                    <Button
+                                        isDisabled={loading}
+                                        type='button'
+                                        variant='ghost'
+                                        onPress={otpModal.close}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        isDisabled={loading || code.length !== 6}
+                                        type='submit'
+                                        variant='primary'
+                                    >
+                                        {loading ? (
+                                            <span className='flex items-center justify-center gap-2'>
+                                                <Loader2 className='h-4 w-4 animate-spin' />
+                                                Verifying…
+                                            </span>
+                                        ) : (
+                                            'Verify'
+                                        )}
+                                    </Button>
+                                </Modal.Footer>
+                            </form>
+                        </Modal.Dialog>
+                    </Modal.Container>
+                </Modal.Backdrop>
             </Modal>
         </div>
     );

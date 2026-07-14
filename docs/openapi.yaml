@@ -12,6 +12,7 @@ tags:
     - name: clusters
     - name: dns
     - name: health
+    - name: initialization
     - name: nodes
     - name: publish
     - name: purge
@@ -2575,6 +2576,83 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             value:
                                                 type: string
+    /api/v1/init:
+        post:
+            operationId: initialize
+            summary: Initialize instance
+            description: Create the first administrator account and mark the instance initialized.
+            tags:
+                - initialization
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                email:
+                                    type: string
+                                name:
+                                    type: string
+                                password:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            email:
+                                                type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            role:
+                                                $ref: '#/components/schemas/model_UserRole'
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
+    /api/v1/init/status:
+        get:
+            operationId: status
+            summary: Instance initialization status
+            description: Return whether initial instance setup has completed.
+            tags:
+                - initialization
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            initialized:
+                                                type: boolean
     /api/v1/session/cluster:
         put:
             operationId: selectCurrent

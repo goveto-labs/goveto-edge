@@ -2,8 +2,6 @@
 package auth
 
 import (
-	"database/sql"
-	"errors"
 	"net/http"
 	"strings"
 
@@ -65,10 +63,10 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 			Where(query.User.Email.Equals(input.Email)).
 			First(c.Request().Context())
 		if err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
-			}
 			return err
+		}
+		if user == nil {
+			return echo.NewHTTPError(http.StatusUnauthorized, "invalid email or password")
 		}
 
 		if user.Status != model.UserStatusACTIVE || !password.Verify(user.PasswordHash, input.Password) {

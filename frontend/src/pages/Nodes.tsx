@@ -303,172 +303,174 @@ export default function Nodes() {
             )}
 
             <Modal isOpen={createState.isOpen} onOpenChange={createState.setOpen}>
-                <Modal.Container size='md'>
-                    <Modal.Dialog>
-                        <form className='space-y-4' onSubmit={handleCreate}>
-                            <Modal.Header>
-                                <Modal.Heading>Create node</Modal.Heading>
-                            </Modal.Header>
-                            <Modal.Body>
-                                {createError && (
-                                    <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
-                                        {createError}
-                                    </div>
-                                )}
-                                <div>
-                                    <Label htmlFor='node-name'>Name</Label>
-                                    <Input
-                                        id='node-name'
-                                        required
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-addresses'>
-                                        Addresses (comma separated)
-                                    </Label>
-                                    <Input
-                                        id='node-addresses'
-                                        required
-                                        value={addresses}
-                                        onChange={(e) => setAddresses(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-dns-lines'>DNS lines</Label>
-                                    <Select
-                                        id='node-dns-lines'
-                                        value={Array.from(dnsLineIds)}
-                                        selectionMode='multiple'
-                                        onChange={(keys) =>
-                                            setDnsLineIds(new Set(keys as string[]))
-                                        }
-                                    >
-                                        <Select.Trigger>
-                                            <Select.Value />
-                                        </Select.Trigger>
-                                        <Select.Popover>
-                                            <ListBox>
-                                                {dnsLines.map((line) => (
-                                                    <ListBox.Item key={line.id} id={line.id}>
-                                                        {line.name}
-                                                    </ListBox.Item>
-                                                ))}
-                                            </ListBox>
-                                        </Select.Popover>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-group'>Group (optional)</Label>
-                                    <Select
-                                        id='node-group'
-                                        value={groupId || null}
-                                        onChange={(key) => setGroupId(String(key ?? ''))}
-                                    >
-                                        <Select.Trigger>
-                                            <Select.Value />
-                                        </Select.Trigger>
-                                        <Select.Popover>
-                                            <ListBox>
-                                                {groups.map((g) => (
-                                                    <ListBox.Item key={g.id} id={g.id}>
-                                                        {g.name}
-                                                    </ListBox.Item>
-                                                ))}
-                                            </ListBox>
-                                        </Select.Popover>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-region'>Region (optional)</Label>
-                                    <Select
-                                        id='node-region'
-                                        value={regionId || null}
-                                        onChange={(key) => setRegionId(String(key ?? ''))}
-                                    >
-                                        <Select.Trigger>
-                                            <Select.Value />
-                                        </Select.Trigger>
-                                        <Select.Popover>
-                                            <ListBox>
-                                                {regions.map((r) => (
-                                                    <ListBox.Item key={r.id} id={r.id}>
-                                                        {r.name}
-                                                    </ListBox.Item>
-                                                ))}
-                                            </ListBox>
-                                        </Select.Popover>
-                                    </Select>
-                                </div>
-                                <div className='grid grid-cols-2 gap-4'>
+                <Modal.Backdrop>
+                    <Modal.Container size='md'>
+                        <Modal.Dialog>
+                            <form className='space-y-4' onSubmit={handleCreate}>
+                                <Modal.Header>
+                                    <Modal.Heading>Create node</Modal.Heading>
+                                </Modal.Header>
+                                <Modal.Body>
+                                    {createError && (
+                                        <div className='rounded-md bg-danger p-3 text-sm text-danger-foreground'>
+                                            {createError}
+                                        </div>
+                                    )}
                                     <div>
-                                        <Label htmlFor='node-ssh-ip'>SSH entry IP</Label>
+                                        <Label htmlFor='node-name'>Name</Label>
                                         <Input
-                                            id='node-ssh-ip'
+                                            id='node-name'
                                             required
-                                            value={sshIp}
-                                            onChange={(e) => setSshIp(e.target.value)}
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
                                         />
                                     </div>
                                     <div>
-                                        <Label htmlFor='node-ssh-port'>SSH port</Label>
+                                        <Label htmlFor='node-addresses'>
+                                            Addresses (comma separated)
+                                        </Label>
                                         <Input
-                                            id='node-ssh-port'
+                                            id='node-addresses'
                                             required
-                                            type='number'
-                                            value={sshPort}
-                                            onChange={(e) => setSshPort(e.target.value)}
+                                            value={addresses}
+                                            onChange={(e) => setAddresses(e.target.value)}
                                         />
                                     </div>
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-ssh-user'>SSH user</Label>
-                                    <Input
-                                        id='node-ssh-user'
-                                        required
-                                        value={sshUser}
-                                        onChange={(e) => setSshUser(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-ssh-password'>SSH password</Label>
-                                    <Input
-                                        id='node-ssh-password'
-                                        type='password'
-                                        value={sshPassword}
-                                        onChange={(e) => setSshPassword(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-ssh-key'>SSH private key path</Label>
-                                    <Input
-                                        id='node-ssh-key'
-                                        value={sshKey}
-                                        onChange={(e) => setSshKey(e.target.value)}
-                                    />
-                                </div>
-                                <div>
-                                    <Label htmlFor='node-ssh-passphrase'>SSH key passphrase</Label>
-                                    <Input
-                                        id='node-ssh-passphrase'
-                                        type='password'
-                                        value={sshPassphrase}
-                                        onChange={(e) => setSshPassphrase(e.target.value)}
-                                    />
-                                </div>
-                            </Modal.Body>
-                            <Modal.Footer>
-                                <Button type='button' variant='ghost' onPress={createState.close}>
-                                    Cancel
-                                </Button>
-                                <Button isDisabled={createLoading} type='submit' variant='primary'>
-                                    {createLoading ? 'Creating...' : 'Create'}
-                                </Button>
-                            </Modal.Footer>
-                        </form>
-                    </Modal.Dialog>
-                </Modal.Container>
+                                    <div>
+                                        <Label htmlFor='node-dns-lines'>DNS lines</Label>
+                                        <Select
+                                            id='node-dns-lines'
+                                            value={Array.from(dnsLineIds)}
+                                            selectionMode='multiple'
+                                            onChange={(keys) =>
+                                                setDnsLineIds(new Set(keys as string[]))
+                                            }
+                                        >
+                                            <Select.Trigger>
+                                                <Select.Value />
+                                            </Select.Trigger>
+                                            <Select.Popover>
+                                                <ListBox>
+                                                    {dnsLines.map((line) => (
+                                                        <ListBox.Item key={line.id} id={line.id}>
+                                                            {line.name}
+                                                        </ListBox.Item>
+                                                    ))}
+                                                </ListBox>
+                                            </Select.Popover>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-group'>Group (optional)</Label>
+                                        <Select
+                                            id='node-group'
+                                            value={groupId || null}
+                                            onChange={(key) => setGroupId(String(key ?? ''))}
+                                        >
+                                            <Select.Trigger>
+                                                <Select.Value />
+                                            </Select.Trigger>
+                                            <Select.Popover>
+                                                <ListBox>
+                                                    {groups.map((g) => (
+                                                        <ListBox.Item key={g.id} id={g.id}>
+                                                            {g.name}
+                                                        </ListBox.Item>
+                                                    ))}
+                                                </ListBox>
+                                            </Select.Popover>
+                                        </Select>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-region'>Region (optional)</Label>
+                                        <Select
+                                            id='node-region'
+                                            value={regionId || null}
+                                            onChange={(key) => setRegionId(String(key ?? ''))}
+                                        >
+                                            <Select.Trigger>
+                                                <Select.Value />
+                                            </Select.Trigger>
+                                            <Select.Popover>
+                                                <ListBox>
+                                                    {regions.map((r) => (
+                                                        <ListBox.Item key={r.id} id={r.id}>
+                                                            {r.name}
+                                                        </ListBox.Item>
+                                                    ))}
+                                                </ListBox>
+                                            </Select.Popover>
+                                        </Select>
+                                    </div>
+                                    <div className='grid grid-cols-2 gap-4'>
+                                        <div>
+                                            <Label htmlFor='node-ssh-ip'>SSH entry IP</Label>
+                                            <Input
+                                                id='node-ssh-ip'
+                                                required
+                                                value={sshIp}
+                                                onChange={(e) => setSshIp(e.target.value)}
+                                            />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor='node-ssh-port'>SSH port</Label>
+                                            <Input
+                                                id='node-ssh-port'
+                                                required
+                                                type='number'
+                                                value={sshPort}
+                                                onChange={(e) => setSshPort(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-ssh-user'>SSH user</Label>
+                                        <Input
+                                            id='node-ssh-user'
+                                            required
+                                            value={sshUser}
+                                            onChange={(e) => setSshUser(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-ssh-password'>SSH password</Label>
+                                        <Input
+                                            id='node-ssh-password'
+                                            type='password'
+                                            value={sshPassword}
+                                            onChange={(e) => setSshPassword(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-ssh-key'>SSH private key path</Label>
+                                        <Input
+                                            id='node-ssh-key'
+                                            value={sshKey}
+                                            onChange={(e) => setSshKey(e.target.value)}
+                                        />
+                                    </div>
+                                    <div>
+                                        <Label htmlFor='node-ssh-passphrase'>SSH key passphrase</Label>
+                                        <Input
+                                            id='node-ssh-passphrase'
+                                            type='password'
+                                            value={sshPassphrase}
+                                            onChange={(e) => setSshPassphrase(e.target.value)}
+                                        />
+                                    </div>
+                                </Modal.Body>
+                                <Modal.Footer>
+                                    <Button type='button' variant='ghost' onPress={createState.close}>
+                                        Cancel
+                                    </Button>
+                                    <Button isDisabled={createLoading} type='submit' variant='primary'>
+                                        {createLoading ? 'Creating...' : 'Create'}
+                                    </Button>
+                                </Modal.Footer>
+                            </form>
+                        </Modal.Dialog>
+                    </Modal.Container>
+                </Modal.Backdrop>
             </Modal>
 
             <Drawer isOpen={drawerState.isOpen} onOpenChange={drawerState.setOpen}>
