@@ -311,6 +311,22 @@ query.PostAuthorIdColumn
   - `Nodeid` (UUID)
   - `Dnslineid` (String)
 
+### NodeGroupMembership
+
+- Client handle: `c.NodeGroupMembership`
+- Query namespace: `query.NodeGroupMembership`
+- Fields:
+  - `Nodeid` (UUID)
+  - `Groupid` (String)
+
+### NodeRegionMembership
+
+- Client handle: `c.NodeRegionMembership`
+- Query namespace: `query.NodeRegionMembership`
+- Fields:
+  - `Nodeid` (UUID)
+  - `Regionid` (String)
+
 ### NodeSiteConfigVersion
 
 - Client handle: `c.NodeSiteConfigVersion`

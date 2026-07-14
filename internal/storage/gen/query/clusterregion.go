@@ -30,13 +30,14 @@ func ApplyClusterRegionOptions(opts []ClusterRegionQueryOption) ClusterRegionQue
 
 // ClusterRegionQuery is the namespace for ClusterRegion query operations.
 type ClusterRegionQuery struct {
-	Id        clusterRegionIdField
-	ClusterId clusterRegionClusterIdField
-	Name      clusterRegionNameField
-	CreatedAt clusterRegionCreatedAtField
-	UpdatedAt clusterRegionUpdatedAtField
-	Cluster   clusterRegionClusterRelation
-	Nodes     clusterRegionNodesRelation
+	Id              clusterRegionIdField
+	ClusterId       clusterRegionClusterIdField
+	Name            clusterRegionNameField
+	CreatedAt       clusterRegionCreatedAtField
+	UpdatedAt       clusterRegionUpdatedAtField
+	Cluster         clusterRegionClusterRelation
+	Nodes           clusterRegionNodesRelation
+	NodeMemberships clusterRegionNodeMembershipsRelation
 }
 
 const ClusterRegionTable = "node_regions"
@@ -48,13 +49,14 @@ const ClusterRegionUpdatedAtColumn = "updated_at"
 
 // ClusterRegionQuery provides query building methods for the ClusterRegion model.
 var ClusterRegion = ClusterRegionQuery{
-	Id:        clusterRegionIdField{},
-	ClusterId: clusterRegionClusterIdField{},
-	Name:      clusterRegionNameField{},
-	CreatedAt: clusterRegionCreatedAtField{},
-	UpdatedAt: clusterRegionUpdatedAtField{},
-	Cluster:   clusterRegionClusterRelation{},
-	Nodes:     clusterRegionNodesRelation{},
+	Id:              clusterRegionIdField{},
+	ClusterId:       clusterRegionClusterIdField{},
+	Name:            clusterRegionNameField{},
+	CreatedAt:       clusterRegionCreatedAtField{},
+	UpdatedAt:       clusterRegionUpdatedAtField{},
+	Cluster:         clusterRegionClusterRelation{},
+	Nodes:           clusterRegionNodesRelation{},
+	NodeMemberships: clusterRegionNodeMembershipsRelation{},
 }
 
 // ClusterRegionWhereClause represents a WHERE condition for ClusterRegion.
@@ -477,6 +479,14 @@ func (clusterRegionNodesRelation) Fetch() ClusterRegionIncludeClause {
 	return ClusterRegionIncludeClause{Relation: "nodes"}
 }
 
+// NodeMembershipsRelation provides relation query helpers for nodeMemberships.
+type clusterRegionNodeMembershipsRelation struct{}
+
+// Fetch creates an include clause to fetch related nodeMemberships.
+func (clusterRegionNodeMembershipsRelation) Fetch() ClusterRegionIncludeClause {
+	return ClusterRegionIncludeClause{Relation: "nodeMemberships"}
+}
+
 // ClusterRegionSetClause represents a field set operation for create/update.
 type ClusterRegionSetClause struct {
 	Field string
@@ -510,13 +520,14 @@ type ClusterRegionGroupByResult struct {
 
 // ClusterRegionCreateInput holds data for creating a ClusterRegion record.
 type ClusterRegionCreateInput struct {
-	Id        string
-	ClusterId string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Cluster   *ClusterCreateNestedInput
-	Nodes     *NodeCreateNestedInput
+	Id              string
+	ClusterId       string
+	Name            string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Cluster         *ClusterCreateNestedInput
+	Nodes           *NodeCreateNestedInput
+	NodeMemberships *NodeRegionMembershipCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

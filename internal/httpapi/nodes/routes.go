@@ -76,12 +76,6 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 				query.Node.Name.Set(input.Name),
 				query.Node.Status.Set(model.NodeStatusPENDING),
 			}
-			if input.GroupID != nil {
-				sets = append(sets, query.Node.GroupId.Set(*input.GroupID))
-			}
-			if input.RegionID != nil {
-				sets = append(sets, query.Node.RegionId.Set(*input.RegionID))
-			}
 
 			if _, err := tx.Node.Create().Set(sets...).Do(ctx); err != nil {
 				return err
@@ -116,6 +110,26 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 					Set(
 						query.NodeDNSLine.NodeId.Set(nodeID),
 						query.NodeDNSLine.DnsLineId.Set(lineID),
+					).
+					Do(ctx); err != nil {
+					return err
+				}
+			}
+			for _, groupID := range input.GroupIDs {
+				if _, err := tx.NodeGroupMembership.Create().
+					Set(
+						query.NodeGroupMembership.NodeId.Set(nodeID),
+						query.NodeGroupMembership.GroupId.Set(groupID),
+					).
+					Do(ctx); err != nil {
+					return err
+				}
+			}
+			for _, regionID := range input.RegionIDs {
+				if _, err := tx.NodeRegionMembership.Create().
+					Set(
+						query.NodeRegionMembership.NodeId.Set(nodeID),
+						query.NodeRegionMembership.RegionId.Set(regionID),
 					).
 					Do(ctx); err != nil {
 					return err
@@ -159,8 +173,13 @@ func validateReferences(ctx context.Context, db *client.Client, input nodedomain
 		return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
 	}
 
-	if input.GroupID != nil {
-		group, err := db.ClusterGroup.FindUnique(ctx, query.ClusterGroup.Id.Equals(*input.GroupID))
+	seenGroups := make(map[string]struct{}, len(input.GroupIDs))
+	for _, groupID := range input.GroupIDs {
+		if _, exists := seenGroups[groupID]; exists {
+			return echo.NewHTTPError(http.StatusBadRequest, "duplicate group")
+		}
+		seenGroups[groupID] = struct{}{}
+		group, err := db.ClusterGroup.FindUnique(ctx, query.ClusterGroup.Id.Equals(groupID))
 		if err != nil {
 			return err
 		}
@@ -169,8 +188,13 @@ func validateReferences(ctx context.Context, db *client.Client, input nodedomain
 		}
 	}
 
-	if input.RegionID != nil {
-		region, err := db.ClusterRegion.FindUnique(ctx, query.ClusterRegion.Id.Equals(*input.RegionID))
+	seenRegions := make(map[string]struct{}, len(input.RegionIDs))
+	for _, regionID := range input.RegionIDs {
+		if _, exists := seenRegions[regionID]; exists {
+			return echo.NewHTTPError(http.StatusBadRequest, "duplicate region")
+		}
+		seenRegions[regionID] = struct{}{}
+		region, err := db.ClusterRegion.FindUnique(ctx, query.ClusterRegion.Id.Equals(regionID))
 		if err != nil {
 			return err
 		}

@@ -13,9 +13,20 @@ import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
-function formatDate(value?: string) {
+function formatDateTime(value?: string) {
     if (!value) return '-';
-    return new Date(value).toLocaleDateString();
+    return new Date(value).toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    });
+}
+
+function taskTarget(task: PublishTask) {
+    if (task.site_id) return `Site ${task.site_id.slice(0, 8)}`;
+    if (task.node_id) return `Node ${task.node_id.slice(0, 8)}`;
+    return '-';
 }
 
 export default function Dashboard() {
@@ -94,7 +105,7 @@ export default function Dashboard() {
         { label: 'Publish status', path: '/publish', icon: Rocket },
     ];
 
-    const recentTasks = status?.recent_tasks?.slice(0, 5) ?? [];
+    const recentTasks = status?.recent_tasks?.slice(0, 6) ?? [];
 
     return (
         <div className='space-y-6'>
@@ -120,7 +131,7 @@ export default function Dashboard() {
                 </div>
             ) : (
                 <>
-                    <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                    <section className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
                         {stats.map((stat) => (
                             <StatCard
                                 key={stat.label}
@@ -131,23 +142,26 @@ export default function Dashboard() {
                                 value={stat.value}
                             />
                         ))}
-                    </div>
+                    </section>
 
-                    <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                        <ContentCard className='lg:col-span-2' title='Publish activity'>
+                    <section className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
+                        <ContentCard className='lg:col-span-8' title='Publish activity'>
                             {recentTasks.length === 0 ? (
                                 <div className='text-sm text-muted'>No recent publish tasks.</div>
                             ) : (
                                 <DataTable aria-label='Recent publish tasks'>
                                     <thead>
                                         <tr className='border-b border-border'>
-                                            <th className='py-2 text-left text-xs font-medium text-muted'>
+                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
                                                 Task
                                             </th>
-                                            <th className='py-2 text-left text-xs font-medium text-muted'>
+                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
+                                                Target
+                                            </th>
+                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
                                                 Status
                                             </th>
-                                            <th className='py-2 text-left text-xs font-medium text-muted'>
+                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
                                                 Updated
                                             </th>
                                         </tr>
@@ -158,14 +172,19 @@ export default function Dashboard() {
                                                 className='border-b border-border last:border-0'
                                                 key={task.id}
                                             >
-                                                <td className='py-3 font-mono text-xs'>
-                                                    {task.id}
+                                                <td className='py-3 pr-4 font-mono text-xs'>
+                                                    {task.id.slice(0, 12)}
                                                 </td>
-                                                <td className='py-3'>
+                                                <td className='py-3 pr-4 text-sm text-muted'>
+                                                    {taskTarget(task)}
+                                                </td>
+                                                <td className='py-3 pr-4'>
                                                     <StatusBadge status={task.status} />
                                                 </td>
-                                                <td className='py-3 text-sm text-muted'>
-                                                    {formatDate(task.updated_at ?? task.created_at)}
+                                                <td className='py-3 pr-4 text-sm text-muted'>
+                                                    {formatDateTime(
+                                                        task.updated_at ?? task.created_at
+                                                    )}
                                                 </td>
                                             </tr>
                                         ))}
@@ -174,36 +193,64 @@ export default function Dashboard() {
                             )}
                         </ContentCard>
 
-                        <ContentCard
-                            action={
-                                <Button
-                                    size='sm'
-                                    variant='ghost'
-                                    onPress={() => navigate('/publish')}
-                                >
-                                    View all
-                                </Button>
-                            }
-                            title='Quick actions'
-                        >
-                            <div className='grid grid-cols-1 gap-2'>
-                                {quickActions.map((action) => (
+                        <div className='flex flex-col gap-4 lg:col-span-4'>
+                            <ContentCard
+                                action={
                                     <Button
-                                        key={action.path}
-                                        className='h-auto justify-between px-3 py-2.5'
+                                        size='sm'
                                         variant='ghost'
-                                        onPress={() => navigate(action.path)}
+                                        onPress={() => navigate('/publish')}
                                     >
-                                        <span className='flex items-center gap-2'>
-                                            <action.icon className='h-4 w-4' />
-                                            {action.label}
-                                        </span>
-                                        <ArrowRight className='h-4 w-4 text-muted' />
+                                        View all
                                     </Button>
-                                ))}
-                            </div>
-                        </ContentCard>
-                    </div>
+                                }
+                                className='flex-1'
+                                title='Quick actions'
+                            >
+                                <div className='grid grid-cols-1 gap-1'>
+                                    {quickActions.map((action) => (
+                                        <Button
+                                            key={action.path}
+                                            className='h-auto justify-between px-3 py-2.5'
+                                            variant='ghost'
+                                            onPress={() => navigate(action.path)}
+                                        >
+                                            <span className='flex items-center gap-2'>
+                                                <action.icon className='h-4 w-4' />
+                                                {action.label}
+                                            </span>
+                                            <ArrowRight className='h-4 w-4 text-muted' />
+                                        </Button>
+                                    ))}
+                                </div>
+                            </ContentCard>
+
+                            <ContentCard title='Cluster snapshot'>
+                                <dl className='space-y-3 text-sm'>
+                                    <div className='flex justify-between'>
+                                        <dt className='text-muted'>Active nodes</dt>
+                                        <dd className='font-medium'>{nodes.length}</dd>
+                                    </div>
+                                    <div className='flex justify-between'>
+                                        <dt className='text-muted'>Certificates</dt>
+                                        <dd className='font-medium'>{certs.length}</dd>
+                                    </div>
+                                    <div className='flex justify-between'>
+                                        <dt className='text-muted'>Pending tasks</dt>
+                                        <dd className='font-medium'>
+                                            {status?.pending_count ?? 0}
+                                        </dd>
+                                    </div>
+                                    <div className='flex justify-between'>
+                                        <dt className='text-muted'>Failed tasks</dt>
+                                        <dd className='font-medium text-danger'>
+                                            {status?.failed_count ?? 0}
+                                        </dd>
+                                    </div>
+                                </dl>
+                            </ContentCard>
+                        </div>
+                    </section>
                 </>
             )}
         </div>

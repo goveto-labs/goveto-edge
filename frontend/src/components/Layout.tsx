@@ -1,5 +1,5 @@
 import { Alert, Avatar, Button, Drawer, Input, useOverlayState, useTheme } from '@heroui/react';
-import { Bell, Menu, Moon, Plus, Sun, UserPlus } from 'lucide-react';
+import { Bell, ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 
@@ -16,8 +16,8 @@ function Greeting() {
     const name = user?.name || user?.email || user?.id || 'there';
 
     return (
-        <div className='hidden items-center gap-2 md:flex'>
-            <span className='text-lg font-semibold'>
+        <div className='hidden items-center gap-2 lg:flex'>
+            <span className='text-sm font-medium text-muted'>
                 {greeting}, {name}
             </span>
         </div>
@@ -42,6 +42,7 @@ export function Layout() {
     const [clusterName, setClusterName] = useState('');
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
+    const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
     const toggleTheme = () => {
         setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
@@ -72,12 +73,16 @@ export function Layout() {
 
     return (
         <div className='flex h-full'>
-            <aside className='hidden w-64 flex-col overflow-y-auto border-r border-border bg-surface md:flex'>
-                <Sidebar onLogout={handleLogout} />
+            <aside
+                className={`hidden flex-col overflow-y-auto border-r border-border bg-surface transition-[width] duration-300 ease-in-out md:flex ${
+                    sidebarCollapsed ? 'w-[72px]' : 'w-64'
+                }`}
+            >
+                <Sidebar collapsed={sidebarCollapsed} onLogout={handleLogout} />
             </aside>
 
             <div className='flex min-w-0 flex-1 flex-col'>
-                <header className='flex h-16 shrink-0 items-center justify-between gap-4 border-b border-border bg-surface px-4'>
+                <header className='sticky top-0 z-30 flex h-14 shrink-0 items-center justify-between gap-4 border-b border-border bg-surface/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-surface/80'>
                     <div className='flex items-center gap-3'>
                         <Drawer state={mobileMenu}>
                             <Drawer.Trigger aria-label='Open navigation' className='md:hidden'>
@@ -87,6 +92,21 @@ export function Layout() {
                                 <Sidebar onLogout={handleLogout} onNavigate={mobileMenu.close} />
                             </Drawer.Content>
                         </Drawer>
+
+                        <Button
+                            aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                            className='hidden md:flex'
+                            isIconOnly
+                            size='sm'
+                            variant='ghost'
+                            onPress={() => setSidebarCollapsed((c) => !c)}
+                        >
+                            {sidebarCollapsed ? (
+                                <ChevronRight className='h-4 w-4' />
+                            ) : (
+                                <ChevronLeft className='h-4 w-4' />
+                            )}
+                        </Button>
 
                         <div className='flex items-center gap-2 md:hidden'>
                             <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
@@ -104,13 +124,15 @@ export function Layout() {
                         <div className='hidden sm:block'>
                             <Input
                                 aria-label='Search'
-                                className='w-48 lg:w-64'
-                                placeholder='Search...'
+                                className='w-48 lg:w-72'
+                                placeholder='Search nodes, sites, certs…'
                                 variant='secondary'
                             />
                         </div>
 
-                        <ClusterPicker />
+                        <div className='hidden w-40 md:block lg:w-48'>
+                            <ClusterPicker />
+                        </div>
 
                         <Button
                             isIconOnly
@@ -141,11 +163,6 @@ export function Layout() {
                             <Bell className='h-4 w-4' />
                         </Button>
 
-                        <Button className='hidden sm:flex' size='sm' variant='primary'>
-                            <UserPlus className='mr-1.5 h-4 w-4' />
-                            Invite
-                        </Button>
-
                         <Avatar className='h-8 w-8 text-xs md:hidden'>
                             <Avatar.Fallback>{userInitial}</Avatar.Fallback>
                         </Avatar>
@@ -153,23 +170,24 @@ export function Layout() {
                 </header>
 
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
-                    {!clusterId && !requiresCluster && location.pathname !== '/' && (
-                        <Alert className='mb-6' status='warning'>
-                            <Alert.Indicator />
-                            <Alert.Content>
-                                <Alert.Title>No cluster selected</Alert.Title>
-                                <Alert.Description>
-                                    Select a cluster in the header to use cluster features.
-                                </Alert.Description>
-                            </Alert.Content>
-                        </Alert>
-                    )}
-                    <Outlet />
+                    <div className='mx-auto max-w-[1600px]'>
+                        {!clusterId && !requiresCluster && location.pathname !== '/' && (
+                            <Alert className='mb-6' status='warning'>
+                                <Alert.Indicator />
+                                <Alert.Content>
+                                    <Alert.Title>No cluster selected</Alert.Title>
+                                    <Alert.Description>
+                                        Select a cluster in the header to use cluster features.
+                                    </Alert.Description>
+                                </Alert.Content>
+                            </Alert>
+                        )}
+                        <Outlet />
+                    </div>
                 </main>
             </div>
 
             <DialogShell
-                icon={<Plus className='h-5 w-5' />}
                 isDismissable={!requiresCluster}
                 isOpen={requiresCluster || createModal.isOpen}
                 size='sm'

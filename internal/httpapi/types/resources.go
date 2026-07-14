@@ -79,6 +79,16 @@ type NodeDNSLine struct {
 	NodeID    string `json:"nodeId"`
 	DNSLineID string `json:"dnsLineId"`
 }
+
+type NodeGroupMembership struct {
+	NodeID  string `json:"nodeId"`
+	GroupID string `json:"groupId"`
+}
+
+type NodeRegionMembership struct {
+	NodeID   string `json:"nodeId"`
+	RegionID string `json:"regionId"`
+}
 type SiteConfigVersion struct {
 	SiteID  string             `json:"site_id"`
 	Version int64              `json:"version"`
@@ -101,22 +111,30 @@ func NewNodeCacheConfig(value *model.NodeCacheConfig) NodeCacheConfig {
 }
 
 type Node struct {
-	ID                 string              `json:"id"`
-	Name               string              `json:"name"`
-	Status             model.NodeStatus    `json:"status"`
-	Addresses          []NodeAddress       `json:"addresses"`
-	DNSLines           []NodeDNSLine       `json:"dnsLines,omitempty"`
-	SiteConfigVersions []SiteConfigVersion `json:"siteConfigVersions,omitempty"`
-	CacheConfig        *NodeCacheConfig    `json:"cacheConfig,omitempty"`
+	ID                 string                 `json:"id"`
+	Name               string                 `json:"name"`
+	Status             model.NodeStatus       `json:"status"`
+	Addresses          []NodeAddress          `json:"addresses"`
+	DNSLines           []NodeDNSLine          `json:"dnsLines,omitempty"`
+	GroupMemberships   []NodeGroupMembership  `json:"groupMemberships,omitempty"`
+	RegionMemberships  []NodeRegionMembership `json:"regionMemberships,omitempty"`
+	SiteConfigVersions []SiteConfigVersion    `json:"siteConfigVersions,omitempty"`
+	CacheConfig        *NodeCacheConfig       `json:"cacheConfig,omitempty"`
 }
 
 func NewNode(value *model.Node) Node {
-	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
+	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), GroupMemberships: make([]NodeGroupMembership, len(value.GroupMemberships)), RegionMemberships: make([]NodeRegionMembership, len(value.RegionMemberships)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
 	for index, item := range value.Addresses {
 		result.Addresses[index] = NewNodeAddress(item)
 	}
 	for index, item := range value.DnsLines {
 		result.DNSLines[index] = NodeDNSLine{NodeID: item.NodeId, DNSLineID: item.DnsLineId}
+	}
+	for index, item := range value.GroupMemberships {
+		result.GroupMemberships[index] = NodeGroupMembership{NodeID: item.NodeId, GroupID: item.GroupId}
+	}
+	for index, item := range value.RegionMemberships {
+		result.RegionMemberships[index] = NodeRegionMembership{NodeID: item.NodeId, RegionID: item.RegionId}
 	}
 	for index, item := range value.SiteConfigVersions {
 		result.SiteConfigVersions[index] = SiteConfigVersion{SiteID: item.SiteId, Version: item.Version, Status: item.Status}

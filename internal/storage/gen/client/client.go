@@ -41,6 +41,8 @@ type Client struct {
 	NodeCacheConfig       NodeCacheConfigActions
 	NodeCredential        NodeCredentialActions
 	NodeDNSLine           NodeDNSLineActions
+	NodeGroupMembership   NodeGroupMembershipActions
+	NodeRegionMembership  NodeRegionMembershipActions
 	NodeSiteConfigVersion NodeSiteConfigVersionActions
 	OriginBackend         OriginBackendActions
 	OriginPool            OriginPoolActions
@@ -78,6 +80,8 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.NodeCacheConfig = NodeCacheConfigActions{client: c}
 	c.NodeCredential = NodeCredentialActions{client: c}
 	c.NodeDNSLine = NodeDNSLineActions{client: c}
+	c.NodeGroupMembership = NodeGroupMembershipActions{client: c}
+	c.NodeRegionMembership = NodeRegionMembershipActions{client: c}
 	c.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
@@ -275,6 +279,8 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.NodeCacheConfig = NodeCacheConfigActions{client: txClient}
 	txClient.NodeCredential = NodeCredentialActions{client: txClient}
 	txClient.NodeDNSLine = NodeDNSLineActions{client: txClient}
+	txClient.NodeGroupMembership = NodeGroupMembershipActions{client: txClient}
+	txClient.NodeRegionMembership = NodeRegionMembershipActions{client: txClient}
 	txClient.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
@@ -16836,6 +16842,1938 @@ func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts .
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("NodeDNSLine.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedNodeGroupMembershipTable(c *Client) string {
+	return c.quoteIdentifier("node_group_memberships")
+}
+func quotedNodeGroupMembershipColumns(c *Client) string {
+	cols := []string{"node_id", "group_id"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeGroupMembershipField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "group_id":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeGroupMembership field %q", field)
+	}
+}
+
+// buildNodeGroupMembershipWhere recursively builds a WHERE clause string and arguments.
+func buildNodeGroupMembershipWhere(c *Client, wheres []query.NodeGroupMembershipWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeGroupMembershipWhereClause); ok {
+				sub, subArgs := buildNodeGroupMembershipWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeGroupMembershipWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeGroupMembershipWhere(c, []query.NodeGroupMembershipWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeGroupMembershipWhereClause); ok {
+				sub, subArgs := buildNodeGroupMembershipWhere(c, []query.NodeGroupMembershipWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteNodeGroupMembershipField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeGroupMembershipActions provides database operations for the NodeGroupMembership model.
+type NodeGroupMembershipActions struct {
+	client *Client
+}
+
+// NodeGroupMembershipCreateBuilder builds a NodeGroupMembership create operation incrementally.
+type NodeGroupMembershipCreateBuilder struct {
+	action NodeGroupMembershipActions
+	sets   []query.NodeGroupMembershipSetClause
+}
+
+// Create starts a staged NodeGroupMembership create operation.
+func (a NodeGroupMembershipActions) Create() NodeGroupMembershipCreateBuilder {
+	return NodeGroupMembershipCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeGroupMembershipCreateBuilder) Set(sets ...query.NodeGroupMembershipSetClause) NodeGroupMembershipCreateBuilder {
+	next := NodeGroupMembershipCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeGroupMembershipSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeGroupMembershipCreateBuilder) Do(ctx context.Context) (*model.NodeGroupMembership, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeGroupMembershipCreateManyBuilder builds a bulk NodeGroupMembership insert operation.
+type NodeGroupMembershipCreateManyBuilder struct {
+	action            NodeGroupMembershipActions
+	data              []query.NodeGroupMembershipCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeGroupMembership insert operation.
+func (a NodeGroupMembershipActions) BulkCreate(data []query.NodeGroupMembershipCreateInput) NodeGroupMembershipCreateManyBuilder {
+	return NodeGroupMembershipCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeGroupMembershipCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeGroupMembershipCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeGroupMembershipCreateManyBuilder) Returning(columns ...string) NodeGroupMembershipCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeGroupMembershipCreateManyBuilder) BatchSize(n int) NodeGroupMembershipCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeGroupMembershipCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeGroupMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeGroupMembership.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeGroupMembership.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeGroupMembershipCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeGroupMembership, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeGroupMembership
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeGroupMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "group_id"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeGroupMembership
+			if err := rows.Scan(&item.NodeId, &item.GroupId); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeGroupMembershipCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"node_id", "group_id"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeGroupMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeGroupMembershipQueryBuilder builds a NodeGroupMembership query incrementally.
+type NodeGroupMembershipQueryBuilder struct {
+	action NodeGroupMembershipActions
+	opts   []query.NodeGroupMembershipQueryOption
+}
+
+// Query starts a staged NodeGroupMembership query.
+func (a NodeGroupMembershipActions) Query() NodeGroupMembershipQueryBuilder {
+	return NodeGroupMembershipQueryBuilder{action: a}
+}
+
+func (b NodeGroupMembershipQueryBuilder) withOptions(opts ...query.NodeGroupMembershipQueryOption) NodeGroupMembershipQueryBuilder {
+	next := NodeGroupMembershipQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeGroupMembershipQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeGroupMembershipQueryBuilder) Where(clauses ...query.NodeGroupMembershipWhereClause) NodeGroupMembershipQueryBuilder {
+	opts := make([]query.NodeGroupMembershipQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeGroupMembershipQueryBuilder) OrderBy(clause query.NodeGroupMembershipOrderByClause) NodeGroupMembershipQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeGroupMembershipQueryBuilder) Include(clauses ...query.NodeGroupMembershipIncludeClause) NodeGroupMembershipQueryBuilder {
+	opts := make([]query.NodeGroupMembershipQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeGroupMembershipQueryBuilder) Take(n int) NodeGroupMembershipQueryBuilder {
+	return b.withOptions(query.NodeGroupMembershipTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeGroupMembershipQueryBuilder) Skip(n int) NodeGroupMembershipQueryBuilder {
+	return b.withOptions(query.NodeGroupMembershipSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeGroupMembershipQueryBuilder) Do(ctx context.Context) ([]model.NodeGroupMembership, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeGroupMembershipQueryBuilder) First(ctx context.Context) (*model.NodeGroupMembership, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeGroupMembershipQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeGroupMembershipOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeGroupMembershipUpdateBuilder builds a NodeGroupMembership update operation incrementally.
+type NodeGroupMembershipUpdateBuilder struct {
+	action NodeGroupMembershipActions
+	wheres []query.NodeGroupMembershipWhereClause
+	sets   []query.NodeGroupMembershipSetClause
+}
+
+// Update starts a staged NodeGroupMembership update operation.
+func (a NodeGroupMembershipActions) Update() NodeGroupMembershipUpdateBuilder {
+	return NodeGroupMembershipUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeGroupMembershipUpdateBuilder) Where(clauses ...query.NodeGroupMembershipWhereClause) NodeGroupMembershipUpdateBuilder {
+	next := NodeGroupMembershipUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeGroupMembershipWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeGroupMembershipSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeGroupMembershipUpdateBuilder) Set(sets ...query.NodeGroupMembershipSetClause) NodeGroupMembershipUpdateBuilder {
+	next := NodeGroupMembershipUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeGroupMembershipWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeGroupMembershipSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeGroupMembershipUpdateBuilder) combinedWhere() (query.NodeGroupMembershipWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeGroupMembershipWhereClause{}, fmt.Errorf("NodeGroupMembership.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeGroupMembership.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeGroupMembershipUpdateBuilder) Do(ctx context.Context) (*model.NodeGroupMembership, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeGroupMembershipUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeGroupMembershipDeleteBuilder builds a NodeGroupMembership delete operation incrementally.
+type NodeGroupMembershipDeleteBuilder struct {
+	action NodeGroupMembershipActions
+	wheres []query.NodeGroupMembershipWhereClause
+}
+
+// Delete starts a staged NodeGroupMembership delete operation.
+func (a NodeGroupMembershipActions) Delete() NodeGroupMembershipDeleteBuilder {
+	return NodeGroupMembershipDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeGroupMembershipDeleteBuilder) Where(clauses ...query.NodeGroupMembershipWhereClause) NodeGroupMembershipDeleteBuilder {
+	next := NodeGroupMembershipDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeGroupMembershipWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeGroupMembershipDeleteBuilder) combinedWhere() (query.NodeGroupMembershipWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeGroupMembershipWhereClause{}, fmt.Errorf("NodeGroupMembership.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeGroupMembership.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeGroupMembershipDeleteBuilder) Do(ctx context.Context) (*model.NodeGroupMembership, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeGroupMembershipDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeGroupMembership records.
+func (a NodeGroupMembershipActions) FindMany(ctx context.Context, opts ...query.NodeGroupMembershipQueryOption) ([]model.NodeGroupMembership, error) {
+	cfg := query.ApplyNodeGroupMembershipOptions(opts)
+	q := "SELECT " + quotedNodeGroupMembershipColumns(a.client) + " FROM " + quotedNodeGroupMembershipTable(a.client)
+	argIdx := 0
+	where, args := buildNodeGroupMembershipWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteNodeGroupMembershipField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeGroupMembership
+	for rows.Next() {
+		var item model.NodeGroupMembership
+		if err := rows.Scan(&item.NodeId, &item.GroupId); err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeGroupMembership record.
+func (a NodeGroupMembershipActions) FindFirst(ctx context.Context, opts ...query.NodeGroupMembershipQueryOption) (*model.NodeGroupMembership, error) {
+	opts = append(opts, query.NodeGroupMembershipTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeGroupMembership record by unique constraint.
+func (a NodeGroupMembershipActions) FindUnique(ctx context.Context, where query.NodeGroupMembershipWhereClause) (*model.NodeGroupMembership, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeGroupMembershipWhere(a.client, []query.NodeGroupMembershipWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedNodeGroupMembershipColumns(a.client) + " FROM " + quotedNodeGroupMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeGroupMembership
+	if err := row.Scan(&item.NodeId, &item.GroupId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeGroupMembership.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeGroupMembership record.
+func (a NodeGroupMembershipActions) CreateOne(ctx context.Context, sets ...query.NodeGroupMembershipSetClause) (*model.NodeGroupMembership, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeGroupMembership.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeGroupMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeGroupMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeGroupMembership
+		if err := row.Scan(&item.NodeId, &item.GroupId); err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeGroupMembership records.
+func (a NodeGroupMembershipActions) CreateMany(ctx context.Context, data []query.NodeGroupMembershipCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeGroupMembershipActions) buildNodeGroupMembershipCreateManySQL(data []query.NodeGroupMembershipCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"node_id", "group_id"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeGroupMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeGroupMembership record matching the where clause.
+func (a NodeGroupMembershipActions) UpdateOne(ctx context.Context, where query.NodeGroupMembershipWhereClause, sets ...query.NodeGroupMembershipSetClause) (*model.NodeGroupMembership, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeGroupMembership.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeGroupMembershipWhere(a.client, []query.NodeGroupMembershipWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeGroupMembershipTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeGroupMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeGroupMembership
+		if err := row.Scan(&item.NodeId, &item.GroupId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeGroupMembership.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeGroupMembership records matching the where clauses.
+func (a NodeGroupMembershipActions) UpdateMany(ctx context.Context, wheres []query.NodeGroupMembershipWhereClause, sets ...query.NodeGroupMembershipSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeGroupMembership.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeGroupMembershipWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeGroupMembershipTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeGroupMembership.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeGroupMembership record.
+func (a NodeGroupMembershipActions) UpsertOne(ctx context.Context, where query.NodeGroupMembershipWhereClause, create []query.NodeGroupMembershipSetClause, update []query.NodeGroupMembershipSetClause) (*model.NodeGroupMembership, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeGroupMembership.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeGroupMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteNodeGroupMembershipField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeGroupMembershipField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeGroupMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeGroupMembership
+		if err := row.Scan(&item.NodeId, &item.GroupId); err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeGroupMembership record matching the where clause.
+func (a NodeGroupMembershipActions) DeleteOne(ctx context.Context, where query.NodeGroupMembershipWhereClause) (*model.NodeGroupMembership, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeGroupMembershipWhere(a.client, []query.NodeGroupMembershipWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedNodeGroupMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeGroupMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeGroupMembership
+		if err := row.Scan(&item.NodeId, &item.GroupId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeGroupMembership.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeGroupMembership records matching the where clauses.
+func (a NodeGroupMembershipActions) DeleteMany(ctx context.Context, wheres ...query.NodeGroupMembershipWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeGroupMembershipWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedNodeGroupMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeGroupMembership.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeGroupMembership records matching the where clauses.
+func (a NodeGroupMembershipActions) Count(ctx context.Context, wheres ...query.NodeGroupMembershipWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeGroupMembershipWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedNodeGroupMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeGroupMembership.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeGroupMembership.
+func (a NodeGroupMembershipActions) Aggregate(ctx context.Context, opts ...query.NodeGroupMembershipAggregateOption) (*query.NodeGroupMembershipAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeGroupMembershipField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeGroupMembershipTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeGroupMembershipAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeGroupMembership.
+func (a NodeGroupMembershipActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeGroupMembershipAggregateOption) ([]query.NodeGroupMembershipGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeGroupMembershipField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeGroupMembershipField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeGroupMembershipTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeGroupMembership.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeGroupMembershipGroupByResult
+	for rows.Next() {
+		r := query.NodeGroupMembershipGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeGroupMembership.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedNodeRegionMembershipTable(c *Client) string {
+	return c.quoteIdentifier("node_region_memberships")
+}
+func quotedNodeRegionMembershipColumns(c *Client) string {
+	cols := []string{"node_id", "region_id"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeRegionMembershipField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "region_id":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeRegionMembership field %q", field)
+	}
+}
+
+// buildNodeRegionMembershipWhere recursively builds a WHERE clause string and arguments.
+func buildNodeRegionMembershipWhere(c *Client, wheres []query.NodeRegionMembershipWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeRegionMembershipWhereClause); ok {
+				sub, subArgs := buildNodeRegionMembershipWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeRegionMembershipWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeRegionMembershipWhere(c, []query.NodeRegionMembershipWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeRegionMembershipWhereClause); ok {
+				sub, subArgs := buildNodeRegionMembershipWhere(c, []query.NodeRegionMembershipWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteNodeRegionMembershipField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeRegionMembershipActions provides database operations for the NodeRegionMembership model.
+type NodeRegionMembershipActions struct {
+	client *Client
+}
+
+// NodeRegionMembershipCreateBuilder builds a NodeRegionMembership create operation incrementally.
+type NodeRegionMembershipCreateBuilder struct {
+	action NodeRegionMembershipActions
+	sets   []query.NodeRegionMembershipSetClause
+}
+
+// Create starts a staged NodeRegionMembership create operation.
+func (a NodeRegionMembershipActions) Create() NodeRegionMembershipCreateBuilder {
+	return NodeRegionMembershipCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeRegionMembershipCreateBuilder) Set(sets ...query.NodeRegionMembershipSetClause) NodeRegionMembershipCreateBuilder {
+	next := NodeRegionMembershipCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeRegionMembershipSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeRegionMembershipCreateBuilder) Do(ctx context.Context) (*model.NodeRegionMembership, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeRegionMembershipCreateManyBuilder builds a bulk NodeRegionMembership insert operation.
+type NodeRegionMembershipCreateManyBuilder struct {
+	action            NodeRegionMembershipActions
+	data              []query.NodeRegionMembershipCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeRegionMembership insert operation.
+func (a NodeRegionMembershipActions) BulkCreate(data []query.NodeRegionMembershipCreateInput) NodeRegionMembershipCreateManyBuilder {
+	return NodeRegionMembershipCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeRegionMembershipCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeRegionMembershipCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeRegionMembershipCreateManyBuilder) Returning(columns ...string) NodeRegionMembershipCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeRegionMembershipCreateManyBuilder) BatchSize(n int) NodeRegionMembershipCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeRegionMembershipCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeRegionMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeRegionMembership.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeRegionMembership.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeRegionMembershipCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeRegionMembership, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeRegionMembership
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeRegionMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "region_id"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeRegionMembership
+			if err := rows.Scan(&item.NodeId, &item.RegionId); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeRegionMembershipCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"node_id", "region_id"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeRegionMembershipCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeRegionMembershipQueryBuilder builds a NodeRegionMembership query incrementally.
+type NodeRegionMembershipQueryBuilder struct {
+	action NodeRegionMembershipActions
+	opts   []query.NodeRegionMembershipQueryOption
+}
+
+// Query starts a staged NodeRegionMembership query.
+func (a NodeRegionMembershipActions) Query() NodeRegionMembershipQueryBuilder {
+	return NodeRegionMembershipQueryBuilder{action: a}
+}
+
+func (b NodeRegionMembershipQueryBuilder) withOptions(opts ...query.NodeRegionMembershipQueryOption) NodeRegionMembershipQueryBuilder {
+	next := NodeRegionMembershipQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeRegionMembershipQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeRegionMembershipQueryBuilder) Where(clauses ...query.NodeRegionMembershipWhereClause) NodeRegionMembershipQueryBuilder {
+	opts := make([]query.NodeRegionMembershipQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeRegionMembershipQueryBuilder) OrderBy(clause query.NodeRegionMembershipOrderByClause) NodeRegionMembershipQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeRegionMembershipQueryBuilder) Include(clauses ...query.NodeRegionMembershipIncludeClause) NodeRegionMembershipQueryBuilder {
+	opts := make([]query.NodeRegionMembershipQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeRegionMembershipQueryBuilder) Take(n int) NodeRegionMembershipQueryBuilder {
+	return b.withOptions(query.NodeRegionMembershipTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeRegionMembershipQueryBuilder) Skip(n int) NodeRegionMembershipQueryBuilder {
+	return b.withOptions(query.NodeRegionMembershipSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeRegionMembershipQueryBuilder) Do(ctx context.Context) ([]model.NodeRegionMembership, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeRegionMembershipQueryBuilder) First(ctx context.Context) (*model.NodeRegionMembership, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeRegionMembershipQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeRegionMembershipOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeRegionMembershipUpdateBuilder builds a NodeRegionMembership update operation incrementally.
+type NodeRegionMembershipUpdateBuilder struct {
+	action NodeRegionMembershipActions
+	wheres []query.NodeRegionMembershipWhereClause
+	sets   []query.NodeRegionMembershipSetClause
+}
+
+// Update starts a staged NodeRegionMembership update operation.
+func (a NodeRegionMembershipActions) Update() NodeRegionMembershipUpdateBuilder {
+	return NodeRegionMembershipUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeRegionMembershipUpdateBuilder) Where(clauses ...query.NodeRegionMembershipWhereClause) NodeRegionMembershipUpdateBuilder {
+	next := NodeRegionMembershipUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeRegionMembershipWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeRegionMembershipSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeRegionMembershipUpdateBuilder) Set(sets ...query.NodeRegionMembershipSetClause) NodeRegionMembershipUpdateBuilder {
+	next := NodeRegionMembershipUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeRegionMembershipWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeRegionMembershipSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeRegionMembershipUpdateBuilder) combinedWhere() (query.NodeRegionMembershipWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeRegionMembershipWhereClause{}, fmt.Errorf("NodeRegionMembership.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeRegionMembership.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeRegionMembershipUpdateBuilder) Do(ctx context.Context) (*model.NodeRegionMembership, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeRegionMembershipUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeRegionMembershipDeleteBuilder builds a NodeRegionMembership delete operation incrementally.
+type NodeRegionMembershipDeleteBuilder struct {
+	action NodeRegionMembershipActions
+	wheres []query.NodeRegionMembershipWhereClause
+}
+
+// Delete starts a staged NodeRegionMembership delete operation.
+func (a NodeRegionMembershipActions) Delete() NodeRegionMembershipDeleteBuilder {
+	return NodeRegionMembershipDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeRegionMembershipDeleteBuilder) Where(clauses ...query.NodeRegionMembershipWhereClause) NodeRegionMembershipDeleteBuilder {
+	next := NodeRegionMembershipDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeRegionMembershipWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeRegionMembershipDeleteBuilder) combinedWhere() (query.NodeRegionMembershipWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeRegionMembershipWhereClause{}, fmt.Errorf("NodeRegionMembership.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeRegionMembership.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeRegionMembershipDeleteBuilder) Do(ctx context.Context) (*model.NodeRegionMembership, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeRegionMembershipDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeRegionMembership records.
+func (a NodeRegionMembershipActions) FindMany(ctx context.Context, opts ...query.NodeRegionMembershipQueryOption) ([]model.NodeRegionMembership, error) {
+	cfg := query.ApplyNodeRegionMembershipOptions(opts)
+	q := "SELECT " + quotedNodeRegionMembershipColumns(a.client) + " FROM " + quotedNodeRegionMembershipTable(a.client)
+	argIdx := 0
+	where, args := buildNodeRegionMembershipWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteNodeRegionMembershipField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeRegionMembership
+	for rows.Next() {
+		var item model.NodeRegionMembership
+		if err := rows.Scan(&item.NodeId, &item.RegionId); err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeRegionMembership record.
+func (a NodeRegionMembershipActions) FindFirst(ctx context.Context, opts ...query.NodeRegionMembershipQueryOption) (*model.NodeRegionMembership, error) {
+	opts = append(opts, query.NodeRegionMembershipTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeRegionMembership record by unique constraint.
+func (a NodeRegionMembershipActions) FindUnique(ctx context.Context, where query.NodeRegionMembershipWhereClause) (*model.NodeRegionMembership, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeRegionMembershipWhere(a.client, []query.NodeRegionMembershipWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedNodeRegionMembershipColumns(a.client) + " FROM " + quotedNodeRegionMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeRegionMembership
+	if err := row.Scan(&item.NodeId, &item.RegionId); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeRegionMembership.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeRegionMembership record.
+func (a NodeRegionMembershipActions) CreateOne(ctx context.Context, sets ...query.NodeRegionMembershipSetClause) (*model.NodeRegionMembership, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeRegionMembership.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeRegionMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeRegionMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeRegionMembership
+		if err := row.Scan(&item.NodeId, &item.RegionId); err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeRegionMembership records.
+func (a NodeRegionMembershipActions) CreateMany(ctx context.Context, data []query.NodeRegionMembershipCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeRegionMembershipActions) buildNodeRegionMembershipCreateManySQL(data []query.NodeRegionMembershipCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"node_id", "region_id"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeRegionMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeRegionMembership record matching the where clause.
+func (a NodeRegionMembershipActions) UpdateOne(ctx context.Context, where query.NodeRegionMembershipWhereClause, sets ...query.NodeRegionMembershipSetClause) (*model.NodeRegionMembership, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeRegionMembership.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeRegionMembershipWhere(a.client, []query.NodeRegionMembershipWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeRegionMembershipTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeRegionMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeRegionMembership
+		if err := row.Scan(&item.NodeId, &item.RegionId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeRegionMembership.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeRegionMembership records matching the where clauses.
+func (a NodeRegionMembershipActions) UpdateMany(ctx context.Context, wheres []query.NodeRegionMembershipWhereClause, sets ...query.NodeRegionMembershipSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeRegionMembership.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeRegionMembershipWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeRegionMembershipTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeRegionMembership.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeRegionMembership record.
+func (a NodeRegionMembershipActions) UpsertOne(ctx context.Context, where query.NodeRegionMembershipWhereClause, create []query.NodeRegionMembershipSetClause, update []query.NodeRegionMembershipSetClause) (*model.NodeRegionMembership, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeRegionMembership.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeRegionMembershipTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteNodeRegionMembershipField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeRegionMembershipField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeRegionMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeRegionMembership
+		if err := row.Scan(&item.NodeId, &item.RegionId); err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeRegionMembership record matching the where clause.
+func (a NodeRegionMembershipActions) DeleteOne(ctx context.Context, where query.NodeRegionMembershipWhereClause) (*model.NodeRegionMembership, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeRegionMembershipWhere(a.client, []query.NodeRegionMembershipWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedNodeRegionMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeRegionMembershipColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeRegionMembership
+		if err := row.Scan(&item.NodeId, &item.RegionId); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeRegionMembership.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeRegionMembership records matching the where clauses.
+func (a NodeRegionMembershipActions) DeleteMany(ctx context.Context, wheres ...query.NodeRegionMembershipWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeRegionMembershipWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedNodeRegionMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeRegionMembership.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeRegionMembership records matching the where clauses.
+func (a NodeRegionMembershipActions) Count(ctx context.Context, wheres ...query.NodeRegionMembershipWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeRegionMembershipWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedNodeRegionMembershipTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeRegionMembership.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeRegionMembership.
+func (a NodeRegionMembershipActions) Aggregate(ctx context.Context, opts ...query.NodeRegionMembershipAggregateOption) (*query.NodeRegionMembershipAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeRegionMembershipField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeRegionMembershipTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeRegionMembershipAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeRegionMembership.
+func (a NodeRegionMembershipActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeRegionMembershipAggregateOption) ([]query.NodeRegionMembershipGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeRegionMembershipField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeRegionMembershipField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeRegionMembershipTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeRegionMembership.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeRegionMembershipGroupByResult
+	for rows.Next() {
+		r := query.NodeRegionMembershipGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeRegionMembership.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

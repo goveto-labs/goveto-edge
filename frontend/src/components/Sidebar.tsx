@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 
-import { Avatar, Button, ListBox, Select } from '@heroui/react';
+import { Avatar, Button, ListBox, Select, Tooltip } from '@heroui/react';
 import {
     BarChart3,
     Cloud,
@@ -37,15 +37,31 @@ export const nav: NavItemConfig[] = [
 ];
 
 interface SidebarProps {
+    collapsed?: boolean;
     onNavigate?: () => void;
     onLogout: () => void;
 }
 
-function SidebarProfile() {
+function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
     const { user } = useAuth();
     const label = user?.name || user?.email || user?.id || 'User';
     const role = user?.role || 'Admin';
     const initial = label.slice(0, 1).toUpperCase();
+
+    if (collapsed) {
+        return (
+            <div className='flex justify-center px-3 py-4'>
+                <Tooltip>
+                    <Tooltip.Trigger>
+                        <Avatar className='h-10 w-10 text-xs'>
+                            <Avatar.Fallback>{initial}</Avatar.Fallback>
+                        </Avatar>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>{`${label} · ${role}`}</Tooltip.Content>
+                </Tooltip>
+            </div>
+        );
+    }
 
     return (
         <div className='flex items-center gap-3 px-3 py-4'>
@@ -60,15 +76,16 @@ function SidebarProfile() {
     );
 }
 
-function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
+function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
     const location = useLocation();
 
     return (
-        <nav className='flex-1 space-y-1 overflow-y-auto p-3 pt-0'>
+        <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>
             {nav.map((item) => (
                 <NavItem
                     key={item.path}
                     active={location.pathname === item.path}
+                    collapsed={collapsed}
                     icon={item.icon}
                     label={item.label}
                     onClick={onNavigate}
@@ -79,7 +96,39 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
     );
 }
 
-function SidebarFooter({ onLogout }: { onLogout: () => void }) {
+function SidebarFooter({ collapsed, onLogout }: { collapsed?: boolean; onLogout: () => void }) {
+    if (collapsed) {
+        return (
+            <div className='space-y-1 border-t border-border p-2'>
+                <Tooltip>
+                    <Tooltip.Trigger>
+                        <Button
+                            className='w-full justify-center px-2 text-muted'
+                            isIconOnly
+                            variant='ghost'
+                        >
+                            <HelpCircle className='h-[18px] w-[18px]' />
+                        </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>Help & Information</Tooltip.Content>
+                </Tooltip>
+                <Tooltip>
+                    <Tooltip.Trigger>
+                        <Button
+                            className='w-full justify-center px-2 text-muted'
+                            isIconOnly
+                            variant='ghost'
+                            onPress={onLogout}
+                        >
+                            <LogOut className='h-[18px] w-[18px]' />
+                        </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>Log out</Tooltip.Content>
+                </Tooltip>
+            </div>
+        );
+    }
+
     return (
         <div className='space-y-1 border-t border-border p-3'>
             <Button
@@ -101,12 +150,12 @@ function SidebarFooter({ onLogout }: { onLogout: () => void }) {
     );
 }
 
-export function Sidebar({ onNavigate, onLogout }: SidebarProps) {
+export function Sidebar({ collapsed, onNavigate, onLogout }: SidebarProps) {
     return (
         <div className='flex h-full flex-col'>
-            <SidebarProfile />
-            <SidebarNav onNavigate={onNavigate} />
-            <SidebarFooter onLogout={onLogout} />
+            <SidebarProfile collapsed={collapsed} />
+            <SidebarNav collapsed={collapsed} onNavigate={onNavigate} />
+            <SidebarFooter collapsed={collapsed} onLogout={onLogout} />
         </div>
     );
 }

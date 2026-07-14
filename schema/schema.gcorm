@@ -163,13 +163,14 @@ model Cluster {
 }
 
 model ClusterGroup {
-  id        String   @id @default(uuid())
-  clusterId String   @map("cluster_id")
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  cluster   Cluster  @relation(fields: [clusterId], references: [id])
-  nodes     Node[]
+  id              String                @id @default(uuid())
+  clusterId       String                @map("cluster_id")
+  name            String
+  createdAt       DateTime              @default(now()) @map("created_at")
+  updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at")
+  cluster         Cluster               @relation(fields: [clusterId], references: [id])
+  nodes           Node[]
+  nodeMemberships NodeGroupMembership[]
 
   @@unique([clusterId, name])
   @@index([clusterId])
@@ -190,13 +191,14 @@ model ClusterMember {
 }
 
 model ClusterRegion {
-  id        String   @id @default(uuid())
-  clusterId String   @map("cluster_id")
-  name      String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
-  cluster   Cluster  @relation(fields: [clusterId], references: [id])
-  nodes     Node[]
+  id              String                 @id @default(uuid())
+  clusterId       String                 @map("cluster_id")
+  name            String
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @default(now()) @updatedAt @map("updated_at")
+  cluster         Cluster                @relation(fields: [clusterId], references: [id])
+  nodes           Node[]
+  nodeMemberships NodeRegionMembership[]
 
   @@unique([clusterId, name])
   @@index([clusterId])
@@ -331,6 +333,8 @@ model Node {
   region             ClusterRegion?          @relation(fields: [regionId], references: [id])
   addresses          NodeAddress[]
   dnsLines           NodeDNSLine[]
+  groupMemberships   NodeGroupMembership[]
+  regionMemberships  NodeRegionMembership[]
   dnsRecords         DNSManagedRecord[]
   cacheConfig        NodeCacheConfig?
   credential         NodeCredential?
@@ -387,6 +391,28 @@ model NodeDNSLine {
   @@id([nodeId, dnsLineId])
   @@index([dnsLineId])
   @@map("node_dns_lines")
+}
+
+model NodeGroupMembership {
+  nodeId  UUID         @map("node_id")
+  groupId String       @map("group_id")
+  node    Node         @relation(fields: [nodeId], references: [id])
+  group   ClusterGroup @relation(fields: [groupId], references: [id])
+
+  @@id([nodeId, groupId])
+  @@index([groupId])
+  @@map("node_group_memberships")
+}
+
+model NodeRegionMembership {
+  nodeId   UUID          @map("node_id")
+  regionId String        @map("region_id")
+  node     Node          @relation(fields: [nodeId], references: [id])
+  region   ClusterRegion @relation(fields: [regionId], references: [id])
+
+  @@id([nodeId, regionId])
+  @@index([regionId])
+  @@map("node_region_memberships")
 }
 
 model NodeSiteConfigVersion {

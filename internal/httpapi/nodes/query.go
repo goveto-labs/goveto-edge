@@ -20,6 +20,8 @@ func list(db *client.Client) echo.HandlerFunc {
 			Include(
 				query.Node.Addresses.Fetch(),
 				query.Node.DnsLines.Fetch(),
+				query.Node.GroupMemberships.Fetch(),
+				query.Node.RegionMemberships.Fetch(),
 				query.Node.SiteConfigVersions.Fetch(),
 			).
 			OrderBy(query.Node.CreatedAt.Desc()).
@@ -45,11 +47,16 @@ func get(db *client.Client) echo.HandlerFunc {
 			Include(
 				query.Node.Addresses.Fetch(),
 				query.Node.DnsLines.Fetch(),
+				query.Node.GroupMemberships.Fetch(),
+				query.Node.RegionMemberships.Fetch(),
 				query.Node.SiteConfigVersions.Fetch(),
 				query.Node.CacheConfig.Fetch(),
 			).
 			First(c.Request().Context())
-		if err != nil || node.ClusterId != c.Param("cluster_id") {
+		if err != nil {
+			return err
+		}
+		if node == nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
 		return types.JSON(c, http.StatusOK, types.NewNode(node))

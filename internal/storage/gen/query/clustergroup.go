@@ -30,13 +30,14 @@ func ApplyClusterGroupOptions(opts []ClusterGroupQueryOption) ClusterGroupQueryC
 
 // ClusterGroupQuery is the namespace for ClusterGroup query operations.
 type ClusterGroupQuery struct {
-	Id        clusterGroupIdField
-	ClusterId clusterGroupClusterIdField
-	Name      clusterGroupNameField
-	CreatedAt clusterGroupCreatedAtField
-	UpdatedAt clusterGroupUpdatedAtField
-	Cluster   clusterGroupClusterRelation
-	Nodes     clusterGroupNodesRelation
+	Id              clusterGroupIdField
+	ClusterId       clusterGroupClusterIdField
+	Name            clusterGroupNameField
+	CreatedAt       clusterGroupCreatedAtField
+	UpdatedAt       clusterGroupUpdatedAtField
+	Cluster         clusterGroupClusterRelation
+	Nodes           clusterGroupNodesRelation
+	NodeMemberships clusterGroupNodeMembershipsRelation
 }
 
 const ClusterGroupTable = "node_groups"
@@ -48,13 +49,14 @@ const ClusterGroupUpdatedAtColumn = "updated_at"
 
 // ClusterGroupQuery provides query building methods for the ClusterGroup model.
 var ClusterGroup = ClusterGroupQuery{
-	Id:        clusterGroupIdField{},
-	ClusterId: clusterGroupClusterIdField{},
-	Name:      clusterGroupNameField{},
-	CreatedAt: clusterGroupCreatedAtField{},
-	UpdatedAt: clusterGroupUpdatedAtField{},
-	Cluster:   clusterGroupClusterRelation{},
-	Nodes:     clusterGroupNodesRelation{},
+	Id:              clusterGroupIdField{},
+	ClusterId:       clusterGroupClusterIdField{},
+	Name:            clusterGroupNameField{},
+	CreatedAt:       clusterGroupCreatedAtField{},
+	UpdatedAt:       clusterGroupUpdatedAtField{},
+	Cluster:         clusterGroupClusterRelation{},
+	Nodes:           clusterGroupNodesRelation{},
+	NodeMemberships: clusterGroupNodeMembershipsRelation{},
 }
 
 // ClusterGroupWhereClause represents a WHERE condition for ClusterGroup.
@@ -477,6 +479,14 @@ func (clusterGroupNodesRelation) Fetch() ClusterGroupIncludeClause {
 	return ClusterGroupIncludeClause{Relation: "nodes"}
 }
 
+// NodeMembershipsRelation provides relation query helpers for nodeMemberships.
+type clusterGroupNodeMembershipsRelation struct{}
+
+// Fetch creates an include clause to fetch related nodeMemberships.
+func (clusterGroupNodeMembershipsRelation) Fetch() ClusterGroupIncludeClause {
+	return ClusterGroupIncludeClause{Relation: "nodeMemberships"}
+}
+
 // ClusterGroupSetClause represents a field set operation for create/update.
 type ClusterGroupSetClause struct {
 	Field string
@@ -510,13 +520,14 @@ type ClusterGroupGroupByResult struct {
 
 // ClusterGroupCreateInput holds data for creating a ClusterGroup record.
 type ClusterGroupCreateInput struct {
-	Id        string
-	ClusterId string
-	Name      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Cluster   *ClusterCreateNestedInput
-	Nodes     *NodeCreateNestedInput
+	Id              string
+	ClusterId       string
+	Name            string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Cluster         *ClusterCreateNestedInput
+	Nodes           *NodeCreateNestedInput
+	NodeMemberships *NodeGroupMembershipCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

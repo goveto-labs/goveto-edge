@@ -144,6 +144,8 @@ export interface Node {
     status: string;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
+    groupMemberships?: Array<{ nodeId: string; groupId: string }>;
+    regionMemberships?: Array<{ nodeId: string; regionId: string }>;
     siteConfigVersions?: SiteConfigVersion[];
     cacheConfig?: NodeCacheConfig;
 }
@@ -167,8 +169,8 @@ export interface CreateNodeRequest {
     name: string;
     addresses: string[];
     dns_line_ids: string[];
-    group_id?: string;
-    region_id?: string;
+    group_ids: string[];
+    region_ids: string[];
     ssh: NodeSSH;
 }
 

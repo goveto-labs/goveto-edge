@@ -1,21 +1,168 @@
 import type { ClusterGroup, ClusterRegion, DNSLine } from '@/api';
 
-import { Button, Input, ListBox, Select, Spinner } from '@heroui/react';
-import { ArrowLeft, Server } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button, Input, Spinner } from '@heroui/react';
+import {
+    ArrowLeft,
+    Check,
+    ChevronDown,
+    ChevronRight,
+    Plus,
+    Server,
+    Trash2,
+    Users,
+    X,
+} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
-import { FormError, FormField } from '@/components/FormField.tsx';
+import { FormError } from '@/components/FormField.tsx';
+import { FormRow } from '@/components/FormRow.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
-function parseCommaList(value: string) {
-    return value
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
+type CreationMode = 'single' | 'batch';
+
+interface MultiAddOption {
+    id: string;
+    name: string;
+    detail?: string;
+}
+
+function MultiAddField({
+    options,
+    selected,
+    addLabel,
+    emptyLabel,
+    onChange,
+}: {
+    options: MultiAddOption[];
+    selected: Set<string>;
+    addLabel: string;
+    emptyLabel: string;
+    onChange: (value: Set<string>) => void;
+}) {
+    const [open, setOpen] = useState(false);
+    const selectedOptions = options.filter((option) => selected.has(option.id));
+
+    const toggle = (id: string) => {
+        const next = new Set(selected);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        onChange(next);
+    };
+
+    return (
+        <div className='space-y-3'>
+            <div className='flex min-h-8 flex-wrap items-center gap-2'>
+                {selectedOptions.length === 0 && (
+                    <span className='text-sm text-muted'>{emptyLabel}</span>
+                )}
+                {selectedOptions.map((option) => (
+                    <span
+                        className='inline-flex items-center gap-1.5 rounded-full border border-border bg-surface-secondary px-3 py-1 text-sm'
+                        key={option.id}
+                    >
+                        {option.name}
+                        <button
+                            aria-label={`Remove ${option.name}`}
+                            className='rounded-full text-muted transition-colors hover:text-foreground'
+                            type='button'
+                            onClick={() => toggle(option.id)}
+                        >
+                            <X className='h-3.5 w-3.5' />
+                        </button>
+                    </span>
+                ))}
+                <Button size='sm' type='button' variant='secondary' onPress={() => setOpen(!open)}>
+                    <Plus className='mr-1.5 h-4 w-4' />
+                    {addLabel}
+                </Button>
+            </div>
+            {open && (
+                <div className='grid gap-2 rounded-xl border border-border bg-surface-secondary/40 p-3 sm:grid-cols-2'>
+                    {options.length === 0 ? (
+                        <p className='text-sm text-muted'>No options are configured.</p>
+                    ) : (
+                        options.map((option) => {
+                            const active = selected.has(option.id);
+                            return (
+                                <button
+                                    className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left text-sm transition-colors ${
+                                        active
+                                            ? 'border-accent bg-accent/10 text-foreground'
+                                            : 'border-border bg-surface hover:bg-surface-secondary'
+                                    }`}
+                                    key={option.id}
+                                    type='button'
+                                    onClick={() => toggle(option.id)}
+                                >
+                                    <span>
+                                        <span className='block font-medium'>{option.name}</span>
+                                        {option.detail && (
+                                            <span className='block text-xs text-muted'>
+                                                {option.detail}
+                                            </span>
+                                        )}
+                                    </span>
+                                    {active && <Check className='h-4 w-4 shrink-0 text-accent' />}
+                                </button>
+                            );
+                        })
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function SectionHeader({ number, title }: { number: number; title: string }) {
+    return (
+        <div className='flex items-center gap-3 border-b border-border bg-surface-secondary/30 px-6 py-3'>
+            <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground'>
+                {number}
+            </span>
+            <span className='text-sm font-semibold'>{title}</span>
+        </div>
+    );
+}
+
+function ModeTabs({
+    mode,
+    onChange,
+}: {
+    mode: CreationMode;
+    onChange: (mode: CreationMode) => void;
+}) {
+    return (
+        <div className='flex flex-col gap-1'>
+            <button
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
+                    mode === 'single'
+                        ? 'bg-surface-secondary text-foreground'
+                        : 'text-muted hover:bg-surface-secondary hover:text-foreground'
+                }`}
+                onClick={() => onChange('single')}
+                type='button'
+            >
+                <Server className='h-4 w-4' />
+                Single node
+            </button>
+            <button
+                className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
+                    mode === 'batch'
+                        ? 'bg-surface-secondary text-foreground'
+                        : 'text-muted hover:bg-surface-secondary hover:text-foreground'
+                }`}
+                onClick={() => onChange('batch')}
+                type='button'
+            >
+                <Users className='h-4 w-4' />
+                Batch create
+            </button>
+        </div>
+    );
 }
 
 export default function CreateNode() {
@@ -24,6 +171,7 @@ export default function CreateNode() {
     const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
 
+    const [mode, setMode] = useState<CreationMode>('single');
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
     const [groups, setGroups] = useState<ClusterGroup[]>([]);
     const [regions, setRegions] = useState<ClusterRegion[]>([]);
@@ -33,10 +181,14 @@ export default function CreateNode() {
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState('');
     const [name, setName] = useState('');
-    const [addresses, setAddresses] = useState('');
+    const idRef = useRef(0);
+    const [addresses, setAddresses] = useState<{ id: number; value: string }[]>([
+        { id: idRef.current++, value: '' },
+    ]);
     const [dnsLineIds, setDnsLineIds] = useState<Set<string>>(new Set());
-    const [groupId, setGroupId] = useState('');
-    const [regionId, setRegionId] = useState('');
+    const [groupIds, setGroupIds] = useState<Set<string>>(new Set());
+    const [regionIds, setRegionIds] = useState<Set<string>>(new Set());
+    const [sshExpanded, setSshExpanded] = useState(true);
     const [sshIp, setSshIp] = useState('');
     const [sshPort, setSshPort] = useState('22');
     const [sshUser, setSshUser] = useState('');
@@ -68,6 +220,15 @@ export default function CreateNode() {
         loadOptions();
     }, [loadOptions]);
 
+    const handleAddAddress = () =>
+        setAddresses((prev) => [...prev, { id: idRef.current++, value: '' }]);
+    const handleRemoveAddress = (id: number) => {
+        setAddresses((prev) => prev.filter((item) => item.id !== id));
+    };
+    const handleAddressChange = (id: number, value: string) => {
+        setAddresses((prev) => prev.map((item) => (item.id === id ? { ...item, value } : item)));
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!clusterId) return;
@@ -76,10 +237,10 @@ export default function CreateNode() {
         try {
             await nodeApi.create({
                 name,
-                addresses: parseCommaList(addresses),
+                addresses: addresses.map((item) => item.value).filter(Boolean),
                 dns_line_ids: Array.from(dnsLineIds),
-                group_id: groupId || undefined,
-                region_id: regionId || undefined,
+                group_ids: Array.from(groupIds),
+                region_ids: Array.from(regionIds),
                 ssh: {
                     entry_ip: sshIp,
                     port: Number(sshPort) || 22,
@@ -130,196 +291,264 @@ export default function CreateNode() {
                 <div className='flex h-64 items-center justify-center'>
                     <Spinner />
                 </div>
-            ) : (
-                <ContentCard>
-                    <form className='space-y-6' onSubmit={handleSubmit}>
-                        {submitError && <FormError message={submitError} />}
-
-                        <FormField htmlFor='node-name' label='Name' required>
-                            <Input
-                                autoFocus
-                                id='node-name'
-                                required
-                                variant='secondary'
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
-                        </FormField>
-
-                        <FormField
-                            hint='Comma separated list of public addresses'
-                            htmlFor='node-addresses'
-                            label='Addresses'
-                            required
-                        >
-                            <Input
-                                id='node-addresses'
-                                required
-                                variant='secondary'
-                                value={addresses}
-                                onChange={(e) => setAddresses(e.target.value)}
-                            />
-                        </FormField>
-
-                        <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
-                            <FormField className='sm:col-span-2' label='DNS lines'>
-                                <Select
-                                    selectionMode='multiple'
-                                    value={Array.from(dnsLineIds)}
-                                    variant='secondary'
-                                    onChange={(keys) => setDnsLineIds(new Set(keys as string[]))}
-                                >
-                                    <Select.Trigger>
-                                        <Select.Value />
-                                    </Select.Trigger>
-                                    <Select.Popover>
-                                        <ListBox>
-                                            {dnsLines.map((line) => (
-                                                <ListBox.Item
-                                                    id={line.id}
-                                                    key={line.id}
-                                                    textValue={line.name}
-                                                >
-                                                    {line.name}
-                                                </ListBox.Item>
-                                            ))}
-                                        </ListBox>
-                                    </Select.Popover>
-                                </Select>
-                            </FormField>
-
-                            <FormField label='Group (optional)'>
-                                <Select
-                                    value={groupId || null}
-                                    variant='secondary'
-                                    onChange={(key) => setGroupId(String(key ?? ''))}
-                                >
-                                    <Select.Trigger>
-                                        <Select.Value />
-                                    </Select.Trigger>
-                                    <Select.Popover>
-                                        <ListBox>
-                                            {groups.map((g) => (
-                                                <ListBox.Item
-                                                    id={g.id}
-                                                    key={g.id}
-                                                    textValue={g.name}
-                                                >
-                                                    {g.name}
-                                                </ListBox.Item>
-                                            ))}
-                                        </ListBox>
-                                    </Select.Popover>
-                                </Select>
-                            </FormField>
-                        </div>
-
-                        <FormField label='Region (optional)'>
-                            <Select
-                                value={regionId || null}
-                                variant='secondary'
-                                onChange={(key) => setRegionId(String(key ?? ''))}
-                            >
-                                <Select.Trigger>
-                                    <Select.Value />
-                                </Select.Trigger>
-                                <Select.Popover>
-                                    <ListBox>
-                                        {regions.map((r) => (
-                                            <ListBox.Item id={r.id} key={r.id} textValue={r.name}>
-                                                {r.name}
-                                            </ListBox.Item>
-                                        ))}
-                                    </ListBox>
-                                </Select.Popover>
-                            </Select>
-                        </FormField>
-
-                        <div className='border-t border-border pt-4'>
-                            <div className='mb-3 flex items-center gap-2 text-sm font-semibold'>
-                                <Server className='h-4 w-4 text-muted' />
-                                SSH access
-                            </div>
-                            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <FormField htmlFor='node-ssh-ip' label='Entry IP' required>
-                                    <Input
-                                        id='node-ssh-ip'
-                                        required
-                                        variant='secondary'
-                                        value={sshIp}
-                                        onChange={(e) => setSshIp(e.target.value)}
-                                    />
-                                </FormField>
-                                <FormField htmlFor='node-ssh-port' label='Port' required>
-                                    <Input
-                                        id='node-ssh-port'
-                                        required
-                                        type='number'
-                                        variant='secondary'
-                                        value={sshPort}
-                                        onChange={(e) => setSshPort(e.target.value)}
-                                    />
-                                </FormField>
-                            </div>
-                            <div className='mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <FormField htmlFor='node-ssh-user' label='User' required>
-                                    <Input
-                                        id='node-ssh-user'
-                                        required
-                                        variant='secondary'
-                                        value={sshUser}
-                                        onChange={(e) => setSshUser(e.target.value)}
-                                    />
-                                </FormField>
-                                <FormField htmlFor='node-ssh-password' label='Password'>
-                                    <Input
-                                        id='node-ssh-password'
-                                        type='password'
-                                        variant='secondary'
-                                        value={sshPassword}
-                                        onChange={(e) => setSshPassword(e.target.value)}
-                                    />
-                                </FormField>
-                            </div>
-                            <div className='mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                                <FormField
-                                    hint='Path to private key file on the node'
-                                    htmlFor='node-ssh-key'
-                                    label='Private key path'
-                                >
-                                    <Input
-                                        id='node-ssh-key'
-                                        variant='secondary'
-                                        value={sshKey}
-                                        onChange={(e) => setSshKey(e.target.value)}
-                                    />
-                                </FormField>
-                                <FormField htmlFor='node-ssh-passphrase' label='Key passphrase'>
-                                    <Input
-                                        id='node-ssh-passphrase'
-                                        type='password'
-                                        variant='secondary'
-                                        value={sshPassphrase}
-                                        onChange={(e) => setSshPassphrase(e.target.value)}
-                                    />
-                                </FormField>
-                            </div>
-                        </div>
-
-                        <div className='flex justify-end gap-2 border-t border-border pt-4'>
-                            <Button
-                                type='button'
-                                variant='ghost'
-                                onPress={() => navigate('/nodes')}
-                            >
-                                Cancel
-                            </Button>
-                            <Button isDisabled={submitting} type='submit' variant='primary'>
-                                {submitting ? 'Creating...' : 'Create node'}
-                            </Button>
-                        </div>
-                    </form>
+            ) : mode === 'batch' ? (
+                <ContentCard className='p-8 text-center'>
+                    <div className='space-y-3'>
+                        <Users className='mx-auto h-10 w-10 text-muted' />
+                        <div className='text-sm font-medium'>Batch creation is coming soon</div>
+                        <p className='text-xs text-muted'>Use single-node creation for now.</p>
+                        <Button size='sm' variant='primary' onPress={() => setMode('single')}>
+                            Back to single node
+                        </Button>
+                    </div>
                 </ContentCard>
+            ) : (
+                <form onSubmit={handleSubmit}>
+                    <div className='grid grid-cols-1 gap-6 lg:grid-cols-[200px_1fr]'>
+                        <div className='hidden lg:block'>
+                            <ModeTabs mode={mode} onChange={setMode} />
+                        </div>
+
+                        <div className='space-y-6'>
+                            <ContentCard className='overflow-visible p-0' noPadding>
+                                <SectionHeader number={1} title='Node information' />
+
+                                <div className='px-6 py-2'>
+                                    {submitError && (
+                                        <div className='mb-4'>
+                                            <FormError message={submitError} />
+                                        </div>
+                                    )}
+
+                                    <FormRow htmlFor='node-name' label='Node name' required>
+                                        <Input
+                                            autoFocus
+                                            id='node-name'
+                                            required
+                                            variant='secondary'
+                                            value={name}
+                                            onChange={(e) => setName(e.target.value)}
+                                        />
+                                    </FormRow>
+
+                                    <FormRow
+                                        label='IP'
+                                        required
+                                    >
+                                        <div className='space-y-2'>
+                                            {addresses.map((item, index) => (
+                                                <div
+                                                    key={item.id}
+                                                    className='flex items-center gap-2'
+                                                >
+                                                    <Input
+                                                        aria-label={`IP address ${index + 1}`}
+                                                        className='flex-1'
+                                                        required={index === 0}
+                                                        variant='secondary'
+                                                        value={item.value}
+                                                        onChange={(e) =>
+                                                            handleAddressChange(
+                                                                item.id,
+                                                                e.target.value
+                                                            )
+                                                        }
+                                                    />
+                                                    {addresses.length > 1 && (
+                                                        <Button
+                                                            isIconOnly
+                                                            aria-label='Remove address'
+                                                            className='shrink-0 text-muted'
+                                                            size='sm'
+                                                            variant='ghost'
+                                                            onPress={() =>
+                                                                handleRemoveAddress(item.id)
+                                                            }
+                                                        >
+                                                            <Trash2 className='h-4 w-4' />
+                                                        </Button>
+                                                    )}
+                                                </div>
+                                            ))}
+                                            <Button
+                                                className='w-fit gap-1'
+                                                size='sm'
+                                                variant='ghost'
+                                                onPress={handleAddAddress}
+                                            >
+                                                <Plus className='h-4 w-4' />
+                                                Add address
+                                            </Button>
+                                        </div>
+                                    </FormRow>
+
+                                    <FormRow
+                                        hint='Select every DNS routing line served by this node.'
+                                        label='DNS lines'
+                                    >
+                                        <MultiAddField
+                                            addLabel='Add DNS line'
+                                            emptyLabel='No DNS lines selected'
+                                            options={dnsLines.map((line) => ({
+                                                id: line.id,
+                                                name: line.name,
+                                                detail: line.providerCode,
+                                            }))}
+                                            selected={dnsLineIds}
+                                            onChange={setDnsLineIds}
+                                        />
+                                    </FormRow>
+
+                                    <FormRow
+                                        hint='Groups can be used for filtering and cache topology. A node may belong to multiple groups.'
+                                        label='Groups'
+                                    >
+                                        <MultiAddField
+                                            addLabel='Add group'
+                                            emptyLabel='No groups selected'
+                                            options={groups}
+                                            selected={groupIds}
+                                            onChange={setGroupIds}
+                                        />
+                                    </FormRow>
+
+                                    <FormRow
+                                        hint='Regions support geographic reporting and routing. A node may belong to multiple regions.'
+                                        label='Regions'
+                                    >
+                                        <MultiAddField
+                                            addLabel='Add region'
+                                            emptyLabel='No regions selected'
+                                            options={regions}
+                                            selected={regionIds}
+                                            onChange={setRegionIds}
+                                        />
+                                    </FormRow>
+                                </div>
+                            </ContentCard>
+
+                            <ContentCard className='overflow-visible p-0' noPadding>
+                                <button
+                                    className='flex w-full items-center justify-between border-b border-border bg-surface-secondary/30 px-6 py-3 text-left'
+                                    onClick={() => setSshExpanded((v) => !v)}
+                                    type='button'
+                                >
+                                    <div className='flex items-center gap-3'>
+                                        <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground'>
+                                            2
+                                        </span>
+                                        <span className='text-sm font-semibold'>SSH access</span>
+                                    </div>
+                                    {sshExpanded ? (
+                                        <ChevronDown className='h-4 w-4 text-muted' />
+                                    ) : (
+                                        <ChevronRight className='h-4 w-4 text-muted' />
+                                    )}
+                                </button>
+
+                                {sshExpanded && (
+                                    <div className='px-6 py-2'>
+                                        <FormRow
+                                            hint='For example, 192.168.1.100. Used to install the edge agent remotely.'
+                                            htmlFor='node-ssh-ip'
+                                            label='SSH host'
+                                            required
+                                        >
+                                            <Input
+                                                id='node-ssh-ip'
+                                                required
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshIp}
+                                                onChange={(e) => setSshIp(e.target.value)}
+                                            />
+                                        </FormRow>
+
+                                        <FormRow
+                                            hint='Usually port 22.'
+                                            htmlFor='node-ssh-port'
+                                            label='SSH port'
+                                            required
+                                        >
+                                            <Input
+                                                id='node-ssh-port'
+                                                required
+                                                type='number'
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshPort}
+                                                onChange={(e) => setSshPort(e.target.value)}
+                                            />
+                                        </FormRow>
+
+                                        <FormRow htmlFor='node-ssh-user' label='SSH user' required>
+                                            <Input
+                                                id='node-ssh-user'
+                                                required
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshUser}
+                                                onChange={(e) => setSshUser(e.target.value)}
+                                            />
+                                        </FormRow>
+
+                                        <FormRow htmlFor='node-ssh-password' label='Password'>
+                                            <Input
+                                                id='node-ssh-password'
+                                                type='password'
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshPassword}
+                                                onChange={(e) => setSshPassword(e.target.value)}
+                                            />
+                                        </FormRow>
+
+                                        <FormRow
+                                            hint='PEM-encoded private key used to connect to the node.'
+                                            htmlFor='node-ssh-key'
+                                            label='Private key'
+                                        >
+                                            <Input
+                                                id='node-ssh-key'
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshKey}
+                                                onChange={(e) => setSshKey(e.target.value)}
+                                            />
+                                        </FormRow>
+
+                                        <FormRow
+                                            htmlFor='node-ssh-passphrase'
+                                            label='Private key passphrase'
+                                        >
+                                            <Input
+                                                id='node-ssh-passphrase'
+                                                type='password'
+                                                className='w-full'
+                                                variant='secondary'
+                                                value={sshPassphrase}
+                                                onChange={(e) => setSshPassphrase(e.target.value)}
+                                            />
+                                        </FormRow>
+                                    </div>
+                                )}
+                            </ContentCard>
+
+                            <div className='flex items-center gap-2 justify-end'>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    onPress={() => navigate('/nodes')}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button isDisabled={submitting} type='submit' variant='primary'>
+                                    {submitting ? 'Creating…' : 'Create node'}
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
             )}
         </div>
     );

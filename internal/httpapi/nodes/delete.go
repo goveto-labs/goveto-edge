@@ -55,6 +55,12 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *d
 			if _, err := tx.NodeDNSLine.Delete().Where(query.NodeDNSLine.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
 				return err
 			}
+			if _, err := tx.NodeGroupMembership.Delete().Where(query.NodeGroupMembership.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
+				return err
+			}
+			if _, err := tx.NodeRegionMembership.Delete().Where(query.NodeRegionMembership.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
+				return err
+			}
 			if _, err := tx.NodeAddress.Delete().Where(query.NodeAddress.NodeId.Equals(nodeID)).DoMany(ctx); err != nil {
 				return err
 			}

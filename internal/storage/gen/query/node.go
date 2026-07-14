@@ -46,6 +46,8 @@ type NodeQuery struct {
 	Region             nodeRegionRelation
 	Addresses          nodeAddressesRelation
 	DnsLines           nodeDnsLinesRelation
+	GroupMemberships   nodeGroupMembershipsRelation
+	RegionMemberships  nodeRegionMembershipsRelation
 	DnsRecords         nodeDnsRecordsRelation
 	CacheConfig        nodeCacheConfigRelation
 	Credential         nodeCredentialRelation
@@ -81,6 +83,8 @@ var Node = NodeQuery{
 	Region:             nodeRegionRelation{},
 	Addresses:          nodeAddressesRelation{},
 	DnsLines:           nodeDnsLinesRelation{},
+	GroupMemberships:   nodeGroupMembershipsRelation{},
+	RegionMemberships:  nodeRegionMembershipsRelation{},
 	DnsRecords:         nodeDnsRecordsRelation{},
 	CacheConfig:        nodeCacheConfigRelation{},
 	Credential:         nodeCredentialRelation{},
@@ -851,6 +855,22 @@ func (nodeDnsLinesRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "dnsLines"}
 }
 
+// GroupMembershipsRelation provides relation query helpers for groupMemberships.
+type nodeGroupMembershipsRelation struct{}
+
+// Fetch creates an include clause to fetch related groupMemberships.
+func (nodeGroupMembershipsRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "groupMemberships"}
+}
+
+// RegionMembershipsRelation provides relation query helpers for regionMemberships.
+type nodeRegionMembershipsRelation struct{}
+
+// Fetch creates an include clause to fetch related regionMemberships.
+func (nodeRegionMembershipsRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "regionMemberships"}
+}
+
 // DnsRecordsRelation provides relation query helpers for dnsRecords.
 type nodeDnsRecordsRelation struct{}
 
@@ -931,6 +951,8 @@ type NodeCreateInput struct {
 	Region             *ClusterRegionCreateNestedInput
 	Addresses          *NodeAddressCreateNestedInput
 	DnsLines           *NodeDNSLineCreateNestedInput
+	GroupMemberships   *NodeGroupMembershipCreateNestedInput
+	RegionMemberships  *NodeRegionMembershipCreateNestedInput
 	DnsRecords         *DNSManagedRecordCreateNestedInput
 	CacheConfig        *NodeCacheConfigCreateNestedInput
 	Credential         *NodeCredentialCreateNestedInput

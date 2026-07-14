@@ -7,9 +7,10 @@ interface ContentCardProps {
     title?: ReactNode;
     action?: ReactNode;
     className?: string;
+    noPadding?: boolean;
 }
 
-export function ContentCard({ children, title, action, className = '' }: ContentCardProps) {
+export function ContentCard({ children, title, action, noPadding = false, className = '' }: ContentCardProps) {
     return (
         <Card className={`overflow-hidden ${className}`}>
             {(title || action) && (
@@ -18,7 +19,7 @@ export function ContentCard({ children, title, action, className = '' }: Content
                     {action && <div className='flex items-center gap-2'>{action}</div>}
                 </div>
             )}
-            <div className='p-5'>{children}</div>
+            <div className={noPadding ? 'overflow-hidden rounded-3xl' : 'p-5'}>{children}</div>
         </Card>
     );
 }

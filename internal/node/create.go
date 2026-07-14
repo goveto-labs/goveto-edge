@@ -16,8 +16,8 @@ type CreateInput struct {
 	Name       string          `json:"name"`
 	Addresses  []string        `json:"addresses"`
 	DNSLineIDs []string        `json:"dns_line_ids"`
-	GroupID    *string         `json:"group_id"`
-	RegionID   *string         `json:"region_id"`
+	GroupIDs   []string        `json:"group_ids"`
+	RegionIDs  []string        `json:"region_ids"`
 	SSH        SSHInstallInput `json:"ssh"`
 }
 

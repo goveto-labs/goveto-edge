@@ -58,13 +58,14 @@ type Cluster struct {
 
 // ClusterGroup represents the ClusterGroup model.
 type ClusterGroup struct {
-	Id        string    `db:"id" json:"id"`
-	ClusterId string    `db:"cluster_id" json:"clusterId"`
-	Name      string    `db:"name" json:"name"`
-	CreatedAt time.Time `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
-	Cluster   *Cluster  `db:"-" json:"cluster,omitempty"`
-	Nodes     []*Node   `db:"-" json:"nodes,omitempty"`
+	Id              string                 `db:"id" json:"id"`
+	ClusterId       string                 `db:"cluster_id" json:"clusterId"`
+	Name            string                 `db:"name" json:"name"`
+	CreatedAt       time.Time              `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time              `db:"updated_at" json:"updatedAt"`
+	Cluster         *Cluster               `db:"-" json:"cluster,omitempty"`
+	Nodes           []*Node                `db:"-" json:"nodes,omitempty"`
+	NodeMemberships []*NodeGroupMembership `db:"-" json:"nodeMemberships,omitempty"`
 }
 
 // ClusterMember represents the ClusterMember model.
@@ -79,13 +80,14 @@ type ClusterMember struct {
 
 // ClusterRegion represents the ClusterRegion model.
 type ClusterRegion struct {
-	Id        string    `db:"id" json:"id"`
-	ClusterId string    `db:"cluster_id" json:"clusterId"`
-	Name      string    `db:"name" json:"name"`
-	CreatedAt time.Time `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time `db:"updated_at" json:"updatedAt"`
-	Cluster   *Cluster  `db:"-" json:"cluster,omitempty"`
-	Nodes     []*Node   `db:"-" json:"nodes,omitempty"`
+	Id              string                  `db:"id" json:"id"`
+	ClusterId       string                  `db:"cluster_id" json:"clusterId"`
+	Name            string                  `db:"name" json:"name"`
+	CreatedAt       time.Time               `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time               `db:"updated_at" json:"updatedAt"`
+	Cluster         *Cluster                `db:"-" json:"cluster,omitempty"`
+	Nodes           []*Node                 `db:"-" json:"nodes,omitempty"`
+	NodeMemberships []*NodeRegionMembership `db:"-" json:"nodeMemberships,omitempty"`
 }
 
 // ConfigVersion represents the ConfigVersion model.
@@ -195,6 +197,8 @@ type Node struct {
 	Region             *ClusterRegion           `db:"-" json:"region,omitempty"`
 	Addresses          []*NodeAddress           `db:"-" json:"addresses,omitempty"`
 	DnsLines           []*NodeDNSLine           `db:"-" json:"dnsLines,omitempty"`
+	GroupMemberships   []*NodeGroupMembership   `db:"-" json:"groupMemberships,omitempty"`
+	RegionMemberships  []*NodeRegionMembership  `db:"-" json:"regionMemberships,omitempty"`
 	DnsRecords         []*DNSManagedRecord      `db:"-" json:"dnsRecords,omitempty"`
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
@@ -237,6 +241,22 @@ type NodeDNSLine struct {
 	DnsLineId string   `db:"dns_line_id" json:"dnsLineId"`
 	Node      *Node    `db:"-" json:"node,omitempty"`
 	DnsLine   *DNSLine `db:"-" json:"dnsLine,omitempty"`
+}
+
+// NodeGroupMembership represents the NodeGroupMembership model.
+type NodeGroupMembership struct {
+	NodeId  string        `db:"node_id" json:"nodeId"`
+	GroupId string        `db:"group_id" json:"groupId"`
+	Node    *Node         `db:"-" json:"node,omitempty"`
+	Group   *ClusterGroup `db:"-" json:"group,omitempty"`
+}
+
+// NodeRegionMembership represents the NodeRegionMembership model.
+type NodeRegionMembership struct {
+	NodeId   string         `db:"node_id" json:"nodeId"`
+	RegionId string         `db:"region_id" json:"regionId"`
+	Node     *Node          `db:"-" json:"node,omitempty"`
+	Region   *ClusterRegion `db:"-" json:"region,omitempty"`
 }
 
 // NodeSiteConfigVersion represents the NodeSiteConfigVersion model.
