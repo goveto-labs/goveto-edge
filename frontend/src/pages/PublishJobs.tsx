@@ -165,7 +165,12 @@ export default function PublishJobs() {
                 </div>
             </ContentCard>
 
-            <DataTable title='Recent tasks'>
+            <DataTable
+                empty={recentTasks.length === 0}
+                emptyDescription='Publishing activity will appear here.'
+                emptyTitle='No recent tasks'
+                title='Recent tasks'
+            >
                 <thead>
                     <tr className='border-b border-border'>
                         <th className='py-3 text-left text-xs font-medium text-muted'>Task</th>
@@ -188,7 +193,13 @@ export default function PublishJobs() {
                 </tbody>
             </DataTable>
 
-            <DataTable title={`Site jobs${loading ? ' (loading)' : ''}`}>
+            <DataTable
+                empty={jobs.length === 0}
+                emptyDescription='Choose a site and load its publish history.'
+                emptyTitle='No site jobs loaded'
+                loading={loading && jobs.length === 0}
+                title='Site jobs'
+            >
                 <thead>
                     <tr className='border-b border-border'>
                         <th className='py-3 text-left text-xs font-medium text-muted'>Job ID</th>

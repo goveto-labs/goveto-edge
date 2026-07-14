@@ -186,7 +186,18 @@ export default function Nodes() {
                     <Spinner />
                 </div>
             ) : (
-                <DataTable aria-label='Nodes'>
+                <DataTable
+                    aria-label='Nodes'
+                    empty={nodes.length === 0}
+                    emptyAction={
+                        <Button onPress={() => navigate('/nodes/create')}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Create node
+                        </Button>
+                    }
+                    emptyDescription='Create a node to start serving traffic from this cluster.'
+                    emptyTitle='No nodes yet'
+                >
                     <thead>
                         <tr className='border-b border-border'>
                             <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>

@@ -5,6 +5,6 @@ import { get, post } from './client.ts';
 export const authApi = {
     login: (payload: LoginRequest) => post<User>('/auth/login', payload),
     register: (payload: RegisterRequest) => post<User>('/auth/register', payload),
-    me: () => get<{ uid: string }>('/auth/me'),
+    me: () => get<User>('/auth/me'),
     registrationConfig: () => get<RegistrationConfig>('/auth/registration-config'),
 };

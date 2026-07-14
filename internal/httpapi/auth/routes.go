@@ -32,8 +32,11 @@ type userResponse struct {
 	Status model.UserStatus `json:"status"`
 }
 
-type meResponse struct {
-	UID string `json:"uid"`
+func newUserResponse(user *model.User) userResponse {
+	return userResponse{
+		ID: user.Id, Email: user.Email, Name: user.Name,
+		Role: user.Role, Status: user.Status,
+	}
 }
 
 func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, captchaVerifier *captcha.Verifier) {
@@ -41,7 +44,7 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, set
 	group.POST("/login", login(db, sessions))
 	group.POST("/register", register(db, settingStore, captchaVerifier))
 	group.GET("/registration-config", registrationConfig(settingStore))
-	group.GET("/me", me, authn.RequireAuth)
+	group.GET("/me", me(db), authn.RequireAuth)
 }
 
 // @summary Login
@@ -88,19 +91,25 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		}
 
 		sessions.SetCookie(c, token)
-		return types.JSON(c, http.StatusOK, userResponse{
-			ID:     user.Id,
-			Email:  user.Email,
-			Name:   user.Name,
-			Role:   user.Role,
-			Status: user.Status,
-		})
+		return types.JSON(c, http.StatusOK, newUserResponse(user))
 	}
 }
 
 // @summary Current user
-// @description Return the authenticated user id from the current session.
+// @description Return the authenticated user's profile.
 // @Tags auth
-func me(c *echo.Context) error {
-	return types.JSON(c, http.StatusOK, meResponse{UID: authn.CurrentUID(c)})
+func me(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		user, err := db.User.FindUnique(
+			c.Request().Context(),
+			query.User.Id.Equals(authn.CurrentUID(c)),
+		)
+		if err != nil {
+			return err
+		}
+		if user == nil || user.Status != model.UserStatusACTIVE {
+			return echo.NewHTTPError(http.StatusUnauthorized, "user is unavailable")
+		}
+		return types.JSON(c, http.StatusOK, newUserResponse(user))
+	}
 }

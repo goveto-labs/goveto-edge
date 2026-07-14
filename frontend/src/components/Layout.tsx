@@ -35,7 +35,13 @@ export function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
     const { user, logout } = useAuth();
-    const { clusterId, error: clusterError, requiresCluster, createCluster } = useCluster();
+    const {
+        clusterId,
+        error: clusterError,
+        ready: clustersReady,
+        requiresCluster,
+        createCluster,
+    } = useCluster();
     const { resolvedTheme, setTheme } = useTheme();
     const mobileMenu = useOverlayState();
     const createModal = useOverlayState();
@@ -171,17 +177,20 @@ export function Layout() {
 
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
                     <div className='mx-auto max-w-[1600px]'>
-                        {!clusterId && !requiresCluster && location.pathname !== '/' && (
-                            <Alert className='mb-6' status='warning'>
-                                <Alert.Indicator />
-                                <Alert.Content>
-                                    <Alert.Title>No cluster selected</Alert.Title>
-                                    <Alert.Description>
-                                        Select a cluster in the header to use cluster features.
-                                    </Alert.Description>
-                                </Alert.Content>
-                            </Alert>
-                        )}
+                        {clustersReady &&
+                            !clusterId &&
+                            !requiresCluster &&
+                            location.pathname !== '/' && (
+                                <Alert className='mb-6' status='warning'>
+                                    <Alert.Indicator />
+                                    <Alert.Content>
+                                        <Alert.Title>No cluster selected</Alert.Title>
+                                        <Alert.Description>
+                                            Select a cluster in the header to use cluster features.
+                                        </Alert.Description>
+                                    </Alert.Content>
+                                </Alert>
+                            )}
                         <Outlet />
                     </div>
                 </main>

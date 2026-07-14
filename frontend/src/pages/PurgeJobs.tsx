@@ -1,6 +1,6 @@
 import type { PurgeJob, PurgeType } from '@/api';
 
-import { Button, Input, Label, ListBox, Select, Spinner } from '@heroui/react';
+import { Button, Input, Label, ListBox, Select } from '@heroui/react';
 import { Eraser, Search } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -162,7 +162,13 @@ export default function PurgeJobs() {
                 </form>
             </ContentCard>
 
-            <DataTable aria-label='Purge jobs'>
+            <DataTable
+                aria-label='Purge jobs'
+                empty={jobs.length === 0}
+                emptyDescription='Submitted cache purge operations will appear here.'
+                emptyTitle='No purge jobs yet'
+                loading={loading && jobs.length === 0}
+            >
                 <thead>
                     <tr className='border-b border-border'>
                         <th className='py-3 text-left text-xs font-medium text-muted'>Job ID</th>
@@ -173,15 +179,6 @@ export default function PurgeJobs() {
                     </tr>
                 </thead>
                 <tbody>
-                    {loading && jobs.length === 0 && (
-                        <tr id='loading'>
-                            <td colSpan={5}>
-                                <div className='flex justify-center py-4'>
-                                    <Spinner />
-                                </div>
-                            </td>
-                        </tr>
-                    )}
                     {jobs.map((job) => (
                         <tr className='border-b border-border last:border-0' key={job.id}>
                             <td className='py-3 font-mono text-xs'>{job.id}</td>

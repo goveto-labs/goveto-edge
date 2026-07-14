@@ -223,7 +223,12 @@ export default function Analytics() {
             </ContentCard>
 
             <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <DataTable title='Top URLs'>
+                <DataTable
+                    empty={topUrls.length === 0}
+                    emptyDescription='URL traffic rankings will appear after requests are collected.'
+                    emptyTitle='No URL traffic yet'
+                    title='Top URLs'
+                >
                     <thead>
                         <tr className='border-b border-border'>
                             <th className='py-3 text-left text-xs font-medium text-muted'>URL</th>
@@ -246,7 +251,12 @@ export default function Analytics() {
                     </tbody>
                 </DataTable>
 
-                <DataTable title='Top IPs'>
+                <DataTable
+                    empty={topIps.length === 0}
+                    emptyDescription='Client IP rankings will appear after requests are collected.'
+                    emptyTitle='No IP traffic yet'
+                    title='Top IPs'
+                >
                     <thead>
                         <tr className='border-b border-border'>
                             <th className='py-3 text-left text-xs font-medium text-muted'>IP</th>

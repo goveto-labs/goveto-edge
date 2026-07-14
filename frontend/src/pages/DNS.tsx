@@ -6,11 +6,12 @@ import type {
     UpdateDNSConfig,
 } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select, Table } from '@heroui/react';
+import { Button, Card, Input, Label, ListBox, Select } from '@heroui/react';
 import { Plus, Power, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, clusterApi, dnsApi } from '@/api';
+import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -575,73 +576,69 @@ export default function DNS() {
                 </div>
             </Card>
 
-            <Card className='overflow-hidden'>
-                <Table>
-                    <Table.ScrollContainer>
-                        <Table.Content aria-label='DNS records'>
-                            <Table.Header>
-                                <Table.Column isRowHeader>Hostname</Table.Column>
-                                <Table.Column>Type</Table.Column>
-                                <Table.Column>Value</Table.Column>
-                                <Table.Column>Line</Table.Column>
-                                <Table.Column>Status</Table.Column>
-                                <Table.Column>Detail</Table.Column>
-                            </Table.Header>
-                            <Table.Body>
-                                {records.map((record) => (
-                                    <Table.Row id={record.id} key={record.id}>
-                                        <Table.Cell className='font-mono text-xs'>
-                                            {record.hostname}
-                                        </Table.Cell>
-                                        <Table.Cell>{record.type}</Table.Cell>
-                                        <Table.Cell className='font-mono text-xs'>
-                                            {record.value}
-                                        </Table.Cell>
-                                        <Table.Cell>{record.dnsLineKey}</Table.Cell>
-                                        <Table.Cell>{record.status}</Table.Cell>
-                                        <Table.Cell>
-                                            {record.lastError ?? record.lastSyncedAt ?? '—'}
-                                        </Table.Cell>
-                                    </Table.Row>
-                                ))}
-                            </Table.Body>
-                        </Table.Content>
-                    </Table.ScrollContainer>
-                </Table>
-            </Card>
+            <DataTable
+                aria-label='DNS records'
+                empty={records.length === 0}
+                emptyDescription='Managed DNS records will appear after nodes and sites are synchronized.'
+                emptyTitle='No DNS records yet'
+                title='Managed records'
+            >
+                <thead>
+                    <tr>
+                        <th>Hostname</th>
+                        <th>Type</th>
+                        <th>Value</th>
+                        <th>Line</th>
+                        <th>Status</th>
+                        <th>Detail</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {records.map((record) => (
+                        <tr key={record.id}>
+                            <td className='font-mono text-xs'>{record.hostname}</td>
+                            <td>{record.type}</td>
+                            <td className='font-mono text-xs'>{record.value}</td>
+                            <td>{record.dnsLineKey}</td>
+                            <td>{record.status}</td>
+                            <td>{record.lastError ?? record.lastSyncedAt ?? '—'}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </DataTable>
 
-            <Card className='overflow-hidden'>
-                <Table>
-                    <Table.ScrollContainer>
-                        <Table.Content aria-label='DNS jobs'>
-                            <Table.Header>
-                                <Table.Column isRowHeader>Job</Table.Column>
-                                <Table.Column>Action</Table.Column>
-                                <Table.Column>Status</Table.Column>
-                                <Table.Column>Attempts</Table.Column>
-                                <Table.Column>Error</Table.Column>
-                                <Table.Column>Created</Table.Column>
-                            </Table.Header>
-                            <Table.Body>
-                                {jobs.map((job) => (
-                                    <Table.Row id={job.id} key={job.id}>
-                                        <Table.Cell className='font-mono text-xs'>
-                                            {job.id}
-                                        </Table.Cell>
-                                        <Table.Cell>{job.action}</Table.Cell>
-                                        <Table.Cell>{job.status}</Table.Cell>
-                                        <Table.Cell>
-                                            {job.attempts}/{job.maxAttempts}
-                                        </Table.Cell>
-                                        <Table.Cell>{job.resultJson?.error || '—'}</Table.Cell>
-                                        <Table.Cell>{job.createdAt}</Table.Cell>
-                                    </Table.Row>
-                                ))}
-                            </Table.Body>
-                        </Table.Content>
-                    </Table.ScrollContainer>
-                </Table>
-            </Card>
+            <DataTable
+                aria-label='DNS jobs'
+                empty={jobs.length === 0}
+                emptyDescription='DNS synchronization jobs will appear when configuration changes.'
+                emptyTitle='No DNS jobs yet'
+                title='Synchronization jobs'
+            >
+                <thead>
+                    <tr>
+                        <th>Job</th>
+                        <th>Action</th>
+                        <th>Status</th>
+                        <th>Attempts</th>
+                        <th>Error</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {jobs.map((job) => (
+                        <tr key={job.id}>
+                            <td className='font-mono text-xs'>{job.id}</td>
+                            <td>{job.action}</td>
+                            <td>{job.status}</td>
+                            <td>
+                                {job.attempts}/{job.maxAttempts}
+                            </td>
+                            <td>{job.resultJson?.error || '—'}</td>
+                            <td>{job.createdAt}</td>
+                        </tr>
+                    ))}
+                </tbody>
+            </DataTable>
         </div>
     );
 }

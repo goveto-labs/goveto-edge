@@ -146,51 +146,40 @@ export default function Dashboard() {
 
                     <section className='grid grid-cols-1 gap-4 lg:grid-cols-12'>
                         <ContentCard className='lg:col-span-8' title='Publish activity'>
-                            {recentTasks.length === 0 ? (
-                                <div className='text-sm text-muted'>No recent publish tasks.</div>
-                            ) : (
-                                <DataTable aria-label='Recent publish tasks'>
-                                    <thead>
-                                        <tr className='border-b border-border'>
-                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
-                                                Task
-                                            </th>
-                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
-                                                Target
-                                            </th>
-                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
-                                                Status
-                                            </th>
-                                            <th className='py-2 pr-4 text-left text-xs font-medium text-muted'>
-                                                Updated
-                                            </th>
+                            <DataTable
+                                aria-label='Recent publish tasks'
+                                className='border-0 shadow-none'
+                                empty={recentTasks.length === 0}
+                                emptyDescription='Publish tasks will appear after a site is deployed.'
+                                emptyTitle='No recent publish tasks'
+                            >
+                                <thead>
+                                    <tr>
+                                        <th>Task</th>
+                                        <th>Target</th>
+                                        <th>Status</th>
+                                        <th>Updated</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {recentTasks.map((task: PublishTask) => (
+                                        <tr key={task.id}>
+                                            <td className='font-mono text-xs'>
+                                                {task.id.slice(0, 12)}
+                                            </td>
+                                            <td className='text-sm text-muted'>
+                                                {taskTarget(task)}
+                                            </td>
+                                            <td>
+                                                <StatusBadge status={task.status} />
+                                            </td>
+                                            <td className='text-sm text-muted'>
+                                                {formatDateTime(task.updated_at ?? task.created_at)}
+                                            </td>
                                         </tr>
-                                    </thead>
-                                    <tbody>
-                                        {recentTasks.map((task: PublishTask) => (
-                                            <tr
-                                                className='border-b border-border last:border-0'
-                                                key={task.id}
-                                            >
-                                                <td className='py-3 pr-4 font-mono text-xs'>
-                                                    {task.id.slice(0, 12)}
-                                                </td>
-                                                <td className='py-3 pr-4 text-sm text-muted'>
-                                                    {taskTarget(task)}
-                                                </td>
-                                                <td className='py-3 pr-4'>
-                                                    <StatusBadge status={task.status} />
-                                                </td>
-                                                <td className='py-3 pr-4 text-sm text-muted'>
-                                                    {formatDateTime(
-                                                        task.updated_at ?? task.created_at
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </DataTable>
-                            )}
+                                    ))}
+                                </tbody>
+                            </DataTable>
                         </ContentCard>
 
                         <div className='flex flex-col gap-4 lg:col-span-4'>

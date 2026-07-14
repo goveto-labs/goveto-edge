@@ -100,7 +100,18 @@ export default function Certificates() {
                     Loading certificates...
                 </div>
             ) : (
-                <DataTable aria-label='Certificates'>
+                <DataTable
+                    aria-label='Certificates'
+                    empty={certs.length === 0}
+                    emptyAction={
+                        <Button onPress={open}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Upload certificate
+                        </Button>
+                    }
+                    emptyDescription='Upload a TLS certificate before enabling HTTPS for a site.'
+                    emptyTitle='No certificates yet'
+                >
                     <thead>
                         <tr className='border-b border-border'>
                             <th className='py-3 text-left text-xs font-medium text-muted'>Name</th>

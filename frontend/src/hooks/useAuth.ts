@@ -33,13 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(true);
         try {
             const me = await authApi.me();
-            setUser({
-                id: me.uid,
-                email: '',
-                name: '',
-                role: '',
-                status: '',
-            });
+            setUser(me);
             setError(null);
         } catch (err) {
             if (err instanceof ApiError && err.status === 401) {

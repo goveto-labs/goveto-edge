@@ -7,6 +7,7 @@ import {
     useContext,
     useEffect,
     useMemo,
+    useRef,
     useState,
 } from 'react';
 
@@ -17,6 +18,7 @@ interface ClusterContextValue {
     clusterId: string;
     clusters: ClusterChoice[];
     loading: boolean;
+    ready: boolean;
     error: string | null;
     requiresCluster: boolean;
     setClusterId: (id: string) => Promise<void>;
@@ -32,28 +34,45 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [loadedForUserId, setLoadedForUserId] = useState<string | null>(null);
+    const requestVersion = useRef(0);
+    const ready = !!user && loadedForUserId === user.id;
 
     const refresh = useCallback(async () => {
-        if (!user) {
+        const userId = user?.id ?? null;
+        const version = ++requestVersion.current;
+
+        if (!userId) {
             setClusters([]);
             setCurrentClusterId('');
+            setLoadedForUserId(null);
+            setLoading(false);
+            setError(null);
             return;
         }
+
         setLoading(true);
         try {
             const result = await clustersApi.list();
+            if (version !== requestVersion.current) return;
             setClusters(result.clusters ?? []);
             setCurrentClusterId(result.selected_cluster_id ?? '');
+            setLoadedForUserId(userId);
             setError(null);
         } catch (err) {
+            if (version !== requestVersion.current) return;
+            setLoadedForUserId(null);
             setError(err instanceof Error ? err.message : 'Unable to load clusters');
         } finally {
-            setLoading(false);
+            if (version === requestVersion.current) setLoading(false);
         }
-    }, [user]);
+    }, [user?.id]);
 
     useEffect(() => {
         void refresh();
+        return () => {
+            requestVersion.current++;
+        };
     }, [refresh]);
 
     const setClusterId = useCallback(async (id: string) => {
@@ -75,13 +94,14 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
             clusterId,
             clusters,
             loading,
+            ready,
             error,
-            requiresCluster: !loading && !!user && clusters.length === 0,
+            requiresCluster: ready && !loading && clusters.length === 0,
             setClusterId,
             createCluster,
             refresh,
         }),
-        [clusterId, clusters, loading, error, user, setClusterId, createCluster, refresh]
+        [clusterId, clusters, loading, ready, error, setClusterId, createCluster, refresh]
     );
     return createElement(ClusterContext.Provider, { value }, children);
 }
