@@ -3,6 +3,8 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"reflect"
@@ -20,6 +22,7 @@ type Lifecycle struct {
 	http           *http.Client
 	cipher         *CredentialCipher
 	onStatusChange func(context.Context, string)
+	healthFailures map[string]string
 }
 
 type healthTarget struct {
@@ -36,10 +39,11 @@ func NewLifecycle(
 	onStatusChange ...func(context.Context, string),
 ) *Lifecycle {
 	lifecycle := &Lifecycle{
-		db:           db,
-		cipher:       cipher,
-		offlineAfter: offlineAfter,
-		http:         &http.Client{Timeout: 5 * time.Second},
+		db:             db,
+		cipher:         cipher,
+		offlineAfter:   offlineAfter,
+		http:           &http.Client{Timeout: 5 * time.Second},
+		healthFailures: map[string]string{},
 	}
 	if len(onStatusChange) > 0 {
 		lifecycle.onStatusChange = onStatusChange[0]
@@ -65,22 +69,20 @@ func (l *Lifecycle) poll(ctx context.Context) {
 		JOIN node_addresses a ON a.node_id = n.id AND a.primary = TRUE
 		WHERE n.status NOT IN ('PENDING', 'INSTALLING', 'INSTALL_FAILED', 'DISABLED')`)
 	if err != nil {
+		slog.Error("query node health targets", "error", err)
 		return
 	}
 
 	for _, target := range targets {
-		request, err := http.NewRequestWithContext(
-			ctx,
-			http.MethodGet,
-			"http://"+net.JoinHostPort(target.Address, "80")+"/v1/health",
-			nil,
-		)
+		request, err := newHealthRequest(ctx, target)
 		if err != nil {
+			l.logHealthFailure(target, "build request: "+err.Error())
 			continue
 		}
 
 		response, err := l.http.Do(request)
 		if err != nil {
+			l.logHealthFailure(target, "request failed: "+err.Error())
 			continue
 		}
 
@@ -90,8 +92,28 @@ func (l *Lifecycle) poll(ctx context.Context) {
 		}
 		decodeErr := json.NewDecoder(response.Body).Decode(&health)
 		response.Body.Close()
-		if response.StatusCode != http.StatusOK || decodeErr != nil || health.NodeID != target.NodeID {
+		if response.StatusCode != http.StatusOK {
+			l.logHealthFailure(target, fmt.Sprintf("unexpected HTTP status %s", response.Status))
 			continue
+		}
+		if decodeErr != nil {
+			l.logHealthFailure(target, "decode response: "+decodeErr.Error())
+			continue
+		}
+		if health.NodeID != target.NodeID {
+			l.logHealthFailure(
+				target,
+				fmt.Sprintf("node ID mismatch: got %q", health.NodeID),
+			)
+			continue
+		}
+		if _, failed := l.healthFailures[target.NodeID]; failed {
+			slog.Info(
+				"node health check recovered",
+				"node_id", target.NodeID,
+				"address", target.Address,
+			)
+			delete(l.healthFailures, target.NodeID)
 		}
 
 		_, _ = l.db.RawExec(
@@ -100,11 +122,45 @@ func (l *Lifecycle) poll(ctx context.Context) {
 			target.NodeID,
 		)
 		if target.Status != "ONLINE" {
+			slog.Info(
+				"node is online",
+				"node_id", target.NodeID,
+				"address", target.Address,
+			)
 			l.notifyStatusChange(ctx, target.ClusterID)
 		}
 		l.reconcileCacheConfig(ctx, target, health.CacheConfig)
 	}
 	l.markOffline(ctx)
+}
+
+func newHealthRequest(ctx context.Context, target healthTarget) (*http.Request, error) {
+	request, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		"http://"+net.JoinHostPort(target.Address, "80")+"/v1/health",
+		nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	// The Agent API is routed by Caddy using the node UUID as its Host matcher.
+	request.Host = target.NodeID
+	return request, nil
+}
+
+func (l *Lifecycle) logHealthFailure(target healthTarget, reason string) {
+	if l.healthFailures[target.NodeID] == reason {
+		return
+	}
+	l.healthFailures[target.NodeID] = reason
+	slog.Warn(
+		"node health check failed",
+		"node_id", target.NodeID,
+		"address", target.Address,
+		"host", target.NodeID,
+		"reason", reason,
+	)
 }
 
 func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarget, current edgeprotocol.NodeCacheConfig) {
