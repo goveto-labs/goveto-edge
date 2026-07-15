@@ -69,23 +69,23 @@ CREATE MATERIALIZED VIEW IF NOT EXISTS goveto.mv_request_usage_hourly
 TO goveto.request_usage_hourly
 AS
 SELECT
-    toStartOfHour(event_time) AS bucket,
-    cluster_id,
-    node_id,
-    site_id,
+    toStartOfHour(logs.event_time) AS bucket,
+    logs.cluster_id AS cluster_id,
+    logs.node_id AS node_id,
+    logs.site_id AS site_id,
     count() AS requests,
-    sum(ingress_bytes) AS ingress_bytes,
-    sum(egress_bytes) AS egress_bytes,
-    countIf(cache_status IN ('hit', 'HIT')) AS cache_hit_requests,
-    countIf(cache_status IN ('miss', 'MISS', 'bypass', 'BYPASS')) AS cache_miss_requests,
-    sumIf(egress_bytes, cache_status IN ('hit', 'HIT')) AS cache_egress_bytes,
-    countIf(upstream_address != '') AS origin_requests,
-    countIf(status_code >= 500) AS error_requests,
-    sum(duration_us) AS duration_us_sum,
+    sum(logs.ingress_bytes) AS ingress_bytes,
+    sum(logs.egress_bytes) AS egress_bytes,
+    countIf(logs.cache_status IN ('hit', 'HIT')) AS cache_hit_requests,
+    countIf(logs.cache_status IN ('miss', 'MISS', 'bypass', 'BYPASS')) AS cache_miss_requests,
+    sumIf(logs.egress_bytes, logs.cache_status IN ('hit', 'HIT')) AS cache_egress_bytes,
+    countIf(logs.upstream_address != '') AS origin_requests,
+    countIf(logs.status_code >= 500) AS error_requests,
+    sum(logs.duration_us) AS duration_us_sum,
     count() AS duration_count,
-    uniqCombined64State(client_ip) AS unique_ip_state
-FROM goveto.web_request_logs
-GROUP BY bucket, cluster_id, node_id, site_id;
+    uniqCombined64State(logs.client_ip) AS unique_ip_state
+FROM goveto.web_request_logs AS logs
+GROUP BY bucket, logs.cluster_id, logs.node_id, logs.site_id;
 
 CREATE TABLE IF NOT EXISTS goveto.request_usage_daily
 (
@@ -256,6 +256,7 @@ CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute
     cpu_usage_percent Float32,
     memory_used_bytes UInt64, memory_total_bytes UInt64,
     load_1 Float32, load_5 Float32, load_15 Float32,
+    connections UInt64,
     cache_used_bytes UInt64, cache_max_bytes UInt64, cache_directory String,
     disk_used_bytes UInt64, disk_total_bytes UInt64
 )
@@ -263,6 +264,9 @@ ENGINE = ReplacingMergeTree
 PARTITION BY toYYYYMM(minute)
 ORDER BY (node_id, minute)
 TTL minute + INTERVAL 90 DAY DELETE;
+
+ALTER TABLE goveto.node_runtime_metrics_minute
+    ADD COLUMN IF NOT EXISTS connections UInt64 DEFAULT 0 AFTER load_15;
 
 CREATE TABLE IF NOT EXISTS goveto.node_traffic_metrics_minute
 (
