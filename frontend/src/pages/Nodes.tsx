@@ -1,40 +1,68 @@
-import type { DNSLine, Node } from '@/api';
+import type { DNSLine, Node, NodeRuntimePoint } from '@/api';
 
 import { Button } from '@heroui/react';
 import { Eye, Plus, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ApiError, clusterApi, nodesApi } from '@/api';
+import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
+function formatPercent(value: number) {
+    return `${value.toFixed(1)}%`;
+}
+
+function formatBytes(bytes: number) {
+    if (bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / 1024 ** unit).toFixed(1)} ${units[unit]}`;
+}
+
+function formatMemory(metric?: NodeRuntimePoint) {
+    if (!metric || metric.memory_total_bytes <= 0) return '—';
+    const percent = (metric.memory_used_bytes / metric.memory_total_bytes) * 100;
+    return `${formatBytes(metric.memory_used_bytes)} / ${formatBytes(metric.memory_total_bytes)} (${formatPercent(percent)})`;
+}
+
 export default function Nodes() {
     const navigate = useNavigate();
     const { clusterId } = useCluster();
     const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
+    const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const [nodes, setNodes] = useState<Node[]>([]);
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
+    const [runtimeByNode, setRuntimeByNode] = useState<Record<string, NodeRuntimePoint>>({});
     const [error, setError] = useState('');
 
     const load = useCallback(async () => {
         if (!clusterId) return;
         try {
-            const [nodeData, lineData] = await Promise.all([nodeApi.list(), cluster.dnsLines()]);
+            const [nodeData, lineData, runtimeData] = await Promise.all([
+                nodeApi.list(),
+                cluster.dnsLines(),
+                analytics.latestNodeRuntime().catch(() => []),
+            ]);
             setNodes(nodeData);
             setDnsLines(lineData);
+            setRuntimeByNode(
+                Object.fromEntries(runtimeData.map((metric) => [metric.node_id, metric]))
+            );
             setError('');
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load nodes');
         }
-    }, [cluster, clusterId, nodeApi]);
+    }, [analytics, cluster, clusterId, nodeApi]);
 
     useEffect(() => {
         void load();
+        const refresh = window.setInterval(() => void load(), 60_000);
+        return () => window.clearInterval(refresh);
     }, [load]);
 
     const handleDelete = async (node: Node) => {
@@ -98,6 +126,10 @@ export default function Nodes() {
                         <th>Status</th>
                         <th>DNS lines</th>
                         <th>Addresses</th>
+                        <th>CPU</th>
+                        <th>Memory</th>
+                        <th>Load (1/5/15m)</th>
+                        <th>TCP connections</th>
                         <th className='text-right'>Actions</th>
                     </tr>
                 </thead>
@@ -108,6 +140,10 @@ export default function Nodes() {
                                 dnsLines.find((line) => line.id === link.dnsLineId)?.name ||
                                 link.dnsLineId
                         );
+                        const runtime = runtimeByNode[node.id];
+                        const runtimeTitle = runtime
+                            ? `Reported ${new Date(runtime.bucket).toLocaleString()}`
+                            : 'No runtime metrics have been reported';
                         return (
                             <tr key={node.id}>
                                 <td>
@@ -143,6 +179,23 @@ export default function Nodes() {
                                             .map((address) => address.address)
                                             .join(', ') || '—'}
                                     </span>
+                                </td>
+                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
+                                    {runtime ? formatPercent(runtime.cpu_usage_percent) : '—'}
+                                </td>
+                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
+                                    {formatMemory(runtime)}
+                                </td>
+                                <td
+                                    className='whitespace-nowrap font-mono text-xs'
+                                    title={runtimeTitle}
+                                >
+                                    {runtime
+                                        ? `${runtime.load_1.toFixed(2)} / ${runtime.load_5.toFixed(2)} / ${runtime.load_15.toFixed(2)}`
+                                        : '—'}
+                                </td>
+                                <td className='text-sm' title={runtimeTitle}>
+                                    {runtime?.connections ?? '—'}
                                 </td>
                                 <td>
                                     <div className='flex justify-end gap-2'>

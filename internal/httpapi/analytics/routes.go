@@ -28,6 +28,21 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/rankings/:dimension", ranking(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/distributions/:dimension", ranking(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime", nodeRuntime(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime/latest", latestNodeRuntime(store), require...)
+}
+
+// @summary Latest node runtime metrics
+// @description Latest recorded runtime metric for each node.
+// @Tags analytics
+func latestNodeRuntime(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		items, err := s.LatestNodeRuntime(c.Request().Context(), c.Param("cluster_id"))
+		if err != nil {
+			return err
+		}
+
+		return types.JSON(c, http.StatusOK, items)
+	}
 }
 
 type trafficResponse struct {

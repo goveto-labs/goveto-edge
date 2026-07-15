@@ -30,6 +30,49 @@ type NodeRuntimePoint struct {
 	Load1       float32   `json:"load_1"`
 	Load5       float32   `json:"load_5"`
 	Load15      float32   `json:"load_15"`
+	Connections uint64    `json:"connections"`
+}
+
+func (s *Store) LatestNodeRuntime(ctx context.Context, cluster string) ([]NodeRuntimePoint, error) {
+	rows, err := s.db.Query(ctx, `SELECT
+		minute,
+		toString(node_id),
+		cpu_usage_percent,
+		memory_used_bytes,
+		memory_total_bytes,
+		load_1,
+		load_5,
+		load_15,
+		connections
+	FROM goveto.node_runtime_metrics_minute
+	WHERE cluster_id = ?
+	ORDER BY node_id, minute DESC
+	LIMIT 1 BY node_id`, cluster)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := []NodeRuntimePoint{}
+	for rows.Next() {
+		var x NodeRuntimePoint
+		if err = rows.Scan(
+			&x.Bucket,
+			&x.NodeID,
+			&x.CPU,
+			&x.MemoryUsed,
+			&x.MemoryTotal,
+			&x.Load1,
+			&x.Load5,
+			&x.Load15,
+			&x.Connections,
+		); err != nil {
+			return nil, err
+		}
+		out = append(out, x)
+	}
+
+	return out, rows.Err()
 }
 
 func (s *Store) TrafficSeries(ctx context.Context, cluster, site, period string) ([]TrafficPoint, error) {
@@ -217,7 +260,8 @@ func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string)
 		toUInt64(avg(memory_total_bytes)),
 		toFloat32(avg(load_1)),
 		toFloat32(avg(load_5)),
-		toFloat32(avg(load_15))
+		toFloat32(avg(load_15)),
+		toUInt64(avg(connections))
 	FROM goveto.node_runtime_metrics_minute
 	WHERE cluster_id = ? AND minute >= ?`
 	args := []any{cluster, from}
@@ -247,6 +291,7 @@ func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string)
 			&x.Load1,
 			&x.Load5,
 			&x.Load15,
+			&x.Connections,
 		); err != nil {
 			return nil, err
 		}

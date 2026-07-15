@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	clickhouseschema "goveto-edge/configs/clickhouse"
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
@@ -80,6 +81,15 @@ func main() {
 			os.Exit(1)
 		}
 		defer clickhouseConn.Close()
+
+		clickhouseSchemaCtx, cancelClickHouseSchema := context.WithTimeout(ctx, 5*time.Minute)
+		statementCount, clickhouseErr := storage.InitClickHouseSchema(clickhouseSchemaCtx, clickhouseConn, clickhouseschema.FS)
+		cancelClickHouseSchema()
+		if clickhouseErr != nil {
+			slog.Error("initialize ClickHouse schema", "error", clickhouseErr)
+			os.Exit(1)
+		}
+		slog.Info("ClickHouse schema is up to date", "statements", statementCount)
 
 		analyticsStore = analytics.NewStore(clickhouseConn)
 		go analytics.NewIngest(orm, credentialCipher, analyticsStore).Run(ctx)

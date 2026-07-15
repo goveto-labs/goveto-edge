@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
 func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
@@ -55,10 +57,22 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	if err := json.Unmarshal(batch[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"minute", "cpu_usage_percent", "memory_used_bytes", "cache_directory", "cache_max_bytes"} {
+	for _, key := range []string{"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections", "cache_directory", "cache_max_bytes"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("missing metrics key %q in %#v", key, payload)
 		}
+	}
+}
+
+func TestEstablishedConnections(t *testing.T) {
+	connections := []gnet.ConnectionStat{
+		{Status: "ESTABLISHED"},
+		{Status: "LISTEN"},
+		{Status: "ESTABLISHED"},
+		{Status: "TIME_WAIT"},
+	}
+	if got := establishedConnections(connections); got != 2 {
+		t.Fatalf("established connections = %d, want 2", got)
 	}
 }
 

@@ -63,6 +63,10 @@ export const analyticsApi = (clusterId: string) => ({
                 `/analytics/nodes/runtime${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
+    latestNodeRuntime: () =>
+        get<NodeRuntimeResponse['series']>(
+            clusterPath(clusterId, '/analytics/nodes/runtime/latest')
+        ),
 });
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {

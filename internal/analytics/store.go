@@ -96,6 +96,7 @@ type NodeRuntimeMetric struct {
 	CPU                     float32
 	MemoryUsed, MemoryTotal uint64
 	Load1, Load5, Load15    float32
+	Connections             uint64
 	CacheUsed, CacheMax     uint64
 	CacheDirectory          string
 	DiskUsed, DiskTotal     uint64
@@ -112,12 +113,13 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		load_1,
 		load_5,
 		load_15,
+		connections,
 		cache_used_bytes,
 		cache_max_bytes,
 		cache_directory,
 		disk_used_bytes,
 		disk_total_bytes
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		m.Minute,
 		m.ClusterID,
 		m.NodeID,
@@ -127,6 +129,7 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		m.Load1,
 		m.Load5,
 		m.Load15,
+		m.Connections,
 		m.CacheUsed,
 		m.CacheMax,
 		m.CacheDirectory,

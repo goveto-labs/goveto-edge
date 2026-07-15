@@ -15,6 +15,7 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/load"
 	"github.com/shirou/gopsutil/v4/mem"
+	gnet "github.com/shirou/gopsutil/v4/net"
 )
 
 type NodeConfig = edgeprotocol.NodeCacheConfig
@@ -126,6 +127,7 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	cpuValues, cpuErr := cpu.Percent(0, false)
 	memory, _ := mem.VirtualMemory()
 	loads, _ := load.Avg()
+	connections, connectionErr := gnet.ConnectionsWithoutUids("tcp")
 	usage, diskErr := disk.Usage(config.CacheDirectory)
 	maxCache := config.MaxSizeBytes
 	if config.AutoMaxSize && usage != nil && diskErr == nil {
@@ -139,6 +141,7 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 		"load_1":             loadAt(loads, 1),
 		"load_5":             loadAt(loads, 5),
 		"load_15":            loadAt(loads, 15),
+		"connections":        establishedConnections(connections),
 		"cache_directory":    config.CacheDirectory,
 		"cache_used_bytes":   diskUsed(usage),
 		"cache_max_bytes":    maxCache,
@@ -154,8 +157,21 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 		payloadMap["disk_used_bytes"] = nil
 		payloadMap["disk_total_bytes"] = nil
 	}
+	if connectionErr != nil {
+		payloadMap["connection_error"] = connectionErr.Error()
+	}
 	payload, _ := json.Marshal(payloadMap)
 	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
+}
+
+func establishedConnections(connections []gnet.ConnectionStat) uint64 {
+	var count uint64
+	for _, connection := range connections {
+		if connection.Status == "ESTABLISHED" {
+			count++
+		}
+	}
+	return count
 }
 
 func first(values []float64) float64 {

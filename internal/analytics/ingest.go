@@ -121,6 +121,7 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 				Load1          float32   `json:"load_1"`
 				Load5          float32   `json:"load_5"`
 				Load15         float32   `json:"load_15"`
+				Connections    uint64    `json:"connections"`
 				CacheUsed      uint64    `json:"cache_used_bytes"`
 				CacheMax       uint64    `json:"cache_max_bytes"`
 				CacheDirectory string    `json:"cache_directory"`
@@ -138,6 +139,7 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 					Load1:          m.Load1,
 					Load5:          m.Load5,
 					Load15:         m.Load15,
+					Connections:    m.Connections,
 					CacheUsed:      m.CacheUsed,
 					CacheMax:       m.CacheMax,
 					CacheDirectory: m.CacheDirectory,

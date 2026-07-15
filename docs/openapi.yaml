@@ -373,6 +373,40 @@ paths:
                                                 type: array
                                                 items:
                                                     $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+    /api/v1/clusters/{cluster_id}/analytics/nodes/runtime/latest:
+        get:
+            operationId: latestNodeRuntime
+            summary: Latest node runtime metrics
+            description: Latest recorded runtime metric for each node.
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_NodeRuntimePoint'
     /api/v1/clusters/{cluster_id}/analytics/rankings/{dimension}:
         get:
             operationId: ranking
@@ -3075,6 +3109,9 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 cpu_usage_percent:
                     type: number
+                connections:
+                    type: number
+                    description: Number of system-wide TCP connections in ESTABLISHED state.
                 load_1:
                     type: number
                 load_5:

@@ -387,6 +387,7 @@ export interface NodeRuntimePoint {
     load_1: number;
     load_5: number;
     load_15: number;
+    connections: number;
 }
 
 export interface NodeRuntimeResponse {
