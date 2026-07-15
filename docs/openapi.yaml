@@ -1698,6 +1698,7 @@ paths:
                                 max_disk_usage_percent:
                                     type: number
                                 max_size_bytes:
+                                    description: Maximum cache size in bytes. Zero means unlimited when auto_max_size is false.
                                     type: number
             responses:
                 "200":
@@ -4414,6 +4415,7 @@ components:
                 max_disk_usage_percent:
                     type: number
                 max_size_bytes:
+                    description: Maximum cache size in bytes. Zero means unlimited when auto_max_size is false.
                     type: number
         types_NodeDNSLine:
             type: object

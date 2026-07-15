@@ -1,6 +1,6 @@
 import type { ClusterGroup, ClusterRegion, DNSLine, Node, NodeCacheConfig, NodeSSH } from '@/api';
 
-import { Button, Input, Switch, TextArea } from '@heroui/react';
+import { Button, Input, TextArea } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
@@ -33,6 +33,12 @@ import { useCluster } from '@/hooks/useCluster.ts';
 
 type DetailTab = 'overview' | 'network' | 'cache' | 'reinstall';
 type SSHAuthMethod = 'password' | 'private_key';
+const bytesPerGB = 1024 ** 3;
+
+function bytesToGB(value: number) {
+    if (value === 0) return '0';
+    return String(Number((value / bytesPerGB).toFixed(3)));
+}
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Server }> = [
     { id: 'overview', label: 'Overview', icon: Server },
@@ -110,6 +116,7 @@ export default function NodeDetail() {
     const [editingAddress, setEditingAddress] = useState('');
     const [addressBusyId, setAddressBusyId] = useState('');
     const [cache, setCache] = useState<NodeCacheConfig | null>(null);
+    const [maxSizeGB, setMaxSizeGB] = useState('0');
     const [cacheSaving, setCacheSaving] = useState(false);
     const [cacheMessage, setCacheMessage] = useState('');
 
@@ -131,6 +138,7 @@ export default function NodeDetail() {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
         setCache(value.cacheConfig ?? null);
+        setMaxSizeGB(bytesToGB(value.cacheConfig?.max_size_bytes ?? 0));
         setSshIp((current) => current || value.addresses[0]?.address || '');
     }, []);
 
@@ -269,7 +277,10 @@ export default function NodeDetail() {
         setCacheMessage('');
         setError('');
         try {
-            const result = await api.updateCacheConfig(node.id, cache);
+            const result = await api.updateCacheConfig(node.id, {
+                ...cache,
+                auto_max_size: false,
+            });
             setCache(result.cache_config);
             setCacheMessage(
                 result.synced
@@ -365,8 +376,7 @@ export default function NodeDetail() {
     const cacheIsValid = Boolean(
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
-            cache.max_disk_usage_percent <= 95 &&
-            (cache.auto_max_size || cache.max_size_bytes > 0)
+            cache.max_disk_usage_percent <= 95
     );
 
     return (
@@ -679,47 +689,33 @@ export default function NodeDetail() {
                                         }
                                     />
                                 </FormField>
-                                <div className='flex items-start justify-between gap-4 rounded-xl border border-border bg-surface-secondary/30 p-4'>
-                                    <div>
-                                        <div className='text-sm font-medium'>
-                                            Automatic maximum size
-                                        </div>
-                                        <p className='mt-1 text-xs leading-5 text-muted'>
-                                            Let the agent calculate a safe cache limit from
-                                            available disk space.
-                                        </p>
-                                    </div>
-                                    <Switch
-                                        isSelected={cache.auto_max_size}
-                                        onChange={(checked) =>
-                                            setCache({ ...cache, auto_max_size: checked })
-                                        }
-                                    />
-                                </div>
                                 <div className='grid gap-5 sm:grid-cols-2'>
                                     <FormField
-                                        error={
-                                            !cache.auto_max_size && cache.max_size_bytes <= 0
-                                                ? 'Enter a value greater than zero.'
-                                                : undefined
-                                        }
-                                        hint='Required when automatic sizing is disabled.'
+                                        hint='Enter 0 for no cache size limit.'
                                         htmlFor='node-cache-max-size'
-                                        label='Maximum size (bytes)'
+                                        label='Maximum size (GB)'
                                     >
                                         <Input
                                             id='node-cache-max-size'
-                                            disabled={cache.auto_max_size}
-                                            min={1}
+                                            min={0}
+                                            step={0.1}
                                             type='number'
-                                            value={String(cache.max_size_bytes)}
+                                            value={maxSizeGB}
                                             variant='secondary'
-                                            onChange={(event) =>
+                                            onChange={(event) => {
+                                                setMaxSizeGB(event.target.value);
                                                 setCache({
                                                     ...cache,
-                                                    max_size_bytes: Number(event.target.value),
-                                                })
-                                            }
+                                                    auto_max_size: false,
+                                                    max_size_bytes: Math.max(
+                                                        0,
+                                                        Math.round(
+                                                            Number(event.target.value || 0) *
+                                                                bytesPerGB
+                                                        )
+                                                    ),
+                                                });
+                                            }}
                                         />
                                     </FormField>
                                     <FormField

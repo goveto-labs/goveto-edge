@@ -62,10 +62,6 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 		if input.MaxDiskUsagePercent < 1 || input.MaxDiskUsagePercent > 95 {
 			return echo.NewHTTPError(http.StatusBadRequest, "max_disk_usage_percent must be between 1 and 95")
 		}
-		if !input.AutoMaxSize && input.MaxSizeBytes == 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "max_size_bytes is required when auto_max_size is false")
-		}
-
 		ctx, nodeID := c.Request().Context(), c.Param("node_id")
 		sets := []query.NodeCacheConfigSetClause{
 			query.NodeCacheConfig.CacheDir.Set(input.CacheDirectory),
