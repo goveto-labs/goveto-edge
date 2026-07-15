@@ -5,21 +5,23 @@ import type {
     SiteCreateResponse,
     SiteListenerConfig,
     SiteListenerUpdateResponse,
+    SiteSummary,
 } from './types.ts';
 
-import { get, post, put } from './client.ts';
+import { get, patch, post, put } from './client.ts';
 
 function clusterPath(clusterId: string, path: string) {
     return `/clusters/${clusterId}${path}`;
 }
 
 export const sitesApi = (clusterId: string) => ({
+    list: () => get<SiteSummary[]>(clusterPath(clusterId, '/sites')),
     create: (payload: CreateSiteRequest) =>
         post<SiteCreateResponse>(clusterPath(clusterId, '/sites'), payload),
     getListener: (siteId: string) =>
         get<SiteListenerConfig>(clusterPath(clusterId, `/sites/${siteId}/listener`)),
     updateListener: (siteId: string, payload: Partial<SiteListenerConfig>) =>
-        put<SiteListenerUpdateResponse>(
+        patch<SiteListenerUpdateResponse>(
             clusterPath(clusterId, `/sites/${siteId}/listener`),
             payload
         ),

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -41,13 +42,56 @@ type createResponse struct {
 	PublishJob   *types.PublishJob `json:"publish_job,omitempty"`
 	PublishError string            `json:"publish_error,omitempty"`
 }
+type siteSummary struct {
+	ID               string           `json:"id"`
+	Name             string           `json:"name"`
+	Status           model.SiteStatus `json:"status"`
+	Domains          []string         `json:"domains"`
+	CertificateCount int              `json:"certificate_count"`
+	Version          int64            `json:"version"`
+	UpdatedAt        time.Time        `json:"updated_at"`
+}
 
 func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service) {
+	e.GET("/api/v1/clusters/:cluster_id/sites", list(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+}
+
+// @summary List sites
+// @description List sites in a cluster with their domains and certificate count.
+// @Tags sites
+func list(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		items, err := db.Site.Query().
+			Where(query.Site.ClusterId.Equals(c.Param("cluster_id"))).
+			Include(query.Site.Domains.Fetch(), query.Site.Certificates.Fetch()).
+			OrderBy(query.Site.UpdatedAt.Desc()).
+			Do(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		result := make([]siteSummary, len(items))
+		for index := range items {
+			domains := make([]string, len(items[index].Domains))
+			for domainIndex, domain := range items[index].Domains {
+				domains[domainIndex] = domain.Hostname
+			}
+			result[index] = siteSummary{
+				ID:               items[index].Id,
+				Name:             items[index].Name,
+				Status:           items[index].Status,
+				Domains:          domains,
+				CertificateCount: len(items[index].Certificates),
+				Version:          items[index].Version,
+				UpdatedAt:        items[index].UpdatedAt,
+			}
+		}
+		return types.JSON(c, http.StatusOK, result)
+	}
 }
 
 // @summary Create site

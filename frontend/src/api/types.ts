@@ -210,6 +210,15 @@ export interface SiteCreateResponse {
     publish_job?: PublishJob;
     publish_error?: string;
 }
+export interface SiteSummary {
+    id: string;
+    name: string;
+    status: string;
+    domains: string[];
+    certificate_count: number;
+    version: number;
+    updated_at: string;
+}
 export interface SiteListenerUpdateResponse {
     listener: SiteListenerConfig;
     publish_job?: PublishJob;

@@ -9,6 +9,7 @@ import { InitializationGate, InitializationProvider } from '@/hooks/useInitializ
 import Analytics from '@/pages/Analytics.tsx';
 import Certificates from '@/pages/Certificates.tsx';
 import CreateNode from '@/pages/CreateNode.tsx';
+import CreateSite from '@/pages/CreateSite.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
 import DNS from '@/pages/DNS.tsx';
 import Init from '@/pages/Init.tsx';
@@ -43,6 +44,7 @@ export default function App() {
                                     <Route element={<CreateNode />} path='/nodes/create' />
                                     <Route element={<NodeDetail />} path='/nodes/:nodeId' />
                                     <Route element={<Sites />} path='/sites' />
+                                    <Route element={<CreateSite />} path='/sites/create' />
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
                                     <Route element={<PublishJobs />} path='/publish' />

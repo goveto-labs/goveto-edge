@@ -1,129 +1,81 @@
-import type {
-    CachePolicy,
-    Certificate,
-    SiteCreateResponse,
-    SiteListenerConfig,
-    SiteOrigin,
-} from '@/api';
+import type { CachePolicy, SiteListenerConfig, SiteSummary } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select, Switch, Tabs } from '@heroui/react';
-import { Plus, Rocket, RotateCcw, Save } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Button, Card, Input, Label, Switch, Tabs } from '@heroui/react';
+import { ArrowLeft, Eye, Globe2, Plus, Rocket, Save } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import { ApiError, certificatesApi, publishApi, sitesApi } from '@/api';
+import { ApiError, publishApi, sitesApi } from '@/api';
+import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
-function parseCommaList(value: string) {
-    return value
-        .split(',')
-        .map((s) => s.trim())
-        .filter(Boolean);
-}
-
-const emptyOrigin: SiteOrigin = {
-    protocol: 'HTTP',
-    address: '',
-    host_header: '',
-    weight: 1,
-};
-
-type OriginFormItem = SiteOrigin & { localId: string };
-
-function createEmptyOrigin(): OriginFormItem {
-    const id =
-        typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    return { ...emptyOrigin, localId: id };
-}
-
 export default function Sites() {
+    const navigate = useNavigate();
     const { clusterId } = useCluster();
-    const certsApi = useMemo(() => certificatesApi(clusterId), [clusterId]);
-    const siteApi = useMemo(() => sitesApi(clusterId), [clusterId]);
+    const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const pubApi = useMemo(() => publishApi(clusterId), [clusterId]);
     const [searchParams, setSearchParams] = useSearchParams();
     const siteId = searchParams.get('siteId') ?? '';
-
-    const [certs, setCerts] = useState<Certificate[]>([]);
-    const [certIds, setCertIds] = useState<Set<string>>(new Set());
-
-    const [createName, setCreateName] = useState('');
-    const [createDomains, setCreateDomains] = useState('');
-    const [origins, setOrigins] = useState<OriginFormItem[]>([createEmptyOrigin()]);
-    const [createLoading, setCreateLoading] = useState(false);
-    const [createError, setCreateError] = useState('');
-
-    const [site, setSite] = useState<SiteCreateResponse | null>(null);
+    const [sites, setSites] = useState<SiteSummary[]>([]);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
-    const [detailError, setDetailError] = useState('');
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
     const [saveLoading, setSaveLoading] = useState(false);
     const [publishLoading, setPublishLoading] = useState(false);
 
-    useEffect(() => {
+    const selectedSite = useMemo(
+        () => sites.find((site) => site.id === siteId) ?? null,
+        [siteId, sites]
+    );
+
+    const loadSites = useCallback(async () => {
         if (!clusterId) return;
-        certsApi
-            .list()
-            .then(setCerts)
-            .catch((err) =>
-                setDetailError(err instanceof ApiError ? err.message : 'Failed to load certs')
-            );
-    }, [certsApi, clusterId]);
+        setLoading(true);
+        try {
+            setSites(await api.list());
+            setError('');
+        } catch (loadError) {
+            setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
+        } finally {
+            setLoading(false);
+        }
+    }, [api, clusterId]);
+
+    useEffect(() => {
+        void loadSites();
+    }, [loadSites]);
 
     useEffect(() => {
         if (!clusterId || !siteId) return;
-        Promise.all([siteApi.getListener(siteId), siteApi.getCache(siteId)])
-            .then(([l, c]) => {
-                setListener(l);
-                setCache(c);
-                setDetailError('');
+        Promise.all([api.getListener(siteId), api.getCache(siteId)])
+            .then(([listenerData, cacheData]) => {
+                setListener(listenerData);
+                setCache(cacheData);
+                setError('');
             })
-            .catch((err) => {
-                setDetailError(
-                    err instanceof ApiError ? err.message : 'Failed to load site config'
+            .catch((loadError) => {
+                setError(
+                    loadError instanceof ApiError
+                        ? loadError.message
+                        : 'Failed to load site configuration'
                 );
             });
-    }, [siteApi, clusterId, siteId]);
-
-    const handleCreate = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setCreateLoading(true);
-        setCreateError('');
-        try {
-            const created = await siteApi.create({
-                name: createName,
-                domains: parseCommaList(createDomains),
-                certificate_ids: Array.from(certIds),
-                origins: origins.filter((o) => o.address.trim()).map(({ localId: _, ...o }) => o),
-            });
-            setSite(created);
-            setSearchParams({ siteId: created.id });
-        } catch (err) {
-            setCreateError(err instanceof ApiError ? err.message : 'Failed to create site');
-        } finally {
-            setCreateLoading(false);
-        }
-    };
-
-    const updateOrigin = (index: number, patch: Partial<SiteOrigin>) => {
-        setOrigins((prev) => prev.map((o, i) => (i === index ? { ...o, ...patch } : o)));
-    };
-
-    const removeOrigin = (index: number) => {
-        setOrigins((prev) => prev.filter((_, i) => i !== index));
-    };
+    }, [api, clusterId, siteId]);
 
     const saveListener = async () => {
         if (!siteId) return;
         setSaveLoading(true);
+        setError('');
         try {
-            const result = await siteApi.updateListener(siteId, listener);
+            const result = await api.updateListener(siteId, listener);
             setListener(result.listener);
-        } catch (err) {
-            setDetailError(err instanceof ApiError ? err.message : 'Failed to update listener');
+        } catch (saveError) {
+            setError(
+                saveError instanceof ApiError ? saveError.message : 'Failed to update listener'
+            );
         } finally {
             setSaveLoading(false);
         }
@@ -132,11 +84,12 @@ export default function Sites() {
     const saveCache = async () => {
         if (!siteId) return;
         setSaveLoading(true);
+        setError('');
         try {
-            const result = await siteApi.updateCache(siteId, cache);
+            const result = await api.updateCache(siteId, cache);
             setCache(result.cache);
-        } catch (err) {
-            setDetailError(err instanceof ApiError ? err.message : 'Failed to update cache');
+        } catch (saveError) {
+            setError(saveError instanceof ApiError ? saveError.message : 'Failed to update cache');
         } finally {
             setSaveLoading(false);
         }
@@ -145,10 +98,11 @@ export default function Sites() {
     const publish = async () => {
         if (!siteId) return;
         setPublishLoading(true);
+        setError('');
         try {
             await pubApi.enqueueSite(siteId);
-        } catch (err) {
-            setDetailError(err instanceof ApiError ? err.message : 'Failed to publish');
+        } catch (publishError) {
+            setError(publishError instanceof ApiError ? publishError.message : 'Failed to publish');
         } finally {
             setPublishLoading(false);
         }
@@ -161,10 +115,8 @@ export default function Sites() {
                     subtitle='Configure site listeners, origins, and cache policies.'
                     title='Sites'
                 />
-                <Card className='p-8 text-center'>
-                    <div className='text-sm text-muted'>
-                        Select a cluster in the header to manage sites.
-                    </div>
+                <Card className='p-8 text-center text-sm text-muted'>
+                    Select a cluster in the header to manage sites.
                 </Card>
             </div>
         );
@@ -174,171 +126,112 @@ export default function Sites() {
         return (
             <div className='space-y-6'>
                 <PageHeader
-                    subtitle='Add a new site with origins and certificates.'
-                    title='Create site'
-                />
-                {createError && (
+                    subtitle='Manage domains, origins, certificates, and publishing.'
+                    title='Sites'
+                >
+                    <Button onPress={() => navigate('/sites/create')}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Create site
+                    </Button>
+                </PageHeader>
+
+                {error && (
                     <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
-                        {createError}
+                        {error}
                     </div>
                 )}
-                <Card className='p-5'>
-                    <form className='space-y-5' onSubmit={handleCreate}>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='site-name'>Site name</Label>
-                            <Input
-                                variant='secondary'
-                                id='site-name'
-                                required
-                                value={createName}
-                                onChange={(e) => setCreateName(e.target.value)}
-                            />
-                        </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='site-domains'>Domains (comma separated)</Label>
-                            <Input
-                                variant='secondary'
-                                id='site-domains'
-                                required
-                                value={createDomains}
-                                onChange={(e) => setCreateDomains(e.target.value)}
-                            />
-                        </div>
-                        <Select
-                            variant='secondary'
-                            value={Array.from(certIds)}
-                            selectionMode='multiple'
-                            onChange={(keys) => setCertIds(new Set(keys as string[]))}
-                        >
-                            <Label>Certificates</Label>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    {certs.map((cert) => (
-                                        <ListBox.Item
-                                            key={cert.id}
-                                            id={cert.id}
-                                            textValue={cert.name}
-                                        >
-                                            {cert.name}
-                                        </ListBox.Item>
-                                    ))}
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
 
-                        <div className='space-y-3'>
-                            <div className='text-sm font-medium'>Origins</div>
-                            {origins.map((origin, idx) => (
-                                <div key={origin.localId} className='grid grid-cols-12 gap-2'>
-                                    <Select
-                                        variant='secondary'
-                                        className='col-span-2'
-                                        aria-label='Origin protocol'
-                                        value={origin.protocol}
-                                        onChange={(key) =>
-                                            updateOrigin(idx, {
-                                                protocol: String(key ?? '') as 'HTTP' | 'HTTPS',
-                                            })
-                                        }
-                                    >
-                                        <Select.Trigger>
-                                            <Select.Value />
-                                        </Select.Trigger>
-                                        <Select.Popover>
-                                            <ListBox>
-                                                <ListBox.Item id='HTTP' textValue='HTTP'>
-                                                    HTTP
-                                                </ListBox.Item>
-                                                <ListBox.Item id='HTTPS' textValue='HTTPS'>
-                                                    HTTPS
-                                                </ListBox.Item>
-                                            </ListBox>
-                                        </Select.Popover>
-                                    </Select>
-                                    <Input
-                                        variant='secondary'
-                                        className='col-span-5'
-                                        aria-label='Origin address'
-                                        placeholder='Address'
-                                        value={origin.address}
-                                        onChange={(e) =>
-                                            updateOrigin(idx, { address: e.target.value })
-                                        }
-                                    />
-                                    <Input
-                                        variant='secondary'
-                                        className='col-span-3'
-                                        aria-label='Origin host header'
-                                        placeholder='Host header'
-                                        value={origin.host_header}
-                                        onChange={(e) =>
-                                            updateOrigin(idx, { host_header: e.target.value })
-                                        }
-                                    />
-                                    <Input
-                                        variant='secondary'
-                                        className='col-span-1'
-                                        aria-label='Origin weight'
-                                        placeholder='W'
-                                        type='number'
-                                        value={String(origin.weight ?? 1)}
-                                        onChange={(e) =>
-                                            updateOrigin(idx, { weight: Number(e.target.value) })
-                                        }
-                                    />
-                                    <Button
-                                        className='col-span-1'
-                                        size='sm'
-                                        variant='secondary'
-                                        onPress={() => removeOrigin(idx)}
-                                    >
-                                        ×
-                                    </Button>
-                                </div>
-                            ))}
-                            <Button
-                                size='sm'
-                                variant='ghost'
-                                onPress={() => setOrigins((prev) => [...prev, createEmptyOrigin()])}
-                            >
-                                <Plus className='mr-2 h-4 w-4' />
-                                Add origin
-                            </Button>
-                        </div>
-
-                        <Button
-                            fullWidth
-                            isDisabled={createLoading}
-                            type='submit'
-                            variant='primary'
-                        >
-                            {createLoading ? 'Creating...' : 'Create site'}
+                <DataTable
+                    aria-label='Sites'
+                    empty={sites.length === 0}
+                    emptyAction={
+                        <Button onPress={() => navigate('/sites/create')}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Create site
                         </Button>
-                    </form>
-                </Card>
+                    }
+                    emptyDescription='Create a site to route domains to origin servers.'
+                    emptyTitle='No sites yet'
+                    loading={loading}
+                >
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Domains</th>
+                            <th>Status</th>
+                            <th>Certificates</th>
+                            <th>Version</th>
+                            <th>Updated</th>
+                            <th className='text-right'>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sites.map((site) => (
+                            <tr key={site.id}>
+                                <td>
+                                    <button
+                                        className='flex items-center gap-2 text-sm font-semibold hover:underline'
+                                        type='button'
+                                        onClick={() => setSearchParams({ siteId: site.id })}
+                                    >
+                                        <Globe2 className='h-4 w-4 text-muted' />
+                                        {site.name}
+                                    </button>
+                                </td>
+                                <td className='max-w-sm'>
+                                    <span className='line-clamp-2 text-sm text-muted'>
+                                        {site.domains.join(', ') || '—'}
+                                    </span>
+                                </td>
+                                <td>
+                                    <StatusBadge status={site.status} />
+                                </td>
+                                <td className='text-sm text-muted'>{site.certificate_count}</td>
+                                <td className='text-sm text-muted'>v{site.version}</td>
+                                <td className='whitespace-nowrap text-sm text-muted'>
+                                    {new Date(site.updated_at).toLocaleString()}
+                                </td>
+                                <td>
+                                    <div className='flex justify-end'>
+                                        <Button
+                                            size='sm'
+                                            variant='secondary'
+                                            onPress={() => setSearchParams({ siteId: site.id })}
+                                        >
+                                            <Eye className='mr-1.5 h-3.5 w-3.5' />
+                                            View
+                                        </Button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </DataTable>
             </div>
         );
     }
 
     return (
         <div className='space-y-6'>
-            <PageHeader subtitle={`ID: ${siteId}`} title={site?.name ?? 'Site config'}>
-                <Button isDisabled={publishLoading} variant='primary' onPress={publish}>
+            <PageHeader
+                actions={
+                    <Button variant='ghost' onPress={() => setSearchParams({})}>
+                        <ArrowLeft className='mr-1.5 h-4 w-4' />
+                        Back to sites
+                    </Button>
+                }
+                subtitle={selectedSite?.domains.join(', ') || `ID: ${siteId}`}
+                title={selectedSite?.name ?? 'Site configuration'}
+            >
+                <Button isDisabled={publishLoading} onPress={() => void publish()}>
                     <Rocket className='mr-2 h-4 w-4' />
-                    {publishLoading ? 'Publishing...' : 'Publish'}
-                </Button>
-                <Button variant='ghost' onPress={() => setSearchParams({})}>
-                    <RotateCcw className='mr-2 h-4 w-4' />
-                    New site
+                    {publishLoading ? 'Publishing…' : 'Publish'}
                 </Button>
             </PageHeader>
 
-            {detailError && (
+            {error && (
                 <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
-                    {detailError}
+                    {error}
                 </div>
             )}
 
@@ -354,14 +247,14 @@ export default function Sites() {
                             <div className='flex flex-col gap-1'>
                                 <Label htmlFor='listener-http-port'>HTTP port</Label>
                                 <Input
-                                    variant='secondary'
                                     id='listener-http-port'
                                     type='number'
                                     value={String(listener.http_port ?? 80)}
-                                    onChange={(e) =>
+                                    variant='secondary'
+                                    onChange={(event) =>
                                         setListener({
                                             ...listener,
-                                            http_port: Number(e.target.value),
+                                            http_port: Number(event.target.value),
                                         })
                                     }
                                 />
@@ -369,14 +262,14 @@ export default function Sites() {
                             <div className='flex flex-col gap-1'>
                                 <Label htmlFor='listener-https-port'>HTTPS port</Label>
                                 <Input
-                                    variant='secondary'
                                     id='listener-https-port'
                                     type='number'
                                     value={String(listener.https_port ?? 443)}
-                                    onChange={(e) =>
+                                    variant='secondary'
+                                    onChange={(event) =>
                                         setListener({
                                             ...listener,
-                                            https_port: Number(e.target.value),
+                                            https_port: Number(event.target.value),
                                         })
                                     }
                                 />
@@ -420,9 +313,13 @@ export default function Sites() {
                                 Redirect HTTP to HTTPS
                             </label>
                         </div>
-                        <Button className='mt-5' isDisabled={saveLoading} onPress={saveListener}>
+                        <Button
+                            className='mt-5'
+                            isDisabled={saveLoading}
+                            onPress={() => void saveListener()}
+                        >
                             <Save className='mr-2 h-4 w-4' />
-                            {saveLoading ? 'Saving...' : 'Save listener'}
+                            {saveLoading ? 'Saving…' : 'Save listener'}
                         </Button>
                     </Card>
                 </Tabs.Panel>
@@ -444,43 +341,47 @@ export default function Sites() {
                             <div className='flex flex-col gap-1'>
                                 <Label htmlFor='cache-ttl'>TTL seconds</Label>
                                 <Input
-                                    variant='secondary'
                                     id='cache-ttl'
                                     type='number'
                                     value={String(cache.ttl?.default_seconds ?? 0)}
-                                    onChange={(e) =>
+                                    variant='secondary'
+                                    onChange={(event) =>
                                         setCache({
                                             ...cache,
                                             ttl: {
                                                 ...(cache.ttl ?? {}),
-                                                default_seconds: Number(e.target.value),
+                                                default_seconds: Number(event.target.value),
                                             },
                                         })
                                     }
                                 />
                             </div>
                             <div className='flex flex-col gap-1'>
-                                <Label htmlFor='cache-stale'>Stale while revalidate seconds</Label>
+                                <Label htmlFor='cache-stale'>Stale if error seconds</Label>
                                 <Input
-                                    variant='secondary'
                                     id='cache-stale'
                                     type='number'
                                     value={String(cache.stale?.if_error_seconds ?? 0)}
-                                    onChange={(e) =>
+                                    variant='secondary'
+                                    onChange={(event) =>
                                         setCache({
                                             ...cache,
                                             stale: {
                                                 ...(cache.stale ?? {}),
-                                                if_error_seconds: Number(e.target.value),
+                                                if_error_seconds: Number(event.target.value),
                                             },
                                         })
                                     }
                                 />
                             </div>
                         </div>
-                        <Button className='mt-5' isDisabled={saveLoading} onPress={saveCache}>
+                        <Button
+                            className='mt-5'
+                            isDisabled={saveLoading}
+                            onPress={() => void saveCache()}
+                        >
                             <Save className='mr-2 h-4 w-4' />
-                            {saveLoading ? 'Saving...' : 'Save cache'}
+                            {saveLoading ? 'Saving…' : 'Save cache'}
                         </Button>
                     </Card>
                 </Tabs.Panel>
