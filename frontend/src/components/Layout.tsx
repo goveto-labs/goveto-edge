@@ -3,7 +3,6 @@ import { Bell, ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-r
 import { useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-import { ApiSpinner } from '@/components/ApiSpinner.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageTransition } from '@/components/PageTransition.tsx';
@@ -183,7 +182,6 @@ export function Layout() {
                             /^\/nodes\/[^/]+/.test(location.pathname) ? '' : 'max-w-[1600px]'
                         }`}
                     >
-                        <ApiSpinner />
                         {clustersReady &&
                             !clusterId &&
                             !requiresCluster &&

@@ -157,7 +157,7 @@ export default function Nodes() {
                                     <button
                                         className='text-sm font-semibold hover:underline'
                                         type='button'
-                                        onClick={() => navigate(`/nodes/${node.id}`)}
+                                        onClick={() => navigate(`/nodes/${node.id}/overview`)}
                                     >
                                         {node.name}
                                     </button>
@@ -222,7 +222,7 @@ export default function Nodes() {
                                         <Button
                                             size='sm'
                                             variant='secondary'
-                                            onPress={() => navigate(`/nodes/${node.id}`)}
+                                            onPress={() => navigate(`/nodes/${node.id}/overview`)}
                                         >
                                             <Eye className='mr-1.5 h-3.5 w-3.5' />
                                             View

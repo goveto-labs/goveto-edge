@@ -2,4 +2,5 @@
 .env
 *.local
 .data
+.agents
 static/agent/*

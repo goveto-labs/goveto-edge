@@ -1,9 +1,6 @@
 import { Loader2 } from 'lucide-react';
 
-import { useApiLoading } from '@/hooks/useApiLoading.tsx';
-
-export function ApiSpinner() {
-    const { isLoading } = useApiLoading();
+export function ApiSpinner({ isLoading }: { isLoading: boolean }) {
     if (!isLoading) return null;
 
     return (

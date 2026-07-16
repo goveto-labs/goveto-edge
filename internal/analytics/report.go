@@ -32,6 +32,41 @@ type MonitoringOverview struct {
 	Month     UsageTotal `json:"month"`
 }
 
+type NodeRequestLog struct {
+	EventTime       time.Time `json:"event_time"`
+	RequestID       string    `json:"request_id"`
+	Hostname        string    `json:"hostname"`
+	Method          string    `json:"method"`
+	Path            string    `json:"path"`
+	StatusCode      uint16    `json:"status_code"`
+	DurationUS      uint64    `json:"duration_us"`
+	UpstreamAddress string    `json:"upstream_address"`
+	CacheStatus     string    `json:"cache_status"`
+}
+
+func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, limit int) ([]NodeRequestLog, error) {
+	rows, err := s.db.Query(ctx, `SELECT
+		event_time, request_id, hostname, method, path, status_code,
+		duration_us, upstream_address, cache_status
+	FROM goveto.web_request_logs
+	WHERE cluster_id = ? AND node_id = ?
+	ORDER BY event_time DESC
+	LIMIT ?`, clusterID, nodeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]NodeRequestLog, 0, limit)
+	for rows.Next() {
+		var item NodeRequestLog
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (s *Store) MonitoringOverview(ctx context.Context, cluster, site string) (MonitoringOverview, error) {
 	now := time.Now().UTC()
 	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)

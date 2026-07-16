@@ -161,6 +161,10 @@ export interface Node {
     id: string;
     name: string;
     status: string;
+    version?: string;
+    heartbeatAt?: string;
+    createdAt: string;
+    updatedAt: string;
     installError?: string;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
@@ -184,6 +188,28 @@ export interface NodeCacheUpdateResponse {
     cache_config: NodeCacheConfig;
     synced: boolean;
     sync_error?: string;
+}
+
+export interface NodeInstallationInfo {
+    node_id: string;
+    status: string;
+    install_error?: string;
+    communication_key: string;
+    identity_json: string;
+    service_unit: string;
+    architectures: string[];
+}
+
+export interface NodeRequestLog {
+    event_time: string;
+    request_id: string;
+    hostname: string;
+    method: string;
+    path: string;
+    status_code: number;
+    duration_us: number;
+    upstream_address: string;
+    cache_status: string;
 }
 
 export interface CreateNodeRequest {

@@ -2,6 +2,7 @@ import type {
     AnalyticsParams,
     DistributionItem,
     MonitoringOverview,
+    NodeRequestLog,
     NodeRuntimeResponse,
     NodeSnapshot,
     Summary,
@@ -92,6 +93,10 @@ export const analyticsApi = (clusterId: string) => ({
                 clusterId,
                 `/analytics/nodes/runtime/latest${buildQuery({ node_id: nodeId })}`
             )
+        ),
+    nodeLogs: (nodeId: string, limit = 100) =>
+        get<NodeRequestLog[]>(
+            clusterPath(clusterId, `/analytics/nodes/logs${buildQuery({ node_id: nodeId, limit })}`)
         ),
 });
 

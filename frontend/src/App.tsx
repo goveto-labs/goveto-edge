@@ -42,7 +42,7 @@ export default function App() {
                                     <Route element={<Dashboard />} path='/' />
                                     <Route element={<Nodes />} path='/nodes' />
                                     <Route element={<CreateNode />} path='/nodes/create' />
-                                    <Route element={<NodeDetail />} path='/nodes/:nodeId' />
+                                    <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<CreateSite />} path='/sites/create' />
                                     <Route element={<DNS />} path='/dns' />
