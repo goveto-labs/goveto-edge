@@ -300,14 +300,12 @@ paths:
                     type: number
                 - name: node_id
                   in: query
-                  description: Filter by node (24h period only).
                   schema:
                     type: string
                 - name: period
                   in: query
                   schema:
                     type: string
-                    enum: [24h, 30d]
                 - name: site_id
                   in: query
                   schema:
@@ -358,7 +356,6 @@ paths:
                   in: query
                   schema:
                     type: string
-                    enum: [12h, 24h, 30d]
             responses:
                 "200":
                     description: OK
@@ -422,11 +419,14 @@ paths:
         get:
             operationId: monitoringOverview
             summary: Monitoring traffic overview
-            description: Today, yesterday and current-month request and traffic totals.
+            description: Today, yesterday and current-month traffic totals.
             tags:
                 - analytics
             security:
                 - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
             parameters:
                 - name: cluster_id
                   in: path
@@ -447,7 +447,8 @@ paths:
                                 properties:
                                     code:
                                         type: string
-                                        enum: [ok]
+                                        enum:
+                                            - ok
                                     data:
                                         $ref: '#/components/schemas/analytics_MonitoringOverview'
     /api/v1/clusters/{cluster_id}/analytics/rankings/{dimension}:
@@ -479,14 +480,12 @@ paths:
                     type: number
                 - name: node_id
                   in: query
-                  description: Filter by node (24h period only).
                   schema:
                     type: string
                 - name: period
                   in: query
                   schema:
                     type: string
-                    enum: [24h, 30d]
                 - name: site_id
                   in: query
                   schema:
@@ -685,12 +684,11 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: period
+                - name: node_id
                   in: query
                   schema:
                     type: string
-                    enum: [24h, 30d]
-                - name: node_id
+                - name: period
                   in: query
                   schema:
                     type: string
@@ -1786,7 +1784,6 @@ paths:
                                 max_disk_usage_percent:
                                     type: number
                                 max_size_bytes:
-                                    description: Maximum cache size in bytes. Zero means unlimited when auto_max_size is false.
                                     type: number
             responses:
                 "200":
@@ -2230,6 +2227,40 @@ paths:
                                             name:
                                                 type: string
     /api/v1/clusters/{cluster_id}/sites:
+        get:
+            operationId: list
+            summary: List sites
+            description: List sites in a cluster with their domains and certificate count.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/sites_siteSummary'
         post:
             operationId: create
             summary: Create site
@@ -3154,6 +3185,15 @@ components:
                     type: number
                 value:
                     type: string
+        analytics_MonitoringOverview:
+            type: object
+            properties:
+                month:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
+                today:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
+                yesterday:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
         analytics_NodeRuntimePoint:
             type: object
             properties:
@@ -3161,20 +3201,19 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
-                cpu_usage_percent:
+                cache_directory:
+                    type: string
+                cache_max_bytes:
+                    type: number
+                cache_used_bytes:
                     type: number
                 connections:
                     type: number
-                    description: Number of system-wide TCP connections in ESTABLISHED state.
-                cache_used_bytes:
-                    type: number
-                cache_max_bytes:
-                    type: number
-                cache_directory:
-                    type: string
-                disk_used_bytes:
+                cpu_usage_percent:
                     type: number
                 disk_total_bytes:
+                    type: number
+                disk_used_bytes:
                     type: number
                 load_1:
                     type: number
@@ -3189,39 +3228,46 @@ components:
                 node_id:
                     type: string
         analytics_NodeSnapshot:
-            allOf:
-                - $ref: '#/components/schemas/analytics_NodeRuntimePoint'
-                - type: object
-                  properties:
-                    online:
-                        type: boolean
-                    ingress_bytes_per_second:
-                        type: number
-                    egress_bytes_per_second:
-                        type: number
-                    requests_per_minute:
-                        type: number
-                    disk_write_bytes_per_second:
-                        type: number
-                        description: Estimated from positive cache usage growth between the latest reports.
-        analytics_UsageTotal:
             type: object
             properties:
-                requests:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cache_directory:
+                    type: string
+                cache_max_bytes:
                     type: number
-                ingress_bytes:
+                cache_used_bytes:
                     type: number
-                egress_bytes:
+                connections:
                     type: number
-        analytics_MonitoringOverview:
-            type: object
-            properties:
-                today:
-                    $ref: '#/components/schemas/analytics_UsageTotal'
-                yesterday:
-                    $ref: '#/components/schemas/analytics_UsageTotal'
-                month:
-                    $ref: '#/components/schemas/analytics_UsageTotal'
+                cpu_usage_percent:
+                    type: number
+                disk_total_bytes:
+                    type: number
+                disk_used_bytes:
+                    type: number
+                egress_bytes_per_second:
+                    type: number
+                ingress_bytes_per_second:
+                    type: number
+                load_1:
+                    type: number
+                load_5:
+                    type: number
+                load_15:
+                    type: number
+                memory_total_bytes:
+                    type: number
+                memory_used_bytes:
+                    type: number
+                node_id:
+                    type: string
+                online:
+                    type: boolean
+                requests_per_minute:
+                    type: number
         analytics_Summary:
             type: object
             properties:
@@ -3255,6 +3301,15 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 cache_egress_bytes:
                     type: number
+                egress_bytes:
+                    type: number
+                ingress_bytes:
+                    type: number
+                requests:
+                    type: number
+        analytics_UsageTotal:
+            type: object
+            properties:
                 egress_bytes:
                     type: number
                 ingress_bytes:
@@ -3716,6 +3771,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_NodeGroupMembership'
+                hardwareProfile:
+                    $ref: '#/components/schemas/model_NodeHardwareProfile'
+                hardwareProfile:
+                    $ref: '#/components/schemas/model_NodeHardwareProfile'
                 heartbeatAt:
                     type: string
                     format: date-time
@@ -3795,6 +3854,26 @@ components:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
                     type: string
+        model_NodeHardwareProfile:
+            type: object
+            properties:
+                architecture:
+                    type: string
+                benchmarkBytes:
+                    type: number
+                benchmarkDurationMs:
+                    type: number
+                cacheDiskWriteBytesPerSecond:
+                    type: number
+                cpuModel:
+                    type: string
+                measuredAt:
+                    type: string
+                    format: date-time
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
         model_NodeDNSLine:
             type: object
             properties:
@@ -3813,6 +3892,27 @@ components:
                     $ref: '#/components/schemas/model_ClusterGroup'
                 groupId:
                     type: string
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+        model_NodeHardwareProfile:
+            type: object
+            properties:
+                architecture:
+                    type: string
+                benchmarkBytes:
+                    type: number
+                benchmarkDurationMs:
+                    type: number
+                cacheDiskWriteBytesPerSecond:
+                    type: number
+                cpuModel:
+                    type: string
+                measuredAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
                 node:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
@@ -4383,6 +4483,27 @@ components:
                     $ref: '#/components/schemas/model_OriginProtocol'
                 weight:
                     type: number
+        sites_siteSummary:
+            type: object
+            properties:
+                certificate_count:
+                    type: number
+                domains:
+                    type: array
+                    items:
+                        type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
         types_Certificate:
             type: object
             properties:
@@ -4517,6 +4638,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/types_NodeGroupMembership'
+                hardwareProfile:
+                    $ref: '#/components/schemas/types_NodeHardwareProfile'
                 id:
                     type: string
                 installError:
@@ -4550,7 +4673,6 @@ components:
                 max_disk_usage_percent:
                     type: number
                 max_size_bytes:
-                    description: Maximum cache size in bytes. Zero means unlimited when auto_max_size is false.
                     type: number
         types_NodeDNSLine:
             type: object
@@ -4566,6 +4688,23 @@ components:
                     type: string
                 nodeId:
                     type: string
+        types_NodeHardwareProfile:
+            type: object
+            properties:
+                architecture:
+                    type: string
+                benchmark_bytes:
+                    type: number
+                benchmark_duration_ms:
+                    type: number
+                cache_disk_write_bytes_per_second:
+                    type: number
+                cpu_model:
+                    type: string
+                measured_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         types_NodeRegionMembership:
             type: object
             properties:

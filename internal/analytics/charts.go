@@ -43,11 +43,10 @@ type NodeRuntimePoint struct {
 
 type NodeSnapshot struct {
 	NodeRuntimePoint
-	Online                  bool    `json:"online"`
-	IngressBytesPerSecond   float64 `json:"ingress_bytes_per_second"`
-	EgressBytesPerSecond    float64 `json:"egress_bytes_per_second"`
-	RequestsPerMinute       uint64  `json:"requests_per_minute"`
-	DiskWriteBytesPerSecond float64 `json:"disk_write_bytes_per_second"`
+	Online                bool    `json:"online"`
+	IngressBytesPerSecond float64 `json:"ingress_bytes_per_second"`
+	EgressBytesPerSecond  float64 `json:"egress_bytes_per_second"`
+	RequestsPerMinute     uint64  `json:"requests_per_minute"`
 }
 
 func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) ([]NodeSnapshot, error) {
@@ -73,7 +72,7 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 		q += " AND node_id = ?"
 		args = append(args, nodeID)
 	}
-	q += " ORDER BY node_id, minute DESC LIMIT 2 BY node_id"
+	q += " ORDER BY node_id, minute DESC LIMIT 1 BY node_id"
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -123,12 +122,6 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 		snapshot := NodeSnapshot{
 			NodeRuntimePoint: points[0],
 			Online:           now.Sub(points[0].Bucket) <= 3*time.Minute,
-		}
-		if len(points) > 1 && points[0].CacheUsed > points[1].CacheUsed {
-			seconds := points[0].Bucket.Sub(points[1].Bucket).Seconds()
-			if seconds > 0 {
-				snapshot.DiskWriteBytesPerSecond = float64(points[0].CacheUsed-points[1].CacheUsed) / seconds
-			}
 		}
 		if current, ok := traffic[nodeID]; ok {
 			snapshot.IngressBytesPerSecond = float64(current.IngressBytes) / 60

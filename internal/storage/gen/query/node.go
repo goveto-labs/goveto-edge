@@ -51,6 +51,7 @@ type NodeQuery struct {
 	RegionMemberships  nodeRegionMembershipsRelation
 	DnsRecords         nodeDnsRecordsRelation
 	CacheConfig        nodeCacheConfigRelation
+	HardwareProfile    nodeHardwareProfileRelation
 	Credential         nodeCredentialRelation
 	SiteConfigVersions nodeSiteConfigVersionsRelation
 }
@@ -90,6 +91,7 @@ var Node = NodeQuery{
 	RegionMemberships:  nodeRegionMembershipsRelation{},
 	DnsRecords:         nodeDnsRecordsRelation{},
 	CacheConfig:        nodeCacheConfigRelation{},
+	HardwareProfile:    nodeHardwareProfileRelation{},
 	Credential:         nodeCredentialRelation{},
 	SiteConfigVersions: nodeSiteConfigVersionsRelation{},
 }
@@ -961,6 +963,14 @@ func (nodeCacheConfigRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "cacheConfig"}
 }
 
+// HardwareProfileRelation provides relation query helpers for hardwareProfile.
+type nodeHardwareProfileRelation struct{}
+
+// Fetch creates an include clause to fetch related hardwareProfile.
+func (nodeHardwareProfileRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "hardwareProfile"}
+}
+
 // CredentialRelation provides relation query helpers for credential.
 type nodeCredentialRelation struct{}
 
@@ -1030,6 +1040,7 @@ type NodeCreateInput struct {
 	RegionMemberships  *NodeRegionMembershipCreateNestedInput
 	DnsRecords         *DNSManagedRecordCreateNestedInput
 	CacheConfig        *NodeCacheConfigCreateNestedInput
+	HardwareProfile    *NodeHardwareProfileCreateNestedInput
 	Credential         *NodeCredentialCreateNestedInput
 	SiteConfigVersions *NodeSiteConfigVersionCreateNestedInput
 }

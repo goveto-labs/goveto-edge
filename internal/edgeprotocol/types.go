@@ -9,6 +9,16 @@ import (
 	"time"
 )
 
+type NodeHardwareProfile struct {
+	Architecture                 string    `json:"architecture"`
+	CPUModel                     string    `json:"cpu_model"`
+	CacheDiskWriteBytesPerSecond *uint64   `json:"cache_disk_write_bytes_per_second,omitempty"`
+	BenchmarkBytes               *uint64   `json:"benchmark_bytes,omitempty"`
+	BenchmarkDurationMS          *int64    `json:"benchmark_duration_ms,omitempty"`
+	MeasuredAt                   time.Time `json:"measured_at"`
+	DiskBenchmarkError           string    `json:"disk_benchmark_error,omitempty"`
+}
+
 type SiteConfig struct {
 	SiteID       string              `json:"site_id"`
 	Version      uint64              `json:"version"`

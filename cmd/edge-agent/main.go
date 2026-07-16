@@ -16,6 +16,13 @@ import (
 )
 
 func main() {
+	if handled, err := edgeagent.RunHardwareBenchmarkCommand(os.Args[1:], os.Stdout); handled {
+		if err != nil {
+			slog.Error("benchmark node hardware", "error", err)
+			os.Exit(1)
+		}
+		return
+	}
 	identityPath := os.Getenv("EDGE_AGENT_IDENTITY_FILE")
 	if identityPath == "" {
 		identityPath = "/opt/goveto-edge/agent/identity.json"

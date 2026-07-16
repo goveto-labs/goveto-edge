@@ -340,6 +340,7 @@ model Node {
   regionMemberships  NodeRegionMembership[]
   dnsRecords         DNSManagedRecord[]
   cacheConfig        NodeCacheConfig?
+  hardwareProfile    NodeHardwareProfile?
   credential         NodeCredential?
   siteConfigVersions NodeSiteConfigVersion[]
 
@@ -404,6 +405,19 @@ model NodeGroupMembership {
   @@id([nodeId, groupId])
   @@index([groupId])
   @@map("node_group_memberships")
+}
+
+model NodeHardwareProfile {
+  nodeId                       UUID     @id @map("node_id")
+  architecture                 String
+  cpuModel                     String   @map("cpu_model")
+  cacheDiskWriteBytesPerSecond BigInt?  @map("cache_disk_write_bytes_per_second")
+  benchmarkBytes               BigInt?  @map("benchmark_bytes")
+  benchmarkDurationMs          Int?     @map("benchmark_duration_ms")
+  measuredAt                   DateTime @map("measured_at")
+  node                         Node     @relation(fields: [nodeId], references: [id])
+
+  @@map("node_hardware_profiles")
 }
 
 model NodeRegionMembership {

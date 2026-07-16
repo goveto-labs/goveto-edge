@@ -101,6 +101,26 @@ type NodeCacheConfig struct {
 	MaxDiskUsagePercent int    `json:"max_disk_usage_percent"`
 }
 
+type NodeHardwareProfile struct {
+	Architecture                 string    `json:"architecture"`
+	CPUModel                     string    `json:"cpu_model"`
+	CacheDiskWriteBytesPerSecond *int64    `json:"cache_disk_write_bytes_per_second,omitempty"`
+	BenchmarkBytes               *int64    `json:"benchmark_bytes,omitempty"`
+	BenchmarkDurationMS          *int      `json:"benchmark_duration_ms,omitempty"`
+	MeasuredAt                   time.Time `json:"measured_at"`
+}
+
+func NewNodeHardwareProfile(value *model.NodeHardwareProfile) NodeHardwareProfile {
+	return NodeHardwareProfile{
+		Architecture:                 value.Architecture,
+		CPUModel:                     value.CpuModel,
+		CacheDiskWriteBytesPerSecond: value.CacheDiskWriteBytesPerSecond,
+		BenchmarkBytes:               value.BenchmarkBytes,
+		BenchmarkDurationMS:          value.BenchmarkDurationMs,
+		MeasuredAt:                   value.MeasuredAt,
+	}
+}
+
 func NewNodeCacheConfig(value *model.NodeCacheConfig) NodeCacheConfig {
 	result := NodeCacheConfig{CacheDirectory: value.CacheDir, AutoMaxSize: value.AutoMaxSize, MaxDiskUsagePercent: value.MaxDiskUsagePercent}
 	if value.MaxSizeBytes != nil {
@@ -120,6 +140,7 @@ type Node struct {
 	RegionMemberships  []NodeRegionMembership `json:"regionMemberships,omitempty"`
 	SiteConfigVersions []SiteConfigVersion    `json:"siteConfigVersions,omitempty"`
 	CacheConfig        *NodeCacheConfig       `json:"cacheConfig,omitempty"`
+	HardwareProfile    *NodeHardwareProfile   `json:"hardwareProfile,omitempty"`
 }
 
 func NewNode(value *model.Node) Node {
@@ -142,6 +163,10 @@ func NewNode(value *model.Node) Node {
 	if value.CacheConfig != nil {
 		cache := NewNodeCacheConfig(value.CacheConfig)
 		result.CacheConfig = &cache
+	}
+	if value.HardwareProfile != nil {
+		hardware := NewNodeHardwareProfile(value.HardwareProfile)
+		result.HardwareProfile = &hardware
 	}
 	return result
 }

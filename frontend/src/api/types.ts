@@ -142,6 +142,15 @@ export interface NodeCacheConfig {
     max_disk_usage_percent: number;
 }
 
+export interface NodeHardwareProfile {
+    architecture: string;
+    cpu_model: string;
+    cache_disk_write_bytes_per_second?: number;
+    benchmark_bytes?: number;
+    benchmark_duration_ms?: number;
+    measured_at: string;
+}
+
 export interface SiteConfigVersion {
     site_id: string;
     version: number;
@@ -159,6 +168,7 @@ export interface Node {
     regionMemberships?: Array<{ nodeId: string; regionId: string }>;
     siteConfigVersions?: SiteConfigVersion[];
     cacheConfig?: NodeCacheConfig;
+    hardwareProfile?: NodeHardwareProfile;
 }
 
 export interface NodeStatusResponse {
@@ -400,7 +410,6 @@ export interface NodeSnapshot extends NodeRuntimePoint {
     ingress_bytes_per_second: number;
     egress_bytes_per_second: number;
     requests_per_minute: number;
-    disk_write_bytes_per_second: number;
 }
 
 export interface NodeRuntimeResponse {

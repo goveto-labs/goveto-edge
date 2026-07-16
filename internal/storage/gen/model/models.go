@@ -204,6 +204,7 @@ type Node struct {
 	RegionMemberships  []*NodeRegionMembership  `db:"-" json:"regionMemberships,omitempty"`
 	DnsRecords         []*DNSManagedRecord      `db:"-" json:"dnsRecords,omitempty"`
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
+	HardwareProfile    *NodeHardwareProfile     `db:"-" json:"hardwareProfile,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }
@@ -251,6 +252,18 @@ type NodeGroupMembership struct {
 	GroupId string        `db:"group_id" json:"groupId"`
 	Node    *Node         `db:"-" json:"node,omitempty"`
 	Group   *ClusterGroup `db:"-" json:"group,omitempty"`
+}
+
+// NodeHardwareProfile represents the NodeHardwareProfile model.
+type NodeHardwareProfile struct {
+	NodeId                       string    `db:"node_id" json:"nodeId"`
+	Architecture                 string    `db:"architecture" json:"architecture"`
+	CpuModel                     string    `db:"cpu_model" json:"cpuModel"`
+	CacheDiskWriteBytesPerSecond *int64    `db:"cache_disk_write_bytes_per_second" json:"cacheDiskWriteBytesPerSecond"`
+	BenchmarkBytes               *int64    `db:"benchmark_bytes" json:"benchmarkBytes"`
+	BenchmarkDurationMs          *int      `db:"benchmark_duration_ms" json:"benchmarkDurationMs"`
+	MeasuredAt                   time.Time `db:"measured_at" json:"measuredAt"`
+	Node                         *Node     `db:"-" json:"node,omitempty"`
 }
 
 // NodeRegionMembership represents the NodeRegionMembership model.

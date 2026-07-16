@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -179,6 +180,96 @@ WantedBy=multi-user.target
 		logger.Info("remote installation output", "output", strings.TrimSpace(string(output)))
 	}
 	logger.Info("remote installation script completed")
+	if err := w.collectAndStoreHardwareProfile(installCtx, connection, payload, arch, privileged); err != nil {
+		logger.Warn("node hardware benchmark failed", "error", err)
+	}
+	return nil
+}
+
+func (w *InstallWorker) collectAndStoreHardwareProfile(
+	ctx context.Context,
+	connection *ssh.Client,
+	payload InstallPayload,
+	architecture, privileged string,
+) error {
+	cacheDirectory := "/opt/goveto-edge/cache"
+	config, err := w.db.NodeCacheConfig.FindUnique(
+		ctx,
+		query.NodeCacheConfig.NodeId.Equals(payload.NodeID),
+	)
+	if err != nil {
+		return fmt.Errorf("load cache directory for hardware benchmark: %w", err)
+	}
+	if config != nil && strings.TrimSpace(config.CacheDir) != "" {
+		cacheDirectory = config.CacheDir
+	}
+
+	command := privileged + "/usr/local/bin/goveto-edge-agent benchmark --directory " +
+		shellQuote(cacheDirectory) + " --bytes 16777216"
+	output, err := runRemoteCommand(ctx, connection, 45*time.Second, command)
+	if err != nil {
+		return fmt.Errorf("run node hardware benchmark: %w%s", err, commandOutputSuffix(output))
+	}
+	var profile edgeprotocol.NodeHardwareProfile
+	if err := json.Unmarshal(output, &profile); err != nil {
+		return fmt.Errorf("decode node hardware benchmark: %w", err)
+	}
+	if profile.Architecture == "" {
+		profile.Architecture = architecture
+	}
+	if profile.CPUModel == "" {
+		profile.CPUModel = architecture
+	}
+	if profile.MeasuredAt.IsZero() {
+		profile.MeasuredAt = time.Now().UTC()
+	}
+
+	create := []query.NodeHardwareProfileSetClause{
+		query.NodeHardwareProfile.NodeId.Set(payload.NodeID),
+		query.NodeHardwareProfile.Architecture.Set(profile.Architecture),
+		query.NodeHardwareProfile.CpuModel.Set(profile.CPUModel),
+		query.NodeHardwareProfile.MeasuredAt.Set(profile.MeasuredAt),
+	}
+	update := []query.NodeHardwareProfileSetClause{
+		query.NodeHardwareProfile.Architecture.Set(profile.Architecture),
+		query.NodeHardwareProfile.CpuModel.Set(profile.CPUModel),
+		query.NodeHardwareProfile.MeasuredAt.Set(profile.MeasuredAt),
+	}
+	if profile.CacheDiskWriteBytesPerSecond != nil {
+		value := int64(*profile.CacheDiskWriteBytesPerSecond)
+		create = append(create, query.NodeHardwareProfile.CacheDiskWriteBytesPerSecond.Set(value))
+		update = append(update, query.NodeHardwareProfile.CacheDiskWriteBytesPerSecond.Set(value))
+	} else {
+		create = append(create, query.NodeHardwareProfile.CacheDiskWriteBytesPerSecond.SetNull())
+		update = append(update, query.NodeHardwareProfile.CacheDiskWriteBytesPerSecond.SetNull())
+	}
+	if profile.BenchmarkBytes != nil {
+		value := int64(*profile.BenchmarkBytes)
+		create = append(create, query.NodeHardwareProfile.BenchmarkBytes.Set(value))
+		update = append(update, query.NodeHardwareProfile.BenchmarkBytes.Set(value))
+	} else {
+		create = append(create, query.NodeHardwareProfile.BenchmarkBytes.SetNull())
+		update = append(update, query.NodeHardwareProfile.BenchmarkBytes.SetNull())
+	}
+	if profile.BenchmarkDurationMS != nil {
+		value := int(*profile.BenchmarkDurationMS)
+		create = append(create, query.NodeHardwareProfile.BenchmarkDurationMs.Set(value))
+		update = append(update, query.NodeHardwareProfile.BenchmarkDurationMs.Set(value))
+	} else {
+		create = append(create, query.NodeHardwareProfile.BenchmarkDurationMs.SetNull())
+		update = append(update, query.NodeHardwareProfile.BenchmarkDurationMs.SetNull())
+	}
+	if _, err := w.db.NodeHardwareProfile.UpsertOne(
+		ctx,
+		query.NodeHardwareProfile.NodeId.Equals(payload.NodeID),
+		create,
+		update,
+	); err != nil {
+		return fmt.Errorf("store node hardware profile: %w", err)
+	}
+	if profile.DiskBenchmarkError != "" {
+		return fmt.Errorf("cache disk benchmark: %s", profile.DiskBenchmarkError)
+	}
 	return nil
 }
 

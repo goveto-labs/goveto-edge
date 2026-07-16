@@ -55,6 +55,14 @@ func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node,
 			return err
 		}
 		node.CacheConfig = cache
+		hardware, err := db.NodeHardwareProfile.FindUnique(
+			ctx,
+			query.NodeHardwareProfile.NodeId.Equals(node.Id),
+		)
+		if err != nil {
+			return err
+		}
+		node.HardwareProfile = hardware
 	}
 	return nil
 }

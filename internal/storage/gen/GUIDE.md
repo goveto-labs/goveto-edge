@@ -321,6 +321,19 @@ query.PostAuthorIdColumn
   - `Nodeid` (UUID)
   - `Groupid` (String)
 
+### NodeHardwareProfile
+
+- Client handle: `c.NodeHardwareProfile`
+- Query namespace: `query.NodeHardwareProfile`
+- Fields:
+  - `Nodeid` (UUID, id)
+  - `Architecture` (String)
+  - `Cpumodel` (String)
+  - `Cachediskwritebytespersecond` (BigInt, optional)
+  - `Benchmarkbytes` (BigInt, optional)
+  - `Benchmarkdurationms` (Int, optional)
+  - `Measuredat` (DateTime)
+
 ### NodeRegionMembership
 
 - Client handle: `c.NodeRegionMembership`

@@ -714,6 +714,28 @@ export default function NodeDetail() {
                                 </div>
                             </div>
 
+                            {!snapshot && node.hardwareProfile && (
+                                <div className='mb-3 grid gap-3 sm:grid-cols-2'>
+                                    <StatCell
+                                        footer={node.hardwareProfile.architecture}
+                                        label='CPU model'
+                                        value={node.hardwareProfile.cpu_model}
+                                    />
+                                    <StatCell
+                                        footer={`Measured ${new Date(node.hardwareProfile.measured_at).toLocaleString()} · ${formatBytes(node.hardwareProfile.benchmark_bytes ?? 0)} sample`}
+                                        label='Cache disk write speed'
+                                        value={
+                                            node.hardwareProfile.cache_disk_write_bytes_per_second
+                                                ? formatRate(
+                                                      node.hardwareProfile
+                                                          .cache_disk_write_bytes_per_second
+                                                  )
+                                                : 'Unavailable'
+                                        }
+                                    />
+                                </div>
+                            )}
+
                             {snapshot ? (
                                 <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-3'>
                                     <StatCell
@@ -723,6 +745,11 @@ export default function NodeDetail() {
                                         value={snapshot.online ? 'Online' : 'Offline'}
                                     />
                                     <StatCell
+                                        footer={
+                                            node.hardwareProfile
+                                                ? `${node.hardwareProfile.cpu_model} · ${node.hardwareProfile.architecture}`
+                                                : 'Recorded during agent installation'
+                                        }
                                         label='CPU'
                                         value={`${snapshot.cpu_usage_percent.toFixed(1)}%`}
                                     />
@@ -756,9 +783,20 @@ export default function NodeDetail() {
                                         value={formatBytes(snapshot.cache_used_bytes)}
                                     />
                                     <StatCell
-                                        footer={`Limit ${formatBytes(snapshot.cache_max_bytes)}`}
-                                        label='Estimated cache writes'
-                                        value={formatRate(snapshot.disk_write_bytes_per_second)}
+                                        footer={
+                                            node.hardwareProfile
+                                                ? `Measured ${new Date(node.hardwareProfile.measured_at).toLocaleString()} · ${formatBytes(node.hardwareProfile.benchmark_bytes ?? 0)} sample`
+                                                : 'Run during agent installation'
+                                        }
+                                        label='Cache disk write speed'
+                                        value={
+                                            node.hardwareProfile?.cache_disk_write_bytes_per_second
+                                                ? formatRate(
+                                                      node.hardwareProfile
+                                                          .cache_disk_write_bytes_per_second
+                                                  )
+                                                : 'Unavailable'
+                                        }
                                     />
                                 </div>
                             ) : (
