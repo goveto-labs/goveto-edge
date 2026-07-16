@@ -164,19 +164,6 @@ export default function Nodes() {
                                 </td>
                                 <td>
                                     <div className='flex flex-col items-start gap-1.5'>
-                                        <span
-                                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                                                runtime?.online
-                                                    ? 'bg-success/10 text-success'
-                                                    : 'bg-danger/10 text-danger'
-                                            }`}
-                                            title={runtimeTitle}
-                                        >
-                                            <span
-                                                className={`h-1.5 w-1.5 rounded-full ${runtime?.online ? 'bg-success' : 'bg-danger'}`}
-                                            />
-                                            {runtime?.online ? 'Online' : 'Offline'}
-                                        </span>
                                         <StatusBadge status={node.status} />
                                         {node.status === 'INSTALL_FAILED' && node.installError && (
                                             <p

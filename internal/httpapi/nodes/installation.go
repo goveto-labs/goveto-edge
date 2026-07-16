@@ -71,43 +71,51 @@ func getInstallation(db *client.Client, cipher *node.CredentialCipher) echo.Hand
 	}
 }
 
-type installationStatusInput struct {
-	Status model.NodeStatus `json:"status"`
-}
-
-func setInstallationStatus(db *client.Client, queue *node.InstallQueue, dnsService *dnssync.Service) echo.HandlerFunc {
+// @summary Initialize a manually installed node agent
+// @description Verify the running agent, synchronize node configuration, and enter the normal health cycle.
+// @Tags nodes
+func initializeManualInstallation(
+	db *client.Client,
+	queue *node.InstallQueue,
+	cipher *node.CredentialCipher,
+	dnsService *dnssync.Service,
+) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		item, err := nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
 		if err != nil {
 			return err
 		}
-		var input installationStatusInput
-		if err := c.Bind(&input); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		if item.Status == model.NodeStatusDISABLED {
+			return echo.NewHTTPError(http.StatusConflict, "enable the node before initialization")
 		}
-		switch input.Status {
-		case model.NodeStatusPENDING, model.NodeStatusINSTALLING, model.NodeStatusOFFLINE, model.NodeStatusINSTALL_FAILED, model.NodeStatusDISABLED:
-		default:
-			return echo.NewHTTPError(http.StatusBadRequest, "unsupported manual installation status")
+		if item.Status == model.NodeStatusINSTALLING {
+			return echo.NewHTTPError(http.StatusConflict, "automatic SSH installation is still in progress")
 		}
-		if input.Status != model.NodeStatusPENDING {
-			if err := queue.Delete(ctx, item.Id); err != nil {
-				return err
-			}
-		}
-		sets := []query.NodeSetClause{query.Node.Status.Set(input.Status)}
-		if input.Status != model.NodeStatusINSTALL_FAILED {
-			sets = append(sets, query.Node.InstallError.SetNull())
-		}
-		updated, err := db.Node.Update().Where(query.Node.Id.Equals(item.Id)).Set(sets...).Do(ctx)
-		if err != nil {
+		if err := queue.Delete(ctx, item.Id); err != nil {
 			return err
+		}
+
+		address, initializeErr := node.InitializeInstalledNode(ctx, db, cipher, item.ClusterId, item.Id)
+		if initializeErr != nil {
+			message := "manual initialization failed: " + initializeErr.Error()
+			if item.Status == model.NodeStatusPENDING || item.Status == model.NodeStatusINSTALL_FAILED {
+				_, _ = db.Node.Update().Where(query.Node.Id.Equals(item.Id)).Set(
+					query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+					query.Node.InstallError.Set(message),
+					query.Node.HeartbeatAt.SetNull(),
+				).DoMany(ctx)
+			}
+			return echo.NewHTTPError(http.StatusBadGateway, message)
 		}
 		if err := enqueueDNSIfChanged(ctx, dnsService, item.ClusterId); err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": map[string]any{"id": updated.Id, "status": updated.Status}})
+		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": map[string]any{
+			"id":      item.Id,
+			"status":  model.NodeStatusONLINE,
+			"message": "node initialized through " + address,
+		}})
 	}
 }
 

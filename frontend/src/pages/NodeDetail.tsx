@@ -14,7 +14,7 @@ import type {
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
-import { Button, Input, ListBox, Select, TextArea } from '@heroui/react';
+import { Button, Input, TextArea } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
@@ -70,14 +70,6 @@ const tabs: Array<{ id: DetailTab; label: string; icon: typeof Server }> = [
     { id: 'installation', label: 'Installation', icon: Terminal },
     { id: 'settings', label: 'Settings', icon: Settings },
 ];
-const manualInstallationStatuses = [
-    'PENDING',
-    'INSTALLING',
-    'OFFLINE',
-    'INSTALL_FAILED',
-    'DISABLED',
-] as const;
-
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
@@ -296,8 +288,9 @@ export default function NodeDetail() {
     const [testError, setTestError] = useState('');
     const [installation, setInstallation] = useState<NodeInstallationInfo | null>(null);
     const [installationLoading, setInstallationLoading] = useState(false);
-    const [installationStatus, setInstallationStatus] = useState('');
-    const [installationStatusSaving, setInstallationStatusSaving] = useState(false);
+    const [manualInitializing, setManualInitializing] = useState(false);
+    const [manualInitializationMessage, setManualInitializationMessage] = useState('');
+    const [manualInitializationError, setManualInitializationError] = useState('');
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState('');
@@ -346,15 +339,11 @@ export default function NodeDetail() {
         if (tab !== 'installation' || !nodeId) return;
         setInstallationLoading(true);
         setInstallation(null);
-        setInstallationStatus('');
+        setManualInitializationMessage('');
+        setManualInitializationError('');
         api.installation(nodeId)
             .then((value) => {
                 setInstallation(value);
-                setInstallationStatus(
-                    manualInstallationStatuses.some((status) => status === value.status)
-                        ? value.status
-                        : ''
-                );
                 setError('');
             })
             .catch((loadError) =>
@@ -733,7 +722,7 @@ export default function NodeDetail() {
             : tab === 'logs'
               ? logsLoading
               : tab === 'installation'
-                ? installationLoading || installationStatusSaving || testing || reinstalling
+                ? installationLoading
                 : tab === 'settings' && settingsPage === 'network'
                   ? dnsSaving || addressAdding || addressBusyId !== ''
                   : tab === 'settings' && settingsPage === 'cache'
@@ -744,24 +733,28 @@ export default function NodeDetail() {
         if (detailPath === nextPath) return;
         navigate(`/nodes/${nodeId}/${nextPath}`);
     };
-    const saveInstallationStatus = async () => {
-        if (!node || !installationStatus) return;
-        setInstallationStatusSaving(true);
-        setError('');
+    const initializeManualInstallation = async () => {
+        if (!node) return;
+        setManualInitializing(true);
+        setManualInitializationMessage('');
+        setManualInitializationError('');
         try {
-            await api.setInstallationStatus(node.id, installationStatus);
+            const result = await api.initializeInstallation(node.id);
             await refreshNode();
             setInstallation((current) =>
-                current ? { ...current, status: installationStatus } : current
+                current ? { ...current, status: result.status, install_error: undefined } : current
             );
-        } catch (statusError) {
-            setError(
-                statusError instanceof ApiError
-                    ? statusError.message
-                    : 'Failed to update installation status'
+            setManualInitializationMessage(
+                result.message || 'The agent is initialized and ready for health monitoring.'
+            );
+        } catch (initializeError) {
+            setManualInitializationError(
+                initializeError instanceof ApiError
+                    ? initializeError.message
+                    : 'Failed to initialize the manually installed agent'
             );
         } finally {
-            setInstallationStatusSaving(false);
+            setManualInitializing(false);
         }
     };
 
@@ -1011,6 +1004,7 @@ export default function NodeDetail() {
 
                                 <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                                     <ContentCard
+                                        allowOverflow
                                         className='h-full'
                                         title={`Traffic · ${monitoringPeriod}`}
                                     >
@@ -1034,6 +1028,7 @@ export default function NodeDetail() {
                                         />
                                     </ContentCard>
                                     <ContentCard
+                                        allowOverflow
                                         className='h-full'
                                         title={`Requests · ${monitoringPeriod}`}
                                     >
@@ -1050,7 +1045,11 @@ export default function NodeDetail() {
                                             ]}
                                         />
                                     </ContentCard>
-                                    <ContentCard className='h-full' title='CPU & memory · 12h'>
+                                    <ContentCard
+                                        allowOverflow
+                                        className='h-full'
+                                        title='CPU & memory · 12h'
+                                    >
                                         <TimeSeriesChart
                                             ariaLabel={`${node.name} CPU and memory trend`}
                                             data={cpuMemoryChart}
@@ -1066,7 +1065,11 @@ export default function NodeDetail() {
                                             valueFormatter={(value) => `${value.toFixed(1)}%`}
                                         />
                                     </ContentCard>
-                                    <ContentCard className='h-full' title='Load average · 12h'>
+                                    <ContentCard
+                                        allowOverflow
+                                        className='h-full'
+                                        title='Load average · 12h'
+                                    >
                                         <TimeSeriesChart
                                             ariaLabel={`${node.name} load average trend`}
                                             data={loadChart}
@@ -1078,7 +1081,11 @@ export default function NodeDetail() {
                                             ]}
                                         />
                                     </ContentCard>
-                                    <ContentCard className='h-full' title='Cache usage · 12h'>
+                                    <ContentCard
+                                        allowOverflow
+                                        className='h-full'
+                                        title='Cache usage · 12h'
+                                    >
                                         <TimeSeriesChart
                                             ariaLabel={`${node.name} cache usage trend`}
                                             data={cacheChart}
@@ -1312,7 +1319,7 @@ export default function NodeDetail() {
                                     page={settingsPage}
                                     onChange={(page) => navigateTo('settings', page)}
                                 />
-                                <div className='grid gap-4 xl:grid-cols-2'>
+                                <div className='grid gap-4'>
                                     <ContentCard className='overflow-visible p-0' noPadding>
                                         <SectionTitle
                                             description='Choose every provider routing line served by this node.'
@@ -1591,203 +1598,54 @@ export default function NodeDetail() {
                         )}
 
                         {tab === 'installation' && (
-                            <div className='mx-auto max-w-5xl space-y-4'>
+                            <div className='mx-auto max-w-6xl space-y-5'>
                                 {installation && (
-                                    <>
-                                        <div className='grid gap-4 lg:grid-cols-2'>
-                                            <ContentCard title='Installation information'>
-                                                <div className='space-y-4'>
-                                                    <FormField label='Current status'>
-                                                        <StatusBadge status={installation.status} />
-                                                    </FormField>
-                                                    <FormField label='Node ID'>
-                                                        <span className='break-all font-mono text-sm'>
-                                                            {installation.node_id}
-                                                        </span>
-                                                    </FormField>
-                                                    <FormField label='Communication key'>
-                                                        <div className='flex items-center gap-2'>
-                                                            <code className='min-w-0 flex-1 break-all rounded-lg bg-surface-secondary px-3 py-2 text-xs'>
-                                                                {installation.communication_key}
-                                                            </code>
-                                                            <Button
-                                                                size='sm'
-                                                                type='button'
-                                                                variant='secondary'
-                                                                onPress={() =>
-                                                                    void navigator.clipboard.writeText(
-                                                                        installation.communication_key
-                                                                    )
-                                                                }
-                                                            >
-                                                                Copy
-                                                            </Button>
-                                                        </div>
-                                                    </FormField>
-                                                    {installation.install_error && (
-                                                        <FormError
-                                                            message={installation.install_error}
-                                                        />
-                                                    )}
-                                                </div>
-                                            </ContentCard>
-
-                                            <ContentCard title='Set installation status'>
-                                                <div className='space-y-4'>
-                                                    <p className='text-sm leading-6 text-muted'>
-                                                        Use this after completing a manual
-                                                        installation or when resolving an
-                                                        interrupted installation.
-                                                    </p>
-                                                    <Select
-                                                        aria-label='Installation status'
-                                                        value={installationStatus}
-                                                        variant='secondary'
-                                                        onChange={(key) =>
-                                                            key &&
-                                                            setInstallationStatus(String(key))
-                                                        }
-                                                    >
-                                                        <Select.Trigger>
-                                                            <Select.Value>
-                                                                {installationStatus
-                                                                    ? undefined
-                                                                    : 'Choose a manual status'}
-                                                            </Select.Value>
-                                                        </Select.Trigger>
-                                                        <Select.Popover>
-                                                            <ListBox>
-                                                                {manualInstallationStatuses.map(
-                                                                    (status) => (
-                                                                        <ListBox.Item
-                                                                            id={status}
-                                                                            key={status}
-                                                                            textValue={status}
-                                                                        >
-                                                                            {status}
-                                                                        </ListBox.Item>
-                                                                    )
-                                                                )}
-                                                            </ListBox>
-                                                        </Select.Popover>
-                                                    </Select>
-                                                    <Button
-                                                        isDisabled={
-                                                            installationStatusSaving ||
-                                                            !installationStatus ||
-                                                            installationStatus ===
-                                                                installation.status
-                                                        }
-                                                        onPress={() =>
-                                                            void saveInstallationStatus()
-                                                        }
-                                                    >
-                                                        <Save className='mr-1.5 h-4 w-4' />
-                                                        {installationStatusSaving
-                                                            ? 'Saving…'
-                                                            : 'Save status'}
-                                                    </Button>
-                                                </div>
-                                            </ContentCard>
+                                    <div className='flex flex-col gap-4 rounded-xl border border-border bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                                        <div className='min-w-0'>
+                                            <div className='flex flex-wrap items-center gap-3'>
+                                                <h2 className='text-base font-semibold'>
+                                                    Agent installation
+                                                </h2>
+                                                <StatusBadge status={installation.status} />
+                                            </div>
+                                            <p className='mt-1 text-sm text-muted'>
+                                                Node ID{' '}
+                                                <span className='break-all font-mono text-xs text-foreground'>
+                                                    {installation.node_id}
+                                                </span>
+                                            </p>
                                         </div>
+                                    </div>
+                                )}
 
-                                        <ContentCard title='Manual installation downloads'>
-                                            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
-                                                {installation.architectures.map((architecture) => (
-                                                    <a
-                                                        className='button button--secondary justify-center'
-                                                        download
-                                                        href={api.installationArtifactUrl(
-                                                            node.id,
-                                                            `binary/${architecture}`
-                                                        )}
-                                                        key={architecture}
-                                                    >
-                                                        <Download className='h-4 w-4' />
-                                                        Linux {architecture}
-                                                    </a>
-                                                ))}
-                                                <a
-                                                    className='button button--secondary justify-center'
-                                                    download
-                                                    href={api.installationArtifactUrl(
-                                                        node.id,
-                                                        'identity'
-                                                    )}
-                                                >
-                                                    <Download className='h-4 w-4' /> Identity config
-                                                </a>
-                                                <a
-                                                    className='button button--secondary justify-center'
-                                                    download
-                                                    href={api.installationArtifactUrl(
-                                                        node.id,
-                                                        'service'
-                                                    )}
-                                                >
-                                                    <Download className='h-4 w-4' /> systemd unit
-                                                </a>
-                                            </div>
-                                        </ContentCard>
-
-                                        <ContentCard title='Manual installation steps'>
-                                            <ol className='list-decimal space-y-3 pl-5 text-sm leading-6'>
-                                                <li>
-                                                    Download the binary matching the node
-                                                    architecture, identity config, and systemd unit.
-                                                </li>
-                                                <li>
-                                                    Copy the files to the node, then run the
-                                                    commands below as root or with sudo.
-                                                </li>
-                                                <li>
-                                                    After the service starts, set the installation
-                                                    status to OFFLINE. It becomes ONLINE after the
-                                                    first successful heartbeat.
-                                                </li>
-                                            </ol>
-                                            <pre className='mt-4 overflow-x-auto rounded-xl bg-surface-secondary p-4 text-xs leading-6'>
-                                                {`install -d -m 0700 /opt/goveto-edge/agent
-install -m 0600 identity.json /opt/goveto-edge/agent/identity.json
-install -m 0755 goveto-edge-agent-linux-ARCH /usr/local/bin/goveto-edge-agent
-install -m 0644 goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
-systemctl daemon-reload
-systemctl enable --now goveto-edge-agent
-systemctl status goveto-edge-agent`}
-                                            </pre>
-                                            <div className='mt-5 grid gap-4 lg:grid-cols-2'>
-                                                <FormField label='identity.json'>
-                                                    <pre className='max-h-64 overflow-auto rounded-xl bg-surface-secondary p-4 text-xs leading-5'>
-                                                        {installation.identity_json}
-                                                    </pre>
-                                                </FormField>
-                                                <FormField label='goveto-edge-agent.service'>
-                                                    <pre className='max-h-64 overflow-auto rounded-xl bg-surface-secondary p-4 text-xs leading-5'>
-                                                        {installation.service_unit}
-                                                    </pre>
-                                                </FormField>
-                                            </div>
-                                        </ContentCard>
-                                    </>
+                                {installation?.install_error && (
+                                    <FormError message={installation.install_error} />
                                 )}
 
                                 <ContentCard className='overflow-visible p-0' noPadding>
-                                    <div className='flex items-center gap-3 border-b border-border bg-surface-secondary/30 px-6 py-3'>
-                                        <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-primary-foreground'>
-                                            <RefreshCw className='h-3.5 w-3.5' />
-                                        </span>
-                                        <div>
-                                            <div className='text-sm font-semibold'>SSH access</div>
-                                            <div className='text-xs text-muted'>
-                                                Verify temporary credentials before reinstalling the
-                                                edge agent.
+                                    <div className='flex flex-col gap-3 border-b border-border bg-surface-secondary/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6'>
+                                        <div className='flex items-start gap-3'>
+                                            <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground'>
+                                                <RefreshCw className='h-4 w-4' />
+                                            </span>
+                                            <div>
+                                                <div className='text-sm font-semibold'>
+                                                    Install automatically with SSH
+                                                </div>
+                                                <div className='mt-0.5 text-xs leading-5 text-muted'>
+                                                    Test access, upload the agent, configure
+                                                    systemd, and start the service.
+                                                </div>
                                             </div>
                                         </div>
+                                        <span className='self-start rounded-full border border-border bg-surface px-2.5 py-1 text-xs font-medium text-muted sm:self-auto'>
+                                            Recommended
+                                        </span>
                                     </div>
 
-                                    <div className='px-6 py-2'>
+                                    <div className='px-5 py-2 sm:px-6'>
                                         <FormRow
-                                            hint='For example, 192.168.1.100. Used to reinstall the edge agent remotely.'
+                                            hint='The address must be reachable from the control plane.'
                                             htmlFor='reinstall-ssh-ip'
                                             label='SSH host'
                                             required
@@ -1833,6 +1691,7 @@ systemctl status goveto-edge-agent`}
                                         <FormRow label='Authentication method' required>
                                             <div className='grid gap-3 sm:grid-cols-2'>
                                                 <button
+                                                    aria-pressed={authMethod === 'password'}
                                                     className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
                                                         authMethod === 'password'
                                                             ? 'border-accent bg-accent/10'
@@ -1857,6 +1716,7 @@ systemctl status goveto-edge-agent`}
                                                     </span>
                                                 </button>
                                                 <button
+                                                    aria-pressed={authMethod === 'private_key'}
                                                     className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
                                                         authMethod === 'private_key'
                                                             ? 'border-accent bg-accent/10'
@@ -1971,25 +1831,201 @@ systemctl status goveto-edge-agent`}
                                                 </p>
                                             )}
                                         </div>
+
+                                        <div className='flex flex-col-reverse gap-3 border-t border-border py-5 sm:flex-row sm:items-center sm:justify-between'>
+                                            <p className='text-xs leading-5 text-muted'>
+                                                Reinstallation replaces the agent binary and
+                                                restarts the service. Node identity is preserved.
+                                            </p>
+                                            <Button
+                                                className='shrink-0'
+                                                isDisabled={!connectionVerified || reinstalling}
+                                                type='button'
+                                                onPress={() => void reinstall()}
+                                            >
+                                                {reinstalling
+                                                    ? 'Starting installation…'
+                                                    : 'Install with SSH'}
+                                            </Button>
+                                        </div>
                                     </div>
                                 </ContentCard>
 
-                                <div className='flex items-center justify-end gap-2'>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        onPress={() => navigateTo('overview')}
-                                    >
-                                        Cancel
-                                    </Button>
-                                    <Button
-                                        isDisabled={!connectionVerified || reinstalling}
-                                        type='button'
-                                        onPress={() => void reinstall()}
-                                    >
-                                        {reinstalling ? 'Reinstalling…' : 'Reinstall node'}
-                                    </Button>
-                                </div>
+                                {installation && (
+                                    <details className='group overflow-hidden rounded-xl border border-border bg-surface'>
+                                        <summary className='flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-surface-secondary/50 sm:px-6'>
+                                            <div className='flex items-start gap-3'>
+                                                <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-secondary text-muted'>
+                                                    <Terminal className='h-4 w-4' />
+                                                </span>
+                                                <div>
+                                                    <div className='text-sm font-semibold'>
+                                                        Manual installation
+                                                    </div>
+                                                    <div className='mt-0.5 text-xs leading-5 text-muted'>
+                                                        Download the agent files when SSH automation
+                                                        is unavailable.
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <span className='text-xs font-medium text-muted group-open:hidden'>
+                                                Show instructions
+                                            </span>
+                                            <span className='hidden text-xs font-medium text-muted group-open:inline'>
+                                                Hide instructions
+                                            </span>
+                                        </summary>
+
+                                        <div className='space-y-6 border-t border-border px-5 py-5 sm:px-6'>
+                                            <div>
+                                                <h3 className='text-sm font-semibold'>
+                                                    Download files
+                                                </h3>
+                                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                                    Choose one binary, then download the identity
+                                                    and service files for this node.
+                                                </p>
+                                                <div className='mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+                                                    {installation.architectures.map(
+                                                        (architecture) => (
+                                                            <a
+                                                                className='button button--secondary justify-center w-full'
+                                                                download
+                                                                href={api.installationArtifactUrl(
+                                                                    node.id,
+                                                                    `binary/${architecture}`
+                                                                )}
+                                                                key={architecture}
+                                                            >
+                                                                <Download className='h-4 w-4' />
+                                                                Linux {architecture}
+                                                            </a>
+                                                        )
+                                                    )}
+                                                    <a
+                                                        className='button button--secondary justify-center w-full'
+                                                        download
+                                                        href={api.installationArtifactUrl(
+                                                            node.id,
+                                                            'identity'
+                                                        )}
+                                                    >
+                                                        <Download className='h-4 w-4' /> Identity
+                                                    </a>
+                                                    <a
+                                                        className='button button--secondary justify-center w-full'
+                                                        download
+                                                        href={api.installationArtifactUrl(
+                                                            node.id,
+                                                            'service'
+                                                        )}
+                                                    >
+                                                        <Download className='h-4 w-4' /> systemd
+                                                        unit
+                                                    </a>
+                                                </div>
+                                            </div>
+
+                                            <div className='grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(280px,0.65fr)]'>
+                                                <div>
+                                                    <h3 className='text-sm font-semibold'>
+                                                        Install and start the service
+                                                    </h3>
+                                                    <ol className='mt-2 list-decimal space-y-2 pl-5 text-sm leading-6 text-muted'>
+                                                        <li>Copy all three files to the node.</li>
+                                                        <li>
+                                                            Run the commands below as root or with
+                                                            sudo.
+                                                        </li>
+                                                        <li>
+                                                            Confirm that systemd reports the service
+                                                            as active.
+                                                        </li>
+                                                    </ol>
+                                                    <pre className='mt-4 overflow-x-auto rounded-xl bg-surface-secondary p-4 text-xs leading-6'>
+                                                        {`install -d -m 0700 /opt/goveto-edge/agent
+install -m 0600 identity.json /opt/goveto-edge/agent/identity.json
+install -m 0755 goveto-edge-agent-linux-ARCH /usr/local/bin/goveto-edge-agent
+install -m 0644 goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
+systemctl daemon-reload
+systemctl enable --now goveto-edge-agent
+systemctl status goveto-edge-agent`}
+                                                    </pre>
+                                                </div>
+
+                                                <div className='rounded-xl border border-border bg-surface-secondary/35 p-4 flex flex-col'>
+                                                    <h3 className='text-sm font-semibold'>
+                                                        Finish initialization
+                                                    </h3>
+                                                    <p className='mt-2 text-sm leading-6 text-muted'>
+                                                        After the service is active, verify the
+                                                        Agent, synchronize node configuration, and
+                                                        start health monitoring.
+                                                    </p>
+                                                    <div className='flex-1'></div>
+                                                    <Button
+                                                        className='mt-4 w-full justify-center'
+                                                        isDisabled={
+                                                            manualInitializing ||
+                                                            installation.status === 'INSTALLING' ||
+                                                            installation.status === 'DISABLED'
+                                                        }
+                                                        variant='secondary'
+                                                        onPress={() =>
+                                                            void initializeManualInstallation()
+                                                        }
+                                                    >
+                                                        <RefreshCw className='mr-1.5 h-4 w-4' />
+                                                        {manualInitializing
+                                                            ? 'Initializing…'
+                                                            : 'Verify and initialize'}
+                                                    </Button>
+                                                    {manualInitializationMessage && (
+                                                        <p className='mt-3 text-sm leading-6 text-success'>
+                                                            {manualInitializationMessage}
+                                                        </p>
+                                                    )}
+                                                    {manualInitializationError && (
+                                                        <div className='mt-3'>
+                                                            <FormError
+                                                                message={manualInitializationError}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    {installation.status === 'INSTALLING' && (
+                                                        <p className='mt-3 text-xs leading-5 text-warning'>
+                                                            Wait for the current SSH installation to
+                                                            finish before initializing manually.
+                                                        </p>
+                                                    )}
+                                                    {installation.status === 'DISABLED' && (
+                                                        <p className='mt-3 text-xs leading-5 text-warning'>
+                                                            Enable this node before initializing it.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <details className='rounded-xl border border-border px-4 py-3'>
+                                                <summary className='cursor-pointer text-sm font-medium'>
+                                                    View generated configuration
+                                                </summary>
+                                                <div className='mt-4 grid gap-4 lg:grid-cols-2'>
+                                                    <FormField label='identity.json'>
+                                                        <pre className='max-h-64 overflow-auto rounded-xl bg-surface-secondary p-4 text-xs leading-5'>
+                                                            {installation.identity_json}
+                                                        </pre>
+                                                    </FormField>
+                                                    <FormField label='goveto-edge-agent.service'>
+                                                        <pre className='max-h-64 overflow-auto rounded-xl bg-surface-secondary p-4 text-xs leading-5'>
+                                                            {installation.service_unit}
+                                                        </pre>
+                                                    </FormField>
+                                                </div>
+                                            </details>
+                                        </div>
+                                    </details>
+                                )}
                             </div>
                         )}
                     </LoadingSurface>

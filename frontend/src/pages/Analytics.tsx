@@ -352,7 +352,7 @@ export default function Analytics() {
             )}
 
             <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
-                <ContentCard title={`${period} traffic trend`}>
+                <ContentCard allowOverflow title={`${period} traffic trend`}>
                     <TimeSeriesChart
                         ariaLabel={`${period} ingress and egress traffic trend`}
                         data={trafficData}
@@ -363,7 +363,7 @@ export default function Analytics() {
                         valueFormatter={formatBytes}
                     />
                 </ContentCard>
-                <ContentCard title={`${period} request trend`}>
+                <ContentCard allowOverflow title={`${period} request trend`}>
                     <TimeSeriesChart
                         ariaLabel={`${period} request trend`}
                         data={requestData}
@@ -373,6 +373,7 @@ export default function Analytics() {
             </div>
 
             <ContentCard
+                allowOverflow
                 action={
                     <select
                         aria-label='Node trend selection'

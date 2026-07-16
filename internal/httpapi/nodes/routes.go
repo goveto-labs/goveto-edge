@@ -36,7 +36,7 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/status", setInstallationStatus(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/binary/:arch", downloadAgentBinary(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", downloadIdentity(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/service", downloadServiceUnit(db), authn.RequireAuth, clusteraccess.Require(db))

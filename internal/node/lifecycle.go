@@ -3,6 +3,7 @@ package node
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -14,6 +15,7 @@ import (
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
@@ -127,10 +129,69 @@ func (l *Lifecycle) poll(ctx context.Context) {
 			)
 			l.notifyStatusChange(ctx, active.ClusterID)
 		}
-		l.reconcileCacheConfig(ctx, *active, health.CacheConfig)
+		if err := l.reconcileCacheConfig(ctx, *active, health.CacheConfig); err != nil {
+			slog.Warn(
+				"reconcile node cache config",
+				"node_id", active.NodeID,
+				"address", active.Address,
+				"error", err,
+			)
+		}
 		start = end
 	}
 	l.markOffline(ctx)
+}
+
+// InitializeInstalledNode verifies a manually installed agent, synchronizes
+// its node-level configuration, and admits it into the normal health cycle.
+func InitializeInstalledNode(
+	ctx context.Context,
+	db *client.Client,
+	cipher *CredentialCipher,
+	clusterID, nodeID string,
+) (string, error) {
+	addresses, err := db.NodeAddress.Query().
+		Where(query.NodeAddress.NodeId.Equals(nodeID)).
+		OrderBy(query.NodeAddress.CreatedAt.Asc()).
+		Do(ctx)
+	if err != nil {
+		return "", fmt.Errorf("load node addresses: %w", err)
+	}
+	if len(addresses) == 0 {
+		return "", errors.New("node has no address to initialize")
+	}
+
+	lifecycle := NewLifecycle(db, cipher, 45*time.Second)
+	failures := make([]string, 0, len(addresses))
+	for _, address := range addresses {
+		target := healthTarget{
+			NodeID:    nodeID,
+			ClusterID: clusterID,
+			Address:   address.Address,
+			Status:    string(model.NodeStatusOFFLINE),
+		}
+		health, healthErr := lifecycle.checkHealth(ctx, target)
+		if healthErr != nil {
+			failures = append(failures, address.Address+": "+healthErr.Error())
+			continue
+		}
+		if syncErr := lifecycle.reconcileCacheConfig(ctx, target, health.CacheConfig); syncErr != nil {
+			return "", fmt.Errorf("synchronize node configuration through %s: %w", address.Address, syncErr)
+		}
+		if _, updateErr := db.Node.Update().
+			Where(query.Node.Id.Equals(nodeID)).
+			Set(
+				query.Node.Status.Set(model.NodeStatusONLINE),
+				query.Node.InstallError.SetNull(),
+				query.Node.HeartbeatAt.Set(time.Now()),
+			).
+			Do(ctx); updateErr != nil {
+			return "", fmt.Errorf("complete node initialization: %w", updateErr)
+		}
+		return address.Address, nil
+	}
+
+	return "", fmt.Errorf("agent health check failed: %s", strings.Join(failures, "; "))
 }
 
 func (l *Lifecycle) checkHealth(ctx context.Context, target healthTarget) (*healthResponse, error) {
@@ -185,10 +246,13 @@ func (l *Lifecycle) logHealthFailure(target healthTarget, reason string) {
 	)
 }
 
-func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarget, current edgeprotocol.NodeCacheConfig) {
+func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarget, current edgeprotocol.NodeCacheConfig) error {
 	stored, err := l.db.NodeCacheConfig.FindUnique(ctx, query.NodeCacheConfig.NodeId.Equals(target.NodeID))
 	if err != nil {
-		return
+		return err
+	}
+	if stored == nil {
+		return errors.New("node cache configuration is missing")
 	}
 
 	desired := edgeprotocol.NodeCacheConfig{
@@ -200,20 +264,23 @@ func (l *Lifecycle) reconcileCacheConfig(ctx context.Context, target healthTarge
 		desired.MaxSizeBytes = uint64(*stored.MaxSizeBytes)
 	}
 	if reflect.DeepEqual(current, desired) {
-		return
+		return nil
 	}
 
 	credential, err := l.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(target.NodeID))
 	if err != nil {
-		return
+		return err
+	}
+	if credential == nil {
+		return errors.New("node communication credential is missing")
 	}
 
 	key, err := l.cipher.Decrypt(credential.CommunicationKeyEncrypted)
 	if err != nil {
-		return
+		return err
 	}
 
-	_ = edgecontrol.New(
+	return edgecontrol.New(
 		"http://"+net.JoinHostPort(target.Address, "80"),
 		target.NodeID,
 		key,

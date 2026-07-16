@@ -27,10 +27,11 @@ export const nodesApi = (clusterId: string) => ({
         post<Node>(clusterPath(clusterId, `/nodes/${nodeId}/reinstall`), { ssh, force }),
     installation: (nodeId: string) =>
         get<NodeInstallationInfo>(clusterPath(clusterId, `/nodes/${nodeId}/installation`)),
-    setInstallationStatus: (nodeId: string, status: string) =>
-        put<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/installation/status`), {
-            status,
-        }),
+    initializeInstallation: (nodeId: string) =>
+        post<NodeStatusResponse>(
+            clusterPath(clusterId, `/nodes/${nodeId}/installation/initialize`),
+            {}
+        ),
     installationArtifactUrl: (nodeId: string, artifact: string) =>
         `/api/v1${clusterPath(clusterId, `/nodes/${nodeId}/installation/${artifact}`)}`,
     delete: (nodeId: string) => del<void>(clusterPath(clusterId, `/nodes/${nodeId}`)),
