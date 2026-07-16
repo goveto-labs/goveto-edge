@@ -1,109 +1,275 @@
-import type { Summary, TopItem, TrafficPoint } from '@/api';
+import type {
+    DistributionItem,
+    MonitoringOverview,
+    Node,
+    NodeRuntimePoint,
+    TrafficPoint,
+} from '@/api';
 
 import { Button, Input, Label } from '@heroui/react';
-import { ArrowDown, ArrowUp, MousePointerClick, Percent, RefreshCw } from 'lucide-react';
+import {
+    Activity,
+    ArrowDown,
+    ArrowUp,
+    CalendarDays,
+    HardDrive,
+    MousePointerClick,
+    RefreshCw,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ApiError, analyticsApi } from '@/api';
+import { ApiError, analyticsApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
+import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
+type Period = '24h' | '30d';
+
 function formatBytes(bytes: number) {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${Number((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-function toLocalInput(date: Date) {
-    const offset = date.getTimezoneOffset() * 60000;
-    return new Date(date.getTime() - offset).toISOString().slice(0, 16);
+function totalTraffic(item?: { ingress_bytes: number; egress_bytes: number }) {
+    return (item?.ingress_bytes ?? 0) + (item?.egress_bytes ?? 0);
+}
+
+function trafficOf(item: DistributionItem) {
+    return item.ingress_bytes + item.egress_bytes;
+}
+
+function RankingTable({
+    title,
+    valueLabel,
+    items,
+}: {
+    title: string;
+    valueLabel: string;
+    items: DistributionItem[];
+}) {
+    return (
+        <DataTable
+            empty={items.length === 0}
+            emptyDescription='Data will appear after access logs are collected.'
+            emptyTitle='No analytics data'
+            title={title}
+        >
+            <thead>
+                <tr>
+                    <th>{valueLabel}</th>
+                    <th>Requests</th>
+                    <th>Traffic</th>
+                </tr>
+            </thead>
+            <tbody>
+                {items.map((item) => (
+                    <tr key={item.value}>
+                        <td className='max-w-sm truncate font-mono text-xs' title={item.value}>
+                            {item.value || '(empty)'}
+                        </td>
+                        <td className='text-sm'>{item.requests.toLocaleString()}</td>
+                        <td className='text-sm text-muted'>{formatBytes(trafficOf(item))}</td>
+                    </tr>
+                ))}
+            </tbody>
+        </DataTable>
+    );
+}
+
+function Breakdown({ title, items }: { title: string; items: DistributionItem[] }) {
+    const max = Math.max(1, ...items.map((item) => item.requests));
+    return (
+        <ContentCard title={title}>
+            {items.length === 0 ? (
+                <div className='py-10 text-center text-sm text-muted'>No analytics data</div>
+            ) : (
+                <div className='space-y-3'>
+                    {items.slice(0, 10).map((item) => (
+                        <div className='space-y-1.5' key={item.value}>
+                            <div className='flex items-center justify-between gap-4 text-xs'>
+                                <span className='truncate font-mono' title={item.value}>
+                                    {item.value || '(empty)'}
+                                </span>
+                                <span className='shrink-0 text-muted'>
+                                    {item.requests.toLocaleString()} requests
+                                </span>
+                            </div>
+                            <div className='h-2 overflow-hidden rounded-full bg-surface-secondary'>
+                                <div
+                                    className='h-full rounded-full bg-primary'
+                                    style={{
+                                        width: `${Math.max(2, (item.requests / max) * 100)}%`,
+                                    }}
+                                />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </ContentCard>
+    );
 }
 
 export default function Analytics() {
     const { clusterId } = useCluster();
     const api = useMemo(() => analyticsApi(clusterId), [clusterId]);
-
+    const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
+    const [period, setPeriod] = useState<Period>('24h');
     const [siteId, setSiteId] = useState('');
-    const [from, setFrom] = useState(() =>
-        toLocalInput(new Date(Date.now() - 24 * 60 * 60 * 1000))
-    );
-    const [to, setTo] = useState(() => toLocalInput(new Date()));
-    const [summary, setSummary] = useState<Summary | null>(null);
+    const [overview, setOverview] = useState<MonitoringOverview | null>(null);
     const [traffic, setTraffic] = useState<TrafficPoint[]>([]);
-    const [topUrls, setTopUrls] = useState<TopItem[]>([]);
-    const [topIps, setTopIps] = useState<TopItem[]>([]);
+    const [nodes, setNodes] = useState<Node[]>([]);
+    const [selectedNode, setSelectedNode] = useState('');
+    const [runtime, setRuntime] = useState<NodeRuntimePoint[]>([]);
+    const [domains, setDomains] = useState<DistributionItem[]>([]);
+    const [extensions, setExtensions] = useState<DistributionItem[]>([]);
+    const [statuses, setStatuses] = useState<DistributionItem[]>([]);
+    const [methods, setMethods] = useState<DistributionItem[]>([]);
+    const [paths, setPaths] = useState<DistributionItem[]>([]);
+    const [ipsByRequests, setIpsByRequests] = useState<DistributionItem[]>([]);
+    const [ipsByTraffic, setIpsByTraffic] = useState<DistributionItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
-
-    const params = useMemo(
-        () => ({
-            site_id: siteId,
-            from,
-            to,
-        }),
-        [siteId, from, to]
-    );
 
     const load = useCallback(async () => {
         if (!clusterId) return;
         setLoading(true);
+        const params = { site_id: siteId, period, limit: 10 } as const;
         try {
-            const [s, t, urls, ips] = await Promise.all([
-                api.summary(params),
-                api.traffic({ ...params, period: '24h' }),
-                api.topUrls({ ...params, limit: 10 }),
-                api.topIps({ ...params, limit: 10 }),
+            const [
+                overviewData,
+                trafficData,
+                nodeData,
+                domainData,
+                extensionData,
+                statusData,
+                methodData,
+                pathData,
+                ipRequestData,
+                ipTrafficData,
+            ] = await Promise.all([
+                api.overview({ site_id: siteId }),
+                api.traffic({ site_id: siteId, period }),
+                nodeApi.list(),
+                api.rankings('domain', { ...params, sort: 'requests' }),
+                api.distributions('extension', { ...params, sort: 'requests' }),
+                api.distributions('status', { ...params, sort: 'requests' }),
+                api.distributions('method', { ...params, sort: 'requests' }),
+                api.rankings('path', { ...params, sort: 'requests' }),
+                api.rankings('ip', { ...params, sort: 'requests' }),
+                api.rankings('ip', { ...params, sort: 'traffic' }),
             ]);
-            setSummary(s);
-            setTraffic(t.series);
-            setTopUrls(urls);
-            setTopIps(ips);
+            setOverview(overviewData);
+            setTraffic(trafficData.series);
+            setNodes(nodeData);
+            setSelectedNode((current) =>
+                nodeData.some((node) => node.id === current) ? current : nodeData[0]?.id || ''
+            );
+            setDomains(domainData);
+            setExtensions(extensionData);
+            setStatuses(statusData);
+            setMethods(methodData);
+            setPaths(pathData);
+            setIpsByRequests(ipRequestData);
+            setIpsByTraffic(ipTrafficData);
             setError('');
-        } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Failed to load analytics');
+        } catch (loadError) {
+            setError(
+                loadError instanceof ApiError ? loadError.message : 'Failed to load monitoring data'
+            );
         } finally {
             setLoading(false);
         }
-    }, [api, clusterId, params]);
+    }, [api, clusterId, nodeApi, period, siteId]);
 
     useEffect(() => {
-        load();
+        void load();
+        const refresh = window.setInterval(() => void load(), 60_000);
+        return () => window.clearInterval(refresh);
     }, [load]);
 
-    const chartWidth = 800;
-    const chartHeight = 200;
-    const padding = 24;
-    const maxRequests = useMemo(() => Math.max(1, ...traffic.map((p) => p.requests)), [traffic]);
+    useEffect(() => {
+        if (!clusterId || !selectedNode) {
+            setRuntime([]);
+            return;
+        }
+        const loadRuntime = () =>
+            api
+                .nodeRuntime({ node_id: selectedNode, period: '12h' })
+                .then((result) => setRuntime(result.series))
+                .catch((runtimeError) =>
+                    setError(
+                        runtimeError instanceof ApiError
+                            ? runtimeError.message
+                            : 'Failed to load node trends'
+                    )
+                );
+        void loadRuntime();
+        const refresh = window.setInterval(() => void loadRuntime(), 60_000);
+        return () => window.clearInterval(refresh);
+    }, [api, clusterId, selectedNode]);
 
-    const points = useMemo(() => {
-        if (traffic.length === 0) return [];
-        const innerWidth = chartWidth - padding * 2;
-        const innerHeight = chartHeight - padding * 2;
-        return traffic.map((point, index) => {
-            const x = padding + (index / (traffic.length - 1)) * innerWidth;
-            const y = chartHeight - padding - (point.requests / maxRequests) * innerHeight;
-            return { x, y, value: point.requests };
-        });
-    }, [traffic, maxRequests]);
-
-    const pathD = useMemo(() => {
-        if (points.length === 0) return '';
-        return points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-    }, [points]);
+    const trafficData = useMemo(
+        () =>
+            traffic.map((point) => ({
+                bucket: point.bucket,
+                values: { ingress: point.ingress_bytes, egress: point.egress_bytes },
+            })),
+        [traffic]
+    );
+    const requestData = useMemo(
+        () =>
+            traffic.map((point) => ({
+                bucket: point.bucket,
+                values: { requests: point.requests },
+            })),
+        [traffic]
+    );
+    const cpuMemoryData = useMemo(
+        () =>
+            runtime.map((point) => ({
+                bucket: point.bucket,
+                values: {
+                    cpu: point.cpu_usage_percent,
+                    memory:
+                        point.memory_total_bytes > 0
+                            ? (point.memory_used_bytes / point.memory_total_bytes) * 100
+                            : 0,
+                },
+            })),
+        [runtime]
+    );
+    const loadData = useMemo(
+        () =>
+            runtime.map((point) => ({
+                bucket: point.bucket,
+                values: { load1: point.load_1, load5: point.load_5, load15: point.load_15 },
+            })),
+        [runtime]
+    );
+    const cacheData = useMemo(
+        () =>
+            runtime.map((point) => ({
+                bucket: point.bucket,
+                values: { used: point.cache_used_bytes, limit: point.cache_max_bytes },
+            })),
+        [runtime]
+    );
 
     if (!clusterId) {
         return (
             <div className='space-y-6'>
-                <PageHeader subtitle='Traffic and cache performance metrics.' title='Analytics' />
+                <PageHeader
+                    subtitle='Traffic, node runtime and cache monitoring.'
+                    title='Analytics'
+                />
                 <ContentCard className='p-8 text-center'>
-                    <div className='text-sm text-muted'>
-                        Select a cluster in the header to view analytics.
-                    </div>
+                    <div className='text-sm text-muted'>Select a cluster to view monitoring.</div>
                 </ContentCard>
             </div>
         );
@@ -111,7 +277,12 @@ export default function Analytics() {
 
     return (
         <div className='space-y-6'>
-            <PageHeader subtitle='Traffic and cache performance metrics.' title='Analytics' />
+            <PageHeader subtitle='Traffic, node runtime and cache monitoring.' title='Analytics'>
+                <Button isDisabled={loading} onPress={() => void load()}>
+                    <RefreshCw className='mr-2 h-4 w-4' />
+                    {loading ? 'Refreshing…' : 'Refresh'}
+                </Button>
+            </PageHeader>
 
             {error && (
                 <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
@@ -119,165 +290,186 @@ export default function Analytics() {
                 </div>
             )}
 
-            <ContentCard title='Filters'>
+            <ContentCard title='Monitoring filters'>
                 <div className='flex flex-wrap items-end gap-4'>
                     <div className='flex flex-col gap-1'>
                         <Label htmlFor='analytics-site-id'>Site ID (optional)</Label>
                         <Input
+                            className='w-72'
                             id='analytics-site-id'
-                            className='w-64'
-                            variant='secondary'
                             value={siteId}
-                            onChange={(e) => setSiteId(e.target.value)}
-                        />
-                    </div>
-                    <div className='flex flex-col gap-1'>
-                        <Label htmlFor='analytics-from'>From</Label>
-                        <Input
-                            id='analytics-from'
-                            type='datetime-local'
                             variant='secondary'
-                            value={from}
-                            onChange={(e) => setFrom(e.target.value)}
+                            onChange={(event) => setSiteId(event.target.value)}
                         />
                     </div>
-                    <div className='flex flex-col gap-1'>
-                        <Label htmlFor='analytics-to'>To</Label>
-                        <Input
-                            id='analytics-to'
-                            type='datetime-local'
-                            variant='secondary'
-                            value={to}
-                            onChange={(e) => setTo(e.target.value)}
-                        />
+                    <div className='flex gap-2'>
+                        {(['24h', '30d'] as Period[]).map((value) => (
+                            <Button
+                                key={value}
+                                variant={period === value ? 'primary' : 'secondary'}
+                                onPress={() => setPeriod(value)}
+                            >
+                                {value}
+                            </Button>
+                        ))}
                     </div>
-                    <Button isDisabled={loading} onPress={load}>
-                        <RefreshCw className='mr-2 h-4 w-4' />
-                        {loading ? 'Loading...' : 'Refresh'}
-                    </Button>
                 </div>
             </ContentCard>
 
-            {summary && (
-                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+            {overview && (
+                <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
                     <StatCard
                         color='primary'
-                        icon={MousePointerClick}
-                        label='Requests'
-                        value={summary.requests.toLocaleString()}
+                        footer={`${overview.today.requests.toLocaleString()} requests`}
+                        icon={Activity}
+                        label='Today traffic'
+                        value={formatBytes(totalTraffic(overview.today))}
                     />
                     <StatCard
-                        color='default'
-                        icon={ArrowDown}
-                        label='Ingress bytes'
-                        value={formatBytes(summary.ingress_bytes)}
-                    />
-                    <StatCard
-                        color='default'
-                        icon={ArrowUp}
-                        label='Egress bytes'
-                        value={formatBytes(summary.egress_bytes)}
+                        footer={`${overview.yesterday.requests.toLocaleString()} requests`}
+                        icon={CalendarDays}
+                        label='Yesterday traffic'
+                        value={formatBytes(totalTraffic(overview.yesterday))}
                     />
                     <StatCard
                         color='success'
-                        icon={Percent}
-                        label='Hit rate'
-                        value={`${(summary.hit_rate * 100).toFixed(2)}%`}
+                        footer={`${overview.month.requests.toLocaleString()} requests`}
+                        icon={CalendarDays}
+                        label='Current month traffic'
+                        value={formatBytes(totalTraffic(overview.month))}
+                    />
+                    <StatCard
+                        color='warning'
+                        footer={`${formatBytes(overview.today.ingress_bytes)} ingress · ${formatBytes(overview.today.egress_bytes)} egress`}
+                        icon={MousePointerClick}
+                        label='Today requests'
+                        value={overview.today.requests.toLocaleString()}
                     />
                 </div>
             )}
 
-            <ContentCard title='Traffic (requests)'>
-                {traffic.length === 0 ? (
-                    <div className='text-sm text-muted'>No traffic data.</div>
-                ) : (
-                    <svg
-                        aria-label='Traffic requests chart'
-                        className='w-full'
-                        height={chartHeight}
-                        preserveAspectRatio='none'
-                        role='img'
-                        viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+                <ContentCard title={`${period} traffic trend`}>
+                    <TimeSeriesChart
+                        ariaLabel={`${period} ingress and egress traffic trend`}
+                        data={trafficData}
+                        series={[
+                            { key: 'ingress', label: 'Ingress', color: '#3b82f6' },
+                            { key: 'egress', label: 'Egress', color: '#10b981' },
+                        ]}
+                        valueFormatter={formatBytes}
+                    />
+                </ContentCard>
+                <ContentCard title={`${period} request trend`}>
+                    <TimeSeriesChart
+                        ariaLabel={`${period} request trend`}
+                        data={requestData}
+                        series={[{ key: 'requests', label: 'Requests', color: '#8b5cf6' }]}
+                    />
+                </ContentCard>
+            </div>
+
+            <ContentCard
+                action={
+                    <select
+                        aria-label='Node trend selection'
+                        className='rounded-lg border border-border bg-surface px-3 py-2 text-sm'
+                        value={selectedNode}
+                        onChange={(event) => setSelectedNode(event.target.value)}
                     >
-                        <title>Traffic requests</title>
-                        <line
-                            stroke='currentColor'
-                            strokeOpacity={0.2}
-                            x1={padding}
-                            x2={chartWidth - padding}
-                            y1={chartHeight - padding}
-                            y2={chartHeight - padding}
-                        />
-                        <path d={pathD} fill='none' stroke='currentColor' strokeWidth={2} />
-                        {points.map((p) => (
-                            <circle
-                                key={`${p.x}-${p.value}`}
-                                cx={p.x}
-                                cy={p.y}
-                                fill='currentColor'
-                                r={3}
-                            />
+                        {nodes.map((node) => (
+                            <option key={node.id} value={node.id}>
+                                {node.name}
+                            </option>
                         ))}
-                    </svg>
-                )}
+                    </select>
+                }
+                title='Node runtime trends (12h)'
+            >
+                <div className='grid grid-cols-1 gap-6 xl:grid-cols-2'>
+                    <div>
+                        <h3 className='mb-3 text-sm font-medium'>CPU and memory</h3>
+                        <TimeSeriesChart
+                            ariaLabel='Node CPU and memory trend over 12 hours'
+                            data={cpuMemoryData}
+                            series={[
+                                { key: 'cpu', label: 'CPU', color: '#f59e0b' },
+                                { key: 'memory', label: 'Memory', color: '#3b82f6' },
+                            ]}
+                            valueFormatter={(value) => `${value.toFixed(1)}%`}
+                        />
+                    </div>
+                    <div>
+                        <h3 className='mb-3 text-sm font-medium'>Load average</h3>
+                        <TimeSeriesChart
+                            ariaLabel='Node load average trend over 12 hours'
+                            data={loadData}
+                            series={[
+                                { key: 'load1', label: '1m', color: '#ef4444' },
+                                { key: 'load5', label: '5m', color: '#f59e0b' },
+                                { key: 'load15', label: '15m', color: '#10b981' },
+                            ]}
+                        />
+                    </div>
+                    <div className='xl:col-span-2'>
+                        <div className='mb-3 flex items-center gap-2 text-sm font-medium'>
+                            <HardDrive className='h-4 w-4' /> Cache directory usage
+                        </div>
+                        <TimeSeriesChart
+                            ariaLabel='Cache directory usage trend over 12 hours'
+                            data={cacheData}
+                            series={[
+                                { key: 'used', label: 'Used', color: '#8b5cf6' },
+                                { key: 'limit', label: 'Configured limit', color: '#64748b' },
+                            ]}
+                            valueFormatter={formatBytes}
+                        />
+                    </div>
+                </div>
             </ContentCard>
 
-            <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                <DataTable
-                    empty={topUrls.length === 0}
-                    emptyDescription='URL traffic rankings will appear after requests are collected.'
-                    emptyTitle='No URL traffic yet'
-                    title='Top URLs'
-                >
-                    <thead>
-                        <tr className='border-b border-border'>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>URL</th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                Requests
-                            </th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>Bytes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {topUrls.map((item: TopItem) => (
-                            <tr className='border-b border-border last:border-0' key={item.value}>
-                                <td className='max-w-xs truncate py-3 text-sm'>{item.value}</td>
-                                <td className='py-3 text-sm'>{item.requests.toLocaleString()}</td>
-                                <td className='py-3 text-sm text-muted'>
-                                    {formatBytes(item.traffic_bytes)}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </DataTable>
+            <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+                <RankingTable items={domains} title='Domain request volume' valueLabel='Domain' />
+                <Breakdown items={extensions} title='File extension composition' />
+                <RankingTable
+                    items={statuses}
+                    title='Status code distribution'
+                    valueLabel='Status'
+                />
+                <RankingTable
+                    items={methods}
+                    title='Request method distribution'
+                    valueLabel='Method'
+                />
+            </div>
 
-                <DataTable
-                    empty={topIps.length === 0}
-                    emptyDescription='Client IP rankings will appear after requests are collected.'
-                    emptyTitle='No IP traffic yet'
-                    title='Top IPs'
-                >
-                    <thead>
-                        <tr className='border-b border-border'>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>IP</th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>
-                                Requests
-                            </th>
-                            <th className='py-3 text-left text-xs font-medium text-muted'>Bytes</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {topIps.map((item: TopItem) => (
-                            <tr className='border-b border-border last:border-0' key={item.value}>
-                                <td className='py-3 text-sm'>{item.value}</td>
-                                <td className='py-3 text-sm'>{item.requests.toLocaleString()}</td>
-                                <td className='py-3 text-sm text-muted'>
-                                    {formatBytes(item.traffic_bytes)}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </DataTable>
+            <RankingTable items={paths} title='Request path ranking' valueLabel='Path' />
+            <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+                <RankingTable
+                    items={ipsByRequests}
+                    title='Unique IPs by requests'
+                    valueLabel='Client IP'
+                />
+                <RankingTable
+                    items={ipsByTraffic}
+                    title='Unique IPs by traffic'
+                    valueLabel='Client IP'
+                />
+            </div>
+
+            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
+                <ContentCard title='Traffic direction definition'>
+                    <div className='space-y-3 text-sm text-muted'>
+                        <div className='flex items-center gap-2'>
+                            <ArrowDown className='h-4 w-4 text-primary' />
+                            Ingress is request headers and bodies received by edge nodes.
+                        </div>
+                        <div className='flex items-center gap-2'>
+                            <ArrowUp className='h-4 w-4 text-success' />
+                            Egress is response headers and bodies sent by edge nodes.
+                        </div>
+                    </div>
+                </ContentCard>
             </div>
         </div>
     );

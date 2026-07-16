@@ -20,13 +20,67 @@ type TopItem struct {
 	TrafficBytes uint64 `json:"traffic_bytes"`
 }
 
+type UsageTotal struct {
+	Requests     uint64 `json:"requests"`
+	IngressBytes uint64 `json:"ingress_bytes"`
+	EgressBytes  uint64 `json:"egress_bytes"`
+}
+
+type MonitoringOverview struct {
+	Today     UsageTotal `json:"today"`
+	Yesterday UsageTotal `json:"yesterday"`
+	Month     UsageTotal `json:"month"`
+}
+
+func (s *Store) MonitoringOverview(ctx context.Context, cluster, site string) (MonitoringOverview, error) {
+	now := time.Now().UTC()
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	yesterday := today.AddDate(0, 0, -1)
+	month := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+
+	todayTotal, err := s.usageTotal(ctx, "goveto.request_usage_hourly", "bucket", cluster, site, today, now)
+	if err != nil {
+		return MonitoringOverview{}, err
+	}
+	yesterdayTotal, err := s.usageTotal(ctx, "goveto.request_usage_hourly", "bucket", cluster, site, yesterday, today)
+	if err != nil {
+		return MonitoringOverview{}, err
+	}
+	monthCompleted, err := s.usageTotal(ctx, "goveto.request_usage_daily", "bucket", cluster, site, month, today)
+	if err != nil {
+		return MonitoringOverview{}, err
+	}
+
+	monthCompleted.Requests += todayTotal.Requests
+	monthCompleted.IngressBytes += todayTotal.IngressBytes
+	monthCompleted.EgressBytes += todayTotal.EgressBytes
+	return MonitoringOverview{Today: todayTotal, Yesterday: yesterdayTotal, Month: monthCompleted}, nil
+}
+
+func (s *Store) usageTotal(
+	ctx context.Context,
+	table, timeColumn, cluster, site string,
+	from, to time.Time,
+) (UsageTotal, error) {
+	q := `SELECT sum(requests), sum(ingress_bytes), sum(egress_bytes)
+		FROM ` + table + ` WHERE cluster_id = ? AND ` + timeColumn + ` >= ? AND ` + timeColumn + ` < ?`
+	args := []any{cluster, from, to}
+	if site != "" {
+		q += " AND site_id = ?"
+		args = append(args, site)
+	}
+	var total UsageTotal
+	err := s.db.QueryRow(ctx, q, args...).Scan(&total.Requests, &total.IngressBytes, &total.EgressBytes)
+	return total, err
+}
+
 func (s *Store) Summary(ctx context.Context, cluster, site string, from, to time.Time) (Summary, error) {
 	q := `SELECT
 		count(),
 		sum(request_header_bytes + request_body_bytes),
 		sum(response_header_bytes + response_body_bytes),
-		countIf(cache_status = 'HIT'),
-		countIf(cache_status IN ('MISS', 'BYPASS'))
+		countIf(upper(cache_status) = 'HIT'),
+		countIf(upper(cache_status) IN ('MISS', 'BYPASS'))
 	FROM goveto.web_request_logs
 	WHERE cluster_id = ? AND event_time >= ? AND event_time < ?`
 	args := []any{cluster, from, to}

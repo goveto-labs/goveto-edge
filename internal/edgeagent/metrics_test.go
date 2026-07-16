@@ -41,8 +41,12 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer queue.Close()
+	cacheDirectory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cacheDirectory, "cached-response"), []byte("12345"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	appendMetrics(queue, NodeConfig{
-		CacheDirectory:      t.TempDir(),
+		CacheDirectory:      cacheDirectory,
 		AutoMaxSize:         true,
 		MaxDiskUsagePercent: 80,
 	})
@@ -61,6 +65,9 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("missing metrics key %q in %#v", key, payload)
 		}
+	}
+	if payload["cache_used_bytes"] != float64(5) {
+		t.Fatalf("cache directory size = %#v, want 5", payload["cache_used_bytes"])
 	}
 }
 
@@ -94,7 +101,7 @@ func TestAppendMetricsReportsMissingDisk(t *testing.T) {
 	if err := json.Unmarshal(batch[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload["disk_error"] == nil {
-		t.Fatalf("expected disk_error in %#v", payload)
+	if payload["disk_error"] == nil || payload["cache_error"] == nil {
+		t.Fatalf("expected disk and cache errors in %#v", payload)
 	}
 }

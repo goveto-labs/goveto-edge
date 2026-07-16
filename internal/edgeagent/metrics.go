@@ -129,6 +129,7 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	loads, _ := load.Avg()
 	connections, connectionErr := gnet.ConnectionsWithoutUids("tcp")
 	usage, diskErr := disk.Usage(config.CacheDirectory)
+	cacheUsed, cacheErr := cacheDirectorySize(config.CacheDirectory)
 	maxCache := config.MaxSizeBytes
 	if config.AutoMaxSize && usage != nil && diskErr == nil {
 		maxCache = usage.Total * uint64(config.MaxDiskUsagePercent) / 100
@@ -143,7 +144,7 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 		"load_15":            loadAt(loads, 15),
 		"connections":        establishedConnections(connections),
 		"cache_directory":    config.CacheDirectory,
-		"cache_used_bytes":   diskUsed(usage),
+		"cache_used_bytes":   cacheUsed,
 		"cache_max_bytes":    maxCache,
 		"disk_used_bytes":    diskUsed(usage),
 		"disk_total_bytes":   diskTotal(usage),
@@ -153,15 +154,32 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	}
 	if diskErr != nil {
 		payloadMap["disk_error"] = diskErr.Error()
-		payloadMap["cache_used_bytes"] = nil
 		payloadMap["disk_used_bytes"] = nil
 		payloadMap["disk_total_bytes"] = nil
+	}
+	if cacheErr != nil {
+		payloadMap["cache_error"] = cacheErr.Error()
+		payloadMap["cache_used_bytes"] = nil
 	}
 	if connectionErr != nil {
 		payloadMap["connection_error"] = connectionErr.Error()
 	}
 	payload, _ := json.Marshal(payloadMap)
 	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
+}
+
+func cacheDirectorySize(path string) (uint64, error) {
+	var total uint64
+	err := filepath.Walk(path, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info != nil && info.Mode().IsRegular() {
+			total += uint64(info.Size())
+		}
+		return nil
+	})
+	return total, err
 }
 
 func establishedConnections(connections []gnet.ConnectionStat) uint64 {

@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
 	"strings"
 	"sync"
@@ -51,6 +52,7 @@ func (i *Ingest) Run(ctx context.Context) {
 func (i *Ingest) reconcile(ctx context.Context) {
 	nodes, err := i.db.Node.Query().Where(query.Node.Status.Equals(model.NodeStatusONLINE)).Do(ctx)
 	if err != nil {
+		slog.Error("query analytics nodes", "error", err)
 		return
 	}
 
@@ -94,20 +96,33 @@ func (i *Ingest) pull(ctx context.Context, nodeID, clusterID string) {
 	}
 
 	client := edgecontrol.New("http://"+net.JoinHostPort(a.Address, "80"), nodeID, key)
-	_ = client.PullLogs(ctx, func(ctx context.Context, records []edgeprotocol.LogRecord) error {
+	err = client.PullLogs(ctx, func(ctx context.Context, records []edgeprotocol.LogRecord) error {
 		return i.consume(ctx, clusterID, nodeID, records)
 	})
+	if err != nil && ctx.Err() == nil {
+		slog.Error("pull node analytics", "cluster_id", clusterID, "node_id", nodeID, "error", err)
+	}
 }
 
 func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord) error {
-	domains, err := i.db.SiteDomain.Query().Do(ctx)
+	clusterSites, err := i.db.Site.Query().Where(query.Site.ClusterId.Equals(clusterID)).Do(ctx)
 	if err != nil {
 		return err
 	}
 
 	sites := map[string]string{}
-	for _, d := range domains {
-		sites[strings.ToLower(d.Hostname)] = d.SiteId
+	if len(clusterSites) > 0 {
+		siteIDs := make([]string, 0, len(clusterSites))
+		for _, site := range clusterSites {
+			siteIDs = append(siteIDs, site.Id)
+		}
+		domains, err := i.db.SiteDomain.Query().Where(query.SiteDomain.SiteId.In(siteIDs...)).Do(ctx)
+		if err != nil {
+			return err
+		}
+		for _, d := range domains {
+			sites[strings.ToLower(d.Hostname)] = d.SiteId
+		}
 	}
 
 	events := make([]WebRequestLog, 0, len(records))

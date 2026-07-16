@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -22,6 +23,7 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	require := []echo.MiddlewareFunc{auth.RequireAuth, clusteraccess.Require(db)}
 
 	e.GET("/api/v1/clusters/:cluster_id/analytics/summary", summary(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/overview", monitoringOverview(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/top-urls", top(store, "url"), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/top-ips", top(store, "ip"), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/traffic", traffic(store), require...)
@@ -31,12 +33,33 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime/latest", latestNodeRuntime(store), require...)
 }
 
+// @summary Monitoring traffic overview
+// @description Today, yesterday and current-month traffic totals.
+// @Tags analytics
+func monitoringOverview(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		result, err := s.MonitoringOverview(
+			c.Request().Context(),
+			c.Param("cluster_id"),
+			c.QueryParam("site_id"),
+		)
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, result)
+	}
+}
+
 // @summary Latest node runtime metrics
 // @description Latest recorded runtime metric for each node.
 // @Tags analytics
 func latestNodeRuntime(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		items, err := s.LatestNodeRuntime(c.Request().Context(), c.Param("cluster_id"))
+		items, err := s.LatestNodeRuntime(
+			c.Request().Context(),
+			c.Param("cluster_id"),
+			c.QueryParam("node_id"),
+		)
 		if err != nil {
 			return err
 		}
@@ -68,6 +91,17 @@ func chartPeriod(c *echo.Context) (string, error) {
 	return value, nil
 }
 
+func nodeRuntimePeriod(c *echo.Context) (string, error) {
+	value := c.QueryParam("period")
+	if value == "" {
+		value = "12h"
+	}
+	if value != "12h" && value != "24h" && value != "30d" {
+		return "", echo.NewHTTPError(http.StatusBadRequest, "period must be 12h, 24h or 30d")
+	}
+	return value, nil
+}
+
 // @summary Traffic series
 // @description Time-series traffic metrics for a cluster or site (period: 24h or 30d).
 // @Tags analytics
@@ -82,6 +116,7 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 			c.Request().Context(),
 			c.Param("cluster_id"),
 			c.QueryParam("site_id"),
+			c.QueryParam("node_id"),
 			p,
 		)
 		if err != nil {
@@ -130,7 +165,10 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 			limit,
 		)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			if errors.Is(err, analytics.ErrInvalidDimension) {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid dimension")
+			}
+			return err
 		}
 
 		return types.JSON(c, http.StatusOK, items)
@@ -142,7 +180,7 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 // @Tags analytics
 func nodeRuntime(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		p, err := chartPeriod(c)
+		p, err := nodeRuntimePeriod(c)
 		if err != nil {
 			return err
 		}

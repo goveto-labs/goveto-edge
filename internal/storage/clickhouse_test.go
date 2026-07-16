@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	clickhouseschema "goveto-edge/configs/clickhouse"
 )
@@ -67,6 +68,19 @@ func TestEmbeddedClickHouseSchemaIsExecutableStatementList(t *testing.T) {
 	joined := strings.Join(executor.statements, "\n")
 	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute") {
 		t.Fatal("embedded schema does not create node runtime metrics table")
+	}
+}
+
+func TestApplyClickHouseDailyRollupReplacesDate(t *testing.T) {
+	schemaFS := fstest.MapFS{"rollup_daily.sql": {Data: []byte("SELECT toDate('{date}'); SELECT '{date}';")}}
+	executor := &recordingClickHouseExecutor{}
+	day := time.Date(2026, 7, 15, 23, 0, 0, 0, time.FixedZone("test", 8*60*60))
+	count, err := ApplyClickHouseDailyRollup(context.Background(), executor, schemaFS, day)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 || strings.Contains(strings.Join(executor.statements, ""), "{date}") {
+		t.Fatalf("daily rollup date was not applied: %#v", executor.statements)
 	}
 }
 

@@ -388,6 +388,19 @@ export interface NodeRuntimePoint {
     load_5: number;
     load_15: number;
     connections: number;
+    cache_used_bytes: number;
+    cache_max_bytes: number;
+    cache_directory: string;
+    disk_used_bytes: number;
+    disk_total_bytes: number;
+}
+
+export interface NodeSnapshot extends NodeRuntimePoint {
+    online: boolean;
+    ingress_bytes_per_second: number;
+    egress_bytes_per_second: number;
+    requests_per_minute: number;
+    disk_write_bytes_per_second: number;
 }
 
 export interface NodeRuntimeResponse {
@@ -397,6 +410,19 @@ export interface NodeRuntimeResponse {
 
 export interface AnalyticsParams {
     site_id?: string;
+    node_id?: string;
     from?: string;
     to?: string;
+}
+
+export interface UsageTotal {
+    requests: number;
+    ingress_bytes: number;
+    egress_bytes: number;
+}
+
+export interface MonitoringOverview {
+    today: UsageTotal;
+    yesterday: UsageTotal;
+    month: UsageTotal;
 }

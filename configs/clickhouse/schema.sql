@@ -278,3 +278,19 @@ ENGINE = SummingMergeTree
 PARTITION BY toYYYYMM(minute)
 ORDER BY (node_id, minute)
 TTL minute + INTERVAL 90 DAY DELETE;
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS goveto.mv_node_traffic_metrics_minute
+TO goveto.node_traffic_metrics_minute
+AS
+SELECT
+    toStartOfMinute(logs.event_time) AS minute,
+    logs.cluster_id AS cluster_id,
+    logs.node_id AS node_id,
+    count() AS requests,
+    sum(logs.ingress_bytes) AS ingress_bytes,
+    sum(logs.egress_bytes) AS egress_bytes,
+    countIf(upper(logs.cache_status) = 'HIT') AS cache_hit_requests,
+    countIf(upper(logs.cache_status) IN ('MISS', 'BYPASS')) AS cache_miss_requests,
+    countIf(logs.upstream_address != '') AS origin_requests
+FROM goveto.web_request_logs AS logs
+GROUP BY toStartOfMinute(logs.event_time), logs.cluster_id, logs.node_id;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"strings"
+	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
@@ -28,6 +29,31 @@ func InitClickHouseSchema(ctx context.Context, conn clickhouseSchemaExecutor, sc
 	for i, statement := range statements {
 		if err := conn.Exec(ctx, statement); err != nil {
 			return i, fmt.Errorf("apply ClickHouse schema statement %d: %w", i+1, err)
+		}
+	}
+	return len(statements), nil
+}
+
+// ApplyClickHouseDailyRollup materializes one completed UTC day into the
+// retained daily analytics tables. The script is retry-safe.
+func ApplyClickHouseDailyRollup(
+	ctx context.Context,
+	conn clickhouseSchemaExecutor,
+	schemaFS fs.FS,
+	day time.Time,
+) (int, error) {
+	raw, err := fs.ReadFile(schemaFS, "rollup_daily.sql")
+	if err != nil {
+		return 0, fmt.Errorf("read ClickHouse daily rollup: %w", err)
+	}
+	date := day.UTC().Format(time.DateOnly)
+	statements, err := splitClickHouseStatements(strings.ReplaceAll(string(raw), "{date}", date))
+	if err != nil {
+		return 0, fmt.Errorf("parse ClickHouse daily rollup: %w", err)
+	}
+	for i, statement := range statements {
+		if err := conn.Exec(ctx, statement); err != nil {
+			return i, fmt.Errorf("apply ClickHouse daily rollup %s statement %d: %w", date, i+1, err)
 		}
 	}
 	return len(statements), nil

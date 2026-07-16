@@ -1,4 +1,4 @@
-import type { DNSLine, Node, NodeRuntimePoint } from '@/api';
+import type { DNSLine, Node, NodeSnapshot } from '@/api';
 
 import { Button } from '@heroui/react';
 import { Eye, Plus, Trash2 } from 'lucide-react';
@@ -23,10 +23,14 @@ function formatBytes(bytes: number) {
     return `${(bytes / 1024 ** unit).toFixed(1)} ${units[unit]}`;
 }
 
-function formatMemory(metric?: NodeRuntimePoint) {
+function formatMemory(metric?: NodeSnapshot) {
     if (!metric || metric.memory_total_bytes <= 0) return '—';
     const percent = (metric.memory_used_bytes / metric.memory_total_bytes) * 100;
     return `${formatBytes(metric.memory_used_bytes)} / ${formatBytes(metric.memory_total_bytes)} (${formatPercent(percent)})`;
+}
+
+function formatRate(bytesPerSecond: number) {
+    return `${formatBytes(bytesPerSecond)}/s`;
 }
 
 export default function Nodes() {
@@ -37,7 +41,7 @@ export default function Nodes() {
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const [nodes, setNodes] = useState<Node[]>([]);
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
-    const [runtimeByNode, setRuntimeByNode] = useState<Record<string, NodeRuntimePoint>>({});
+    const [runtimeByNode, setRuntimeByNode] = useState<Record<string, NodeSnapshot>>({});
     const [error, setError] = useState('');
 
     const load = useCallback(async () => {
@@ -123,13 +127,14 @@ export default function Nodes() {
                 <thead>
                     <tr>
                         <th>Name</th>
+                        <th>Monitoring</th>
                         <th>Status</th>
                         <th>DNS lines</th>
                         <th>Addresses</th>
                         <th>CPU</th>
                         <th>Memory</th>
-                        <th>Load (1/5/15m)</th>
-                        <th>TCP connections</th>
+                        <th>Bandwidth</th>
+                        <th>Requests/min</th>
                         <th className='text-right'>Actions</th>
                     </tr>
                 </thead>
@@ -154,6 +159,21 @@ export default function Nodes() {
                                     >
                                         {node.name}
                                     </button>
+                                </td>
+                                <td>
+                                    <span
+                                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                            runtime?.online
+                                                ? 'bg-success/10 text-success'
+                                                : 'bg-danger/10 text-danger'
+                                        }`}
+                                        title={runtimeTitle}
+                                    >
+                                        <span
+                                            className={`h-1.5 w-1.5 rounded-full ${runtime?.online ? 'bg-success' : 'bg-danger'}`}
+                                        />
+                                        {runtime?.online ? 'Online' : 'Offline'}
+                                    </span>
                                 </td>
                                 <td>
                                     <div className='space-y-1.5'>
@@ -186,16 +206,16 @@ export default function Nodes() {
                                 <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
                                     {formatMemory(runtime)}
                                 </td>
-                                <td
-                                    className='whitespace-nowrap font-mono text-xs'
-                                    title={runtimeTitle}
-                                >
+                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
                                     {runtime
-                                        ? `${runtime.load_1.toFixed(2)} / ${runtime.load_5.toFixed(2)} / ${runtime.load_15.toFixed(2)}`
+                                        ? formatRate(
+                                              runtime.ingress_bytes_per_second +
+                                                  runtime.egress_bytes_per_second
+                                          )
                                         : '—'}
                                 </td>
                                 <td className='text-sm' title={runtimeTitle}>
-                                    {runtime?.connections ?? '—'}
+                                    {runtime?.requests_per_minute.toLocaleString() ?? '—'}
                                 </td>
                                 <td>
                                     <div className='flex justify-end gap-2'>

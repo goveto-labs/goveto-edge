@@ -302,6 +302,7 @@ paths:
                   in: query
                   schema:
                     type: string
+                    enum: [24h, 30d]
                 - name: site_id
                   in: query
                   schema:
@@ -352,6 +353,7 @@ paths:
                   in: query
                   schema:
                     type: string
+                    enum: [12h, 24h, 30d]
             responses:
                 "200":
                     description: OK
@@ -391,6 +393,10 @@ paths:
                   required: true
                   schema:
                     type: string
+                - name: node_id
+                  in: query
+                  schema:
+                    type: string
             responses:
                 "200":
                     description: OK
@@ -406,7 +412,39 @@ paths:
                                     data:
                                         type: array
                                         items:
-                                            $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                                            $ref: '#/components/schemas/analytics_NodeSnapshot'
+    /api/v1/clusters/{cluster_id}/analytics/overview:
+        get:
+            operationId: monitoringOverview
+            summary: Monitoring traffic overview
+            description: Today, yesterday and current-month request and traffic totals.
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum: [ok]
+                                    data:
+                                        $ref: '#/components/schemas/analytics_MonitoringOverview'
     /api/v1/clusters/{cluster_id}/analytics/rankings/{dimension}:
         get:
             operationId: ranking
@@ -438,6 +476,7 @@ paths:
                   in: query
                   schema:
                     type: string
+                    enum: [24h, 30d]
                 - name: site_id
                   in: query
                   schema:
@@ -637,6 +676,11 @@ paths:
                   schema:
                     type: string
                 - name: period
+                  in: query
+                  schema:
+                    type: string
+                    enum: [24h, 30d]
+                - name: node_id
                   in: query
                   schema:
                     type: string
@@ -3112,6 +3156,16 @@ components:
                 connections:
                     type: number
                     description: Number of system-wide TCP connections in ESTABLISHED state.
+                cache_used_bytes:
+                    type: number
+                cache_max_bytes:
+                    type: number
+                cache_directory:
+                    type: string
+                disk_used_bytes:
+                    type: number
+                disk_total_bytes:
+                    type: number
                 load_1:
                     type: number
                 load_5:
@@ -3124,6 +3178,40 @@ components:
                     type: number
                 node_id:
                     type: string
+        analytics_NodeSnapshot:
+            allOf:
+                - $ref: '#/components/schemas/analytics_NodeRuntimePoint'
+                - type: object
+                  properties:
+                    online:
+                        type: boolean
+                    ingress_bytes_per_second:
+                        type: number
+                    egress_bytes_per_second:
+                        type: number
+                    requests_per_minute:
+                        type: number
+                    disk_write_bytes_per_second:
+                        type: number
+                        description: Estimated from positive cache usage growth between the latest reports.
+        analytics_UsageTotal:
+            type: object
+            properties:
+                requests:
+                    type: number
+                ingress_bytes:
+                    type: number
+                egress_bytes:
+                    type: number
+        analytics_MonitoringOverview:
+            type: object
+            properties:
+                today:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
+                yesterday:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
+                month:
+                    $ref: '#/components/schemas/analytics_UsageTotal'
         analytics_Summary:
             type: object
             properties:

@@ -5,5 +5,5 @@ import "embed"
 
 // FS contains the ClickHouse schema compiled into the control API binary.
 //
-//go:embed schema.sql
+//go:embed *.sql
 var FS embed.FS

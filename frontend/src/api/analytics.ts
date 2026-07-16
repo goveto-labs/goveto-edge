@@ -1,7 +1,9 @@
 import type {
     AnalyticsParams,
     DistributionItem,
+    MonitoringOverview,
     NodeRuntimeResponse,
+    NodeSnapshot,
     Summary,
     TopItem,
     TrafficResponse,
@@ -14,6 +16,13 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const analyticsApi = (clusterId: string) => ({
+    overview: (params: Pick<AnalyticsParams, 'site_id'> = {}) =>
+        get<MonitoringOverview>(
+            clusterPath(
+                clusterId,
+                `/analytics/overview${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
+            )
+        ),
     summary: (params: AnalyticsParams) =>
         get<Summary>(
             clusterPath(
@@ -42,30 +51,47 @@ export const analyticsApi = (clusterId: string) => ({
                 `/analytics/traffic${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
-    rankings: (dimension: string, params: AnalyticsParams) =>
+    rankings: (
+        dimension: string,
+        params: AnalyticsParams & {
+            period?: '24h' | '30d';
+            sort?: 'requests' | 'traffic';
+            limit?: number;
+        }
+    ) =>
         get<DistributionItem[]>(
             clusterPath(
                 clusterId,
                 `/analytics/rankings/${dimension}${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
-    distributions: (dimension: string, params: AnalyticsParams) =>
+    distributions: (
+        dimension: string,
+        params: AnalyticsParams & {
+            period?: '24h' | '30d';
+            sort?: 'requests' | 'traffic';
+            limit?: number;
+        }
+    ) =>
         get<DistributionItem[]>(
             clusterPath(
                 clusterId,
                 `/analytics/distributions/${dimension}${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
-    nodeRuntime: (params: { node_id?: string; period?: string }) =>
+    nodeRuntime: (params: { node_id?: string; period?: '12h' | '24h' | '30d' }) =>
         get<NodeRuntimeResponse>(
             clusterPath(
                 clusterId,
                 `/analytics/nodes/runtime${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
-    latestNodeRuntime: () =>
-        get<NodeRuntimeResponse['series']>(
-            clusterPath(clusterId, '/analytics/nodes/runtime/latest')
+    latestNodeRuntime: (nodeId?: string) =>
+        get<NodeSnapshot[]>(
+            clusterPath(
+                clusterId,
+                `/analytics/nodes/runtime/latest${buildQuery({ node_id: nodeId })}`
+            )
         ),
 });
 

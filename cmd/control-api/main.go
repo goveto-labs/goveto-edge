@@ -93,6 +93,7 @@ func main() {
 
 		analyticsStore = analytics.NewStore(clickhouseConn)
 		go analytics.NewIngest(orm, credentialCipher, analyticsStore).Run(ctx)
+		go analytics.NewDailyRollup(analyticsStore, clickhouseschema.FS).Run(ctx)
 	}
 
 	publishService := publisher.New(orm, credentialCipher)
