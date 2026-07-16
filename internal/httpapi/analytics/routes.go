@@ -133,13 +133,18 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 }
 
 // @summary Ranking / distribution
-// @description Rank or distribute traffic by dimension (period, sort, limit query params).
+// @description Rank or distribute traffic by dimension (period, sort, limit query params; node_id filter supported for 24h).
 // @Tags analytics
 func ranking(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		p, err := chartPeriod(c)
 		if err != nil {
 			return err
+		}
+
+		nodeID := c.QueryParam("node_id")
+		if nodeID != "" && p == "30d" {
+			return echo.NewHTTPError(http.StatusBadRequest, "node_id filter is only supported for the 24h period")
 		}
 
 		limit := 20
@@ -159,6 +164,7 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 			c.Request().Context(),
 			c.Param("cluster_id"),
 			c.QueryParam("site_id"),
+			nodeID,
 			p,
 			c.Param("dimension"),
 			sortBy,

@@ -1,6 +1,7 @@
 import type {
     ClusterGroup,
     ClusterRegion,
+    DistributionItem,
     DNSLine,
     Node,
     NodeCacheConfig,
@@ -9,20 +10,18 @@ import type {
     NodeSSH,
     TrafficPoint,
 } from '@/api';
+import type { DonutSlice } from '@/components/DonutChart.tsx';
 
 import { Button, Input, TextArea } from '@heroui/react';
 import {
-    Activity,
     ArrowLeft,
     Check,
     Database,
-    Gauge,
     Globe2,
     HardDrive,
     KeyRound,
     LockKeyhole,
     MapPin,
-    MemoryStick,
     Network,
     Pencil,
     Plus,
@@ -30,7 +29,6 @@ import {
     Save,
     Server,
     Trash2,
-    Wifi,
     X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -38,16 +36,18 @@ import { useNavigate, useParams } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { FormRow } from '@/components/FormRow.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
-import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
-type DetailTab = 'overview' | 'monitoring' | 'network' | 'cache' | 'reinstall';
+type DetailTab = 'overview' | 'network' | 'cache' | 'reinstall';
 type SSHAuthMethod = 'password' | 'private_key';
 const bytesPerGB = 1024 ** 3;
 
@@ -58,7 +58,6 @@ function bytesToGB(value: number) {
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Server }> = [
     { id: 'overview', label: 'Overview', icon: Server },
-    { id: 'monitoring', label: 'Monitoring', icon: Activity },
     { id: 'network', label: 'Network & DNS', icon: Network },
     { id: 'cache', label: 'Cache', icon: HardDrive },
     { id: 'reinstall', label: 'Reinstall', icon: RefreshCw },
@@ -67,7 +66,10 @@ const tabs: Array<{ id: DetailTab; label: string; icon: typeof Server }> = [
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.min(
+        Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024))),
+        units.length - 1
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -97,11 +99,23 @@ function SectionTitle({
     );
 }
 
-function Metric({ label, value }: { label: string; value: React.ReactNode }) {
+function StatCell({
+    label,
+    value,
+    footer,
+    tone = 'default',
+}: {
+    label: string;
+    value: React.ReactNode;
+    footer?: React.ReactNode;
+    tone?: 'default' | 'success' | 'danger';
+}) {
+    const toneClass = tone === 'success' ? 'text-success' : tone === 'danger' ? 'text-danger' : '';
     return (
-        <div className='rounded-xl border border-border bg-surface-secondary/30 p-4'>
-            <div className='text-xs font-medium uppercase tracking-wide text-muted'>{label}</div>
-            <div className='mt-2 min-h-6 text-sm font-semibold'>{value}</div>
+        <div className='min-w-0 rounded-xl border border-border/70 bg-surface p-3.5 shadow-sm'>
+            <div className='text-xs font-medium text-muted'>{label}</div>
+            <div className={`mt-1 text-lg font-semibold tracking-tight ${toneClass}`}>{value}</div>
+            {footer && <div className='mt-1 truncate text-xs text-muted'>{footer}</div>}
         </div>
     );
 }
@@ -120,6 +134,58 @@ function NameChips({ names, empty }: { names: string[]; empty: string }) {
             ))}
         </div>
     );
+}
+
+const slicePalette = [
+    '#3b82f6',
+    '#10b981',
+    '#f59e0b',
+    '#8b5cf6',
+    '#06b6d4',
+    '#ec4899',
+    '#84cc16',
+    '#f97316',
+    '#64748b',
+];
+
+const methodColors: Record<string, string> = {
+    GET: '#3b82f6',
+    POST: '#10b981',
+    PUT: '#f59e0b',
+    DELETE: '#ef4444',
+    PATCH: '#8b5cf6',
+    HEAD: '#64748b',
+    OPTIONS: '#06b6d4',
+};
+
+function statusColor(value: string) {
+    if (value.startsWith('2')) return '#10b981';
+    if (value.startsWith('3')) return '#3b82f6';
+    if (value.startsWith('4')) return '#f59e0b';
+    if (value.startsWith('5')) return '#ef4444';
+    return '#64748b';
+}
+
+function toSlices(
+    items: DistributionItem[],
+    colorAt: (value: string, index: number) => string,
+    maxSlices = 6
+): DonutSlice[] {
+    const slices = items.map((item, index) => ({
+        label: item.value || '(empty)',
+        value: item.requests,
+        color: colorAt(item.value, index),
+    }));
+    if (slices.length <= maxSlices + 1) return slices;
+    const rest = slices.slice(maxSlices);
+    return [
+        ...slices.slice(0, maxSlices),
+        {
+            label: 'Other',
+            value: rest.reduce((sum, slice) => sum + slice.value, 0),
+            color: '#94a3b8',
+        },
+    ];
 }
 
 export default function NodeDetail() {
@@ -141,6 +207,10 @@ export default function NodeDetail() {
     const [runtime, setRuntime] = useState<NodeRuntimePoint[]>([]);
     const [traffic, setTraffic] = useState<TrafficPoint[]>([]);
     const [monitoringLoading, setMonitoringLoading] = useState(false);
+    const [domains, setDomains] = useState<DistributionItem[]>([]);
+    const [extensions, setExtensions] = useState<DistributionItem[]>([]);
+    const [statuses, setStatuses] = useState<DistributionItem[]>([]);
+    const [methods, setMethods] = useState<DistributionItem[]>([]);
 
     const [dnsLineIds, setDnsLineIds] = useState<Set<string>>(new Set());
     const [dnsSaving, setDnsSaving] = useState(false);
@@ -211,15 +281,37 @@ export default function NodeDetail() {
     const loadMonitoring = useCallback(async () => {
         if (!clusterId || !nodeId) return;
         setMonitoringLoading(true);
+        const distributionParams = {
+            node_id: nodeId,
+            period: '24h' as const,
+            sort: 'requests' as const,
+            limit: 10,
+        };
         try {
-            const [snapshotData, runtimeData, trafficData] = await Promise.all([
+            const [
+                snapshotData,
+                runtimeData,
+                trafficData,
+                domainData,
+                extensionData,
+                statusData,
+                methodData,
+            ] = await Promise.all([
                 analytics.latestNodeRuntime(nodeId),
                 analytics.nodeRuntime({ node_id: nodeId, period: '12h' }),
                 analytics.traffic({ node_id: nodeId, period: monitoringPeriod }),
+                analytics.rankings('domain', distributionParams),
+                analytics.distributions('extension', distributionParams),
+                analytics.distributions('status', distributionParams),
+                analytics.distributions('method', distributionParams),
             ]);
             setSnapshot(snapshotData[0] ?? null);
             setRuntime(runtimeData.series);
             setTraffic(trafficData.series);
+            setDomains(domainData);
+            setExtensions(extensionData);
+            setStatuses(statusData);
+            setMethods(methodData);
         } catch (monitoringError) {
             setError(
                 monitoringError instanceof ApiError
@@ -232,7 +324,7 @@ export default function NodeDetail() {
     }, [analytics, clusterId, monitoringPeriod, nodeId]);
 
     useEffect(() => {
-        if (tab !== 'monitoring') return;
+        if (tab !== 'overview') return;
         void loadMonitoring();
         const refresh = window.setInterval(() => void loadMonitoring(), 60_000);
         return () => window.clearInterval(refresh);
@@ -432,21 +524,25 @@ export default function NodeDetail() {
         }
     };
 
+    const filledTraffic = useMemo(
+        () => fillTrafficSeries(traffic, monitoringPeriod),
+        [traffic, monitoringPeriod]
+    );
     const trafficChart = useMemo(
         () =>
-            traffic.map((point) => ({
+            filledTraffic.map((point) => ({
                 bucket: point.bucket,
                 values: { ingress: point.ingress_bytes, egress: point.egress_bytes },
             })),
-        [traffic]
+        [filledTraffic]
     );
     const requestChart = useMemo(
         () =>
-            traffic.map((point) => ({
+            filledTraffic.map((point) => ({
                 bucket: point.bucket,
                 values: { requests: point.requests },
             })),
-        [traffic]
+        [filledTraffic]
     );
     const cpuMemoryChart = useMemo(
         () =>
@@ -477,6 +573,24 @@ export default function NodeDetail() {
                 values: { used: point.cache_used_bytes, limit: point.cache_max_bytes },
             })),
         [runtime]
+    );
+    const extensionSlices = useMemo(
+        () => toSlices(extensions, (_value, index) => slicePalette[index % slicePalette.length]),
+        [extensions]
+    );
+    const hostnameSlices = useMemo(
+        () => toSlices(domains, (_value, index) => slicePalette[(index + 3) % slicePalette.length]),
+        [domains]
+    );
+    const statusSlices = useMemo(() => toSlices(statuses, statusColor), [statuses]);
+    const methodSlices = useMemo(
+        () =>
+            toSlices(
+                methods,
+                (value, index) =>
+                    methodColors[value.toUpperCase()] ?? slicePalette[index % slicePalette.length]
+            ),
+        [methods]
     );
 
     if (!clusterId) return <FormError message='Select a cluster to view this node.' />;
@@ -523,12 +637,31 @@ export default function NodeDetail() {
                         </ContentCard>
                     )}
 
-                    <div className='flex gap-1 overflow-x-auto rounded-xl border border-border bg-surface p-1.5'>
+                    <div className='flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl bg-surface px-4 py-2.5 text-sm'>
+                        <span className='flex items-center gap-2'>
+                            <span className='text-xs text-muted'>Status</span>
+                            <StatusBadge status={node.status} />
+                        </span>
+                        <span className='flex items-center gap-2'>
+                            <span className='text-xs text-muted'>IPs</span>
+                            <span className='font-mono text-xs'>{addressSummary}</span>
+                        </span>
+                        <span className='flex items-center gap-2'>
+                            <span className='text-xs text-muted'>DNS lines</span>
+                            <span>{dnsLineIds.size || 'Default'}</span>
+                        </span>
+                        <span className='flex items-center gap-2'>
+                            <span className='text-xs text-muted'>Site configs</span>
+                            <span>{node.siteConfigVersions?.length || 0}</span>
+                        </span>
+                    </div>
+
+                    <div className='flex w-fit items-center gap-1 overflow-x-auto rounded-xl bg-surface p-1'>
                         {tabs.map((item) => {
                             const Icon = item.icon;
                             return (
                                 <button
-                                    className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                                    className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                                         tab === item.id
                                             ? 'bg-surface-secondary text-foreground shadow-sm'
                                             : 'text-muted hover:text-foreground'
@@ -545,20 +678,209 @@ export default function NodeDetail() {
                     </div>
 
                     {tab === 'overview' && (
-                        <div className='space-y-6'>
-                            <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-                                <Metric
-                                    label='Status'
-                                    value={<StatusBadge status={node.status} />}
-                                />
-                                <Metric label='IP addresses' value={addressSummary} />
-                                <Metric label='DNS lines' value={dnsLineIds.size || 'Default'} />
-                                <Metric
-                                    label='Site configurations'
-                                    value={node.siteConfigVersions?.length || 0}
-                                />
+                        <div className='space-y-4'>
+                            <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
+                                <div>
+                                    <h2 className='text-sm font-semibold'>Monitoring</h2>
+                                    <p className='mt-0.5 text-xs text-muted'>
+                                        Live health and traffic. Runtime data refreshes every
+                                        minute.
+                                    </p>
+                                </div>
+                                <div className='flex items-center gap-2'>
+                                    {(['24h', '30d'] as const).map((period) => (
+                                        <Button
+                                            key={period}
+                                            size='sm'
+                                            variant={
+                                                monitoringPeriod === period
+                                                    ? 'primary'
+                                                    : 'secondary'
+                                            }
+                                            onPress={() => setMonitoringPeriod(period)}
+                                        >
+                                            {period}
+                                        </Button>
+                                    ))}
+                                    <Button
+                                        isDisabled={monitoringLoading}
+                                        size='sm'
+                                        variant='secondary'
+                                        onPress={() => void loadMonitoring()}
+                                    >
+                                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                                        Refresh
+                                    </Button>
+                                </div>
                             </div>
-                            <div className='grid gap-6 lg:grid-cols-2'>
+
+                            {snapshot ? (
+                                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4 mb-3'>
+                                    <StatCell
+                                        footer={`Last report ${new Date(snapshot.bucket).toLocaleString()}`}
+                                        label='Monitoring status'
+                                        tone={snapshot.online ? 'success' : 'danger'}
+                                        value={snapshot.online ? 'Online' : 'Offline'}
+                                    />
+                                    <StatCell
+                                        label='CPU'
+                                        value={`${snapshot.cpu_usage_percent.toFixed(1)}%`}
+                                    />
+                                    <StatCell
+                                        footer={`${formatBytes(snapshot.memory_used_bytes)} / ${formatBytes(snapshot.memory_total_bytes)}`}
+                                        label='Memory'
+                                        value={
+                                            snapshot.memory_total_bytes > 0
+                                                ? `${((snapshot.memory_used_bytes / snapshot.memory_total_bytes) * 100).toFixed(1)}%`
+                                                : '—'
+                                        }
+                                    />
+                                    <StatCell
+                                        footer={`${snapshot.connections.toLocaleString()} established connections`}
+                                        label='Requests/min'
+                                        value={snapshot.requests_per_minute.toLocaleString()}
+                                    />
+                                    <StatCell
+                                        footer='Request bytes received by this node'
+                                        label='Ingress bandwidth'
+                                        value={formatRate(snapshot.ingress_bytes_per_second)}
+                                    />
+                                    <StatCell
+                                        footer='Response bytes sent by this node'
+                                        label='Egress bandwidth'
+                                        value={formatRate(snapshot.egress_bytes_per_second)}
+                                    />
+                                    <StatCell
+                                        footer={snapshot.cache_directory}
+                                        label='Cache usage'
+                                        value={formatBytes(snapshot.cache_used_bytes)}
+                                    />
+                                    <StatCell
+                                        footer={`Limit ${formatBytes(snapshot.cache_max_bytes)}`}
+                                        label='Estimated cache writes'
+                                        value={formatRate(snapshot.disk_write_bytes_per_second)}
+                                    />
+                                </div>
+                            ) : (
+                                <ContentCard>
+                                    <div className='py-8 text-center text-sm text-muted'>
+                                        {monitoringLoading
+                                            ? 'Loading node monitoring…'
+                                            : 'No runtime reports have been received from this node.'}
+                                    </div>
+                                </ContentCard>
+                            )}
+
+                            <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+                                <ContentCard
+                                    className='h-full'
+                                    title={`Traffic · ${monitoringPeriod}`}
+                                >
+                                    <TimeSeriesChart
+                                        ariaLabel={`${node.name} traffic trend`}
+                                        data={trafficChart}
+                                        height={220}
+                                        series={[
+                                            { key: 'ingress', label: 'Ingress', color: '#3b82f6' },
+                                            { key: 'egress', label: 'Egress', color: '#10b981' },
+                                        ]}
+                                        valueFormatter={formatBytes}
+                                    />
+                                </ContentCard>
+                                <ContentCard
+                                    className='h-full'
+                                    title={`Requests · ${monitoringPeriod}`}
+                                >
+                                    <TimeSeriesChart
+                                        ariaLabel={`${node.name} requests trend`}
+                                        data={requestChart}
+                                        height={220}
+                                        series={[
+                                            {
+                                                key: 'requests',
+                                                label: 'Requests',
+                                                color: '#8b5cf6',
+                                            },
+                                        ]}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='CPU & memory · 12h'>
+                                    <TimeSeriesChart
+                                        ariaLabel={`${node.name} CPU and memory trend`}
+                                        data={cpuMemoryChart}
+                                        height={220}
+                                        series={[
+                                            { key: 'cpu', label: 'CPU', color: '#f59e0b' },
+                                            { key: 'memory', label: 'Memory', color: '#3b82f6' },
+                                        ]}
+                                        valueFormatter={(value) => `${value.toFixed(1)}%`}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='Load average · 12h'>
+                                    <TimeSeriesChart
+                                        ariaLabel={`${node.name} load average trend`}
+                                        data={loadChart}
+                                        height={220}
+                                        series={[
+                                            { key: 'load1', label: '1m', color: '#ef4444' },
+                                            { key: 'load5', label: '5m', color: '#f59e0b' },
+                                            { key: 'load15', label: '15m', color: '#10b981' },
+                                        ]}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='Cache usage · 12h'>
+                                    <TimeSeriesChart
+                                        ariaLabel={`${node.name} cache usage trend`}
+                                        data={cacheChart}
+                                        height={220}
+                                        series={[
+                                            { key: 'used', label: 'Used', color: '#8b5cf6' },
+                                            {
+                                                key: 'limit',
+                                                label: 'Configured limit',
+                                                color: '#64748b',
+                                            },
+                                        ]}
+                                        valueFormatter={formatBytes}
+                                    />
+                                </ContentCard>
+                            </div>
+
+                            <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+                                <ContentCard className='h-full' title='Top domains · 24h'>
+                                    <RankingBars items={domains} limit={5} />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='File types · 24h'>
+                                    <DonutChart
+                                        compact
+                                        ariaLabel='File type distribution'
+                                        slices={extensionSlices}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='Hostnames · 24h'>
+                                    <DonutChart
+                                        compact
+                                        ariaLabel='Hostname distribution'
+                                        slices={hostnameSlices}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='Status codes · 24h'>
+                                    <DonutChart
+                                        compact
+                                        ariaLabel='Status code distribution'
+                                        slices={statusSlices}
+                                    />
+                                </ContentCard>
+                                <ContentCard className='h-full' title='Methods · 24h'>
+                                    <DonutChart
+                                        compact
+                                        ariaLabel='Request method distribution'
+                                        slices={methodSlices}
+                                    />
+                                </ContentCard>
+                            </div>
+
+                            <div className='grid gap-4 lg:grid-cols-2'>
                                 <ContentCard className='overflow-hidden p-0' noPadding>
                                     <SectionTitle
                                         description='Placement and routing membership for this node.'
@@ -617,180 +939,8 @@ export default function NodeDetail() {
                         </div>
                     )}
 
-                    {tab === 'monitoring' && (
-                        <div className='space-y-6'>
-                            <div className='flex flex-wrap items-center justify-between gap-3'>
-                                <div>
-                                    <h2 className='text-base font-semibold'>Node dashboard</h2>
-                                    <p className='mt-1 text-sm text-muted'>
-                                        Current health and traffic for this node only. Data
-                                        refreshes every minute.
-                                    </p>
-                                </div>
-                                <div className='flex items-center gap-2'>
-                                    {(['24h', '30d'] as const).map((period) => (
-                                        <Button
-                                            key={period}
-                                            size='sm'
-                                            variant={
-                                                monitoringPeriod === period
-                                                    ? 'primary'
-                                                    : 'secondary'
-                                            }
-                                            onPress={() => setMonitoringPeriod(period)}
-                                        >
-                                            {period}
-                                        </Button>
-                                    ))}
-                                    <Button
-                                        isDisabled={monitoringLoading}
-                                        size='sm'
-                                        variant='secondary'
-                                        onPress={() => void loadMonitoring()}
-                                    >
-                                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
-                                        Refresh
-                                    </Button>
-                                </div>
-                            </div>
-
-                            {snapshot ? (
-                                <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-4'>
-                                    <StatCard
-                                        color={snapshot.online ? 'success' : 'danger'}
-                                        footer={`Last report ${new Date(snapshot.bucket).toLocaleString()}`}
-                                        icon={Activity}
-                                        label='Monitoring status'
-                                        value={snapshot.online ? 'Online' : 'Offline'}
-                                    />
-                                    <StatCard
-                                        color='warning'
-                                        icon={Gauge}
-                                        label='CPU'
-                                        value={`${snapshot.cpu_usage_percent.toFixed(1)}%`}
-                                    />
-                                    <StatCard
-                                        icon={MemoryStick}
-                                        label='Memory'
-                                        value={
-                                            snapshot.memory_total_bytes > 0
-                                                ? `${((snapshot.memory_used_bytes / snapshot.memory_total_bytes) * 100).toFixed(1)}%`
-                                                : '—'
-                                        }
-                                        footer={`${formatBytes(snapshot.memory_used_bytes)} / ${formatBytes(snapshot.memory_total_bytes)}`}
-                                    />
-                                    <StatCard
-                                        color='primary'
-                                        footer={`${snapshot.connections.toLocaleString()} established connections`}
-                                        icon={Activity}
-                                        label='Requests/min'
-                                        value={snapshot.requests_per_minute.toLocaleString()}
-                                    />
-                                    <StatCard
-                                        footer='Request bytes received by this node'
-                                        icon={Network}
-                                        label='Ingress bandwidth'
-                                        value={formatRate(snapshot.ingress_bytes_per_second)}
-                                    />
-                                    <StatCard
-                                        color='success'
-                                        footer='Response bytes sent by this node'
-                                        icon={Wifi}
-                                        label='Egress bandwidth'
-                                        value={formatRate(snapshot.egress_bytes_per_second)}
-                                    />
-                                    <StatCard
-                                        footer={snapshot.cache_directory}
-                                        icon={HardDrive}
-                                        label='Cache usage'
-                                        value={formatBytes(snapshot.cache_used_bytes)}
-                                    />
-                                    <StatCard
-                                        footer={`Limit ${formatBytes(snapshot.cache_max_bytes)}`}
-                                        icon={Database}
-                                        label='Estimated cache writes'
-                                        value={formatRate(snapshot.disk_write_bytes_per_second)}
-                                    />
-                                </div>
-                            ) : (
-                                <ContentCard className='p-10 text-center text-sm text-muted'>
-                                    {monitoringLoading
-                                        ? 'Loading node monitoring…'
-                                        : 'No runtime reports have been received from this node.'}
-                                </ContentCard>
-                            )}
-
-                            <div className='grid gap-6 xl:grid-cols-2'>
-                                <ContentCard title={`${monitoringPeriod} traffic trend`}>
-                                    <TimeSeriesChart
-                                        ariaLabel={`${node.name} traffic trend`}
-                                        data={trafficChart}
-                                        series={[
-                                            { key: 'ingress', label: 'Ingress', color: '#3b82f6' },
-                                            { key: 'egress', label: 'Egress', color: '#10b981' },
-                                        ]}
-                                        valueFormatter={formatBytes}
-                                    />
-                                </ContentCard>
-                                <ContentCard title={`${monitoringPeriod} request trend`}>
-                                    <TimeSeriesChart
-                                        ariaLabel={`${node.name} request trend`}
-                                        data={requestChart}
-                                        series={[
-                                            {
-                                                key: 'requests',
-                                                label: 'Requests',
-                                                color: '#8b5cf6',
-                                            },
-                                        ]}
-                                    />
-                                </ContentCard>
-                                <ContentCard title='CPU and memory (12h)'>
-                                    <TimeSeriesChart
-                                        ariaLabel={`${node.name} CPU and memory trend`}
-                                        data={cpuMemoryChart}
-                                        series={[
-                                            { key: 'cpu', label: 'CPU', color: '#f59e0b' },
-                                            { key: 'memory', label: 'Memory', color: '#3b82f6' },
-                                        ]}
-                                        valueFormatter={(value) => `${value.toFixed(1)}%`}
-                                    />
-                                </ContentCard>
-                                <ContentCard title='Load average (12h)'>
-                                    <TimeSeriesChart
-                                        ariaLabel={`${node.name} load average trend`}
-                                        data={loadChart}
-                                        series={[
-                                            { key: 'load1', label: '1m', color: '#ef4444' },
-                                            { key: 'load5', label: '5m', color: '#f59e0b' },
-                                            { key: 'load15', label: '15m', color: '#10b981' },
-                                        ]}
-                                    />
-                                </ContentCard>
-                                <ContentCard
-                                    className='xl:col-span-2'
-                                    title='Cache directory usage (12h)'
-                                >
-                                    <TimeSeriesChart
-                                        ariaLabel={`${node.name} cache usage trend`}
-                                        data={cacheChart}
-                                        series={[
-                                            { key: 'used', label: 'Used', color: '#8b5cf6' },
-                                            {
-                                                key: 'limit',
-                                                label: 'Configured limit',
-                                                color: '#64748b',
-                                            },
-                                        ]}
-                                        valueFormatter={formatBytes}
-                                    />
-                                </ContentCard>
-                            </div>
-                        </div>
-                    )}
-
                     {tab === 'network' && (
-                        <div className='grid gap-6 xl:grid-cols-2'>
+                        <div className='grid gap-4 xl:grid-cols-2'>
                             <ContentCard className='overflow-visible p-0' noPadding>
                                 <SectionTitle
                                     description='Choose every provider routing line served by this node.'

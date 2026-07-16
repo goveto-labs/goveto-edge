@@ -21,17 +21,17 @@ const colorStyles = {
 
 export function StatCard({ icon: Icon, label, value, footer, color = 'default' }: StatCardProps) {
     return (
-        <Card className='p-5'>
+        <Card className='gap-0 rounded-xl border border-border/70 bg-surface p-4 shadow-sm'>
             <div className='flex items-start justify-between'>
-                <div className='space-y-3'>
-                    <p className='text-sm font-medium text-muted'>{label}</p>
-                    <div className='text-3xl font-bold tracking-tight'>{value}</div>
+                <div className='space-y-1.5'>
+                    <p className='text-xs font-medium text-muted'>{label}</p>
+                    <div className='text-2xl font-bold tracking-tight'>{value}</div>
                     {footer && <div className='text-xs text-muted'>{footer}</div>}
                 </div>
                 <div
-                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${colorStyles[color]}`}
+                    className={`flex h-9 w-9 items-center justify-center rounded-lg ${colorStyles[color]}`}
                 >
-                    <Icon className='h-5 w-5' />
+                    <Icon className='h-4.5 w-4.5' />
                 </div>
             </div>
         </Card>

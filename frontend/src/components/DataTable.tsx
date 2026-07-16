@@ -30,7 +30,7 @@ export function DataTable({
 }: DataTableProps) {
     return (
         <Card
-            className={`overflow-hidden border border-border/70 bg-surface shadow-sm ${className}`}
+            className={`gap-0 overflow-hidden rounded-xl border border-border/70 bg-surface p-0 shadow-sm ${className}`}
         >
             {(title || action) && (
                 <div className='flex min-h-14 flex-col gap-3 border-b border-border bg-surface px-5 py-3 sm:flex-row sm:items-center sm:justify-between'>

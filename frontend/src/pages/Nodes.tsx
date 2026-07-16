@@ -19,7 +19,10 @@ function formatPercent(value: number) {
 function formatBytes(bytes: number) {
     if (bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.min(
+        Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024))),
+        units.length - 1
+    );
     return `${(bytes / 1024 ** unit).toFixed(1)} ${units[unit]}`;
 }
 
@@ -127,7 +130,6 @@ export default function Nodes() {
                 <thead>
                     <tr>
                         <th>Name</th>
-                        <th>Monitoring</th>
                         <th>Status</th>
                         <th>DNS lines</th>
                         <th>Addresses</th>
@@ -161,22 +163,20 @@ export default function Nodes() {
                                     </button>
                                 </td>
                                 <td>
-                                    <span
-                                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                                            runtime?.online
-                                                ? 'bg-success/10 text-success'
-                                                : 'bg-danger/10 text-danger'
-                                        }`}
-                                        title={runtimeTitle}
-                                    >
+                                    <div className='flex flex-col items-start gap-1.5'>
                                         <span
-                                            className={`h-1.5 w-1.5 rounded-full ${runtime?.online ? 'bg-success' : 'bg-danger'}`}
-                                        />
-                                        {runtime?.online ? 'Online' : 'Offline'}
-                                    </span>
-                                </td>
-                                <td>
-                                    <div className='space-y-1.5'>
+                                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
+                                                runtime?.online
+                                                    ? 'bg-success/10 text-success'
+                                                    : 'bg-danger/10 text-danger'
+                                            }`}
+                                            title={runtimeTitle}
+                                        >
+                                            <span
+                                                className={`h-1.5 w-1.5 rounded-full ${runtime?.online ? 'bg-success' : 'bg-danger'}`}
+                                            />
+                                            {runtime?.online ? 'Online' : 'Offline'}
+                                        </span>
                                         <StatusBadge status={node.status} />
                                         {node.status === 'INSTALL_FAILED' && node.installError && (
                                             <p

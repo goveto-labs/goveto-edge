@@ -275,7 +275,7 @@ paths:
         get:
             operationId: ranking
             summary: Ranking / distribution
-            description: Rank or distribute traffic by dimension (period, sort, limit query params).
+            description: Rank or distribute traffic by dimension (period, sort, limit query params; node_id filter supported for 24h).
             tags:
                 - analytics
             security:
@@ -298,6 +298,11 @@ paths:
                   in: query
                   schema:
                     type: number
+                - name: node_id
+                  in: query
+                  description: Filter by node (24h period only).
+                  schema:
+                    type: string
                 - name: period
                   in: query
                   schema:
@@ -449,7 +454,7 @@ paths:
         get:
             operationId: ranking
             summary: Ranking / distribution
-            description: Rank or distribute traffic by dimension (period, sort, limit query params).
+            description: Rank or distribute traffic by dimension (period, sort, limit query params; node_id filter supported for 24h).
             tags:
                 - analytics
             security:
@@ -472,6 +477,11 @@ paths:
                   in: query
                   schema:
                     type: number
+                - name: node_id
+                  in: query
+                  description: Filter by node (24h period only).
+                  schema:
+                    type: string
                 - name: period
                   in: query
                   schema:

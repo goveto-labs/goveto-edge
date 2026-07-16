@@ -17,3 +17,7 @@
         @apply bg-background text-foreground antialiased;
     }
 }
+
+body {
+    zoom: 90%;
+}

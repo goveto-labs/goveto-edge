@@ -271,7 +271,7 @@ var dimensions = map[string]string{
 
 func (s *Store) Ranking(
 	ctx context.Context,
-	cluster, site, period, dimension, sortBy string,
+	cluster, site, nodeID, period, dimension, sortBy string,
 	limit int,
 ) ([]DistributionItem, error) {
 	if dimension == "domain" {
@@ -308,6 +308,10 @@ func (s *Store) Ranking(
 	if site != "" {
 		q += " AND site_id = ?"
 		args = append(args, site)
+	}
+	if nodeID != "" {
+		q += " AND node_id = ?"
+		args = append(args, nodeID)
 	}
 
 	q += " GROUP BY 1 ORDER BY "

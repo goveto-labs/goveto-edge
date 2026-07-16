@@ -31,7 +31,10 @@ type Period = '24h' | '30d';
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.min(
+        Math.max(0, Math.floor(Math.log(bytes) / Math.log(1024))),
+        units.length - 1
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 

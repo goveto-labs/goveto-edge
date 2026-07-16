@@ -18,14 +18,16 @@ export function ContentCard({
     className = '',
 }: ContentCardProps) {
     return (
-        <Card className={`overflow-hidden ${className}`}>
+        <Card
+            className={`gap-0 overflow-hidden rounded-xl border border-border/70 bg-surface p-0 shadow-sm ${className}`}
+        >
             {(title || action) && (
-                <div className='flex flex-col gap-3 border-b border-border p-5 sm:flex-row sm:items-center sm:justify-between'>
+                <div className='flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
                     {title && <div className='text-sm font-semibold'>{title}</div>}
                     {action && <div className='flex items-center gap-2'>{action}</div>}
                 </div>
             )}
-            <div className={noPadding ? 'overflow-hidden rounded-3xl' : 'p-5'}>{children}</div>
+            <div className={noPadding ? 'overflow-hidden' : 'p-3.5'}>{children}</div>
         </Card>
     );
 }
