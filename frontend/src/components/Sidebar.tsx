@@ -28,7 +28,7 @@ interface NavItemConfig {
 }
 
 export const nav: NavItemConfig[] = [
-    { path: '/', label: 'Dashboard', icon: LayoutDashboard },
+    { path: '/', label: 'Overview', icon: LayoutDashboard },
     { path: '/nodes', label: 'Nodes', icon: Server },
     {
         path: '/sites',

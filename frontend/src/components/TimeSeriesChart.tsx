@@ -1,6 +1,6 @@
 import type { MouseEvent } from 'react';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 
 export interface TimeSeriesDatum {
     bucket: string;
@@ -19,6 +19,7 @@ interface TimeSeriesChartProps {
     ariaLabel: string;
     valueFormatter?: (value: number) => string;
     height?: number;
+    includeZero?: boolean;
 }
 
 const defaultWidth = 560;
@@ -36,6 +37,10 @@ function round(value: number) {
     return Number(value.toFixed(2));
 }
 
+function clamp(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+}
+
 function smoothLine(points: ChartPoint[]) {
     if (points.length === 0) return '';
     if (points.length === 1) return `M ${points[0].x} ${points[0].y}`;
@@ -46,9 +51,11 @@ function smoothLine(points: ChartPoint[]) {
         const p2 = points[index + 1];
         const p3 = points[Math.min(points.length - 1, index + 2)];
         const c1x = p1.x + (p2.x - p0.x) / 6;
-        const c1y = p1.y + (p2.y - p0.y) / 6;
+        const minY = Math.min(p1.y, p2.y);
+        const maxY = Math.max(p1.y, p2.y);
+        const c1y = clamp(p1.y + (p2.y - p0.y) / 6, minY, maxY);
         const c2x = p2.x - (p3.x - p1.x) / 6;
-        const c2y = p2.y - (p3.y - p1.y) / 6;
+        const c2y = clamp(p2.y - (p3.y - p1.y) / 6, minY, maxY);
         d += ` C ${round(c1x)} ${round(c1y)}, ${round(c2x)} ${round(c2y)}, ${round(p2.x)} ${round(p2.y)}`;
     }
     return d;
@@ -60,39 +67,79 @@ export function TimeSeriesChart({
     ariaLabel,
     valueFormatter = (value) => value.toLocaleString(undefined, { maximumFractionDigits: 1 }),
     height = 224,
+    includeZero = true,
 }: TimeSeriesChartProps) {
     const gradientPrefix = useId().replace(/[^a-zA-Z0-9]/g, '');
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
-    const [width, setWidth] = useState(defaultWidth);
+    const [size, setSize] = useState({ width: defaultWidth, height });
     const chartRef = useRef<HTMLDivElement>(null);
+    const hasData = data.length > 0;
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         if (!chartRef.current) return;
+        const updateSize = () => {
+            if (!chartRef.current) return;
+            const rect = chartRef.current.getBoundingClientRect();
+            const next = {
+                width: Math.max(240, Math.round(rect.width)),
+                height: Math.max(height, Math.round(rect.height)),
+            };
+            setSize((current) =>
+                current.width === next.width && current.height === next.height ? current : next
+            );
+        };
+        updateSize();
         const observer = new ResizeObserver(([entry]) => {
-            setWidth(Math.max(240, Math.round(entry.contentRect.width)));
+            const next = {
+                width: Math.max(240, Math.round(entry.contentRect.width)),
+                height: Math.max(height, Math.round(entry.contentRect.height)),
+            };
+            setSize((current) =>
+                current.width === next.width && current.height === next.height ? current : next
+            );
         });
         observer.observe(chartRef.current);
         return () => observer.disconnect();
-    }, []);
+    }, [hasData, height]);
 
-    if (data.length === 0) {
+    if (!hasData) {
         return (
-            <div className='flex min-h-48 items-center justify-center text-sm text-muted'>
+            <div
+                className='flex h-full min-h-48 flex-1 items-center justify-center text-sm text-muted'
+                style={{ minHeight: height }}
+            >
                 No data
             </div>
         );
     }
 
+    const { width, height: measuredHeight } = size;
     const innerWidth = width - paddingX * 2;
-    const innerHeight = height - paddingTop - paddingBottom;
+    const innerHeight = measuredHeight - paddingTop - paddingBottom;
     const baseline = paddingTop + innerHeight;
-    const maxValue = Math.max(
-        1,
-        ...data.flatMap((point) => series.map((item) => point.values[item.key] ?? 0))
+    const values = data.flatMap((point) =>
+        series.map((item) => Math.max(0, point.values[item.key] ?? 0))
     );
+    const rawMin = includeZero ? 0 : Math.min(...values);
+    const rawMax = Math.max(...values);
+    let minValue = rawMin;
+    let maxValue = rawMax;
+    if (maxValue <= minValue) {
+        const padding = maxValue > 0 ? Math.max(maxValue * 0.1, 0.01) : 1;
+        minValue = includeZero ? 0 : Math.max(0, minValue - padding);
+        maxValue += padding;
+    } else if (!includeZero) {
+        const padding = (maxValue - minValue) * 0.08;
+        minValue = Math.max(0, minValue - padding);
+        maxValue += padding;
+    }
+    const valueRange = Math.max(Number.EPSILON, maxValue - minValue);
     const xAt = (index: number) =>
         paddingX + (data.length === 1 ? innerWidth / 2 : (index / (data.length - 1)) * innerWidth);
-    const yAt = (value: number) => paddingTop + innerHeight - (value / maxValue) * innerHeight;
+    const yAt = (value: number) =>
+        paddingTop +
+        innerHeight -
+        ((clamp(Math.max(0, value), minValue, maxValue) - minValue) / valueRange) * innerHeight;
     const labelIndexes = Array.from(
         new Set([0, Math.floor((data.length - 1) / 2), data.length - 1])
     );
@@ -135,7 +182,7 @@ export function TimeSeriesChart({
         hoverIndex === null ? 0 : Math.min(88, Math.max(12, (xAt(hoverIndex) / width) * 100));
 
     return (
-        <div className='flex h-full flex-col gap-3'>
+        <div className='flex min-h-0 flex-1 flex-col gap-3'>
             <div className='flex flex-wrap gap-4 text-sm text-muted'>
                 {series.map((item) => (
                     <span className='inline-flex items-center gap-1.5' key={item.key}>
@@ -147,16 +194,15 @@ export function TimeSeriesChart({
                     </span>
                 ))}
             </div>
-            <div ref={chartRef} className='relative min-h-0 flex-1'>
+            <div ref={chartRef} className='relative min-h-0 flex-1' style={{ minHeight: height }}>
                 <svg
                     aria-label={ariaLabel}
-                    className='block w-full cursor-crosshair overflow-visible'
-                    height={height}
+                    className='absolute inset-0 block h-full w-full cursor-crosshair overflow-visible'
                     onMouseLeave={() => setHoverIndex(null)}
                     onMouseMove={handleMove}
                     preserveAspectRatio='xMidYMid meet'
                     role='img'
-                    viewBox={`0 0 ${width} ${height}`}
+                    viewBox={`0 0 ${width} ${measuredHeight}`}
                 >
                     <title>{ariaLabel}</title>
                     <defs>
@@ -219,7 +265,7 @@ export function TimeSeriesChart({
                                 x={paddingX + 6}
                                 y={y + (ratio === 0 ? 13 : ratio === 1 ? -5 : 4)}
                             >
-                                {valueFormatter(maxValue * (1 - ratio))}
+                                {valueFormatter(maxValue - valueRange * ratio)}
                             </text>
                         );
                     })}
@@ -256,7 +302,7 @@ export function TimeSeriesChart({
                                 index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'
                             }
                             x={xAt(index)}
-                            y={height - 8}
+                            y={measuredHeight - 8}
                         >
                             {formatBucket(data[index].bucket)}
                         </text>

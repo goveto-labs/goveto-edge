@@ -7,6 +7,7 @@ interface ContentCardProps {
     title?: ReactNode;
     action?: ReactNode;
     className?: string;
+    contentClassName?: string;
     noPadding?: boolean;
     allowOverflow?: boolean;
 }
@@ -18,6 +19,7 @@ export function ContentCard({
     noPadding = false,
     allowOverflow = false,
     className = '',
+    contentClassName = '',
 }: ContentCardProps) {
     return (
         <Card
@@ -30,7 +32,7 @@ export function ContentCard({
                 </div>
             )}
             <div
-                className={
+                className={`${
                     noPadding
                         ? allowOverflow
                             ? 'overflow-visible'
@@ -38,7 +40,7 @@ export function ContentCard({
                         : allowOverflow
                           ? 'overflow-visible p-3.5'
                           : 'p-3.5'
-                }
+                } ${contentClassName}`}
             >
                 {children}
             </div>
