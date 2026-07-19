@@ -55,6 +55,9 @@ type siteSummary struct {
 func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service) {
 	e.GET("/api/v1/clusters/:cluster_id/sites", list(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+	e.DELETE("/api/v1/clusters/:cluster_id/sites/:site_id", deleteSite(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))

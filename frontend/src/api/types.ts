@@ -255,6 +255,17 @@ export interface SiteSummary {
     version: number;
     updated_at: string;
 }
+export interface SiteDetails extends SiteSummary {
+    cluster_id: string;
+    origins: SiteOrigin[];
+    created_at: string;
+}
+export interface UpdateSiteRequest {
+    name?: string;
+    cluster_id?: string;
+    domains?: string[];
+    origins?: SiteOrigin[];
+}
 export interface SiteListenerUpdateResponse {
     listener: SiteListenerConfig;
     publish_job?: PublishJob;
@@ -461,4 +472,8 @@ export interface MonitoringOverview {
     today: UsageTotal;
     yesterday: UsageTotal;
     month: UsageTotal;
+    current_bandwidth_bps: number;
+    today_peak_bandwidth_bps: number;
+    month_peak_bandwidth_bps: number;
+    today_unique_ips: number;
 }

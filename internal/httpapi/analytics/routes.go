@@ -32,6 +32,25 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime", nodeRuntime(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime/latest", latestNodeRuntime(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/logs", nodeLogs(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/sites/logs", siteLogs(store), require...)
+}
+
+func siteLogs(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		siteID := c.QueryParam("site_id")
+		if siteID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "site_id is required")
+		}
+		limit := 100
+		if value, err := strconv.Atoi(c.QueryParam("limit")); err == nil && value > 0 && value <= 500 {
+			limit = value
+		}
+		items, err := s.SiteRequestLogs(c.Request().Context(), c.Param("cluster_id"), siteID, limit)
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, items)
+	}
 }
 
 func nodeLogs(s *analytics.Store) echo.HandlerFunc {

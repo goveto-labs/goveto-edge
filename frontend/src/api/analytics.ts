@@ -98,6 +98,10 @@ export const analyticsApi = (clusterId: string) => ({
         get<NodeRequestLog[]>(
             clusterPath(clusterId, `/analytics/nodes/logs${buildQuery({ node_id: nodeId, limit })}`)
         ),
+    siteLogs: (siteId: string, limit = 100) =>
+        get<NodeRequestLog[]>(
+            clusterPath(clusterId, `/analytics/sites/logs${buildQuery({ site_id: siteId, limit })}`)
+        ),
 });
 
 function buildQuery(params: Record<string, string | number | boolean | undefined>): string {

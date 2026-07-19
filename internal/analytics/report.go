@@ -28,9 +28,13 @@ type UsageTotal struct {
 }
 
 type MonitoringOverview struct {
-	Today     UsageTotal `json:"today"`
-	Yesterday UsageTotal `json:"yesterday"`
-	Month     UsageTotal `json:"month"`
+	Today                 UsageTotal `json:"today"`
+	Yesterday             UsageTotal `json:"yesterday"`
+	Month                 UsageTotal `json:"month"`
+	CurrentBandwidthBPS   uint64     `json:"current_bandwidth_bps"`
+	TodayPeakBandwidthBPS uint64     `json:"today_peak_bandwidth_bps"`
+	MonthPeakBandwidthBPS uint64     `json:"month_peak_bandwidth_bps"`
+	TodayUniqueIPs        uint64     `json:"today_unique_ips"`
 }
 
 type NodeRequestLog struct {
@@ -53,6 +57,29 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 	WHERE cluster_id = ? AND node_id = ?
 	ORDER BY event_time DESC
 	LIMIT ?`, clusterID, nodeID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]NodeRequestLog, 0, limit)
+	for rows.Next() {
+		var item NodeRequestLog
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, limit int) ([]NodeRequestLog, error) {
+	rows, err := s.db.Query(ctx, `SELECT
+		event_time, request_id, hostname, method, path, status_code,
+		duration_us, upstream_address, cache_status
+	FROM goveto.web_request_logs
+	WHERE cluster_id = ? AND site_id = ?
+	ORDER BY event_time DESC
+	LIMIT ?`, clusterID, siteID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -91,7 +118,32 @@ func (s *Store) MonitoringOverview(ctx context.Context, cluster, site string) (M
 	monthCompleted.IngressBytes += todayTotal.IngressBytes
 	monthCompleted.EgressBytes += todayTotal.EgressBytes
 	monthCompleted.CacheEgressBytes += todayTotal.CacheEgressBytes
-	return MonitoringOverview{Today: todayTotal, Yesterday: yesterdayTotal, Month: monthCompleted}, nil
+	filter := " WHERE cluster_id = ?"
+	args := []any{cluster}
+	if site != "" {
+		filter += " AND site_id = ?"
+		args = append(args, site)
+	}
+	var currentBPS, todayPeakBPS, monthPeakBPS uint64
+	err = s.db.QueryRow(ctx, `SELECT
+		toUInt64(ifNull(argMax((ingress_bytes + egress_bytes) / 3600, bucket), 0)),
+		toUInt64(ifNull(maxIf((ingress_bytes + egress_bytes) / 3600, bucket >= toStartOfDay(now('UTC'))), 0)),
+		toUInt64(ifNull(maxIf((ingress_bytes + egress_bytes) / 3600, bucket >= toStartOfMonth(now('UTC'))), 0))
+	FROM goveto.request_usage_hourly`+filter, args...).Scan(&currentBPS, &todayPeakBPS, &monthPeakBPS)
+	if err != nil {
+		return MonitoringOverview{}, err
+	}
+	uniqueArgs := append(append([]any{}, args...), today)
+	var uniqueIPs uint64
+	err = s.db.QueryRow(ctx, `SELECT uniqExact(client_ip) FROM goveto.web_request_logs`+filter+` AND event_time >= ?`, uniqueArgs...).Scan(&uniqueIPs)
+	if err != nil {
+		return MonitoringOverview{}, err
+	}
+	return MonitoringOverview{
+		Today: todayTotal, Yesterday: yesterdayTotal, Month: monthCompleted,
+		CurrentBandwidthBPS: currentBPS, TodayPeakBandwidthBPS: todayPeakBPS,
+		MonthPeakBandwidthBPS: monthPeakBPS, TodayUniqueIPs: uniqueIPs,
+	}, nil
 }
 
 func (s *Store) usageTotal(

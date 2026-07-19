@@ -8,6 +8,8 @@ import { useApiLoading } from '@/hooks/useApiLoading.tsx';
 function pageKey(pathname: string) {
     const nodeDetail = pathname.match(/^\/nodes\/([^/]+)/);
     if (nodeDetail && nodeDetail[1] !== 'create') return `/nodes/${nodeDetail[1]}`;
+    const siteDetail = pathname.match(/^\/sites\/([^/]+)/);
+    if (siteDetail && siteDetail[1] !== 'create') return `/sites/${siteDetail[1]}`;
     return pathname;
 }
 
@@ -16,7 +18,9 @@ export function PageTransition() {
     const element = useOutlet();
     const { pending } = useApiLoading();
     const currentPageKey = pageKey(location.pathname);
-    const isNodeDetailPage = /^\/nodes\/(?!create(?:\/|$))[^/]+(?:\/|$)/.test(location.pathname);
+    const isDetailPage = /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+(?:\/|$)/.test(
+        location.pathname
+    );
     const pendingRef = useRef(pending);
     const pageKeyRef = useRef(currentPageKey);
     pendingRef.current = pending;
@@ -58,7 +62,7 @@ export function PageTransition() {
             >
                 <LoadingSurface
                     className='min-h-full'
-                    isLoading={isVisible && pending > 0 && !isNodeDetailPage}
+                    isLoading={isVisible && pending > 0 && !isDetailPage}
                     label='Updating page data'
                 >
                     {element}

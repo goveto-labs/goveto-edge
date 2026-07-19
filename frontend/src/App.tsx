@@ -19,6 +19,7 @@ import Nodes from '@/pages/Nodes.tsx';
 import PublishJobs from '@/pages/PublishJobs.tsx';
 import PurgeJobs from '@/pages/PurgeJobs.tsx';
 import Register from '@/pages/Register.tsx';
+import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
 
 export default function App() {
@@ -45,6 +46,7 @@ export default function App() {
                                     <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<CreateSite />} path='/sites/create' />
+                                    <Route element={<SiteDetail />} path='/sites/:siteId/*' />
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
                                     <Route element={<PublishJobs />} path='/publish' />
