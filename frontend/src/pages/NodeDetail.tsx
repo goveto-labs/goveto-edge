@@ -37,7 +37,7 @@ import {
     X,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -82,6 +82,60 @@ function formatBytes(bytes: number) {
 
 function formatRate(bytesPerSecond: number) {
     return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+function InstallationProgress({ status }: { status: string }) {
+    const steps = ['Queued', 'Installing', 'Health check', 'Online'];
+    const stepIndex =
+        status === 'PENDING'
+            ? 0
+            : status === 'INSTALLING'
+              ? 1
+              : status === 'OFFLINE'
+                ? 2
+                : status === 'ONLINE'
+                  ? 3
+                  : -1;
+    return (
+        <div className='grid gap-2 sm:grid-cols-4'>
+            {steps.map((step, index) => {
+                const complete = stepIndex > index || status === 'ONLINE';
+                const active = stepIndex === index;
+                return (
+                    <div
+                        className={`rounded-xl border px-3 py-3 ${
+                            complete
+                                ? 'border-success/25 bg-success/10'
+                                : active
+                                  ? 'border-primary/30 bg-primary/10'
+                                  : 'border-border bg-surface-secondary/25'
+                        }`}
+                        key={step}
+                    >
+                        <div className='flex items-center gap-2'>
+                            <span
+                                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                                    complete
+                                        ? 'bg-success text-success-foreground'
+                                        : active
+                                          ? 'bg-primary text-primary-foreground'
+                                          : 'bg-surface-secondary text-muted'
+                                }`}
+                            >
+                                {complete ? <Check className='h-3.5 w-3.5' /> : index + 1}
+                            </span>
+                            <span className='text-xs font-medium'>{step}</span>
+                        </div>
+                        {active && status !== 'ONLINE' && (
+                            <div className='mt-2 h-1 overflow-hidden rounded-full bg-primary/15'>
+                                <div className='local-loading-progress h-full bg-primary' />
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
 }
 
 function SectionTitle({
@@ -232,6 +286,8 @@ function toSlices(
 export default function NodeDetail() {
     const navigate = useNavigate();
     const { nodeId = '', '*': detailPath = '' } = useParams();
+    const [searchParams] = useSearchParams();
+    const trackInstallation = searchParams.get('track') === '1';
     const { clusterId } = useCluster();
     const api = useMemo(() => nodesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
@@ -335,26 +391,58 @@ export default function NodeDetail() {
         void load();
     }, [load]);
 
-    useEffect(() => {
-        if (tab !== 'installation' || !nodeId) return;
-        setInstallationLoading(true);
-        setInstallation(null);
-        setManualInitializationMessage('');
-        setManualInitializationError('');
-        api.installation(nodeId)
-            .then((value) => {
-                setInstallation(value);
+    const loadInstallation = useCallback(
+        async (showLoading = true) => {
+            if (!nodeId) return;
+            if (showLoading) {
+                setInstallationLoading(true);
+                setInstallation(null);
+                setManualInitializationMessage('');
+                setManualInitializationError('');
+            }
+            try {
+                const [installationValue, nodeValue] = await Promise.all([
+                    api.installation(nodeId),
+                    api.get(nodeId),
+                ]);
+                setInstallation(installationValue);
+                applyNode(nodeValue);
                 setError('');
-            })
-            .catch((loadError) =>
+            } catch (loadError) {
                 setError(
                     loadError instanceof ApiError
                         ? loadError.message
                         : 'Failed to load installation information'
-                )
-            )
-            .finally(() => setInstallationLoading(false));
-    }, [api, nodeId, tab]);
+                );
+            } finally {
+                if (showLoading) setInstallationLoading(false);
+            }
+        },
+        [api, applyNode, nodeId]
+    );
+
+    useEffect(() => {
+        if (tab === 'installation') void loadInstallation();
+    }, [loadInstallation, tab]);
+
+    useEffect(() => {
+        if (tab !== 'installation' || !trackInstallation) return;
+        const trackedStatus = node?.status || installation?.status;
+        if (!trackedStatus || ['ONLINE', 'INSTALL_FAILED', 'DISABLED'].includes(trackedStatus)) {
+            return;
+        }
+        let inFlight = false;
+        const refresh = () => {
+            if (inFlight) return;
+            inFlight = true;
+            void loadInstallation(false).finally(() => {
+                inFlight = false;
+            });
+        };
+        refresh();
+        const timer = window.setInterval(refresh, 2000);
+        return () => window.clearInterval(timer);
+    }, [installation?.status, loadInstallation, node?.status, tab, trackInstallation]);
 
     const loadLogs = useCallback(async () => {
         if (!nodeId) return;
@@ -611,17 +699,26 @@ export default function NodeDetail() {
         setReinstalling(true);
         setError('');
         try {
-            await api.reinstall(
+            const reinstalled = await api.reinstall(
                 node.id,
                 ssh,
                 node.status === 'PENDING' || node.status === 'INSTALLING'
+            );
+            applyNode(reinstalled);
+            setInstallation((current) =>
+                current
+                    ? {
+                          ...current,
+                          status: reinstalled.status,
+                          install_error: undefined,
+                      }
+                    : current
             );
             setTestedFingerprint('');
             setPassword('');
             setPrivateKey('');
             setPassphrase('');
-            navigate(`/nodes/${node.id}/overview`);
-            await refreshNode();
+            navigate(`/nodes/${node.id}/installation?track=1`);
         } catch (reinstallError) {
             setError(
                 reinstallError instanceof ApiError
@@ -1603,21 +1700,32 @@ export default function NodeDetail() {
                         {tab === 'installation' && (
                             <div className='mx-auto max-w-6xl space-y-5'>
                                 {installation && (
-                                    <div className='flex flex-col gap-4 rounded-xl border border-border bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                                        <div className='min-w-0'>
-                                            <div className='flex flex-wrap items-center gap-3'>
-                                                <h2 className='text-base font-semibold'>
-                                                    Agent installation
-                                                </h2>
-                                                <StatusBadge status={installation.status} />
+                                    <div className='space-y-4 rounded-xl border border-border bg-surface px-5 py-4'>
+                                        <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+                                            <div className='min-w-0'>
+                                                <div className='flex flex-wrap items-center gap-3'>
+                                                    <h2 className='text-base font-semibold'>
+                                                        Agent installation
+                                                    </h2>
+                                                    <StatusBadge status={installation.status} />
+                                                </div>
+                                                <p className='mt-1 text-sm text-muted'>
+                                                    Node ID{' '}
+                                                    <span className='break-all font-mono text-xs text-foreground'>
+                                                        {installation.node_id}
+                                                    </span>
+                                                </p>
                                             </div>
-                                            <p className='mt-1 text-sm text-muted'>
-                                                Node ID{' '}
-                                                <span className='break-all font-mono text-xs text-foreground'>
-                                                    {installation.node_id}
-                                                </span>
-                                            </p>
+                                            {trackInstallation &&
+                                                !['ONLINE', 'INSTALL_FAILED', 'DISABLED'].includes(
+                                                    installation.status
+                                                ) && (
+                                                    <span className='text-xs text-muted'>
+                                                        Updating automatically
+                                                    </span>
+                                                )}
                                         </div>
+                                        <InstallationProgress status={installation.status} />
                                     </div>
                                 )}
 

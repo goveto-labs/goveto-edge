@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/storage/gen/model"
 )
 
 func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
@@ -35,6 +36,20 @@ func TestAllSucceeded(t *testing.T) {
 				t.Fatalf("allSucceeded() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestNextPublishVersionHandlesMissingHistory(t *testing.T) {
+	if got := nextPublishVersion(1, nil, nil); got != 2 {
+		t.Fatalf("next version = %d, want 2", got)
+	}
+	pending := &model.PublishJob{Version: 7}
+	if got := nextPublishVersion(2, pending, nil); got != 7 {
+		t.Fatalf("pending version = %d, want 7", got)
+	}
+	latest := &model.ConfigVersion{Version: 9}
+	if got := nextPublishVersion(3, nil, latest); got != 10 {
+		t.Fatalf("version after history = %d, want 10", got)
 	}
 }
 

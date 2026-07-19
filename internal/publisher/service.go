@@ -31,6 +31,24 @@ func New(db *client.Client, cipher *node.CredentialCipher) *Service {
 	return &Service{db: db, cipher: cipher, concurrency: 8}
 }
 
+// EnqueueCluster republishes every site after the cluster's available node set
+// changes, for example when a freshly installed node becomes online.
+func (s *Service) EnqueueCluster(ctx context.Context, clusterID string) error {
+	sites, err := s.db.Site.Query().
+		Where(query.Site.ClusterId.Equals(clusterID)).
+		Do(ctx)
+	if err != nil {
+		return err
+	}
+	var enqueueErrors []error
+	for index := range sites {
+		if _, enqueueErr := s.Enqueue(ctx, sites[index].Id); enqueueErr != nil {
+			enqueueErrors = append(enqueueErrors, fmt.Errorf("site %s: %w", sites[index].Id, enqueueErr))
+		}
+	}
+	return errors.Join(enqueueErrors...)
+}
+
 func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob, error) {
 	var job *model.PublishJob
 	err := s.db.Tx(ctx, func(tx *client.Client) error {
@@ -43,6 +61,9 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 		if err != nil {
 			return err
 		}
+		if site == nil {
+			return fmt.Errorf("site %s not found", siteID)
+		}
 
 		pending, pendingErr := tx.PublishJob.Query().
 			Where(
@@ -51,16 +72,21 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 			).
 			OrderBy(query.PublishJob.CreatedAt.Desc()).
 			First(ctx)
-
-		version := site.Version + 1
-		if pendingErr == nil {
-			version = pending.Version
-		} else if latest, latestErr := tx.ConfigVersion.Query().
-			Where(query.ConfigVersion.SiteId.Equals(siteID)).
-			OrderBy(query.ConfigVersion.Version.Desc()).
-			First(ctx); latestErr == nil && latest.Version >= version {
-			version = latest.Version + 1
+		if pendingErr != nil {
+			return pendingErr
 		}
+
+		var latest *model.ConfigVersion
+		if pending == nil {
+			latest, err = tx.ConfigVersion.Query().
+				Where(query.ConfigVersion.SiteId.Equals(siteID)).
+				OrderBy(query.ConfigVersion.Version.Desc()).
+				First(ctx)
+			if err != nil {
+				return err
+			}
+		}
+		version := nextPublishVersion(site.Version, pending, latest)
 
 		config, targets, err := s.buildWith(tx, ctx, site, uint64(version))
 		if err != nil {
@@ -78,7 +104,7 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 		}
 
 		hash := sha256.Sum256(configJSON)
-		if pendingErr == nil {
+		if pending != nil {
 			if _, err = tx.ConfigVersion.Update().
 				Where(
 					query.ConfigVersion.SiteId.Equals(siteID),
@@ -126,6 +152,17 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 		return err
 	})
 	return job, err
+}
+
+func nextPublishVersion(siteVersion int64, pending *model.PublishJob, latest *model.ConfigVersion) int64 {
+	if pending != nil {
+		return pending.Version
+	}
+	version := siteVersion + 1
+	if latest != nil && latest.Version >= version {
+		return latest.Version + 1
+	}
+	return version
 }
 
 func (s *Service) Run(ctx context.Context) {
@@ -484,7 +521,10 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 	}
 
 	nodes, err := db.Node.Query().
-		Where(query.Node.ClusterId.Equals(site.ClusterId)).
+		Where(
+			query.Node.ClusterId.Equals(site.ClusterId),
+			query.Node.Status.Equals(model.NodeStatusONLINE),
+		).
 		Do(ctx)
 	if err != nil {
 		return config, nil, err
@@ -492,10 +532,6 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 
 	targets := make([]target, 0, len(nodes))
 	for _, n := range nodes {
-		if n.Status == model.NodeStatusDISABLED {
-			continue
-		}
-
 		addresses, addressErr := db.NodeAddress.Query().
 			Where(query.NodeAddress.NodeId.Equals(n.Id)).
 			OrderBy(query.NodeAddress.CreatedAt.Asc()).

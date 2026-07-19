@@ -183,3 +183,31 @@ func TestRequestSetsSignedHeaders(t *testing.T) {
 		t.Fatal("signature does not verify")
 	}
 }
+
+func TestAckRetriesConnectionEOF(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/logs/ack" {
+			http.NotFound(w, r)
+			return
+		}
+		if attempts.Add(1) == 1 {
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = connection.Close()
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := New(server.URL, "node-1", "secret")
+	if err := client.ack(context.Background(), 9); err != nil {
+		t.Fatalf("ack after transient EOF: %v", err)
+	}
+	if attempts.Load() != 2 {
+		t.Fatalf("ack attempts = %d, want 2", attempts.Load())
+	}
+}

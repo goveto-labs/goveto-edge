@@ -2,7 +2,10 @@ package edgeagent
 
 import (
 	"encoding/json"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -101,6 +104,63 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 		t.Fatalf("restored config version: %d", restored.ConfigVersion())
 	}
 	_ = restored.Stop()
+}
+
+func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
+	ensureAgentLogSink(t)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("proxied:" + r.URL.Path))
+	}))
+	defer origin.Close()
+
+	originAddress := strings.TrimPrefix(origin.URL, "http://")
+	port := freePort(t)
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
+	manager.SetAgentHost("node-id")
+	config := SiteConfig{
+		SiteID:   "site-http",
+		Version:  1,
+		Domains:  []string{"site.example.test"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
+		Origins:  []OriginConfig{{Protocol: "http", Address: originAddress}},
+	}
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatalf("apply site: %v", err)
+	}
+	defer manager.Stop()
+
+	request, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/hello", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Host = "site.example.test"
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("request site: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK || string(body) != "proxied:/hello" {
+		t.Fatalf("unexpected proxy response: status=%d body=%q", response.StatusCode, body)
+	}
+
+	unmatched, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unmatched.Host = "unknown.example.test"
+	unmatchedResponse, err := http.DefaultClient.Do(unmatched)
+	if err != nil {
+		t.Fatalf("request unmatched host: %v", err)
+	}
+	defer unmatchedResponse.Body.Close()
+	if unmatchedResponse.StatusCode != http.StatusNotFound {
+		t.Fatalf("unmatched host status=%d, want 404", unmatchedResponse.StatusCode)
+	}
 }
 
 func TestHTTPSOriginRendersTLSTransport(t *testing.T) {

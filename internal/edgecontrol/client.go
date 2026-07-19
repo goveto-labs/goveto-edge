@@ -176,21 +176,37 @@ func retryDelay(ctx context.Context) error {
 
 func (c *Client) ack(ctx context.Context, through uint64) error {
 	body, _ := json.Marshal(map[string]uint64{"through": through})
-	request, err := c.request(ctx, http.MethodPost, "/v1/logs/ack", body)
-	if err != nil {
-		return err
-	}
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		request, err := c.request(ctx, http.MethodPost, "/v1/logs/ack", body)
+		if err != nil {
+			return err
+		}
 
-	response, err := c.http.Do(request)
-	if err != nil {
-		return err
+		response, err := c.http.Do(request)
+		if err == nil {
+			response.Body.Close()
+			if response.StatusCode == http.StatusNoContent {
+				return nil
+			}
+			if response.StatusCode < 500 {
+				return fmt.Errorf("ack agent logs: %s", response.Status)
+			}
+			lastErr = fmt.Errorf("ack agent logs: %s", response.Status)
+		} else {
+			lastErr = err
+		}
+		if attempt < 2 {
+			timer := time.NewTimer(250 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return ctx.Err()
+			case <-timer.C:
+			}
+		}
 	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("ack agent logs: %s", response.Status)
-	}
-	return nil
+	return lastErr
 }
 
 func (c *Client) request(ctx context.Context, method, path string, body []byte) (*http.Request, error) {

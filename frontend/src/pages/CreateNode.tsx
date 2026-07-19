@@ -211,7 +211,7 @@ export default function CreateNode() {
         setSubmitting(true);
         setSubmitError('');
         try {
-            await nodeApi.create({
+            const created = await nodeApi.create({
                 name,
                 addresses: addresses.map((item) => item.value).filter(Boolean),
                 dns_line_ids: Array.from(dnsLineIds),
@@ -219,7 +219,7 @@ export default function CreateNode() {
                 region_ids: Array.from(regionIds),
                 ssh: sshPayload,
             });
-            navigate('/nodes');
+            navigate(`/nodes/${created.id}/installation?track=1`);
         } catch (err) {
             setSubmitError(err instanceof ApiError ? err.message : 'Failed to create node');
         } finally {

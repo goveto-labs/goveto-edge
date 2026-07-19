@@ -496,6 +496,17 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 			}
 		}
 	}
+	routes = append(routes, map[string]any{
+		"@id": "goveto_unmatched_host",
+		"handle": []any{
+			map[string]any{
+				"handler":     "static_response",
+				"status_code": http.StatusNotFound,
+				"body":        "site host not configured\n",
+			},
+		},
+		"terminal": true,
+	})
 
 	listen := keys(listeners)
 	protocolList := keys(protocols)

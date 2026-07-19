@@ -114,6 +114,9 @@ func main() {
 		func(callbackCtx context.Context, clusterID string) {
 			go func() {
 				_, _ = dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID)
+				if err := publishService.EnqueueCluster(callbackCtx, clusterID); err != nil {
+					slog.Warn("republish cluster sites after node status change", "cluster_id", clusterID, "error", err)
+				}
 			}()
 		},
 	).Run(ctx)

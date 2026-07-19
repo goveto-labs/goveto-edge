@@ -179,7 +179,9 @@ export function Layout() {
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
                     <div
                         className={`relative mx-auto min-h-full ${
-                            /^\/nodes\/[^/]+/.test(location.pathname) ? '' : 'max-w-[1600px]'
+                            /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+/.test(location.pathname)
+                                ? ''
+                                : 'max-w-[1600px]'
                         }`}
                     >
                         {clustersReady &&

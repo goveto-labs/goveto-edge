@@ -11,7 +11,7 @@ import type {
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
-import { Button, Input, Switch, TextArea } from '@heroui/react';
+import { Button, Input, TextArea } from '@heroui/react';
 import {
     ArrowLeft,
     BarChart3,
@@ -41,6 +41,7 @@ import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
@@ -949,7 +950,8 @@ export default function SiteDetail() {
                                                                 Accept requests over plain HTTP.
                                                             </div>
                                                         </div>
-                                                        <Switch
+                                                        <ToggleSwitch
+                                                            label='Enable HTTP'
                                                             isSelected={
                                                                 listener.http_enabled ?? true
                                                             }
@@ -992,7 +994,8 @@ export default function SiteDetail() {
                                                                 listener.
                                                             </div>
                                                         </div>
-                                                        <Switch
+                                                        <ToggleSwitch
+                                                            label='Redirect to HTTPS'
                                                             isSelected={
                                                                 listener.redirect_http_to_https ??
                                                                 true
@@ -1095,7 +1098,8 @@ export default function SiteDetail() {
                                                             <div className='text-sm font-medium'>
                                                                 {label}
                                                             </div>
-                                                            <Switch
+                                                            <ToggleSwitch
+                                                                label={label}
                                                                 isSelected={Boolean(
                                                                     listener[
                                                                         key as keyof SiteListenerConfig
@@ -1326,7 +1330,8 @@ export default function SiteDetail() {
                                                                 the edge.
                                                             </div>
                                                         </div>
-                                                        <Switch
+                                                        <ToggleSwitch
+                                                            label='Enable cache'
                                                             isSelected={cache.enabled ?? true}
                                                             onChange={(value) =>
                                                                 setCache({
@@ -1446,7 +1451,8 @@ export default function SiteDetail() {
                                                             <div className='text-sm font-medium'>
                                                                 {label as string}
                                                             </div>
-                                                            <Switch
+                                                            <ToggleSwitch
+                                                                label={label as string}
                                                                 isSelected={selected as boolean}
                                                                 onChange={
                                                                     onChange as (
