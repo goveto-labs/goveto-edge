@@ -1,5 +1,6 @@
 import type {
     CachePolicy,
+    Certificate,
     ClusterChoice,
     DistributionItem,
     MonitoringOverview,
@@ -33,13 +34,23 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 
-import { ApiError, analyticsApi, clustersApi, dnsApi, publishApi, sitesApi } from '@/api';
+import {
+    ApiError,
+    analyticsApi,
+    certificatesApi,
+    clustersApi,
+    dnsApi,
+    publishApi,
+    sitesApi,
+} from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
+import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
+import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
@@ -173,6 +184,7 @@ export default function SiteDetail() {
     const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const publishing = useMemo(() => publishApi(clusterId), [clusterId]);
+    const certificateApi = useMemo(() => certificatesApi(clusterId), [clusterId]);
     const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
     const parts = detailPath.split('/').filter(Boolean);
     const requestedTab = parts[0] || 'overview';
@@ -190,6 +202,8 @@ export default function SiteDetail() {
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
+    const [certificates, setCertificates] = useState<Certificate[]>([]);
+    const [certificateIds, setCertificateIds] = useState<Set<string>>(new Set());
     const [cnameTarget, setCnameTarget] = useState('');
     const [overview, setOverview] = useState<MonitoringOverview | null>(null);
     const [traffic24h, setTraffic24h] = useState<TrafficPoint[]>([]);
@@ -221,17 +235,21 @@ export default function SiteDetail() {
         if (!clusterId || !siteId) return;
         setLoading(true);
         try {
-            const [siteData, listenerData, cacheData, clusterData, dnsData] = await Promise.all([
-                api.get(siteId),
-                api.getListener(siteId),
-                api.getCache(siteId),
-                clustersApi.list(),
-                dns.config(),
-            ]);
+            const [siteData, listenerData, cacheData, clusterData, dnsData, certificateData] =
+                await Promise.all([
+                    api.get(siteId),
+                    api.getListener(siteId),
+                    api.getCache(siteId),
+                    clustersApi.list(),
+                    dns.config(),
+                    certificateApi.list(),
+                ]);
             setSite(siteData);
             setListener(listenerData);
             setCache(cacheData);
             setClusters(clusterData.clusters);
+            setCertificates(certificateData);
+            setCertificateIds(new Set(siteData.certificate_ids));
             setCnameTarget(dnsData.primary_hostname || '');
             setName(siteData.name);
             setTargetCluster(siteData.cluster_id);
@@ -248,7 +266,7 @@ export default function SiteDetail() {
         } finally {
             setLoading(false);
         }
-    }, [api, clusterId, dns, siteId]);
+    }, [api, certificateApi, clusterId, dns, siteId]);
 
     const loadOverview = useCallback(async () => {
         if (!clusterId || !siteId) return;
@@ -361,6 +379,7 @@ export default function SiteDetail() {
         setSite(updated);
         setName(updated.name);
         setTargetCluster(updated.cluster_id);
+        setCertificateIds(new Set(updated.certificate_ids));
         setDomainText(updated.domains.join('\n'));
         setOrigins(
             updated.origins.map((origin, index) => ({
@@ -375,6 +394,16 @@ export default function SiteDetail() {
             const result = await api.updateListener(siteId, listener);
             setListener(result.listener);
         }, 'Listener settings saved and publishing queued.');
+    const saveHTTPS = () =>
+        runSave(async () => {
+            const [updated, result] = await Promise.all([
+                api.update(siteId, { certificate_ids: Array.from(certificateIds) }),
+                api.updateListener(siteId, listener),
+            ]);
+            setSite(updated);
+            setCertificateIds(new Set(updated.certificate_ids));
+            setListener(result.listener);
+        }, 'HTTPS settings saved and publishing queued.');
     const saveCache = () =>
         runSave(async () => {
             const result = await api.updateCache(siteId, cache);
@@ -425,6 +454,17 @@ export default function SiteDetail() {
         `${entry.hostname} ${entry.method} ${entry.path} ${entry.status_code} ${entry.cache_status}`
             .toLowerCase()
             .includes(logQuery.toLowerCase())
+    );
+    const certificateOptions = useMemo(
+        () =>
+            certificates.map((certificate) => ({
+                id: certificate.id,
+                name: certificate.name,
+                detail: certificate.expires_at
+                    ? `Expires ${new Date(certificate.expires_at).toLocaleDateString()}`
+                    : undefined,
+            })),
+        [certificates]
     );
     const enteringDataTab =
         previousDetailPathRef.current !== detailPath && (tab === 'overview' || tab === 'logs');
@@ -767,13 +807,17 @@ export default function SiteDetail() {
                                 </ContentCard>
                             )}
                             {tab === 'settings' && (
-                                <div className='grid gap-6 lg:grid-cols-[190px_minmax(0,1fr)]'>
-                                    <nav className='flex gap-1 overflow-x-auto lg:flex-col'>
+                                <div className='grid gap-6 lg:grid-cols-[200px_1fr]'>
+                                    <nav className='flex flex-col gap-1'>
                                         {settingsPages.map((item) => {
                                             const Icon = item.icon;
                                             return (
                                                 <button
-                                                    className={`flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium ${settingsPage === item.id ? 'bg-surface-secondary' : 'text-muted hover:bg-surface-secondary hover:text-foreground'}`}
+                                                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                                                        settingsPage === item.id
+                                                            ? 'bg-surface-secondary text-foreground'
+                                                            : 'text-muted hover:bg-surface-secondary hover:text-foreground'
+                                                    }`}
                                                     key={item.id}
                                                     type='button'
                                                     onClick={() => navigateTo('settings', item.id)}
@@ -1021,13 +1065,51 @@ export default function SiteDetail() {
                                             </ContentCard>
                                         )}
                                         {settingsPage === 'https' && (
-                                            <ContentCard noPadding>
-                                                <SectionHeader
-                                                    title='HTTPS configuration'
-                                                    description='TLS protocols, HSTS, and certificate delivery.'
-                                                />
-                                                <div className='space-y-5 p-5'>
-                                                    <div className='grid gap-5 sm:grid-cols-2'>
+                                            <div className='space-y-4'>
+                                                <ContentCard className='overflow-visible' noPadding>
+                                                    <SectionHeader
+                                                        title='HTTPS configuration'
+                                                        description='Choose certificates and configure the HTTPS listener.'
+                                                    />
+                                                    <div className='space-y-5 p-5'>
+                                                        <FormField
+                                                            label='Certificates'
+                                                            hint='Select from every certificate available in this cluster.'
+                                                        >
+                                                            <SearchableMultiAddField
+                                                                addLabel='Add certificate'
+                                                                dialogTitle='Select certificates'
+                                                                emptyLabel='No certificates selected'
+                                                                itemLabel='certificate'
+                                                                options={certificateOptions}
+                                                                searchPlaceholder='Search certificates…'
+                                                                selected={certificateIds}
+                                                                onChange={setCertificateIds}
+                                                            />
+                                                        </FormField>
+                                                        <div className='flex items-center justify-between gap-4 rounded-xl border border-border/70 bg-surface-secondary/20 px-4 py-3.5'>
+                                                            <div>
+                                                                <div className='text-sm font-medium'>
+                                                                    Enable HTTPS
+                                                                </div>
+                                                                <div className='mt-0.5 text-xs text-muted'>
+                                                                    Serve this site over TLS using
+                                                                    the selected certificates.
+                                                                </div>
+                                                            </div>
+                                                            <ToggleSwitch
+                                                                label='Enable HTTPS'
+                                                                isSelected={Boolean(
+                                                                    listener.https_enabled
+                                                                )}
+                                                                onChange={(https_enabled) =>
+                                                                    setListener({
+                                                                        ...listener,
+                                                                        https_enabled,
+                                                                    })
+                                                                }
+                                                            />
+                                                        </div>
                                                         <FormField
                                                             htmlFor='https-port'
                                                             label='HTTPS port'
@@ -1051,6 +1133,15 @@ export default function SiteDetail() {
                                                                 }
                                                             />
                                                         </FormField>
+                                                    </div>
+                                                </ContentCard>
+
+                                                <ContentCard noPadding>
+                                                    <SectionHeader
+                                                        title='Advanced HTTPS settings'
+                                                        description='Protocol compatibility, transport features, and strict transport security.'
+                                                    />
+                                                    <div className='space-y-5 p-5'>
                                                         <FormField
                                                             htmlFor='tls-min'
                                                             label='Minimum TLS version'
@@ -1078,78 +1169,80 @@ export default function SiteDetail() {
                                                                 </option>
                                                             </select>
                                                         </FormField>
-                                                    </div>
-                                                    {[
-                                                        ['Enable HTTPS', 'https_enabled'],
-                                                        ['HTTP/2', 'http2_enabled'],
-                                                        ['HTTP/3', 'http3_enabled'],
-                                                        ['OCSP stapling', 'ocsp_stapling_enabled'],
-                                                        ['HSTS', 'hsts_enabled'],
-                                                        [
-                                                            'HSTS include subdomains',
-                                                            'hsts_include_subdomains',
-                                                        ],
-                                                        ['HSTS preload', 'hsts_preload'],
-                                                    ].map(([label, key]) => (
-                                                        <div
-                                                            className='flex items-center justify-between gap-4'
-                                                            key={key}
-                                                        >
-                                                            <div className='text-sm font-medium'>
-                                                                {label}
+                                                        {[
+                                                            ['HTTP/2', 'http2_enabled'],
+                                                            ['HTTP/3', 'http3_enabled'],
+                                                            [
+                                                                'OCSP stapling',
+                                                                'ocsp_stapling_enabled',
+                                                            ],
+                                                            ['HSTS', 'hsts_enabled'],
+                                                            [
+                                                                'HSTS include subdomains',
+                                                                'hsts_include_subdomains',
+                                                            ],
+                                                            ['HSTS preload', 'hsts_preload'],
+                                                        ].map(([label, key]) => (
+                                                            <div
+                                                                className='flex items-center justify-between gap-4'
+                                                                key={key}
+                                                            >
+                                                                <div className='text-sm font-medium'>
+                                                                    {label}
+                                                                </div>
+                                                                <ToggleSwitch
+                                                                    label={label}
+                                                                    isSelected={Boolean(
+                                                                        listener[
+                                                                            key as keyof SiteListenerConfig
+                                                                        ]
+                                                                    )}
+                                                                    onChange={(value) =>
+                                                                        setListener({
+                                                                            ...listener,
+                                                                            [key]: value,
+                                                                        })
+                                                                    }
+                                                                />
                                                             </div>
-                                                            <ToggleSwitch
-                                                                label={label}
-                                                                isSelected={Boolean(
-                                                                    listener[
-                                                                        key as keyof SiteListenerConfig
-                                                                    ]
-                                                                )}
-                                                                onChange={(value) =>
-                                                                    setListener({
-                                                                        ...listener,
-                                                                        [key]: value,
-                                                                    })
-                                                                }
-                                                            />
+                                                        ))}
+                                                        {listener.hsts_enabled && (
+                                                            <FormField
+                                                                htmlFor='hsts-age'
+                                                                label='HSTS max age'
+                                                            >
+                                                                <Input
+                                                                    id='hsts-age'
+                                                                    min={0}
+                                                                    type='number'
+                                                                    value={String(
+                                                                        listener.hsts_max_age ??
+                                                                            31536000
+                                                                    )}
+                                                                    variant='secondary'
+                                                                    onChange={(event) =>
+                                                                        setListener({
+                                                                            ...listener,
+                                                                            hsts_max_age: Number(
+                                                                                event.target.value
+                                                                            ),
+                                                                        })
+                                                                    }
+                                                                />
+                                                            </FormField>
+                                                        )}
+                                                        <div className='flex justify-end border-t border-border pt-4'>
+                                                            <Button
+                                                                isDisabled={saving}
+                                                                onPress={() => void saveHTTPS()}
+                                                            >
+                                                                <ShieldCheck className='mr-1.5 h-4 w-4' />
+                                                                Save HTTPS settings
+                                                            </Button>
                                                         </div>
-                                                    ))}
-                                                    {listener.hsts_enabled && (
-                                                        <FormField
-                                                            htmlFor='hsts-age'
-                                                            label='HSTS max age'
-                                                        >
-                                                            <Input
-                                                                id='hsts-age'
-                                                                min={0}
-                                                                type='number'
-                                                                value={String(
-                                                                    listener.hsts_max_age ??
-                                                                        31536000
-                                                                )}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setListener({
-                                                                        ...listener,
-                                                                        hsts_max_age: Number(
-                                                                            event.target.value
-                                                                        ),
-                                                                    })
-                                                                }
-                                                            />
-                                                        </FormField>
-                                                    )}
-                                                    <div className='flex justify-end border-t border-border pt-4'>
-                                                        <Button
-                                                            isDisabled={saving}
-                                                            onPress={() => void saveListener()}
-                                                        >
-                                                            <ShieldCheck className='mr-1.5 h-4 w-4' />
-                                                            Save HTTPS settings
-                                                        </Button>
                                                     </div>
-                                                </div>
-                                            </ContentCard>
+                                                </ContentCard>
+                                            </div>
                                         )}
                                         {settingsPage === 'origins' && (
                                             <ContentCard noPadding>
@@ -1314,165 +1407,12 @@ export default function SiteDetail() {
                                             </ContentCard>
                                         )}
                                         {settingsPage === 'cache' && (
-                                            <ContentCard noPadding>
-                                                <SectionHeader
-                                                    title='Cache configuration'
-                                                    description='Control response caching, stale delivery, and cache headers.'
-                                                />
-                                                <div className='space-y-5 p-5'>
-                                                    <div className='flex items-center justify-between gap-4'>
-                                                        <div>
-                                                            <div className='text-sm font-medium'>
-                                                                Enable cache
-                                                            </div>
-                                                            <div className='text-xs text-muted'>
-                                                                Store eligible origin responses at
-                                                                the edge.
-                                                            </div>
-                                                        </div>
-                                                        <ToggleSwitch
-                                                            label='Enable cache'
-                                                            isSelected={cache.enabled ?? true}
-                                                            onChange={(value) =>
-                                                                setCache({
-                                                                    ...cache,
-                                                                    enabled: value,
-                                                                })
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <div className='grid gap-5 sm:grid-cols-2'>
-                                                        <FormField
-                                                            htmlFor='cache-ttl'
-                                                            label='Default TTL (seconds)'
-                                                        >
-                                                            <Input
-                                                                id='cache-ttl'
-                                                                min={0}
-                                                                type='number'
-                                                                value={String(
-                                                                    cache.ttl?.default_seconds ??
-                                                                        3600
-                                                                )}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setCache({
-                                                                        ...cache,
-                                                                        ttl: {
-                                                                            ...cache.ttl,
-                                                                            default_seconds: Number(
-                                                                                event.target.value
-                                                                            ),
-                                                                        },
-                                                                    })
-                                                                }
-                                                            />
-                                                        </FormField>
-                                                        <FormField
-                                                            htmlFor='stale-time'
-                                                            label='Stale if error (seconds)'
-                                                        >
-                                                            <Input
-                                                                id='stale-time'
-                                                                min={0}
-                                                                type='number'
-                                                                value={String(
-                                                                    cache.stale?.if_error_seconds ??
-                                                                        60
-                                                                )}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setCache({
-                                                                        ...cache,
-                                                                        stale: {
-                                                                            ...cache.stale,
-                                                                            if_error_seconds:
-                                                                                Number(
-                                                                                    event.target
-                                                                                        .value
-                                                                                ),
-                                                                        },
-                                                                    })
-                                                                }
-                                                            />
-                                                        </FormField>
-                                                    </div>
-                                                    {[
-                                                        [
-                                                            'Serve stale on origin error',
-                                                            cache.stale?.enabled ?? true,
-                                                            (value: boolean) =>
-                                                                setCache({
-                                                                    ...cache,
-                                                                    stale: {
-                                                                        ...cache.stale,
-                                                                        enabled: value,
-                                                                    },
-                                                                }),
-                                                        ],
-                                                        [
-                                                            'Expose X-Cache header',
-                                                            cache.response_headers?.x_cache ?? true,
-                                                            (value: boolean) =>
-                                                                setCache({
-                                                                    ...cache,
-                                                                    response_headers: {
-                                                                        ...cache.response_headers,
-                                                                        x_cache: value,
-                                                                    },
-                                                                }),
-                                                        ],
-                                                        [
-                                                            'Expose Age header',
-                                                            cache.response_headers?.age ?? true,
-                                                            (value: boolean) =>
-                                                                setCache({
-                                                                    ...cache,
-                                                                    response_headers: {
-                                                                        ...cache.response_headers,
-                                                                        age: value,
-                                                                    },
-                                                                }),
-                                                        ],
-                                                        [
-                                                            'Allow PURGE method',
-                                                            cache.allow_purge_method ?? false,
-                                                            (value: boolean) =>
-                                                                setCache({
-                                                                    ...cache,
-                                                                    allow_purge_method: value,
-                                                                }),
-                                                        ],
-                                                    ].map(([label, selected, onChange]) => (
-                                                        <div
-                                                            className='flex items-center justify-between gap-4'
-                                                            key={label as string}
-                                                        >
-                                                            <div className='text-sm font-medium'>
-                                                                {label as string}
-                                                            </div>
-                                                            <ToggleSwitch
-                                                                label={label as string}
-                                                                isSelected={selected as boolean}
-                                                                onChange={
-                                                                    onChange as (
-                                                                        value: boolean
-                                                                    ) => void
-                                                                }
-                                                            />
-                                                        </div>
-                                                    ))}
-                                                    <div className='flex justify-end border-t border-border pt-4'>
-                                                        <Button
-                                                            isDisabled={saving}
-                                                            onPress={() => void saveCache()}
-                                                        >
-                                                            <Save className='mr-1.5 h-4 w-4' />
-                                                            Save cache settings
-                                                        </Button>
-                                                    </div>
-                                                </div>
-                                            </ContentCard>
+                                            <SiteCacheSettings
+                                                cache={cache}
+                                                saving={saving}
+                                                onChange={setCache}
+                                                onSave={() => void saveCache()}
+                                            />
                                         )}
                                     </div>
                                 </div>

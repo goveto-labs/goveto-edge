@@ -85,7 +85,6 @@ export default function Sites() {
                         <th>Domains</th>
                         <th>Status</th>
                         <th>Certificates</th>
-                        <th>Version</th>
                         <th>Updated</th>
                         <th className='text-right'>Actions</th>
                     </tr>
@@ -112,7 +111,6 @@ export default function Sites() {
                                 <StatusBadge status={site.status} />
                             </td>
                             <td className='text-sm text-muted'>{site.certificate_count}</td>
-                            <td className='text-sm text-muted'>v{site.version}</td>
                             <td className='whitespace-nowrap text-sm text-muted'>
                                 {new Date(site.updated_at).toLocaleString()}
                             </td>

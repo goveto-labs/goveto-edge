@@ -257,12 +257,14 @@ export interface SiteSummary {
 }
 export interface SiteDetails extends SiteSummary {
     cluster_id: string;
+    certificate_ids: string[];
     origins: SiteOrigin[];
     created_at: string;
 }
 export interface UpdateSiteRequest {
     name?: string;
     cluster_id?: string;
+    certificate_ids?: string[];
     domains?: string[];
     origins?: SiteOrigin[];
 }

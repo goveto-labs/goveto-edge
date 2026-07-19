@@ -16,23 +16,25 @@ import (
 )
 
 type siteDetails struct {
-	ID           string           `json:"id"`
-	ClusterID    string           `json:"cluster_id"`
-	Name         string           `json:"name"`
-	Status       model.SiteStatus `json:"status"`
-	Domains      []string         `json:"domains"`
-	Origins      []originInput    `json:"origins"`
-	Version      int64            `json:"version"`
-	CreatedAt    time.Time        `json:"created_at"`
-	UpdatedAt    time.Time        `json:"updated_at"`
-	Certificates int              `json:"certificate_count"`
+	ID             string           `json:"id"`
+	ClusterID      string           `json:"cluster_id"`
+	Name           string           `json:"name"`
+	Status         model.SiteStatus `json:"status"`
+	Domains        []string         `json:"domains"`
+	CertificateIDs []string         `json:"certificate_ids"`
+	Origins        []originInput    `json:"origins"`
+	Version        int64            `json:"version"`
+	CreatedAt      time.Time        `json:"created_at"`
+	UpdatedAt      time.Time        `json:"updated_at"`
+	Certificates   int              `json:"certificate_count"`
 }
 
 type updateDetailsRequest struct {
-	Name      *string        `json:"name"`
-	ClusterID *string        `json:"cluster_id"`
-	Domains   *[]string      `json:"domains"`
-	Origins   *[]originInput `json:"origins"`
+	Name           *string        `json:"name"`
+	ClusterID      *string        `json:"cluster_id"`
+	CertificateIDs *[]string      `json:"certificate_ids"`
+	Domains        *[]string      `json:"domains"`
+	Origins        *[]originInput `json:"origins"`
 }
 
 func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
@@ -58,12 +60,15 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 	}
 	result := siteDetails{
 		ID: site.Id, ClusterID: site.ClusterId, Name: site.Name, Status: site.Status,
-		Domains: make([]string, len(domains)), Origins: make([]originInput, len(backends)),
+		Domains: make([]string, len(domains)), CertificateIDs: make([]string, len(certificates)), Origins: make([]originInput, len(backends)),
 		Version: site.Version, CreatedAt: site.CreatedAt, UpdatedAt: site.UpdatedAt,
 		Certificates: len(certificates),
 	}
 	for index, domain := range domains {
 		result.Domains[index] = domain.Hostname
+	}
+	for index, certificate := range certificates {
+		result.CertificateIDs[index] = certificate.CertificateId
 	}
 	for index, backend := range backends {
 		result.Origins[index] = originInput{Protocol: backend.Protocol, Address: backend.Address, Weight: backend.Weight}
@@ -132,6 +137,10 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 		if input.ClusterID != nil && strings.TrimSpace(*input.ClusterID) != "" {
 			targetCluster = strings.TrimSpace(*input.ClusterID)
 		}
+		certificateIDs := current.CertificateIDs
+		if input.CertificateIDs != nil {
+			certificateIDs = *input.CertificateIDs
+		}
 		if targetCluster != current.ClusterID {
 			memberships, findErr := db.ClusterMember.Query().Where(
 				query.ClusterMember.ClusterId.Equals(targetCluster),
@@ -143,8 +152,22 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 			if len(memberships) == 0 {
 				return echo.NewHTTPError(http.StatusForbidden, "target cluster access denied")
 			}
-			if current.Certificates > 0 {
+			if input.CertificateIDs == nil && current.Certificates > 0 {
 				return echo.NewHTTPError(http.StatusBadRequest, "remove site certificates before transferring the site")
+			}
+		}
+		seenCertificateIDs := make(map[string]struct{}, len(certificateIDs))
+		for _, certificateID := range certificateIDs {
+			if _, exists := seenCertificateIDs[certificateID]; exists {
+				return echo.NewHTTPError(http.StatusBadRequest, "duplicate certificate")
+			}
+			seenCertificateIDs[certificateID] = struct{}{}
+			certificate, findErr := db.Certificate.FindUnique(c.Request().Context(), query.Certificate.Id.Equals(certificateID))
+			if findErr != nil {
+				return findErr
+			}
+			if certificate == nil || certificate.ClusterId != targetCluster {
+				return echo.NewHTTPError(http.StatusBadRequest, "certificate does not belong to cluster")
 			}
 		}
 
@@ -192,6 +215,19 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 					}
 				}
 			}
+			if input.CertificateIDs != nil {
+				if _, deleteErr := tx.SiteCertificate.Delete().Where(query.SiteCertificate.SiteId.Equals(current.ID)).DoMany(ctx); deleteErr != nil {
+					return deleteErr
+				}
+				for _, certificateID := range certificateIDs {
+					if _, createErr := tx.SiteCertificate.Create().Set(
+						query.SiteCertificate.SiteId.Set(current.ID),
+						query.SiteCertificate.CertificateId.Set(certificateID),
+					).Do(ctx); createErr != nil {
+						return createErr
+					}
+				}
+			}
 			if targetCluster != current.ClusterID {
 				if _, deleteErr := tx.NodeSiteConfigVersion.Delete().Where(query.NodeSiteConfigVersion.SiteId.Equals(current.ID)).DoMany(ctx); deleteErr != nil {
 					return deleteErr
@@ -208,6 +244,8 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 		current.Name = name
 		current.ClusterID = targetCluster
 		current.Domains = domains
+		current.CertificateIDs = certificateIDs
+		current.Certificates = len(certificateIDs)
 		current.Origins = origins
 		current.UpdatedAt = time.Now().UTC()
 		return types.JSON(c, http.StatusOK, current)
