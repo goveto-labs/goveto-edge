@@ -462,6 +462,7 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 			PrivateKeyPEM:  certificate.PrivateKeyPem,
 		})
 	}
+	normalizeListenerForCertificates(&config)
 
 	if site.PolicyId != nil {
 		policy, err := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
@@ -515,6 +516,23 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		return config, nil, errors.New("cluster has no publishable nodes")
 	}
 	return config, targets, nil
+}
+
+// Sites can be created without a certificate. Keep those sites reachable over
+// HTTP instead of sending an invalid HTTPS configuration that the agent rejects.
+func normalizeListenerForCertificates(config *edgeprotocol.SiteConfig) {
+	if len(config.Certificates) > 0 || !config.Listener.HTTPSEnabled {
+		return
+	}
+	config.Listener.HTTPEnabled = true
+	config.Listener.RedirectHTTPToHTTPS = false
+	config.Listener.HTTPSEnabled = false
+	config.Listener.HTTP2Enabled = false
+	config.Listener.HTTP3Enabled = false
+	config.Listener.HSTSEnabled = false
+	config.Listener.HSTSIncludeSubdomains = false
+	config.Listener.HSTSPreload = false
+	config.Listener.OCSPStaplingEnabled = false
 }
 
 func (s *Service) loadCredentials(ctx context.Context, targets []target) error {

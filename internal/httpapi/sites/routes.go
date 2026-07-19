@@ -198,8 +198,20 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				return err
 			}
 
+			listenerSets := []query.SiteListenerConfigSetClause{
+				query.SiteListenerConfig.SiteId.Set(siteID),
+			}
+			if len(input.CertificateIDs) == 0 {
+				listenerSets = append(listenerSets,
+					query.SiteListenerConfig.RedirectHttpToHttps.Set(false),
+					query.SiteListenerConfig.HttpsEnabled.Set(false),
+					query.SiteListenerConfig.Http2Enabled.Set(false),
+					query.SiteListenerConfig.Http3Enabled.Set(false),
+					query.SiteListenerConfig.OcspStaplingEnabled.Set(false),
+				)
+			}
 			if _, err := tx.SiteListenerConfig.Create().
-				Set(query.SiteListenerConfig.SiteId.Set(siteID)).
+				Set(listenerSets...).
 				Do(ctx); err != nil {
 				return err
 			}

@@ -127,7 +127,7 @@ export default function CreateSite() {
                 certificate_ids: Array.from(certificateIds),
                 origins: validOrigins.map(({ localId: _, ...origin }) => origin),
             });
-            navigate(`/sites?siteId=${created.id}`);
+            navigate(`/sites/${created.id}/overview`);
         } catch (createError) {
             setError(
                 createError instanceof ApiError ? createError.message : 'Failed to create site'

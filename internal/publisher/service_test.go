@@ -1,6 +1,10 @@
 package publisher
 
-import "testing"
+import (
+	"testing"
+
+	"goveto-edge/internal/edgeprotocol"
+)
 
 func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
 	targets := []target{{NodeID: "a"}, {NodeID: "b"}, {NodeID: "c"}}
@@ -31,5 +35,51 @@ func TestAllSucceeded(t *testing.T) {
 				t.Fatalf("allSucceeded() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeListenerWithoutCertificatesFallsBackToHTTP(t *testing.T) {
+	config := edgeprotocol.SiteConfig{
+		SiteID:  "site-http",
+		Version: 1,
+		Domains: []string{"example.test"},
+		Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin.test:80"}},
+		Listener: edgeprotocol.ListenerConfig{
+			HTTPPort:              80,
+			RedirectHTTPToHTTPS:   true,
+			HTTPSEnabled:          true,
+			HTTPSPort:             443,
+			HTTP2Enabled:          true,
+			HTTP3Enabled:          true,
+			HSTSEnabled:           true,
+			HSTSIncludeSubdomains: true,
+			HSTSPreload:           true,
+			OCSPStaplingEnabled:   true,
+		},
+	}
+
+	normalizeListenerForCertificates(&config)
+
+	if !config.Listener.HTTPEnabled || config.Listener.HTTPSEnabled || config.Listener.RedirectHTTPToHTTPS {
+		t.Fatalf("expected HTTP-only listener, got %#v", config.Listener)
+	}
+	if config.Listener.HTTP2Enabled || config.Listener.HTTP3Enabled || config.Listener.HSTSEnabled || config.Listener.OCSPStaplingEnabled {
+		t.Fatalf("HTTPS-only features remain enabled: %#v", config.Listener)
+	}
+	if err := config.Validate(); err != nil {
+		t.Fatalf("HTTP fallback config should be accepted by the agent: %v", err)
+	}
+}
+
+func TestNormalizeListenerWithCertificatePreservesHTTPS(t *testing.T) {
+	config := edgeprotocol.SiteConfig{
+		Listener:     edgeprotocol.ListenerConfig{HTTPSEnabled: true, RedirectHTTPToHTTPS: true},
+		Certificates: []edgeprotocol.CertificateConfig{{CertificatePEM: "cert", PrivateKeyPEM: "key"}},
+	}
+
+	normalizeListenerForCertificates(&config)
+
+	if !config.Listener.HTTPSEnabled || !config.Listener.RedirectHTTPToHTTPS {
+		t.Fatalf("HTTPS listener was unexpectedly changed: %#v", config.Listener)
 	}
 }
