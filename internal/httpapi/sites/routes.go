@@ -14,6 +14,7 @@ import (
 
 	"golang.org/x/net/idna"
 
+	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
@@ -48,12 +49,14 @@ type siteSummary struct {
 	Status           model.SiteStatus `json:"status"`
 	Domains          []string         `json:"domains"`
 	CertificateCount int              `json:"certificate_count"`
+	BandwidthBPS     uint64           `json:"bandwidth_bps"`
+	QPS              float64          `json:"qps"`
 	Version          int64            `json:"version"`
 	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
-func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service) {
-	e.GET("/api/v1/clusters/:cluster_id/sites", list(db), auth.RequireAuth, clusteraccess.Require(db))
+func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store) {
+	e.GET("/api/v1/clusters/:cluster_id/sites", list(db, analyticsStore), auth.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
@@ -67,28 +70,63 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 // @summary List sites
 // @description List sites in a cluster with their domains and certificate count.
 // @Tags sites
-func list(db *client.Client) echo.HandlerFunc {
+func list(db *client.Client, analyticsStore *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		items, err := db.Site.Query().
 			Where(query.Site.ClusterId.Equals(c.Param("cluster_id"))).
-			Include(query.Site.Domains.Fetch(), query.Site.Certificates.Fetch()).
 			OrderBy(query.Site.UpdatedAt.Desc()).
 			Do(c.Request().Context())
 		if err != nil {
 			return err
 		}
+		siteIDs := make([]string, len(items))
+		for index := range items {
+			siteIDs[index] = items[index].Id
+		}
+		domainsBySite := make(map[string][]string, len(items))
+		certificatesBySite := make(map[string]int, len(items))
+		if len(siteIDs) > 0 {
+			domains, queryErr := db.SiteDomain.Query().
+				Where(query.SiteDomain.SiteId.In(siteIDs...)).
+				OrderBy(query.SiteDomain.CreatedAt.Asc()).
+				Do(c.Request().Context())
+			if queryErr != nil {
+				return queryErr
+			}
+			for index := range domains {
+				domain := domains[index]
+				domainsBySite[domain.SiteId] = append(domainsBySite[domain.SiteId], domain.Hostname)
+			}
+			certificates, queryErr := db.SiteCertificate.Query().
+				Where(query.SiteCertificate.SiteId.In(siteIDs...)).
+				Do(c.Request().Context())
+			if queryErr != nil {
+				return queryErr
+			}
+			for index := range certificates {
+				certificatesBySite[certificates[index].SiteId]++
+			}
+		}
+		ratesBySite := make(map[string]analytics.SiteRate, len(items))
+		if analyticsStore != nil {
+			rates, rateErr := analyticsStore.LatestSiteRates(c.Request().Context(), c.Param("cluster_id"))
+			if rateErr == nil {
+				for index := range rates {
+					ratesBySite[rates[index].SiteID] = rates[index]
+				}
+			}
+		}
 		result := make([]siteSummary, len(items))
 		for index := range items {
-			domains := make([]string, len(items[index].Domains))
-			for domainIndex, domain := range items[index].Domains {
-				domains[domainIndex] = domain.Hostname
-			}
+			rate := ratesBySite[items[index].Id]
 			result[index] = siteSummary{
 				ID:               items[index].Id,
 				Name:             items[index].Name,
 				Status:           items[index].Status,
-				Domains:          domains,
-				CertificateCount: len(items[index].Certificates),
+				Domains:          domainsBySite[items[index].Id],
+				CertificateCount: certificatesBySite[items[index].Id],
+				BandwidthBPS:     rate.BandwidthBPS,
+				QPS:              rate.QPS,
 				Version:          items[index].Version,
 				UpdatedAt:        items[index].UpdatedAt,
 			}

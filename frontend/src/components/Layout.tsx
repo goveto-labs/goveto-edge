@@ -26,7 +26,13 @@ function Greeting() {
 }
 
 function PageTitle({ pathname }: { pathname: string }) {
-    const item = useMemo(() => nav.find((n) => n.path === pathname), [pathname]);
+    const item = useMemo(
+        () =>
+            nav
+                .flatMap((entry) => [entry, ...(entry.children ?? [])])
+                .find((n) => n.path === pathname),
+        [pathname]
+    );
     const title = item?.label ?? 'Dashboard';
 
     return <span className='text-lg font-semibold'>{title}</span>;
@@ -179,7 +185,10 @@ export function Layout() {
                 <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
                     <div
                         className={`relative mx-auto min-h-full ${
-                            /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+/.test(location.pathname)
+                            /^\/nodes\/(?!create(?:\/|$))[^/]+/.test(location.pathname) ||
+                            /^\/sites\/(?!create(?:\/|$)|logs(?:\/|$)|certificates(?:\/|$)|cache(?:\/|$))[^/]+/.test(
+                                location.pathname
+                            )
                                 ? ''
                                 : 'max-w-[1600px]'
                         }`}

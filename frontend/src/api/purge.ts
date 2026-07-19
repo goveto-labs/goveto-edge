@@ -1,4 +1,4 @@
-import type { PurgeJob, PurgeType } from './types.ts';
+import type { PrewarmResult, PurgeJob, PurgeType } from './types.ts';
 
 import { get, post } from './client.ts';
 
@@ -12,4 +12,6 @@ export const purgeApi = (clusterId: string) => ({
     list: (siteId: string) => get<PurgeJob[]>(clusterPath(clusterId, `/sites/${siteId}/purge`)),
     get: (siteId: string, jobId: string) =>
         get<PurgeJob>(clusterPath(clusterId, `/sites/${siteId}/purge/${jobId}`)),
+    prewarm: (siteId: string, urls: string[]) =>
+        post<PrewarmResult[]>(clusterPath(clusterId, `/sites/${siteId}/prewarm`), { urls }),
 });

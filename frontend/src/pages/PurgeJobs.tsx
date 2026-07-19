@@ -1,80 +1,201 @@
-import type { PurgeJob, PurgeType } from '@/api';
+import type { PrewarmResult, PurgeJob, PurgeType, SiteSummary } from '@/api';
 
-import { Button, Input, Label, ListBox, Select } from '@heroui/react';
-import { Eraser, Search } from 'lucide-react';
+import { Button, Input, TextArea } from '@heroui/react';
+import { Eraser, Flame, Globe2, Link2, RefreshCw, Tags } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
-import { ApiError, purgeApi } from '@/api';
+import { ApiError, purgeApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
-const purgeTypes: PurgeType[] = ['URL', 'PREFIX', 'TAG', 'ALL'];
+const purgeOptions: Array<{
+    id: PurgeType;
+    label: string;
+    description: string;
+    placeholder: string;
+    inputLabel: string;
+    icon: typeof Link2;
+}> = [
+    {
+        id: 'URL',
+        label: 'Exact URL',
+        description: 'Remove one cached URL without affecting related paths.',
+        placeholder: 'https://example.com/assets/app.css',
+        inputLabel: 'URL to refresh',
+        icon: Link2,
+    },
+    {
+        id: 'PREFIX',
+        label: 'Path prefix',
+        description: 'Remove every cached response below a path.',
+        placeholder: '/assets/',
+        inputLabel: 'Path prefix',
+        icon: Globe2,
+    },
+    {
+        id: 'TAG',
+        label: 'Cache tag',
+        description: 'Remove responses associated with one surrogate key.',
+        placeholder: 'product:1234',
+        inputLabel: 'Cache tag',
+        icon: Tags,
+    },
+    {
+        id: 'ALL',
+        label: 'Entire site',
+        description: 'Remove all cached responses for the selected site.',
+        placeholder: '',
+        inputLabel: '',
+        icon: Eraser,
+    },
+];
 
-export default function PurgeJobs() {
+type FixedSite = Pick<SiteSummary, 'id' | 'name' | 'domains'>;
+
+export function CacheOperations({
+    fixedSite,
+    embedded = false,
+}: {
+    fixedSite?: FixedSite;
+    embedded?: boolean;
+}) {
     const { clusterId } = useCluster();
     const api = useMemo(() => purgeApi(clusterId), [clusterId]);
+    const sites = useMemo(() => sitesApi(clusterId), [clusterId]);
     const [searchParams, setSearchParams] = useSearchParams();
-    const siteId = searchParams.get('siteId') ?? '';
+    const siteId = fixedSite?.id ?? searchParams.get('siteId') ?? '';
 
     const [jobs, setJobs] = useState<PurgeJob[]>([]);
+    const [siteItems, setSiteItems] = useState<SiteSummary[]>([]);
     const [type, setType] = useState<PurgeType>('URL');
     const [value, setValue] = useState('');
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
+    const [prewarmURLs, setPrewarmURLs] = useState('');
+    const [prewarming, setPrewarming] = useState(false);
+    const [prewarmResults, setPrewarmResults] = useState<PrewarmResult[]>([]);
     const [error, setError] = useState('');
+    const [message, setMessage] = useState('');
+
+    const selectedSite = fixedSite ?? siteItems.find((site) => site.id === siteId);
+    const selectedPurge = purgeOptions.find((option) => option.id === type) ?? purgeOptions[0];
+    const prewarmURLList = Array.from(
+        new Set(
+            prewarmURLs
+                .split(/\r?\n/)
+                .map((item) => item.trim())
+                .filter(Boolean)
+        )
+    );
+    const prewarmCount = prewarmURLList.length;
 
     const load = useCallback(async () => {
-        if (!clusterId || !siteId.trim()) return;
+        if (!clusterId || !siteId) {
+            setJobs([]);
+            return;
+        }
         setLoading(true);
         try {
-            const data = await api.list(siteId.trim());
-            setJobs(data);
+            setJobs(await api.list(siteId));
             setError('');
-        } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Failed to load purge jobs');
+        } catch (loadError) {
+            setError(
+                loadError instanceof ApiError ? loadError.message : 'Failed to load cache jobs'
+            );
         } finally {
             setLoading(false);
         }
     }, [api, clusterId, siteId]);
 
+    const loadSites = useCallback(async () => {
+        if (!clusterId || fixedSite) return;
+        try {
+            const items = await sites.list();
+            setSiteItems(items);
+            if (!siteId && items[0]) setSearchParams({ siteId: items[0].id }, { replace: true });
+        } catch (loadError) {
+            setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
+        }
+    }, [clusterId, fixedSite, setSearchParams, siteId, sites]);
+
     useEffect(() => {
-        load();
+        void loadSites();
+    }, [loadSites]);
+
+    useEffect(() => {
+        setMessage('');
+        setPrewarmResults([]);
+        void load();
     }, [load]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!siteId.trim()) return;
+    const handlePurge = async (event: React.FormEvent) => {
+        event.preventDefault();
+        if (!siteId || (type !== 'ALL' && !value.trim())) return;
         setSubmitting(true);
         setError('');
+        setMessage('');
         try {
-            const job = await api.enqueue(siteId.trim(), {
+            const job = await api.enqueue(siteId, {
                 type,
                 value: type === 'ALL' ? undefined : value.trim(),
             });
-            setJobs((prev) => [job, ...prev]);
+            setJobs((current) => [job, ...current]);
             setValue('');
-        } catch (err) {
-            setError(err instanceof ApiError ? err.message : 'Failed to enqueue purge');
+            setMessage(`${selectedPurge.label} refresh was queued.`);
+        } catch (submitError) {
+            setError(
+                submitError instanceof ApiError
+                    ? submitError.message
+                    : 'Failed to enqueue cache refresh'
+            );
         } finally {
             setSubmitting(false);
         }
+    };
+
+    const handlePrewarm = async (event: React.FormEvent) => {
+        event.preventDefault();
+        const urls = prewarmURLList;
+        if (!siteId || urls.length === 0 || urls.length > 20) return;
+        setPrewarming(true);
+        setError('');
+        setMessage('');
+        try {
+            const results = await api.prewarm(siteId, urls);
+            setPrewarmResults(results);
+            setMessage(
+                `${results.filter((result) => result.success).length} of ${results.length} URLs were prewarmed.`
+            );
+        } catch (prewarmError) {
+            setError(
+                prewarmError instanceof ApiError ? prewarmError.message : 'Failed to prewarm URLs'
+            );
+        } finally {
+            setPrewarming(false);
+        }
+    };
+
+    const addHomepage = () => {
+        const domain = selectedSite?.domains?.[0];
+        if (!domain) return;
+        const homepage = `https://${domain}/`;
+        const current = prewarmURLs.trim();
+        setPrewarmURLs(current ? `${current}\n${homepage}` : homepage);
     };
 
     if (!clusterId) {
         return (
             <div className='space-y-6'>
                 <PageHeader
-                    subtitle='Clear cached content by URL, prefix, tag, or site.'
-                    title='Purge Jobs'
+                    subtitle='Refresh cached content and prewarm site URLs.'
+                    title='Cache operations'
                 />
-                <ContentCard className='p-8 text-center'>
-                    <div className='text-sm text-muted'>
-                        Select a cluster in the header to manage purge jobs.
-                    </div>
+                <ContentCard className='p-8 text-center text-sm text-muted'>
+                    Select a cluster in the header to manage site caches.
                 </ContentCard>
             </div>
         );
@@ -82,116 +203,264 @@ export default function PurgeJobs() {
 
     return (
         <div className='space-y-6'>
-            <PageHeader
-                subtitle='Clear cached content by URL, prefix, tag, or site.'
-                title='Purge Jobs'
-            />
+            {!embedded && (
+                <PageHeader
+                    subtitle='Refresh cached responses and prepare frequently requested URLs.'
+                    title='Cache operations'
+                >
+                    {!fixedSite && (
+                        <select
+                            aria-label='Site'
+                            className='w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-sm sm:min-w-64'
+                            value={siteId}
+                            onChange={(event) =>
+                                setSearchParams(
+                                    event.target.value ? { siteId: event.target.value } : {},
+                                    { replace: true }
+                                )
+                            }
+                        >
+                            {siteItems.length === 0 && <option value=''>No sites available</option>}
+                            {siteItems.map((site) => (
+                                <option key={site.id} value={site.id}>
+                                    {site.name} ({site.domains?.[0] || site.id})
+                                </option>
+                            ))}
+                        </select>
+                    )}
+                </PageHeader>
+            )}
 
             {error && (
-                <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
+                <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
                     {error}
                 </div>
             )}
+            {message && (
+                <div className='rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success'>
+                    {message}
+                </div>
+            )}
 
-            <ContentCard title='Enqueue purge'>
-                <form className='space-y-4' onSubmit={handleSubmit}>
-                    <div className='flex flex-col gap-4 md:flex-row md:items-end'>
-                        <div className='flex flex-1 flex-col gap-1'>
-                            <Label htmlFor='purge-site-id'>Site ID</Label>
-                            <Input
-                                id='purge-site-id'
-                                placeholder='Site ID'
-                                variant='secondary'
-                                value={siteId}
-                                onChange={(e) => {
-                                    const next = e.target.value;
-                                    if (!next) {
-                                        setSearchParams({});
-                                    } else {
-                                        setSearchParams({ siteId: next });
-                                    }
-                                }}
-                            />
+            <ContentCard noPadding>
+                <div className='border-b border-border px-5 py-4'>
+                    <h2 className='text-sm font-semibold'>Refresh cached content</h2>
+                    <p className='mt-1 text-xs leading-5 text-muted'>
+                        Choose the smallest scope that contains the content you need to invalidate.
+                    </p>
+                </div>
+                <form onSubmit={handlePurge}>
+                    <div className='space-y-5 p-5'>
+                        <div className='grid gap-3 sm:grid-cols-2'>
+                            {purgeOptions.map((option) => {
+                                const Icon = option.icon;
+                                const selected = type === option.id;
+                                return (
+                                    <button
+                                        aria-pressed={selected}
+                                        className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
+                                            selected
+                                                ? 'border-primary bg-primary/5'
+                                                : 'border-border/70 hover:bg-surface-secondary/50'
+                                        }`}
+                                        key={option.id}
+                                        type='button'
+                                        onClick={() => {
+                                            setType(option.id);
+                                            setValue('');
+                                        }}
+                                    >
+                                        <span
+                                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                                selected
+                                                    ? 'bg-primary text-primary-foreground'
+                                                    : 'bg-surface-secondary text-muted'
+                                            }`}
+                                        >
+                                            <Icon className='h-4 w-4' />
+                                        </span>
+                                        <span>
+                                            <span className='block text-sm font-medium'>
+                                                {option.label}
+                                            </span>
+                                            <span className='mt-0.5 block text-xs leading-5 text-muted'>
+                                                {option.description}
+                                            </span>
+                                        </span>
+                                    </button>
+                                );
+                            })}
                         </div>
-                        <Button className='w-full md:w-auto' variant='ghost' onPress={load}>
-                            <Search className='mr-2 h-4 w-4' />
-                            {loading ? 'Loading...' : 'Load'}
-                        </Button>
-                    </div>
 
-                    <div className='flex flex-col gap-3 sm:flex-row sm:items-end'>
-                        <Select
-                            className='w-full sm:w-40'
-                            variant='secondary'
-                            value={type}
-                            onChange={(key) => setType(String(key ?? '') as PurgeType)}
-                        >
-                            <Label>Type</Label>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    {purgeTypes.map((t) => (
-                                        <ListBox.Item key={t} id={t} textValue={t}>
-                                            {t}
-                                        </ListBox.Item>
-                                    ))}
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
-                        <Input
-                            aria-label='Purge value'
-                            className='flex-1'
-                            disabled={type === 'ALL'}
-                            placeholder={type === 'ALL' ? 'No value needed' : 'Value to purge'}
-                            variant='secondary'
-                            value={value}
-                            onChange={(e) => setValue(e.target.value)}
-                        />
+                        {type === 'ALL' ? (
+                            <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-xs leading-5 text-danger'>
+                                This refreshes the entire site cache. New requests will repopulate
+                                content from the origin.
+                            </div>
+                        ) : (
+                            <div className='flex flex-col gap-1.5'>
+                                <label className='text-sm font-medium' htmlFor='purge-value'>
+                                    {selectedPurge.inputLabel}
+                                </label>
+                                <Input
+                                    id='purge-value'
+                                    placeholder={selectedPurge.placeholder}
+                                    value={value}
+                                    variant='secondary'
+                                    onChange={(event) => setValue(event.target.value)}
+                                />
+                            </div>
+                        )}
+                    </div>
+                    <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                        <div className='text-xs text-muted'>
+                            {selectedSite
+                                ? `Target: ${selectedSite.name}`
+                                : 'Select a site before refreshing cache.'}
+                        </div>
                         <Button
-                            className='w-full sm:w-auto'
-                            isDisabled={submitting}
+                            isDisabled={submitting || !siteId || (type !== 'ALL' && !value.trim())}
                             type='submit'
-                            variant='primary'
+                            variant={type === 'ALL' ? 'danger' : 'primary'}
                         >
-                            <Eraser className='mr-2 h-4 w-4' />
-                            {submitting ? 'Purging...' : 'Purge'}
+                            <Eraser className='mr-1.5 h-4 w-4' />
+                            {submitting
+                                ? 'Queuing...'
+                                : type === 'ALL'
+                                  ? 'Refresh entire site'
+                                  : 'Queue refresh'}
                         </Button>
                     </div>
                 </form>
             </ContentCard>
 
+            <ContentCard noPadding>
+                <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                    <div>
+                        <h2 className='text-sm font-semibold'>Prewarm URLs</h2>
+                        <p className='mt-1 text-xs leading-5 text-muted'>
+                            Request important pages now so the first visitor receives cached
+                            content.
+                        </p>
+                    </div>
+                    <Button
+                        isDisabled={!selectedSite?.domains?.[0]}
+                        size='sm'
+                        variant='secondary'
+                        onPress={addHomepage}
+                    >
+                        Add homepage
+                    </Button>
+                </div>
+                <form onSubmit={handlePrewarm}>
+                    <div className='space-y-3 p-5'>
+                        <TextArea
+                            aria-label='URLs to prewarm'
+                            placeholder={'https://example.com/\nhttps://example.com/assets/app.css'}
+                            className={'w-full'}
+                            rows={6}
+                            value={prewarmURLs}
+                            variant='secondary'
+                            onChange={(event) => setPrewarmURLs(event.target.value)}
+                        />
+                        <div className='flex items-center justify-between gap-4 text-xs'>
+                            <span className={prewarmCount > 20 ? 'text-danger' : 'text-muted'}>
+                                {prewarmCount}/20 URLs
+                            </span>
+                            <span className='text-muted'>One absolute URL per line.</span>
+                        </div>
+                    </div>
+                    <div className='flex justify-end border-t border-border bg-surface-secondary/20 px-5 py-4'>
+                        <Button
+                            isDisabled={
+                                prewarming || !siteId || prewarmCount === 0 || prewarmCount > 20
+                            }
+                            type='submit'
+                        >
+                            <Flame className='mr-1.5 h-4 w-4' />
+                            {prewarming ? 'Prewarming...' : `Prewarm ${prewarmCount || ''}`.trim()}
+                        </Button>
+                    </div>
+                </form>
+                {prewarmResults.length > 0 && (
+                    <div className='border-t border-border px-5 py-4'>
+                        <div className='mb-3 text-xs font-medium text-muted'>Latest result</div>
+                        <div className='space-y-2'>
+                            {prewarmResults.map((result) => (
+                                <div
+                                    className='flex flex-col gap-1 rounded-lg bg-surface-secondary/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-4'
+                                    key={result.url}
+                                >
+                                    <span className='min-w-0 break-all font-mono'>
+                                        {result.url}
+                                    </span>
+                                    <span
+                                        className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
+                                    >
+                                        {result.success
+                                            ? `HTTP ${result.status_code}`
+                                            : result.error || `HTTP ${result.status_code || 0}`}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+            </ContentCard>
+
             <DataTable
-                aria-label='Purge jobs'
+                aria-label='Cache refresh jobs'
+                action={
+                    <Button
+                        isDisabled={!siteId || loading}
+                        size='sm'
+                        variant='secondary'
+                        onPress={load}
+                    >
+                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                        Refresh
+                    </Button>
+                }
                 empty={jobs.length === 0}
-                emptyDescription='Submitted cache purge operations will appear here.'
-                emptyTitle='No purge jobs yet'
+                emptyDescription='Queued cache refresh operations will appear here.'
+                emptyTitle='No cache refresh jobs'
                 loading={loading && jobs.length === 0}
+                title='Recent refresh jobs'
             >
                 <thead>
-                    <tr className='border-b border-border'>
-                        <th className='py-3 text-left text-xs font-medium text-muted'>Job ID</th>
-                        <th className='py-3 text-left text-xs font-medium text-muted'>Type</th>
-                        <th className='py-3 text-left text-xs font-medium text-muted'>Value</th>
-                        <th className='py-3 text-left text-xs font-medium text-muted'>Status</th>
-                        <th className='py-3 text-left text-xs font-medium text-muted'>Created</th>
+                    <tr>
+                        <th>Scope</th>
+                        <th>Target</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Job ID</th>
                     </tr>
                 </thead>
                 <tbody>
                     {jobs.map((job) => (
-                        <tr className='border-b border-border last:border-0' key={job.id}>
-                            <td className='py-3 font-mono text-xs'>{job.id}</td>
-                            <td className='py-3 text-sm'>{job.type}</td>
-                            <td className='py-3 text-sm text-muted'>{job.value ?? '-'}</td>
-                            <td className='py-3'>
+                        <tr key={job.id}>
+                            <td className='text-sm font-medium'>
+                                {purgeOptions.find((option) => option.id === job.type)?.label ||
+                                    job.type}
+                            </td>
+                            <td className='max-w-lg font-mono text-xs text-muted'>
+                                {job.value ?? 'All cached content'}
+                            </td>
+                            <td>
                                 <StatusBadge status={job.status} />
                             </td>
-                            <td className='py-3 text-sm text-muted'>{job.created_at}</td>
+                            <td className='whitespace-nowrap text-sm text-muted'>
+                                {new Date(job.created_at).toLocaleString()}
+                            </td>
+                            <td className='font-mono text-xs text-muted'>{job.id}</td>
                         </tr>
                     ))}
                 </tbody>
             </DataTable>
         </div>
     );
+}
+
+export default function PurgeJobs() {
+    return <CacheOperations />;
 }

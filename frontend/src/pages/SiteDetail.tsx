@@ -18,6 +18,7 @@ import {
     BarChart3,
     Cloud,
     FileText,
+    Flame,
     Globe2,
     HardDrive,
     LockKeyhole,
@@ -54,10 +55,18 @@ import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { CacheOperations } from '@/pages/PurgeJobs.tsx';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type DetailTab = 'overview' | 'logs' | 'settings';
-type SettingsPage = 'basic' | 'domains' | 'http' | 'https' | 'origins' | 'cache';
+type SettingsPage =
+    | 'basic'
+    | 'domains'
+    | 'http'
+    | 'https'
+    | 'origins'
+    | 'cache'
+    | 'cache-operations';
 type Period = '24h' | '30d';
 type OriginDraft = SiteOrigin & { draft_id: string };
 
@@ -73,6 +82,7 @@ const settingsPages = [
     { id: 'https' as const, label: 'HTTPS', icon: LockKeyhole },
     { id: 'origins' as const, label: 'Origins', icon: Server },
     { id: 'cache' as const, label: 'Cache', icon: HardDrive },
+    { id: 'cache-operations' as const, label: 'Cache operations', icon: Flame },
 ];
 const palette = ['#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#64748b'];
 
@@ -1412,6 +1422,16 @@ export default function SiteDetail() {
                                                 saving={saving}
                                                 onChange={setCache}
                                                 onSave={() => void saveCache()}
+                                            />
+                                        )}
+                                        {settingsPage === 'cache-operations' && (
+                                            <CacheOperations
+                                                embedded
+                                                fixedSite={{
+                                                    id: site.id,
+                                                    name: site.name,
+                                                    domains: site.domains,
+                                                }}
                                             />
                                         )}
                                     </div>

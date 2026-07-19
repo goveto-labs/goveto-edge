@@ -56,10 +56,14 @@ func New(
 	nodes.Register(e, orm, installQueue, credentialCipher, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
-	sites.Register(e, orm, publishService)
-
+	var analyticsData *analytics.Store
 	if len(analyticsStore) > 0 {
-		analyticsapi.Register(e, orm, analyticsStore[0])
+		analyticsData = analyticsStore[0]
+	}
+	sites.Register(e, orm, publishService, analyticsData)
+
+	if analyticsData != nil {
+		analyticsapi.Register(e, orm, analyticsData)
 	}
 
 	return e

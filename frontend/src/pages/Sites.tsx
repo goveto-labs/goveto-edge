@@ -12,6 +12,13 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
+function formatBandwidth(bitsPerSecond: number) {
+    if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return '0 bps';
+    const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+    const unit = Math.min(Math.floor(Math.log(bitsPerSecond) / Math.log(1000)), units.length - 1);
+    return `${(bitsPerSecond / 1000 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
 export default function Sites() {
     const navigate = useNavigate();
     const { clusterId } = useCluster();
@@ -35,6 +42,8 @@ export default function Sites() {
 
     useEffect(() => {
         void loadSites();
+        const refresh = window.setInterval(() => void loadSites(), 60_000);
+        return () => window.clearInterval(refresh);
     }, [loadSites]);
 
     if (!clusterId) {
@@ -84,6 +93,8 @@ export default function Sites() {
                         <th>Name</th>
                         <th>Domains</th>
                         <th>Status</th>
+                        <th>Bandwidth</th>
+                        <th>QPS</th>
                         <th>Certificates</th>
                         <th>Updated</th>
                         <th className='text-right'>Actions</th>
@@ -104,11 +115,17 @@ export default function Sites() {
                             </td>
                             <td className='max-w-sm'>
                                 <span className='line-clamp-2 text-sm text-muted'>
-                                    {site.domains.join(', ') || '-'}
+                                    {(site.domains ?? []).join(', ') || '-'}
                                 </span>
                             </td>
                             <td>
                                 <StatusBadge status={site.status} />
+                            </td>
+                            <td className='whitespace-nowrap text-sm'>
+                                {formatBandwidth(site.bandwidth_bps)}
+                            </td>
+                            <td className='whitespace-nowrap text-sm'>
+                                {site.qps.toFixed(site.qps >= 10 ? 0 : 2)}
                             </td>
                             <td className='text-sm text-muted'>{site.certificate_count}</td>
                             <td className='whitespace-nowrap text-sm text-muted'>

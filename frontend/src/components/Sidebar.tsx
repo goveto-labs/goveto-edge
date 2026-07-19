@@ -4,6 +4,8 @@ import { Avatar, Button, ListBox, Select, Tooltip } from '@heroui/react';
 import {
     BarChart3,
     Cloud,
+    FileClock,
+    Flame,
     Globe,
     HelpCircle,
     LayoutDashboard,
@@ -11,7 +13,6 @@ import {
     Rocket,
     Server,
     ShieldCheck,
-    Trash2,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 
@@ -23,16 +24,24 @@ interface NavItemConfig {
     path: string;
     label: string;
     icon: LucideIcon;
+    children?: NavItemConfig[];
 }
 
 export const nav: NavItemConfig[] = [
     { path: '/', label: 'Dashboard', icon: LayoutDashboard },
     { path: '/nodes', label: 'Nodes', icon: Server },
-    { path: '/sites', label: 'Sites', icon: Globe },
+    {
+        path: '/sites',
+        label: 'Sites',
+        icon: Globe,
+        children: [
+            { path: '/sites/logs', label: 'Access logs', icon: FileClock },
+            { path: '/sites/certificates', label: 'Certificates', icon: ShieldCheck },
+            { path: '/sites/cache', label: 'Cache operations', icon: Flame },
+        ],
+    },
     { path: '/dns', label: 'DNS', icon: Cloud },
-    { path: '/certificates', label: 'Certificates', icon: ShieldCheck },
     { path: '/publish', label: 'Publish Jobs', icon: Rocket },
-    { path: '/purge', label: 'Purge Jobs', icon: Trash2 },
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
@@ -81,17 +90,37 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
 
     return (
         <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>
-            {nav.map((item) => (
-                <NavItem
-                    key={item.path}
-                    active={location.pathname === item.path}
-                    collapsed={collapsed}
-                    icon={item.icon}
-                    label={item.label}
-                    onClick={onNavigate}
-                    to={item.path}
-                />
-            ))}
+            {nav.map((item) => {
+                const active =
+                    location.pathname === item.path ||
+                    (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                return (
+                    <div key={item.path}>
+                        <NavItem
+                            active={active}
+                            collapsed={collapsed}
+                            icon={item.icon}
+                            label={item.label}
+                            onClick={onNavigate}
+                            to={item.path}
+                        />
+                        {!collapsed && active && item.children && (
+                            <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
+                                {item.children.map((child) => (
+                                    <NavItem
+                                        key={child.path}
+                                        active={location.pathname === child.path}
+                                        icon={child.icon}
+                                        label={child.label}
+                                        onClick={onNavigate}
+                                        to={child.path}
+                                    />
+                                ))}
+                            </div>
+                        )}
+                    </div>
+                );
+            })}
         </nav>
     );
 }

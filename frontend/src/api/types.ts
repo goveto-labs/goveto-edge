@@ -252,6 +252,8 @@ export interface SiteSummary {
     status: string;
     domains: string[];
     certificate_count: number;
+    bandwidth_bps: number;
+    qps: number;
     version: number;
     updated_at: string;
 }
@@ -389,6 +391,13 @@ export interface PurgeJob {
     status: string;
     created_at: string;
     updated_at?: string;
+}
+
+export interface PrewarmResult {
+    url: string;
+    status_code?: number;
+    success: boolean;
+    error?: string;
 }
 
 export interface Summary {

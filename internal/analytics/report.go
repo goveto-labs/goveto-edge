@@ -37,6 +37,36 @@ type MonitoringOverview struct {
 	TodayUniqueIPs        uint64     `json:"today_unique_ips"`
 }
 
+type SiteRate struct {
+	SiteID       string  `json:"site_id"`
+	BandwidthBPS uint64  `json:"bandwidth_bps"`
+	QPS          float64 `json:"qps"`
+}
+
+func (s *Store) LatestSiteRates(ctx context.Context, cluster string) ([]SiteRate, error) {
+	rows, err := s.db.Query(ctx, `SELECT
+		site_id,
+		toUInt64(argMax((ingress_bytes + egress_bytes) * 8 / 3600, bucket)),
+		toFloat64(argMax(requests / 3600, bucket))
+	FROM goveto.request_usage_hourly
+	WHERE cluster_id = ? AND site_id != ''
+	GROUP BY site_id`, cluster)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	items := make([]SiteRate, 0)
+	for rows.Next() {
+		var item SiteRate
+		if err := rows.Scan(&item.SiteID, &item.BandwidthBPS, &item.QPS); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 type NodeRequestLog struct {
 	EventTime       time.Time `json:"event_time"`
 	RequestID       string    `json:"request_id"`

@@ -21,6 +21,7 @@ import PurgeJobs from '@/pages/PurgeJobs.tsx';
 import Register from '@/pages/Register.tsx';
 import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
+import SitesAccessLogs from '@/pages/SitesAccessLogs.tsx';
 
 export default function App() {
     return (
@@ -46,6 +47,9 @@ export default function App() {
                                     <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<CreateSite />} path='/sites/create' />
+                                    <Route element={<SitesAccessLogs />} path='/sites/logs' />
+                                    <Route element={<Certificates />} path='/sites/certificates' />
+                                    <Route element={<PurgeJobs />} path='/sites/cache' />
                                     <Route element={<SiteDetail />} path='/sites/:siteId/*' />
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
