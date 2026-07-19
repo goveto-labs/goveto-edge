@@ -682,13 +682,13 @@ export default function DNS() {
                 <tbody>
                     {jobs.map((job) => (
                         <tr key={job.id}>
-                            <td className='font-mono text-xs'>{job.id}</td>
+                            <td className='font-mono text-xs max-w-48'>{job.id}</td>
                             <td>{job.action === 'UPSERT_CLUSTER' ? 'SYNC_NODE_IP' : job.action}</td>
                             <td>{job.status}</td>
-                            <td>
+                            <td className='max-w-12'>
                                 {job.attempts}/{job.maxAttempts}
                             </td>
-                            <td>{job.resultJson?.error || '—'}</td>
+                            <td className='max-w-156 break-all'>{job.resultJson?.error || '—'}</td>
                             <td>{job.createdAt}</td>
                         </tr>
                     ))}
