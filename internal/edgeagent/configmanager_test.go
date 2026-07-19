@@ -239,6 +239,34 @@ func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
 	}
 }
 
+func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Cache = enabledCachePolicy(t)
+	encoded, err := renderCaddyConfig(
+		map[string]SiteConfig{config.SiteID: config},
+		":80",
+		"node-host",
+		NodeConfig{
+			CacheDirectory:      "/var/cache/goveto",
+			AutoMaxSize:         true,
+			MaxDiskUsagePercent: 77,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		`"path":"/var/cache/goveto"`,
+		`"auto_max_size":true`,
+		`"max_disk_usage_percent":77`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing SimpleFS cache policy %s: %s", expected, text)
+		}
+	}
+}
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

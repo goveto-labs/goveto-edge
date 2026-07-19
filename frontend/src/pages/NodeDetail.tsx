@@ -641,7 +641,10 @@ export default function NodeDetail() {
         () =>
             filledTraffic.map((point) => ({
                 bucket: point.bucket,
-                values: { ingress: point.ingress_bytes, egress: point.egress_bytes },
+                values: {
+                    traffic: point.ingress_bytes + point.egress_bytes,
+                    cache: point.cache_egress_bytes,
+                },
             })),
         [filledTraffic]
     );
@@ -679,7 +682,7 @@ export default function NodeDetail() {
         () =>
             runtime.map((point) => ({
                 bucket: point.bucket,
-                values: { used: point.cache_used_bytes, limit: point.cache_max_bytes },
+                values: { used: point.cache_used_bytes },
             })),
         [runtime]
     );
@@ -960,14 +963,19 @@ export default function NodeDetail() {
                                             value={snapshot.requests_per_minute.toLocaleString()}
                                         />
                                         <StatCell
-                                            footer='Request bytes received by this node'
-                                            label='Ingress bandwidth'
-                                            value={formatRate(snapshot.ingress_bytes_per_second)}
+                                            footer='Request bytes received plus response bytes sent'
+                                            label='Traffic bandwidth'
+                                            value={formatRate(
+                                                snapshot.ingress_bytes_per_second +
+                                                    snapshot.egress_bytes_per_second
+                                            )}
                                         />
                                         <StatCell
-                                            footer='Response bytes sent by this node'
-                                            label='Egress bandwidth'
-                                            value={formatRate(snapshot.egress_bytes_per_second)}
+                                            footer='Response bytes served directly from edge cache'
+                                            label='Cache traffic'
+                                            value={formatRate(
+                                                snapshot.cache_egress_bytes_per_second
+                                            )}
                                         />
                                         <StatCell
                                             footer={snapshot.cache_directory}
@@ -1014,13 +1022,13 @@ export default function NodeDetail() {
                                             height={220}
                                             series={[
                                                 {
-                                                    key: 'ingress',
-                                                    label: 'Ingress',
+                                                    key: 'traffic',
+                                                    label: 'Traffic',
                                                     color: '#3b82f6',
                                                 },
                                                 {
-                                                    key: 'egress',
-                                                    label: 'Egress',
+                                                    key: 'cache',
+                                                    label: 'Cache traffic',
                                                     color: '#10b981',
                                                 },
                                             ]}
@@ -1092,11 +1100,6 @@ export default function NodeDetail() {
                                             height={220}
                                             series={[
                                                 { key: 'used', label: 'Used', color: '#8b5cf6' },
-                                                {
-                                                    key: 'limit',
-                                                    label: 'Configured limit',
-                                                    color: '#64748b',
-                                                },
                                             ]}
                                             valueFormatter={formatBytes}
                                         />
@@ -1948,7 +1951,8 @@ install -m 0600 identity.json /opt/goveto-edge/agent/identity.json
 install -m 0755 goveto-edge-agent-linux-ARCH /usr/local/bin/goveto-edge-agent
 install -m 0644 goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
 systemctl daemon-reload
-systemctl enable --now goveto-edge-agent
+systemctl enable goveto-edge-agent
+systemctl restart goveto-edge-agent
 systemctl status goveto-edge-agent`}
                                                     </pre>
                                                 </div>

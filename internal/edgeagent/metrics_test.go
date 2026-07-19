@@ -61,13 +61,16 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	if err := json.Unmarshal(batch[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections", "cache_directory", "cache_max_bytes"} {
+	for _, key := range []string{"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections", "cache_directory", "cache_used_bytes"} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("missing metrics key %q in %#v", key, payload)
 		}
 	}
 	if payload["cache_used_bytes"] != float64(5) {
 		t.Fatalf("cache directory size = %#v, want 5", payload["cache_used_bytes"])
+	}
+	if _, ok := payload["cache_max_bytes"]; ok {
+		t.Fatalf("runtime metrics must not expose cache max size: %#v", payload)
 	}
 }
 

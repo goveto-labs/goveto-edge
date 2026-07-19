@@ -7,15 +7,7 @@ import type {
 } from '@/api';
 
 import { Button, Input, Label } from '@heroui/react';
-import {
-    Activity,
-    ArrowDown,
-    ArrowUp,
-    CalendarDays,
-    HardDrive,
-    MousePointerClick,
-    RefreshCw,
-} from 'lucide-react';
+import { Activity, CalendarDays, HardDrive, MousePointerClick, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi, nodesApi } from '@/api';
@@ -221,7 +213,10 @@ export default function Analytics() {
         () =>
             traffic.map((point) => ({
                 bucket: point.bucket,
-                values: { ingress: point.ingress_bytes, egress: point.egress_bytes },
+                values: {
+                    traffic: point.ingress_bytes + point.egress_bytes,
+                    cache: point.cache_egress_bytes,
+                },
             })),
         [traffic]
     );
@@ -259,7 +254,7 @@ export default function Analytics() {
         () =>
             runtime.map((point) => ({
                 bucket: point.bucket,
-                values: { used: point.cache_used_bytes, limit: point.cache_max_bytes },
+                values: { used: point.cache_used_bytes },
             })),
         [runtime]
     );
@@ -323,27 +318,27 @@ export default function Analytics() {
                 <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4'>
                     <StatCard
                         color='primary'
-                        footer={`${overview.today.requests.toLocaleString()} requests`}
+                        footer={`${overview.today.requests.toLocaleString()} requests · ${formatBytes(overview.today.cache_egress_bytes)} cache`}
                         icon={Activity}
                         label='Today traffic'
                         value={formatBytes(totalTraffic(overview.today))}
                     />
                     <StatCard
-                        footer={`${overview.yesterday.requests.toLocaleString()} requests`}
+                        footer={`${overview.yesterday.requests.toLocaleString()} requests · ${formatBytes(overview.yesterday.cache_egress_bytes)} cache`}
                         icon={CalendarDays}
                         label='Yesterday traffic'
                         value={formatBytes(totalTraffic(overview.yesterday))}
                     />
                     <StatCard
                         color='success'
-                        footer={`${overview.month.requests.toLocaleString()} requests`}
+                        footer={`${overview.month.requests.toLocaleString()} requests · ${formatBytes(overview.month.cache_egress_bytes)} cache`}
                         icon={CalendarDays}
                         label='Current month traffic'
                         value={formatBytes(totalTraffic(overview.month))}
                     />
                     <StatCard
                         color='warning'
-                        footer={`${formatBytes(overview.today.ingress_bytes)} ingress · ${formatBytes(overview.today.egress_bytes)} egress`}
+                        footer={`${formatBytes(totalTraffic(overview.today))} traffic · ${formatBytes(overview.today.cache_egress_bytes)} cache`}
                         icon={MousePointerClick}
                         label='Today requests'
                         value={overview.today.requests.toLocaleString()}
@@ -354,11 +349,11 @@ export default function Analytics() {
             <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
                 <ContentCard allowOverflow title={`${period} traffic trend`}>
                     <TimeSeriesChart
-                        ariaLabel={`${period} ingress and egress traffic trend`}
+                        ariaLabel={`${period} total and cache traffic trend`}
                         data={trafficData}
                         series={[
-                            { key: 'ingress', label: 'Ingress', color: '#3b82f6' },
-                            { key: 'egress', label: 'Egress', color: '#10b981' },
+                            { key: 'traffic', label: 'Traffic', color: '#3b82f6' },
+                            { key: 'cache', label: 'Cache traffic', color: '#10b981' },
                         ]}
                         valueFormatter={formatBytes}
                     />
@@ -422,10 +417,7 @@ export default function Analytics() {
                         <TimeSeriesChart
                             ariaLabel='Cache directory usage trend over 12 hours'
                             data={cacheData}
-                            series={[
-                                { key: 'used', label: 'Used', color: '#8b5cf6' },
-                                { key: 'limit', label: 'Configured limit', color: '#64748b' },
-                            ]}
+                            series={[{ key: 'used', label: 'Used', color: '#8b5cf6' }]}
                             valueFormatter={formatBytes}
                         />
                     </div>
@@ -462,15 +454,15 @@ export default function Analytics() {
             </div>
 
             <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
-                <ContentCard title='Traffic direction definition'>
+                <ContentCard title='Traffic definition'>
                     <div className='space-y-3 text-sm text-muted'>
                         <div className='flex items-center gap-2'>
-                            <ArrowDown className='h-4 w-4 text-primary' />
-                            Ingress is request headers and bodies received by edge nodes.
+                            <Activity className='h-4 w-4 text-primary' />
+                            Traffic is all request bytes received plus response bytes sent.
                         </div>
                         <div className='flex items-center gap-2'>
-                            <ArrowUp className='h-4 w-4 text-success' />
-                            Egress is response headers and bodies sent by edge nodes.
+                            <HardDrive className='h-4 w-4 text-success' />
+                            Cache traffic is response bytes served directly from edge cache.
                         </div>
                     </div>
                 </ContentCard>

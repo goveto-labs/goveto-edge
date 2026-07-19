@@ -3203,8 +3203,6 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 cache_directory:
                     type: string
-                cache_max_bytes:
-                    type: number
                 cache_used_bytes:
                     type: number
                 connections:
@@ -3236,8 +3234,6 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 cache_directory:
                     type: string
-                cache_max_bytes:
-                    type: number
                 cache_used_bytes:
                     type: number
                 connections:
@@ -3249,6 +3245,8 @@ components:
                 disk_used_bytes:
                     type: number
                 egress_bytes_per_second:
+                    type: number
+                cache_egress_bytes_per_second:
                     type: number
                 ingress_bytes_per_second:
                     type: number
@@ -3310,6 +3308,8 @@ components:
         analytics_UsageTotal:
             type: object
             properties:
+                cache_egress_bytes:
+                    type: number
                 egress_bytes:
                     type: number
                 ingress_bytes:

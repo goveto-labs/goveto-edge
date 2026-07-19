@@ -157,14 +157,7 @@ WantedBy=multi-user.target
 	logger.Info("systemd unit upload completed", "path", "/tmp/goveto-edge-agent.service")
 
 	privileged := privilegedCommandPrefix(payload.SSH.User)
-	script := fmt.Sprintf(`set -eu
-%sinstall -d -m 0700 /opt/goveto-edge/agent
-%sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
-%sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
-%sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
-%ssystemctl daemon-reload
-%ssystemctl enable --now goveto-edge-agent
-`, privileged, privileged, privileged, privileged, privileged, privileged)
+	script := agentInstallScript(privileged)
 	logger.Info("running remote installation script", "command", script)
 
 	output, err := runRemoteCommand(
@@ -184,6 +177,19 @@ WantedBy=multi-user.target
 		logger.Warn("node hardware benchmark failed", "error", err)
 	}
 	return nil
+}
+
+func agentInstallScript(privileged string) string {
+	return fmt.Sprintf(`set -eu
+%sinstall -d -m 0700 /opt/goveto-edge/agent
+%sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
+%sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
+%sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
+%ssystemctl daemon-reload
+%ssystemctl enable goveto-edge-agent
+%ssystemctl restart goveto-edge-agent
+%ssystemctl is-active --quiet goveto-edge-agent
+`, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged)
 }
 
 func (w *InstallWorker) collectAndStoreHardwareProfile(

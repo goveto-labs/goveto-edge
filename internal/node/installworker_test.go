@@ -43,6 +43,22 @@ func TestPrivilegedCommandPrefix(t *testing.T) {
 	}
 }
 
+func TestAgentInstallScriptRestartsExistingService(t *testing.T) {
+	script := agentInstallScript("sudo ")
+	if !strings.Contains(script, "sudo systemctl enable goveto-edge-agent") {
+		t.Fatalf("install script does not enable service: %s", script)
+	}
+	if !strings.Contains(script, "sudo systemctl restart goveto-edge-agent") {
+		t.Fatalf("install script does not restart service: %s", script)
+	}
+	if !strings.Contains(script, "sudo systemctl is-active --quiet goveto-edge-agent") {
+		t.Fatalf("install script does not verify active service: %s", script)
+	}
+	if strings.Contains(script, "enable --now") {
+		t.Fatalf("install script still relies on enable --now: %s", script)
+	}
+}
+
 func TestReadSCPAck(t *testing.T) {
 	if err := readSCPAck(bufio.NewReader(bytes.NewReader([]byte{0}))); err != nil {
 		t.Fatal(err)

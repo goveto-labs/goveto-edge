@@ -257,7 +257,7 @@ CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute
     memory_used_bytes UInt64, memory_total_bytes UInt64,
     load_1 Float32, load_5 Float32, load_15 Float32,
     connections UInt64,
-    cache_used_bytes UInt64, cache_max_bytes UInt64, cache_directory String,
+    cache_used_bytes UInt64, cache_directory String,
     disk_used_bytes UInt64, disk_total_bytes UInt64
 )
 ENGINE = ReplacingMergeTree
@@ -268,10 +268,13 @@ TTL minute + INTERVAL 90 DAY DELETE;
 ALTER TABLE goveto.node_runtime_metrics_minute
     ADD COLUMN IF NOT EXISTS connections UInt64 DEFAULT 0 AFTER load_15;
 
+ALTER TABLE goveto.node_runtime_metrics_minute
+    DROP COLUMN IF EXISTS cache_max_bytes;
+
 CREATE TABLE IF NOT EXISTS goveto.node_traffic_metrics_minute
 (
     minute DateTime('UTC'), cluster_id UUID, node_id UUID,
-    requests UInt64, ingress_bytes UInt64, egress_bytes UInt64,
+    requests UInt64, ingress_bytes UInt64, egress_bytes UInt64, cache_egress_bytes UInt64,
     cache_hit_requests UInt64, cache_miss_requests UInt64, origin_requests UInt64
 )
 ENGINE = SummingMergeTree
@@ -279,7 +282,12 @@ PARTITION BY toYYYYMM(minute)
 ORDER BY (node_id, minute)
 TTL minute + INTERVAL 90 DAY DELETE;
 
-CREATE MATERIALIZED VIEW IF NOT EXISTS goveto.mv_node_traffic_metrics_minute
+ALTER TABLE goveto.node_traffic_metrics_minute
+    ADD COLUMN IF NOT EXISTS cache_egress_bytes UInt64 DEFAULT 0 AFTER egress_bytes;
+
+DROP VIEW IF EXISTS goveto.mv_node_traffic_metrics_minute;
+
+CREATE MATERIALIZED VIEW goveto.mv_node_traffic_metrics_minute
 TO goveto.node_traffic_metrics_minute
 AS
 SELECT
@@ -289,6 +297,7 @@ SELECT
     count() AS requests,
     sum(logs.ingress_bytes) AS ingress_bytes,
     sum(logs.egress_bytes) AS egress_bytes,
+    sumIf(logs.egress_bytes, upper(logs.cache_status) = 'HIT') AS cache_egress_bytes,
     countIf(upper(logs.cache_status) = 'HIT') AS cache_hit_requests,
     countIf(upper(logs.cache_status) IN ('MISS', 'BYPASS')) AS cache_miss_requests,
     countIf(logs.upstream_address != '') AS origin_requests

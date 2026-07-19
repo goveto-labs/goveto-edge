@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"sort"
 	"sync"
 	"time"
 
+	cachefs "goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/edgeprotocol"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -64,63 +64,30 @@ func (s *NodeConfigStore) Get() NodeConfig { s.mu.RLock(); defer s.mu.RUnlock();
 func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigStore) {
 	// Warm CPU sampler so the first real sample is meaningful.
 	_, _ = cpu.Percent(0, false)
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
+	metricsTicker := time.NewTicker(time.Minute)
+	cacheTicker := time.NewTicker(10 * time.Second)
+	defer metricsTicker.Stop()
+	defer cacheTicker.Stop()
+	enforceCacheLimit(configs.Get())
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
-			config := configs.Get()
-			trimCache(config)
-			appendMetrics(queue, config)
+		case <-cacheTicker.C:
+			enforceCacheLimit(configs.Get())
+		case <-metricsTicker.C:
+			appendMetrics(queue, configs.Get())
 		}
 	}
 }
 
-func cacheLimit(config NodeConfig) uint64 {
-	if !config.AutoMaxSize {
-		return config.MaxSizeBytes
-	}
-	usage, err := disk.Usage(config.CacheDirectory)
-	if err != nil || usage == nil {
-		return 0
-	}
-	return usage.Total * uint64(config.MaxDiskUsagePercent) / 100
-}
-
-func trimCache(config NodeConfig) {
-	limit := cacheLimit(config)
-	if limit == 0 {
-		return
-	}
-	type cacheFile struct {
-		path     string
-		size     int64
-		modified time.Time
-	}
-	files := make([]cacheFile, 0)
-	var total uint64
-	_ = filepath.Walk(config.CacheDirectory, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info == nil || !info.Mode().IsRegular() {
-			return nil
-		}
-		total += uint64(info.Size())
-		files = append(files, cacheFile{path: path, size: info.Size(), modified: info.ModTime()})
-		return nil
-	})
-	if total <= limit {
-		return
-	}
-	sort.Slice(files, func(i, j int) bool { return files[i].modified.Before(files[j].modified) })
-	for _, file := range files {
-		if total <= limit {
-			break
-		}
-		if os.Remove(file.path) == nil {
-			total -= uint64(file.size)
-		}
-	}
+func enforceCacheLimit(config NodeConfig) {
+	_ = cachefs.Enforce(
+		config.CacheDirectory,
+		config.AutoMaxSize,
+		config.MaxSizeBytes,
+		config.MaxDiskUsagePercent,
+	)
 }
 
 func appendMetrics(queue *LogQueue, config NodeConfig) {
@@ -130,10 +97,6 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	connections, connectionErr := gnet.ConnectionsWithoutUids("tcp")
 	usage, diskErr := disk.Usage(config.CacheDirectory)
 	cacheUsed, cacheErr := cacheDirectorySize(config.CacheDirectory)
-	maxCache := config.MaxSizeBytes
-	if config.AutoMaxSize && usage != nil && diskErr == nil {
-		maxCache = usage.Total * uint64(config.MaxDiskUsagePercent) / 100
-	}
 	payloadMap := map[string]any{
 		"minute":             time.Now().UTC().Truncate(time.Minute),
 		"cpu_usage_percent":  first(cpuValues),
@@ -145,7 +108,6 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 		"connections":        establishedConnections(connections),
 		"cache_directory":    config.CacheDirectory,
 		"cache_used_bytes":   cacheUsed,
-		"cache_max_bytes":    maxCache,
 		"disk_used_bytes":    diskUsed(usage),
 		"disk_total_bytes":   diskTotal(usage),
 	}

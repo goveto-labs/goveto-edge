@@ -21,9 +21,10 @@ type TopItem struct {
 }
 
 type UsageTotal struct {
-	Requests     uint64 `json:"requests"`
-	IngressBytes uint64 `json:"ingress_bytes"`
-	EgressBytes  uint64 `json:"egress_bytes"`
+	Requests         uint64 `json:"requests"`
+	IngressBytes     uint64 `json:"ingress_bytes"`
+	EgressBytes      uint64 `json:"egress_bytes"`
+	CacheEgressBytes uint64 `json:"cache_egress_bytes"`
 }
 
 type MonitoringOverview struct {
@@ -89,6 +90,7 @@ func (s *Store) MonitoringOverview(ctx context.Context, cluster, site string) (M
 	monthCompleted.Requests += todayTotal.Requests
 	monthCompleted.IngressBytes += todayTotal.IngressBytes
 	monthCompleted.EgressBytes += todayTotal.EgressBytes
+	monthCompleted.CacheEgressBytes += todayTotal.CacheEgressBytes
 	return MonitoringOverview{Today: todayTotal, Yesterday: yesterdayTotal, Month: monthCompleted}, nil
 }
 
@@ -97,7 +99,7 @@ func (s *Store) usageTotal(
 	table, timeColumn, cluster, site string,
 	from, to time.Time,
 ) (UsageTotal, error) {
-	q := `SELECT sum(requests), sum(ingress_bytes), sum(egress_bytes)
+	q := `SELECT sum(requests), sum(ingress_bytes), sum(egress_bytes), sum(cache_egress_bytes)
 		FROM ` + table + ` WHERE cluster_id = ? AND ` + timeColumn + ` >= ? AND ` + timeColumn + ` < ?`
 	args := []any{cluster, from, to}
 	if site != "" {
@@ -105,7 +107,12 @@ func (s *Store) usageTotal(
 		args = append(args, site)
 	}
 	var total UsageTotal
-	err := s.db.QueryRow(ctx, q, args...).Scan(&total.Requests, &total.IngressBytes, &total.EgressBytes)
+	err := s.db.QueryRow(ctx, q, args...).Scan(
+		&total.Requests,
+		&total.IngressBytes,
+		&total.EgressBytes,
+		&total.CacheEgressBytes,
+	)
 	return total, err
 }
 

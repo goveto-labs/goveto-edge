@@ -571,8 +571,12 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 			"stale":                 stale,
 			"default_cache_control": "public, max-age=" + strconv.Itoa(policy.TTL.DefaultSeconds),
 			"simplefs": map[string]any{
-				"uuid": "goveto-shared",
 				"path": nodeConfig.CacheDirectory,
+				"configuration": map[string]any{
+					"auto_max_size":          nodeConfig.AutoMaxSize,
+					"max_size_bytes":         nodeConfig.MaxSizeBytes,
+					"max_disk_usage_percent": nodeConfig.MaxDiskUsagePercent,
+				},
 			},
 			"storers": []string{"simplefs"},
 		},

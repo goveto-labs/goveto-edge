@@ -35,7 +35,6 @@ type NodeRuntimePoint struct {
 	Load15         float32   `json:"load_15"`
 	Connections    uint64    `json:"connections"`
 	CacheUsed      uint64    `json:"cache_used_bytes"`
-	CacheMax       uint64    `json:"cache_max_bytes"`
 	CacheDirectory string    `json:"cache_directory"`
 	DiskUsed       uint64    `json:"disk_used_bytes"`
 	DiskTotal      uint64    `json:"disk_total_bytes"`
@@ -43,10 +42,11 @@ type NodeRuntimePoint struct {
 
 type NodeSnapshot struct {
 	NodeRuntimePoint
-	Online                bool    `json:"online"`
-	IngressBytesPerSecond float64 `json:"ingress_bytes_per_second"`
-	EgressBytesPerSecond  float64 `json:"egress_bytes_per_second"`
-	RequestsPerMinute     uint64  `json:"requests_per_minute"`
+	Online                    bool    `json:"online"`
+	IngressBytesPerSecond     float64 `json:"ingress_bytes_per_second"`
+	EgressBytesPerSecond      float64 `json:"egress_bytes_per_second"`
+	CacheEgressBytesPerSecond float64 `json:"cache_egress_bytes_per_second"`
+	RequestsPerMinute         uint64  `json:"requests_per_minute"`
 }
 
 func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) ([]NodeSnapshot, error) {
@@ -61,7 +61,6 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 		load_15,
 		connections,
 		cache_used_bytes,
-		cache_max_bytes,
 		cache_directory,
 		disk_used_bytes,
 		disk_total_bytes
@@ -94,7 +93,6 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 			&x.Load15,
 			&x.Connections,
 			&x.CacheUsed,
-			&x.CacheMax,
 			&x.CacheDirectory,
 			&x.DiskUsed,
 			&x.DiskTotal,
@@ -126,6 +124,7 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 		if current, ok := traffic[nodeID]; ok {
 			snapshot.IngressBytesPerSecond = float64(current.IngressBytes) / 60
 			snapshot.EgressBytesPerSecond = float64(current.EgressBytes) / 60
+			snapshot.CacheEgressBytesPerSecond = float64(current.CacheEgressBytes) / 60
 			snapshot.RequestsPerMinute = current.Requests
 		}
 		out = append(out, snapshot)
@@ -135,9 +134,10 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 }
 
 type nodeTrafficMinute struct {
-	Requests     uint64
-	IngressBytes uint64
-	EgressBytes  uint64
+	Requests         uint64
+	IngressBytes     uint64
+	EgressBytes      uint64
+	CacheEgressBytes uint64
 }
 
 func (s *Store) latestNodeTraffic(ctx context.Context, cluster, nodeID string) (map[string]nodeTrafficMinute, error) {
@@ -145,7 +145,8 @@ func (s *Store) latestNodeTraffic(ctx context.Context, cluster, nodeID string) (
 		toString(node_id),
 		sum(requests),
 		sum(ingress_bytes),
-		sum(egress_bytes)
+		sum(egress_bytes),
+		sum(cache_egress_bytes)
 	FROM goveto.node_traffic_metrics_minute
 	WHERE cluster_id = ? AND minute >= now() - INTERVAL 1 MINUTE`
 	args := []any{cluster}
@@ -164,7 +165,7 @@ func (s *Store) latestNodeTraffic(ctx context.Context, cluster, nodeID string) (
 	for rows.Next() {
 		var nodeID string
 		var current nodeTrafficMinute
-		if err := rows.Scan(&nodeID, &current.Requests, &current.IngressBytes, &current.EgressBytes); err != nil {
+		if err := rows.Scan(&nodeID, &current.Requests, &current.IngressBytes, &current.EgressBytes, &current.CacheEgressBytes); err != nil {
 			return nil, err
 		}
 		out[nodeID] = current
@@ -458,7 +459,6 @@ func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string)
 		toFloat32(avg(load_15)),
 		toUInt64(avg(connections)),
 		toUInt64(avg(cache_used_bytes)),
-		toUInt64(avg(cache_max_bytes)),
 		argMax(cache_directory, minute),
 		toUInt64(avg(disk_used_bytes)),
 		toUInt64(avg(disk_total_bytes))
@@ -493,7 +493,6 @@ func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string)
 			&x.Load15,
 			&x.Connections,
 			&x.CacheUsed,
-			&x.CacheMax,
 			&x.CacheDirectory,
 			&x.DiskUsed,
 			&x.DiskTotal,
