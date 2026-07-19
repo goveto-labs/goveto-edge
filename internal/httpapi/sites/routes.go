@@ -137,31 +137,19 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 
 		siteID, poolID := uuid.NewString(), uuid.NewString()
 		err = db.Tx(ctx, func(tx *client.Client) error {
-			dnsConfig, configErr := tx.DNSProviderConfig.FindUnique(
+			cluster, clusterErr := tx.Cluster.FindUnique(
 				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(c.Param("cluster_id")),
+				query.Cluster.Id.Equals(c.Param("cluster_id")),
 			)
-			if configErr != nil {
-				return configErr
+			if clusterErr != nil {
+				return clusterErr
 			}
-			if dnsConfig != nil && dnsConfig.Enabled {
-				cluster, clusterErr := tx.Cluster.FindUnique(
-					ctx,
-					query.Cluster.Id.Equals(c.Param("cluster_id")),
-				)
-				if clusterErr != nil {
-					return clusterErr
-				}
-				if cluster == nil {
-					return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
-				}
-				for _, domain := range domains {
-					if domain != dnsConfig.Zone && !strings.HasSuffix(domain, "."+dnsConfig.Zone) {
-						return echo.NewHTTPError(http.StatusBadRequest, "all site domains must belong to the cluster DNS zone")
-					}
-					if cluster.PrimaryHostname != nil && domain == *cluster.PrimaryHostname {
-						return echo.NewHTTPError(http.StatusBadRequest, "site domain cannot equal the cluster primary hostname")
-					}
+			if cluster == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+			}
+			for _, domain := range domains {
+				if cluster.PrimaryHostname != nil && domain == *cluster.PrimaryHostname {
+					return echo.NewHTTPError(http.StatusBadRequest, "site domain cannot equal the cluster primary hostname")
 				}
 			}
 

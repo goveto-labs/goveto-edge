@@ -151,6 +151,20 @@ func (s *Service) EnqueueNodeIPIfChanged(
 	if config == nil || !config.Enabled {
 		return nil, nil
 	}
+	// Older versions managed Site domain CNAMEs in the cluster provider. Force
+	// one full reconciliation so those records are removed from both the
+	// provider and the local managed-record table.
+	managed, err := s.db.DNSManagedRecord.Query().
+		Where(query.DNSManagedRecord.ClusterId.Equals(clusterID)).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range managed {
+		if record.SiteDomainId != nil {
+			return s.Enqueue(ctx, clusterID, nil, model.DNSSyncActionUPSERT_CLUSTER)
+		}
+	}
 	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt DNS credentials: %w", err)
@@ -316,6 +330,7 @@ func (s *Service) Run(ctx context.Context) {
 	reconcile := time.NewTicker(5 * time.Minute)
 	defer reconcile.Stop()
 
+	s.enqueuePeriodic(ctx)
 	s.runOne(ctx)
 	for {
 		select {
@@ -534,7 +549,7 @@ func (s *Service) finish(ctx context.Context, job *model.DNSSyncJob, executionEr
 
 type desiredRecord struct {
 	dnsprovider.Record
-	SiteDomainID, DNSLineID, NodeID *string
+	DNSLineID, NodeID *string
 }
 
 func (s *Service) desiredNodeRecords(
@@ -890,40 +905,9 @@ func (s *Service) desired(
 		}
 	}
 
-	sites, err := s.db.Site.Query().
-		Where(
-			query.Site.ClusterId.Equals(cluster.Id),
-			query.Site.Status.Equals(model.SiteStatusACTIVE),
-		).
-		Do(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for _, site := range sites {
-		if err := s.renewLease(ctx, jobID); err != nil {
-			return nil, err
-		}
-		domains, domainErr := s.db.SiteDomain.Query().
-			Where(query.SiteDomain.SiteId.Equals(site.Id)).
-			Do(ctx)
-		if domainErr != nil {
-			return nil, domainErr
-		}
-		for _, domain := range domains {
-			id := domain.Id
-			result = append(result, desiredRecord{
-				Record: dnsprovider.Record{
-					Hostname: domain.Hostname,
-					Type:     model.DNSRecordTypeCNAME,
-					Value:    *cluster.PrimaryHostname,
-					Line:     "default",
-					TTL:      config.DefaultTtl,
-					Proxied:  config.Proxied,
-				},
-				SiteDomainID: &id,
-			})
-		}
-	}
+	// Site domains are customer-owned DNS names. They are intentionally not
+	// managed through the cluster provider; customers point them at the cluster
+	// primary hostname with CNAME or an equivalent apex alias record.
 	return result, nil
 }
 
@@ -970,9 +954,6 @@ func (s *Service) apply(
 				query.DNSManagedRecord.DnsLineKey.Set(lineKey),
 				query.DNSManagedRecord.Status.Set(model.DNSRecordStatusPENDING),
 				query.DNSManagedRecord.UpdatedAt.Set(now),
-			}
-			if item.SiteDomainID != nil {
-				sets = append(sets, query.DNSManagedRecord.SiteDomainId.Set(*item.SiteDomainID))
 			}
 			if item.DNSLineID != nil {
 				sets = append(sets, query.DNSManagedRecord.DnsLineId.Set(*item.DNSLineID))
@@ -1023,11 +1004,7 @@ func (s *Service) apply(
 			query.DNSManagedRecord.LastSyncedAt.Set(time.Now()),
 			query.DNSManagedRecord.UpdatedAt.Set(time.Now()),
 		}
-		if item.SiteDomainID != nil {
-			updateSets = append(updateSets, query.DNSManagedRecord.SiteDomainId.Set(*item.SiteDomainID))
-		} else {
-			updateSets = append(updateSets, query.DNSManagedRecord.SiteDomainId.SetNull())
-		}
+		updateSets = append(updateSets, query.DNSManagedRecord.SiteDomainId.SetNull())
 		if item.DNSLineID != nil {
 			updateSets = append(updateSets, query.DNSManagedRecord.DnsLineId.Set(*item.DNSLineID))
 		} else {

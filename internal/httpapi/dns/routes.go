@@ -295,27 +295,6 @@ func updateConfig(
 				return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
 			}
 
-			outside, queryErr := client.Raw[countRow](
-				ctx,
-				tx,
-				`SELECT COUNT(*) AS count
-				 FROM site_domains d
-				 JOIN sites s ON s.id=d.site_id
-				 WHERE s.cluster_id=$1
-				   AND d.hostname<>$2
-				   AND RIGHT(d.hostname, CHAR_LENGTH($2)+1)<>'.'||$2`,
-				clusterID,
-				zone,
-			)
-			if queryErr != nil {
-				return queryErr
-			}
-			if len(outside) > 0 && outside[0].Count > 0 {
-				return echo.NewHTTPError(
-					http.StatusBadRequest,
-					"all managed site domains must belong to the configured DNS zone",
-				)
-			}
 			collision, queryErr := client.Raw[countRow](
 				ctx,
 				tx,

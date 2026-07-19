@@ -5,7 +5,7 @@ import { ArrowLeft, Eye, Globe2, Plus, Rocket, Save } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-import { ApiError, publishApi, sitesApi } from '@/api';
+import { ApiError, dnsApi, publishApi, sitesApi } from '@/api';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
@@ -16,6 +16,7 @@ export default function Sites() {
     const { clusterId } = useCluster();
     const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const pubApi = useMemo(() => publishApi(clusterId), [clusterId]);
+    const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
     const [searchParams, setSearchParams] = useSearchParams();
     const siteId = searchParams.get('siteId') ?? '';
     const [sites, setSites] = useState<SiteSummary[]>([]);
@@ -25,6 +26,7 @@ export default function Sites() {
     const [error, setError] = useState('');
     const [saveLoading, setSaveLoading] = useState(false);
     const [publishLoading, setPublishLoading] = useState(false);
+    const [cnameTarget, setCnameTarget] = useState<string | null>(null);
 
     const selectedSite = useMemo(
         () => sites.find((site) => site.id === siteId) ?? null,
@@ -47,6 +49,14 @@ export default function Sites() {
     useEffect(() => {
         void loadSites();
     }, [loadSites]);
+
+    useEffect(() => {
+        if (!clusterId) return;
+        setCnameTarget(null);
+        dns.config()
+            .then((config) => setCnameTarget(config.primary_hostname))
+            .catch(() => setCnameTarget(null));
+    }, [clusterId, dns]);
 
     useEffect(() => {
         if (!clusterId || !siteId) return;
@@ -234,6 +244,39 @@ export default function Sites() {
                     {error}
                 </div>
             )}
+
+            <Card className='p-5'>
+                <div className='flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'>
+                    <div className='min-w-0'>
+                        <div className='flex items-center gap-2 text-sm font-medium'>
+                            <Globe2 className='h-4 w-4 text-muted' />
+                            CNAME target
+                        </div>
+                        {cnameTarget ? (
+                            <>
+                                <p className='mt-1 text-sm text-muted'>
+                                    At your DNS provider, point every Site domain to this CDN
+                                    hostname. For an apex domain, use ALIAS or CNAME flattening if
+                                    required by the provider.
+                                </p>
+                                <code className='mt-3 block w-fit max-w-full overflow-x-auto rounded-lg bg-surface-secondary px-3 py-2 text-sm font-medium text-foreground'>
+                                    {cnameTarget}
+                                </code>
+                            </>
+                        ) : (
+                            <p className='mt-1 text-sm text-muted'>
+                                Configure a cluster primary hostname before routing customer
+                                domains.
+                            </p>
+                        )}
+                    </div>
+                    {!cnameTarget && (
+                        <Button size='sm' variant='secondary' onPress={() => navigate('/dns')}>
+                            Configure DNS
+                        </Button>
+                    )}
+                </div>
+            </Card>
 
             <Tabs>
                 <Tabs.List>

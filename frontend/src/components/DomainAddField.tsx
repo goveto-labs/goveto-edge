@@ -117,7 +117,7 @@ export function DomainAddField({
                 title='Add domains'
                 onOpenChange={handleOpenChange}
             >
-                <div className='space-y-5 px-6 py-5'>
+                <div className='px-6 py-4'>
                     <Tabs
                         aria-label='Domain input mode'
                         selectedKey={mode}
@@ -135,7 +135,7 @@ export function DomainAddField({
                             </Tabs.Tab>
                         </Tabs.List>
 
-                        <Tabs.Panel className='pt-5' id='single'>
+                        <Tabs.Panel className='pt-2' id='single'>
                             <FormField
                                 hint='Enter a hostname only, for example example.com.'
                                 htmlFor='single-site-domain'
@@ -162,7 +162,7 @@ export function DomainAddField({
                             </FormField>
                         </Tabs.Panel>
 
-                        <Tabs.Panel className='pt-5' id='multiple'>
+                        <Tabs.Panel className='pt-2' id='multiple'>
                             <FormField
                                 hint='Empty lines and duplicate entries are ignored.'
                                 htmlFor='multiple-site-domains'

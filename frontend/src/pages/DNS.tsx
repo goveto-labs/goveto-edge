@@ -341,18 +341,21 @@ export default function DNS() {
     };
 
     const refreshDomain = async () => {
-        await mutate(() => api.refresh(), 'Failed to refresh DNS domain');
+        await mutate(() => api.refresh(), 'Failed to refresh CDN endpoint');
     };
 
     const deleteDomain = async () => {
-        if (!confirm(`Delete DNS domain "${zone}" and all records managed by Goveto Edge?`)) return;
-        await mutate(() => api.delete(), 'Failed to delete DNS domain');
+        if (
+            !confirm(`Delete the CDN endpoint configuration for "${zone}" and all managed records?`)
+        )
+            return;
+        await mutate(() => api.delete(), 'Failed to delete CDN endpoint');
     };
 
     if (!clusterId) {
         return (
             <div className='space-y-6'>
-                <PageHeader subtitle='Cluster hostname and site CNAME management.' title='DNS' />
+                <PageHeader subtitle='Manage the cluster CDN endpoint hostname.' title='DNS' />
                 <Card className='p-8 text-center text-sm text-muted'>
                     Select a cluster to manage DNS.
                 </Card>
@@ -363,7 +366,7 @@ export default function DNS() {
     return (
         <div className='space-y-6'>
             <PageHeader
-                subtitle='Publish the cluster hostname to edge node IPs and CNAME every site domain to it.'
+                subtitle='Publish the cluster primary hostname to edge node IP addresses.'
                 title='DNS'
             >
                 <Button isDisabled={loading || busy} variant='ghost' onPress={() => void load()}>
@@ -373,19 +376,19 @@ export default function DNS() {
                 {isOwner && !configured && (
                     <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
                         <Plus className='mr-2 h-4 w-4' />
-                        Add domain
+                        Configure endpoint
                     </Button>
                 )}
                 {configured && isOwner && (
                     <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
                         <Pencil className='mr-2 h-4 w-4' />
-                        Edit domain
+                        Edit endpoint
                     </Button>
                 )}
                 {configured && isOwner && (
                     <Button isDisabled={!canEdit} variant='secondary' onPress={refreshDomain}>
                         <RefreshCw className='mr-2 h-4 w-4' />
-                        Refresh domain
+                        Refresh endpoint
                     </Button>
                 )}
                 <Button
@@ -399,7 +402,7 @@ export default function DNS() {
                 {configured && isOwner && (
                     <Button isDisabled={!canEdit} variant='danger' onPress={deleteDomain}>
                         <Trash2 className='mr-2 h-4 w-4' />
-                        Delete domain
+                        Delete endpoint
                     </Button>
                 )}
             </PageHeader>
@@ -435,9 +438,10 @@ export default function DNS() {
                 ) : (
                     <div className='py-5 text-center'>
                         <Globe2 className='mx-auto mb-3 h-8 w-8 text-muted' />
-                        <h2 className='font-semibold'>No DNS domain configured</h2>
+                        <h2 className='font-semibold'>No CDN endpoint configured</h2>
                         <p className='mt-1 text-sm text-muted'>
-                            Add a provider credential, then choose one of its domains.
+                            Add provider credentials, then choose the DNS zone for the cluster
+                            hostname.
                         </p>
                     </div>
                 )}
@@ -448,8 +452,8 @@ export default function DNS() {
                 isDismissable={!busy}
                 isOpen={domainDialogOpen}
                 size='lg'
-                subtitle='Connect a provider and select one of its domains.'
-                title={configured ? 'Edit DNS domain' : 'Add DNS domain'}
+                subtitle='Select the DNS zone that hosts the cluster primary hostname.'
+                title={configured ? 'Edit CDN endpoint' : 'Configure CDN endpoint'}
                 onOpenChange={setDomainDialogOpen}
             >
                 <form onSubmit={save}>
@@ -539,7 +543,7 @@ export default function DNS() {
                                 ) : (
                                     <RefreshCw className='mr-2 h-4 w-4' />
                                 )}
-                                Load domains
+                                Load zones
                             </Button>
                         </div>
                         <Select
@@ -548,7 +552,7 @@ export default function DNS() {
                             value={zone}
                             onChange={selectDomain}
                         >
-                            <Label>Domain</Label>
+                            <Label>DNS zone</Label>
                             <Select.Trigger>
                                 <Select.Value />
                             </Select.Trigger>
@@ -572,7 +576,7 @@ export default function DNS() {
                                 variant='secondary'
                                 id='dns-hostname'
                                 disabled={!canEdit || !zone}
-                                placeholder={zone ? `edge.${zone}` : 'Select a domain first'}
+                                placeholder={zone ? `edge.${zone}` : 'Select a DNS zone first'}
                                 required
                                 value={hostname}
                                 onChange={(event) => setHostname(event.target.value)}

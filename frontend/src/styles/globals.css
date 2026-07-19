@@ -7,6 +7,11 @@
 @import "@heroui/styles/variants";
 
 @layer base {
+    :root {
+        --app-zoom: 0.9;
+        --app-zoom-inverse: 1.1111111111;
+    }
+
     html,
     body,
     #root {
@@ -45,5 +50,18 @@
 }
 
 body {
-    zoom: 90%;
+    zoom: var(--app-zoom);
+}
+
+/*
+ * HeroUI renders modal overlays through a body-level portal. Counter the
+ * global application zoom so the fixed backdrop covers the visual viewport,
+ * then restore the application scale for the dialog content itself.
+ */
+.dialog-shell-backdrop {
+    zoom: var(--app-zoom-inverse);
+}
+
+.dialog-shell-container {
+    zoom: var(--app-zoom);
 }
