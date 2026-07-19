@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { ApiError, certificatesApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { DomainAddField } from '@/components/DomainAddField.tsx';
 import { FormError } from '@/components/FormField.tsx';
 import { FormRow } from '@/components/FormRow.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -23,13 +24,6 @@ function createOrigin(): OriginFormItem {
         host_header: '',
         weight: 1,
     };
-}
-
-function parseDomains(value: string) {
-    return value
-        .split(',')
-        .map((domain) => domain.trim())
-        .filter(Boolean);
 }
 
 function StepNavigation() {
@@ -72,7 +66,7 @@ export default function CreateSite() {
     const [certificates, setCertificates] = useState<Certificate[]>([]);
     const [certificateIds, setCertificateIds] = useState<Set<string>>(new Set());
     const [name, setName] = useState('');
-    const [domains, setDomains] = useState('');
+    const [domains, setDomains] = useState<string[]>([]);
     const [origins, setOrigins] = useState<OriginFormItem[]>([createOrigin()]);
     const [loadingOptions, setLoadingOptions] = useState(false);
     const [submitting, setSubmitting] = useState(false);
@@ -114,9 +108,8 @@ export default function CreateSite() {
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
-        const parsedDomains = parseDomains(domains);
         const validOrigins = origins.filter((origin) => origin.address.trim());
-        if (parsedDomains.length === 0) {
+        if (domains.length === 0) {
             setError('Add at least one domain.');
             return;
         }
@@ -130,7 +123,7 @@ export default function CreateSite() {
         try {
             const created = await api.create({
                 name: name.trim(),
-                domains: parsedDomains,
+                domains,
                 certificate_ids: Array.from(certificateIds),
                 origins: validOrigins.map(({ localId: _, ...origin }) => origin),
             });
@@ -183,19 +176,11 @@ export default function CreateSite() {
                                         />
                                     </FormRow>
                                     <FormRow
-                                        hint='Separate multiple hostnames with commas, for example: example.com, www.example.com.'
-                                        htmlFor='site-domains'
+                                        hint='Add one hostname or paste multiple hostnames, one per line.'
                                         label='Domains'
                                         required
                                     >
-                                        <Input
-                                            id='site-domains'
-                                            placeholder='example.com, www.example.com'
-                                            required
-                                            value={domains}
-                                            variant='secondary'
-                                            onChange={(event) => setDomains(event.target.value)}
-                                        />
+                                        <DomainAddField value={domains} onChange={setDomains} />
                                     </FormRow>
                                     <FormRow
                                         hint='Optional. Select certificates when this site will serve HTTPS.'
