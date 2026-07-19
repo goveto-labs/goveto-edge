@@ -2,12 +2,13 @@ import type { NodeRequestLog, SiteSummary } from '@/api';
 
 import { Button, Input } from '@heroui/react';
 import { RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function SitesAccessLogs() {
@@ -50,13 +51,8 @@ export default function SitesAccessLogs() {
         }
     }, [analytics, clusterId, siteId]);
 
-    useEffect(() => {
-        void loadSites();
-    }, [loadSites]);
-
-    useEffect(() => {
-        void loadLogs();
-    }, [loadLogs]);
+    useAutoRefresh(loadSites, Boolean(clusterId));
+    useAutoRefresh(loadLogs, Boolean(clusterId && siteId));
 
     const filteredLogs = logs.filter((entry) =>
         `${entry.method} ${entry.hostname} ${entry.path} ${entry.status_code} ${entry.cache_status}`

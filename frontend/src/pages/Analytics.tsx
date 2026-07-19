@@ -8,7 +8,7 @@ import type {
 
 import { Button, Input, Label } from '@heroui/react';
 import { Activity, CalendarDays, HardDrive, MousePointerClick, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -16,6 +16,7 @@ import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 type Period = '24h' | '30d';
@@ -182,32 +183,26 @@ export default function Analytics() {
         }
     }, [api, clusterId, nodeApi, period, siteId]);
 
-    useEffect(() => {
-        void load();
-        const refresh = window.setInterval(() => void load(), 60_000);
-        return () => window.clearInterval(refresh);
-    }, [load]);
+    useAutoRefresh(load, Boolean(clusterId));
 
-    useEffect(() => {
+    const loadRuntime = useCallback(async () => {
         if (!clusterId || !selectedNode) {
             setRuntime([]);
             return;
         }
-        const loadRuntime = () =>
-            api
-                .nodeRuntime({ node_id: selectedNode, period: '12h' })
-                .then((result) => setRuntime(result.series))
-                .catch((runtimeError) =>
-                    setError(
-                        runtimeError instanceof ApiError
-                            ? runtimeError.message
-                            : 'Failed to load node trends'
-                    )
-                );
-        void loadRuntime();
-        const refresh = window.setInterval(() => void loadRuntime(), 60_000);
-        return () => window.clearInterval(refresh);
+        try {
+            const result = await api.nodeRuntime({ node_id: selectedNode, period: '12h' });
+            setRuntime(result.series);
+        } catch (runtimeError) {
+            setError(
+                runtimeError instanceof ApiError
+                    ? runtimeError.message
+                    : 'Failed to load node trends'
+            );
+        }
     }, [api, clusterId, selectedNode]);
+
+    useAutoRefresh(loadRuntime, Boolean(clusterId && selectedNode));
 
     const trafficData = useMemo(
         () =>

@@ -10,7 +10,7 @@ import type { DonutSlice } from '@/components/DonutChart.tsx';
 
 import { Button } from '@heroui/react';
 import { RefreshCw, Server } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, analyticsApi, nodesApi, sitesApi } from '@/api';
@@ -20,6 +20,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
@@ -209,11 +210,7 @@ export default function Dashboard() {
         }
     }, [analytics, clusterId, nodeApi, period, siteApi]);
 
-    useEffect(() => {
-        void load();
-        const refresh = window.setInterval(() => void load(), 60_000);
-        return () => window.clearInterval(refresh);
-    }, [load]);
+    useAutoRefresh(load, Boolean(clusterId));
 
     const onlineNodes = nodes.filter((node) => node.status === 'ONLINE').length;
     const chartTraffic = fillTrafficSeries(traffic, period);

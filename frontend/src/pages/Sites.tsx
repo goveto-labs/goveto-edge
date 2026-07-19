@@ -2,7 +2,7 @@ import type { SiteSummary } from '@/api';
 
 import { Button } from '@heroui/react';
 import { Eye, Globe2, Plus } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, sitesApi } from '@/api';
@@ -10,6 +10,7 @@ import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function formatBandwidth(bitsPerSecond: number) {
@@ -40,11 +41,7 @@ export default function Sites() {
         }
     }, [api, clusterId]);
 
-    useEffect(() => {
-        void loadSites();
-        const refresh = window.setInterval(() => void loadSites(), 60_000);
-        return () => window.clearInterval(refresh);
-    }, [loadSites]);
+    useAutoRefresh(loadSites, Boolean(clusterId));
 
     if (!clusterId) {
         return (

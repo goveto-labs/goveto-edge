@@ -2,7 +2,7 @@ import type { DNSLine, Node, NodeSnapshot } from '@/api';
 
 import { Button } from '@heroui/react';
 import { Eye, Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
@@ -10,6 +10,7 @@ import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function formatPercent(value: number) {
@@ -66,11 +67,7 @@ export default function Nodes() {
         }
     }, [analytics, cluster, clusterId, nodeApi]);
 
-    useEffect(() => {
-        void load();
-        const refresh = window.setInterval(() => void load(), 60_000);
-        return () => window.clearInterval(refresh);
-    }, [load]);
+    useAutoRefresh(load, Boolean(clusterId));
 
     const handleDelete = async (node: Node) => {
         if (!confirm(`Delete node "${node.name}"?`)) return;

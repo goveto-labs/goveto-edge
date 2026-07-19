@@ -10,6 +10,7 @@ import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function PublishJobs() {
@@ -35,9 +36,7 @@ export default function PublishJobs() {
         }
     }, [api, clusterId]);
 
-    useEffect(() => {
-        loadStatus();
-    }, [loadStatus]);
+    useAutoRefresh(loadStatus, Boolean(clusterId));
 
     useEffect(() => {
         if (!clusterId) return;

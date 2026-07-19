@@ -54,6 +54,7 @@ import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.ts
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { CacheOperations } from '@/pages/PurgeJobs.tsx';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
@@ -332,7 +333,6 @@ export default function SiteDetail() {
     const loadLogs = useCallback(async () => {
         if (!clusterId || !siteId) return;
         setLogsLoading(true);
-        setLogs([]);
         try {
             setLogs(await analytics.siteLogs(siteId, 300));
             setError('');
@@ -346,12 +346,22 @@ export default function SiteDetail() {
     useEffect(() => {
         void loadBase();
     }, [loadBase]);
-    useEffect(() => {
-        if (tab === 'overview') void loadOverview();
-    }, [loadOverview, tab]);
-    useEffect(() => {
-        if (tab === 'logs') void loadLogs();
-    }, [loadLogs, tab]);
+    const loadSiteOverview = useCallback(async () => {
+        if (!siteId) return;
+        try {
+            const [siteData] = await Promise.all([api.get(siteId), loadOverview()]);
+            setSite(siteData);
+        } catch (overviewError) {
+            setError(
+                overviewError instanceof ApiError
+                    ? overviewError.message
+                    : 'Failed to refresh site overview'
+            );
+        }
+    }, [api, loadOverview, siteId]);
+
+    useAutoRefresh(loadSiteOverview, tab === 'overview' && Boolean(clusterId && siteId));
+    useAutoRefresh(loadLogs, tab === 'logs' && Boolean(clusterId && siteId));
 
     useEffect(() => {
         if (!siteId || detailPath === canonicalDetailPath) return;

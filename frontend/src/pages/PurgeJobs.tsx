@@ -2,7 +2,7 @@ import type { PrewarmResult, PurgeJob, PurgeType, SiteSummary } from '@/api';
 
 import { Button, Input, TextArea } from '@heroui/react';
 import { Eraser, Flame, Globe2, Link2, RefreshCw, Tags } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 import { ApiError, purgeApi, sitesApi } from '@/api';
@@ -10,6 +10,7 @@ import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 const purgeOptions: Array<{
@@ -122,15 +123,15 @@ export function CacheOperations({
         }
     }, [clusterId, fixedSite, setSearchParams, siteId, sites]);
 
-    useEffect(() => {
-        void loadSites();
-    }, [loadSites]);
+    useAutoRefresh(loadSites, Boolean(clusterId && !fixedSite));
 
-    useEffect(() => {
+    const handleSiteChange = (nextSiteId: string) => {
         setMessage('');
         setPrewarmResults([]);
-        void load();
-    }, [load]);
+        setSearchParams(nextSiteId ? { siteId: nextSiteId } : {}, { replace: true });
+    };
+
+    useAutoRefresh(load, Boolean(clusterId && siteId));
 
     const handlePurge = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -213,12 +214,7 @@ export function CacheOperations({
                             aria-label='Site'
                             className='w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-sm sm:min-w-64'
                             value={siteId}
-                            onChange={(event) =>
-                                setSearchParams(
-                                    event.target.value ? { siteId: event.target.value } : {},
-                                    { replace: true }
-                                )
-                            }
+                            onChange={(event) => handleSiteChange(event.target.value)}
                         >
                             {siteItems.length === 0 && <option value=''>No sites available</option>}
                             {siteItems.map((site) => (

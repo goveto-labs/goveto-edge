@@ -50,6 +50,7 @@ import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
@@ -447,7 +448,6 @@ export default function NodeDetail() {
     const loadLogs = useCallback(async () => {
         if (!nodeId) return;
         setLogsLoading(true);
-        setLogs([]);
         setLogsError('');
         try {
             setLogs(await analytics.nodeLogs(nodeId, 200));
@@ -460,9 +460,7 @@ export default function NodeDetail() {
         }
     }, [analytics, nodeId]);
 
-    useEffect(() => {
-        if (tab === 'logs') void loadLogs();
-    }, [loadLogs, tab]);
+    useAutoRefresh(loadLogs, tab === 'logs' && Boolean(nodeId));
 
     useEffect(() => {
         if (!nodeId) return;
@@ -520,12 +518,19 @@ export default function NodeDetail() {
         }
     }, [analytics, clusterId, monitoringPeriod, nodeId]);
 
-    useEffect(() => {
-        if (tab !== 'overview') return;
-        void loadMonitoring();
-        const refresh = window.setInterval(() => void loadMonitoring(), 60_000);
-        return () => window.clearInterval(refresh);
-    }, [loadMonitoring, tab]);
+    const loadNodeOverview = useCallback(async () => {
+        try {
+            await Promise.all([refreshNode(), loadMonitoring()]);
+        } catch (overviewError) {
+            setError(
+                overviewError instanceof ApiError
+                    ? overviewError.message
+                    : 'Failed to refresh node status'
+            );
+        }
+    }, [loadMonitoring, refreshNode]);
+
+    useAutoRefresh(loadNodeOverview, tab === 'overview' && Boolean(clusterId && nodeId));
 
     const dnsOptions = useMemo(
         () =>

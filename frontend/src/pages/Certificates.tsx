@@ -2,7 +2,7 @@ import type { Certificate } from '@/api';
 
 import { Button, Input, TextArea, useOverlayState } from '@heroui/react';
 import { Plus, ShieldCheck, Upload } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import { ApiError, certificatesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -10,6 +10,7 @@ import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 export default function Certificates() {
@@ -36,9 +37,7 @@ export default function Certificates() {
         }
     }, [api, clusterId]);
 
-    useEffect(() => {
-        load();
-    }, [load]);
+    useAutoRefresh(load, Boolean(clusterId));
 
     const open = () => {
         setName('');

@@ -14,6 +14,7 @@ import { ApiError, dnsApi } from '@/api';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 function errorMessage(error: unknown, fallback: string) {
@@ -193,6 +194,8 @@ export default function DNS() {
         }, 2000);
         return () => window.clearInterval(timer);
     }, [hasActiveJobs, ready, refreshStatus]);
+
+    useAutoRefresh(refreshStatus, ready && !hasActiveJobs);
 
     const mutate = async (
         operation: () => Promise<unknown>,
