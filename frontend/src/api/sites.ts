@@ -1,11 +1,13 @@
 import type {
     CachePolicy,
     CreateSiteRequest,
+    SecurityPolicy,
     SiteCacheUpdateResponse,
     SiteCreateResponse,
     SiteDetails,
     SiteListenerConfig,
     SiteListenerUpdateResponse,
+    SiteSecurityUpdateResponse,
     SiteSummary,
     UpdateSiteRequest,
 } from './types.ts';
@@ -35,4 +37,11 @@ export const sitesApi = (clusterId: string) => ({
         get<CachePolicy>(clusterPath(clusterId, `/sites/${siteId}/cache`)),
     updateCache: (siteId: string, payload: CachePolicy) =>
         put<SiteCacheUpdateResponse>(clusterPath(clusterId, `/sites/${siteId}/cache`), payload),
+    getSecurity: (siteId: string) =>
+        get<SecurityPolicy>(clusterPath(clusterId, `/sites/${siteId}/security`)),
+    updateSecurity: (siteId: string, payload: SecurityPolicy) =>
+        put<SiteSecurityUpdateResponse>(
+            clusterPath(clusterId, `/sites/${siteId}/security`),
+            payload
+        ),
 });

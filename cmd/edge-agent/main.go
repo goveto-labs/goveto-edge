@@ -12,6 +12,8 @@ import (
 
 	_ "goveto-edge/caddy/cacheheaders"
 	_ "goveto-edge/caddy/cachematch"
+	_ "goveto-edge/caddy/cachepurge"
+	_ "goveto-edge/caddy/waf"
 	"goveto-edge/internal/edgeagent"
 )
 

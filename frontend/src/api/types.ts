@@ -281,6 +281,72 @@ export interface SiteCacheUpdateResponse {
     publish_error?: string;
 }
 
+export interface WAFRequestRule {
+    id?: string;
+    field: string;
+    name?: string;
+    operator: string;
+    value?: string;
+    values?: string[];
+    negate?: boolean;
+    case_sensitive?: boolean;
+}
+
+export interface WAFRuleGroup {
+    id: string;
+    name: string;
+    enabled: boolean;
+    operator: string;
+    action: string;
+    status_code?: number;
+    rules: WAFRequestRule[];
+}
+
+export interface RequestConditionGroup {
+    id?: string;
+    operator: string;
+    rules: WAFRequestRule[];
+}
+
+export interface RequestConditions {
+    group_operator: string;
+    groups: RequestConditionGroup[];
+}
+
+export interface RateLimitRule {
+    id: string;
+    name: string;
+    enabled: boolean;
+    key: string;
+    key_name?: string;
+    requests: number;
+    window_seconds: number;
+    burst: number;
+    ban_seconds: number;
+    status_code: number;
+    conditions: RequestConditions;
+}
+
+export interface SecurityPolicy {
+    waf: {
+        enabled: boolean;
+        mode: string;
+        block_status: number;
+        max_body_bytes: number;
+        presets: string[];
+        groups: WAFRuleGroup[];
+    };
+    rate_limit: {
+        enabled: boolean;
+        rules: RateLimitRule[];
+    };
+}
+
+export interface SiteSecurityUpdateResponse extends SecurityPolicy {
+    publish_job?: PublishJob;
+    publish_error?: string;
+}
+
 export interface CreateSiteRequest {
     name: string;
     domains: string[];

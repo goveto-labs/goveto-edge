@@ -5,6 +5,7 @@ import type {
     DistributionItem,
     MonitoringOverview,
     NodeRequestLog,
+    SecurityPolicy,
     SiteDetails,
     SiteListenerConfig,
     SiteOrigin,
@@ -52,6 +53,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
+import { SiteSecuritySettings } from '@/components/SiteSecuritySettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
@@ -66,10 +68,43 @@ type SettingsPage =
     | 'http'
     | 'https'
     | 'origins'
+    | 'security'
     | 'cache'
     | 'cache-operations';
 type Period = '24h' | '30d';
 type OriginDraft = SiteOrigin & { draft_id: string };
+
+function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
+    return {
+        waf: {
+            ...policy.waf,
+            groups: policy.waf.groups.map((group) => ({
+                ...group,
+                rules: group.rules.map((rule) => ({
+                    ...rule,
+                    id: rule.id ?? crypto.randomUUID(),
+                })),
+            })),
+        },
+        rate_limit: {
+            ...policy.rate_limit,
+            rules: policy.rate_limit.rules.map((rule) => ({
+                ...rule,
+                conditions: {
+                    ...rule.conditions,
+                    groups: rule.conditions.groups.map((group) => ({
+                        ...group,
+                        id: group.id ?? crypto.randomUUID(),
+                        rules: group.rules.map((condition) => ({
+                            ...condition,
+                            id: condition.id ?? crypto.randomUUID(),
+                        })),
+                    })),
+                },
+            })),
+        },
+    };
+}
 
 const tabs = [
     { id: 'overview' as const, label: 'Overview', icon: BarChart3 },
@@ -82,6 +117,7 @@ const settingsPages = [
     { id: 'http' as const, label: 'HTTP', icon: FileText },
     { id: 'https' as const, label: 'HTTPS', icon: LockKeyhole },
     { id: 'origins' as const, label: 'Origins', icon: Server },
+    { id: 'security' as const, label: 'Security', icon: ShieldCheck },
     { id: 'cache' as const, label: 'Cache', icon: HardDrive },
     { id: 'cache-operations' as const, label: 'Cache operations', icon: Flame },
 ];
@@ -212,6 +248,17 @@ export default function SiteDetail() {
     const [site, setSite] = useState<SiteDetails | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
+    const [security, setSecurity] = useState<SecurityPolicy>({
+        waf: {
+            enabled: false,
+            mode: 'BLOCK',
+            block_status: 403,
+            max_body_bytes: 65536,
+            presets: [],
+            groups: [],
+        },
+        rate_limit: { enabled: false, rules: [] },
+    });
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
     const [certificates, setCertificates] = useState<Certificate[]>([]);
     const [certificateIds, setCertificateIds] = useState<Set<string>>(new Set());
@@ -246,18 +293,27 @@ export default function SiteDetail() {
         if (!clusterId || !siteId) return;
         setLoading(true);
         try {
-            const [siteData, listenerData, cacheData, clusterData, dnsData, certificateData] =
-                await Promise.all([
-                    api.get(siteId),
-                    api.getListener(siteId),
-                    api.getCache(siteId),
-                    clustersApi.list(),
-                    dns.config(),
-                    certificateApi.list(),
-                ]);
+            const [
+                siteData,
+                listenerData,
+                cacheData,
+                securityData,
+                clusterData,
+                dnsData,
+                certificateData,
+            ] = await Promise.all([
+                api.get(siteId),
+                api.getListener(siteId),
+                api.getCache(siteId),
+                api.getSecurity(siteId),
+                clustersApi.list(),
+                dns.config(),
+                certificateApi.list(),
+            ]);
             setSite(siteData);
             setListener(listenerData);
             setCache(cacheData);
+            setSecurity(withSecurityEditorIDs(securityData));
             setClusters(clusterData.clusters);
             setCertificates(certificateData);
             setCertificateIds(new Set(siteData.certificate_ids));
@@ -429,6 +485,11 @@ export default function SiteDetail() {
             const result = await api.updateCache(siteId, cache);
             setCache(result.cache);
         }, 'Cache settings saved and publishing queued.');
+    const saveSecurity = () =>
+        runSave(async () => {
+            const result = await api.updateSecurity(siteId, security);
+            setSecurity(withSecurityEditorIDs({ waf: result.waf, rate_limit: result.rate_limit }));
+        }, 'Security settings saved and publishing queued.');
     const publish = async () => {
         setPublishingSite(true);
         setError('');
@@ -1432,6 +1493,14 @@ export default function SiteDetail() {
                                                 saving={saving}
                                                 onChange={setCache}
                                                 onSave={() => void saveCache()}
+                                            />
+                                        )}
+                                        {settingsPage === 'security' && (
+                                            <SiteSecuritySettings
+                                                policy={security}
+                                                saving={saving}
+                                                onChange={setSecurity}
+                                                onSave={() => void saveSecurity()}
                                             />
                                         )}
                                         {settingsPage === 'cache-operations' && (

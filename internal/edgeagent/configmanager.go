@@ -1,13 +1,10 @@
 package edgeagent
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,6 +16,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 
+	cachefs "goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
 )
@@ -171,88 +169,32 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
 
-func (m *ConfigManager) Purge(ctx context.Context, purge edgeprotocol.PurgeRequest) error {
+func (m *ConfigManager) Purge(_ context.Context, purge edgeprotocol.PurgeRequest) error {
 	m.mu.Lock()
 	site, ok := m.sites[purge.SiteID]
-	listen := m.agentListen
+	cacheDirectory := m.nodeConfig.CacheDirectory
 	m.mu.Unlock()
 
 	if !ok || site.Disabled {
 		return errors.New("site config is not active")
 	}
-	if site.Cache == nil {
+	cachePolicy, configured, err := decodeCachePolicy(site.Cache)
+	if err != nil {
+		return fmt.Errorf("invalid site cache policy: %w", err)
+	}
+	if !configured || !cachePolicy.Enabled {
 		return errors.New("site cache is not enabled")
 	}
 	if len(site.Domains) == 0 {
 		return errors.New("site has no domain")
 	}
-
-	host, port, err := net.SplitHostPort(listen)
-	if err != nil {
-		return fmt.Errorf("invalid agent listen address: %w", err)
-	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-
-	scheme := "http"
-	if !site.Listener.HTTPEnabled {
-		scheme, port = "https", strconv.Itoa(site.Listener.HTTPSPort)
-	}
-
-	endpoint := scheme + "://" + net.JoinHostPort(host, port) + "/__goveto/cache/" + purge.SiteID
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	var request *http.Request
-	if purge.Type == "ALL" {
-		request, err = http.NewRequestWithContext(ctx, "PURGE", endpoint+"/flush", nil)
-	} else {
-		kind := map[string]string{"URL": "uri", "PREFIX": "uri-prefix", "TAG": "group"}[purge.Type]
-		values := append([]string(nil), purge.Values...)
-		if purge.Type != "TAG" {
-			for i, value := range values {
-				if strings.HasPrefix(value, "/") {
-					values[i] = site.Domains[0] + value
-				}
-			}
-		}
-
-		payload := map[string]any{"type": kind, "purge": true}
-		if purge.Type == "TAG" {
-			payload["groups"] = values
-		} else {
-			payload["selectors"] = values
-		}
-
-		body, marshalErr := json.Marshal(payload)
-		if marshalErr != nil {
-			return marshalErr
-		}
-
-		request, err = http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-		if request != nil {
-			request.Header.Set("Content-Type", "application/json")
-		}
-	}
-	if err != nil {
-		return err
-	}
-
-	request.Host = site.Domains[0]
-	response, err := client.Do(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("cache purge rejected: %s", response.Status)
-	}
-	return nil
+	_, err = cachefs.Purge(
+		filepath.Join(cacheDirectory, site.SiteID),
+		purge.Type,
+		site.Domains,
+		purge.Values,
+	)
+	return err
 }
 
 func persistSites(path string, sites map[string]SiteConfig) error {
@@ -357,7 +299,23 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 			})
 		}
 
-		handlers := make([]any, 0, 4)
+		handlers := make([]any, 0, 5)
+		wafPolicy, wafConfigured, err := decodeWAFPolicy(site.WAF)
+		if err != nil {
+			return nil, fmt.Errorf("site %s WAF policy: %w", id, err)
+		}
+		rateLimitPolicy, rateLimitConfigured, err := decodeRateLimitPolicy(site.RateLimit)
+		if err != nil {
+			return nil, fmt.Errorf("site %s rate-limit policy: %w", id, err)
+		}
+		if (wafConfigured && wafPolicy.Enabled) || (rateLimitConfigured && rateLimitPolicy.Enabled) {
+			handlers = append(handlers, map[string]any{
+				"handler":    "goveto_waf",
+				"site_id":    id,
+				"waf":        wafPolicy,
+				"rate_limit": rateLimitPolicy,
+			})
+		}
 		if listener.HSTSEnabled {
 			value := "max-age=" + strconv.Itoa(listener.HSTSMaxAge)
 			if listener.HSTSIncludeSubdomains {
@@ -420,6 +378,19 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
 		} else if ok && cachePolicy.Enabled {
+			cacheHandler := souinHandler(id, cachePolicy, nodeConfig)
+			routes = append(routes, map[string]any{
+				"@id": "site_" + id + "_cache_api",
+				"match": []any{
+					map[string]any{
+						"host":   site.Domains,
+						"method": []string{http.MethodPost, "PURGE"},
+						"path":   []string{"/__goveto/cache/" + id + "*"},
+					},
+				},
+				"handle":   []any{cacheHandler},
+				"terminal": true,
+			})
 			cachedHandlers := append([]any(nil), handlers...)
 			cachedHandlers = append(cachedHandlers, map[string]any{
 				"handler": "goveto_cache_headers",
@@ -427,12 +398,13 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 				"age":     cachePolicy.ResponseHeaders.Age,
 			})
 			cachedHandlers = append(cachedHandlers,
-				souinHandler(id, cachePolicy, nodeConfig),
+				cacheHandler,
 				map[string]any{
-					"handler":     "goveto_cache_headers",
-					"age":         true,
-					"default_ttl": cachePolicy.TTL.DefaultSeconds,
-					"status_ttl":  cachePolicy.TTL.Status,
+					"handler":            "goveto_cache_headers",
+					"age":                true,
+					"default_ttl":        cachePolicy.TTL.DefaultSeconds,
+					"status_ttl":         cachePolicy.TTL.Status,
+					"stale_if_error_ttl": staleIfErrorTTL(cachePolicy),
 				},
 				reverseProxy,
 			)
@@ -447,7 +419,13 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 							"method": []string{"PURGE"},
 						},
 					},
-					"handle":   cachedHandlers,
+					"handle": []any{
+						map[string]any{
+							"handler": "goveto_cache_purge",
+							"path":    filepath.Join(nodeConfig.CacheDirectory, id),
+							"hosts":   site.Domains,
+						},
+					},
 					"terminal": true,
 				})
 			}
@@ -516,6 +494,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 			"protocols":               protocolList,
 			"routes":                  routes,
 			"tls_connection_policies": policies,
+			"automatic_https":         map[string]any{"disable": true},
 			"logs":                    map[string]any{},
 		},
 	}
@@ -552,7 +531,43 @@ func decodeCachePolicy(raw map[string]any) (cachepolicy.CachePolicy, bool, error
 		return cachepolicy.CachePolicy{}, false, err
 	}
 
-	var policy cachepolicy.CachePolicy
+	policy := cachepolicy.DefaultCachePolicy()
+	if err = json.Unmarshal(data, &policy); err != nil {
+		return policy, false, err
+	}
+	if err = policy.NormalizeAndValidate(); err != nil {
+		return policy, false, err
+	}
+	return policy, true, nil
+}
+
+func decodeWAFPolicy(raw map[string]any) (cachepolicy.WAFPolicy, bool, error) {
+	if raw == nil {
+		return cachepolicy.WAFPolicy{}, false, nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return cachepolicy.WAFPolicy{}, false, err
+	}
+	policy := cachepolicy.DefaultWAFPolicy()
+	if err = json.Unmarshal(data, &policy); err != nil {
+		return policy, false, err
+	}
+	if err = policy.NormalizeAndValidate(); err != nil {
+		return policy, false, err
+	}
+	return policy, true, nil
+}
+
+func decodeRateLimitPolicy(raw map[string]any) (cachepolicy.RateLimitPolicy, bool, error) {
+	if raw == nil {
+		return cachepolicy.RateLimitPolicy{}, false, nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return cachepolicy.RateLimitPolicy{}, false, err
+	}
+	policy := cachepolicy.DefaultRateLimitPolicy()
 	if err = json.Unmarshal(data, &policy); err != nil {
 		return policy, false, err
 	}
@@ -574,15 +589,16 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 	}
 
 	configuration := map[string]any{
-		"default_cache": map[string]any{
+		"DefaultCache": map[string]any{
 			"allowed_http_verbs":    verbs,
-			"cache_name":            "Goveto",
-			"headers":               policy.VaryHeaders,
+			"cache_name":            "Goveto-" + siteID,
+			"key":                   map[string]any{"headers": policy.VaryHeaders},
 			"ttl":                   strconv.Itoa(policy.TTL.DefaultSeconds) + "s",
 			"stale":                 stale,
 			"default_cache_control": "public, max-age=" + strconv.Itoa(policy.TTL.DefaultSeconds),
 			"simplefs": map[string]any{
-				"path": nodeConfig.CacheDirectory,
+				"found": true,
+				"path":  filepath.Join(nodeConfig.CacheDirectory, siteID),
 				"configuration": map[string]any{
 					"auto_max_size":          nodeConfig.AutoMaxSize,
 					"max_size_bytes":         nodeConfig.MaxSizeBytes,
@@ -591,7 +607,7 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 			},
 			"storers": []string{"simplefs"},
 		},
-		"api": map[string]any{
+		"API": map[string]any{
 			"souin": map[string]any{
 				"enable":   true,
 				"basepath": "/__goveto/cache/" + siteID,
@@ -599,6 +615,13 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 		},
 	}
 	return map[string]any{"handler": "cache", "Configuration": configuration}
+}
+
+func staleIfErrorTTL(policy cachepolicy.CachePolicy) int {
+	if !policy.Stale.Enabled {
+		return 0
+	}
+	return policy.Stale.IfErrorSeconds
 }
 
 func keys(values map[string]struct{}) []string {

@@ -317,12 +317,43 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	}
 	text := string(encoded)
 	for _, expected := range []string{
-		`"path":"/var/cache/goveto"`,
+		`"path":"/var/cache/goveto/site-1"`,
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing SimpleFS cache policy %s: %s", expected, text)
+		}
+	}
+}
+
+func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
+	config := validHTTPConfig(t)
+	waf := cachepolicy.DefaultWAFPolicy()
+	waf.Enabled = true
+	waf.Groups = []cachepolicy.WAFRuleGroup{{
+		ID:       "admin",
+		Enabled:  true,
+		Operator: "AND",
+		Action:   "BLOCK",
+		Rules: []cachepolicy.WAFRequestRule{
+			{Field: "PATH", Operator: "PREFIX", Value: "/admin"},
+		},
+	}}
+	rateLimit := cachepolicy.RateLimitPolicy{Enabled: true, Rules: []cachepolicy.RateLimitRule{{
+		ID: "cc", Enabled: true, Key: "CLIENT_IP", Requests: 20, WindowSeconds: 10,
+	}}}
+	config.WAF = toMap(t, waf)
+	config.RateLimit = toMap(t, rateLimit)
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"SQL_INJECTION"`, `"window_seconds":10`} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing security policy %s: %s", expected, text)
 		}
 	}
 }
@@ -356,6 +387,19 @@ func enabledCachePolicy(t *testing.T) map[string]any {
 	policy := cachepolicy.DefaultCachePolicy()
 	policy.Enabled = true
 	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result map[string]any
+	if err = json.Unmarshal(data, &result); err != nil {
+		t.Fatal(err)
+	}
+	return result
+}
+
+func toMap(t *testing.T, value any) map[string]any {
+	t.Helper()
+	data, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}

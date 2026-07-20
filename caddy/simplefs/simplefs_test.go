@@ -1,9 +1,11 @@
 package simplefs
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/darkweak/storages/core"
 	"go.uber.org/zap"
@@ -30,6 +32,32 @@ func TestWithinAutoLimitUsesWholeFilesystemTarget(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMultiLevelKeepsResponseBodyForStaleWindow(t *testing.T) {
+	provider, err := newProvider(core.CacheProvider{
+		Path: t.TempDir(),
+		Configuration: map[string]any{
+			"auto_max_size":  false,
+			"max_size_bytes": 1 << 20,
+		},
+	}, zap.NewNop().Sugar(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := []byte("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok")
+	if err = provider.SetMultiLevel("key", "key", response, nil, "", 10*time.Millisecond, "key"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	fresh, stale := provider.GetMultiLevel("key", &http.Request{Header: http.Header{}}, &core.Revalidator{})
+	if fresh != nil {
+		t.Fatal("expired response should not remain fresh")
+	}
+	if stale == nil {
+		t.Fatal("response body was removed before the stale window elapsed")
+	}
+	_ = stale.Body.Close()
 }
 
 func TestFixedLimitEvictsOldestOrphan(t *testing.T) {

@@ -1,0 +1,327 @@
+package policy
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+	"net/netip"
+	"regexp"
+	"sort"
+	"strings"
+)
+
+const (
+	WAFModeBlock   = "BLOCK"
+	WAFModeMonitor = "MONITOR"
+)
+
+var supportedWAFPresets = map[string]struct{}{
+	"BAD_BOTS":          {},
+	"COMMAND_INJECTION": {},
+	"PATH_TRAVERSAL":    {},
+	"SCANNER":           {},
+	"SQL_INJECTION":     {},
+	"XSS":               {},
+}
+
+type WAFPolicy struct {
+	Enabled      bool           `json:"enabled"`
+	Mode         string         `json:"mode"`
+	BlockStatus  int            `json:"block_status"`
+	MaxBodyBytes int64          `json:"max_body_bytes"`
+	Presets      []string       `json:"presets"`
+	Groups       []WAFRuleGroup `json:"groups"`
+}
+
+type WAFRuleGroup struct {
+	ID         string           `json:"id"`
+	Name       string           `json:"name"`
+	Enabled    bool             `json:"enabled"`
+	Operator   string           `json:"operator"`
+	Action     string           `json:"action"`
+	StatusCode int              `json:"status_code,omitempty"`
+	Rules      []WAFRequestRule `json:"rules"`
+}
+
+type WAFRequestRule struct {
+	Field         string   `json:"field"`
+	Name          string   `json:"name,omitempty"`
+	Operator      string   `json:"operator"`
+	Value         string   `json:"value,omitempty"`
+	Values        []string `json:"values,omitempty"`
+	Negate        bool     `json:"negate,omitempty"`
+	CaseSensitive bool     `json:"case_sensitive,omitempty"`
+}
+
+type RateLimitPolicy struct {
+	Enabled bool            `json:"enabled"`
+	Rules   []RateLimitRule `json:"rules"`
+}
+
+type RateLimitRule struct {
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Enabled       bool              `json:"enabled"`
+	Key           string            `json:"key"`
+	KeyName       string            `json:"key_name,omitempty"`
+	Requests      int               `json:"requests"`
+	WindowSeconds int               `json:"window_seconds"`
+	Burst         int               `json:"burst"`
+	BanSeconds    int               `json:"ban_seconds"`
+	StatusCode    int               `json:"status_code"`
+	Conditions    RequestConditions `json:"conditions"`
+}
+
+type RequestConditions struct {
+	GroupOperator string                  `json:"group_operator"`
+	Groups        []RequestConditionGroup `json:"groups"`
+}
+
+type RequestConditionGroup struct {
+	Operator string           `json:"operator"`
+	Rules    []WAFRequestRule `json:"rules"`
+}
+
+func DefaultWAFPolicy() WAFPolicy {
+	return WAFPolicy{
+		Mode:         WAFModeBlock,
+		BlockStatus:  http.StatusForbidden,
+		MaxBodyBytes: 64 << 10,
+		Presets:      []string{"SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION", "SCANNER", "BAD_BOTS"},
+	}
+}
+
+func DefaultRateLimitPolicy() RateLimitPolicy { return RateLimitPolicy{} }
+
+func (p *WAFPolicy) NormalizeAndValidate() error {
+	p.Mode = strings.ToUpper(strings.TrimSpace(p.Mode))
+	if p.Mode == "" {
+		p.Mode = WAFModeBlock
+	}
+	if p.Mode != WAFModeBlock && p.Mode != WAFModeMonitor {
+		return errors.New("mode must be BLOCK or MONITOR")
+	}
+	if p.BlockStatus == 0 {
+		p.BlockStatus = http.StatusForbidden
+	}
+	if p.BlockStatus < 400 || p.BlockStatus > 599 {
+		return errors.New("block_status must be between 400 and 599")
+	}
+	if p.MaxBodyBytes == 0 {
+		p.MaxBodyBytes = 64 << 10
+	}
+	if p.MaxBodyBytes < 0 || p.MaxBodyBytes > 1<<20 {
+		return errors.New("max_body_bytes must be between 0 and 1048576")
+	}
+
+	seenPresets := map[string]struct{}{}
+	for index, preset := range p.Presets {
+		preset = strings.ToUpper(strings.TrimSpace(preset))
+		if _, ok := supportedWAFPresets[preset]; !ok {
+			return fmt.Errorf("unsupported WAF preset %q", preset)
+		}
+		if _, ok := seenPresets[preset]; ok {
+			return fmt.Errorf("duplicate WAF preset %q", preset)
+		}
+		seenPresets[preset] = struct{}{}
+		p.Presets[index] = preset
+	}
+	sort.Strings(p.Presets)
+
+	if len(p.Groups) > 64 {
+		return errors.New("WAF policy cannot contain more than 64 groups")
+	}
+	seenIDs := map[string]struct{}{}
+	for index := range p.Groups {
+		group := &p.Groups[index]
+		group.ID = strings.TrimSpace(group.ID)
+		if group.ID == "" {
+			group.ID = fmt.Sprintf("group-%d", index+1)
+		}
+		if _, ok := seenIDs[group.ID]; ok {
+			return fmt.Errorf("duplicate WAF group id %q", group.ID)
+		}
+		seenIDs[group.ID] = struct{}{}
+		group.Name = strings.TrimSpace(group.Name)
+		group.Operator = normalizeBooleanOperator(group.Operator)
+		if !booleanOperator(group.Operator) {
+			return fmt.Errorf("groups[%d].operator must be AND or OR", index)
+		}
+		group.Action = strings.ToUpper(strings.TrimSpace(group.Action))
+		if group.Action == "" {
+			group.Action = "BLOCK"
+		}
+		if group.Action != "BLOCK" && group.Action != "MONITOR" && group.Action != "ALLOW" {
+			return fmt.Errorf("groups[%d].action must be BLOCK, MONITOR or ALLOW", index)
+		}
+		if group.StatusCode == 0 {
+			group.StatusCode = p.BlockStatus
+		}
+		if group.StatusCode < 400 || group.StatusCode > 599 {
+			return fmt.Errorf("groups[%d].status_code must be between 400 and 599", index)
+		}
+		if len(group.Rules) == 0 || len(group.Rules) > 64 {
+			return fmt.Errorf("groups[%d] must contain between 1 and 64 rules", index)
+		}
+		if err := normalizeRequestRules(group.Rules, fmt.Sprintf("groups[%d]", index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (p *RateLimitPolicy) NormalizeAndValidate() error {
+	if len(p.Rules) > 64 {
+		return errors.New("rate-limit policy cannot contain more than 64 rules")
+	}
+	seenIDs := map[string]struct{}{}
+	for index := range p.Rules {
+		rule := &p.Rules[index]
+		rule.ID = strings.TrimSpace(rule.ID)
+		if rule.ID == "" {
+			rule.ID = fmt.Sprintf("cc-%d", index+1)
+		}
+		if _, ok := seenIDs[rule.ID]; ok {
+			return fmt.Errorf("duplicate rate-limit rule id %q", rule.ID)
+		}
+		seenIDs[rule.ID] = struct{}{}
+		rule.Name = strings.TrimSpace(rule.Name)
+		rule.Key = strings.ToUpper(strings.TrimSpace(rule.Key))
+		switch rule.Key {
+		case "CLIENT_IP", "CLIENT_IP_PATH", "GLOBAL":
+			rule.KeyName = ""
+		case "HEADER":
+			rule.KeyName = http.CanonicalHeaderKey(strings.TrimSpace(rule.KeyName))
+			if rule.KeyName == "" {
+				return fmt.Errorf("rules[%d].key_name is required for HEADER", index)
+			}
+		case "COOKIE":
+			rule.KeyName = strings.TrimSpace(rule.KeyName)
+			if rule.KeyName == "" {
+				return fmt.Errorf("rules[%d].key_name is required for COOKIE", index)
+			}
+		default:
+			return fmt.Errorf("rules[%d].key is unsupported", index)
+		}
+		if rule.Requests < 1 || rule.Requests > 1_000_000 {
+			return fmt.Errorf("rules[%d].requests must be between 1 and 1000000", index)
+		}
+		if rule.WindowSeconds < 1 || rule.WindowSeconds > 3600 {
+			return fmt.Errorf("rules[%d].window_seconds must be between 1 and 3600", index)
+		}
+		if rule.Burst < 0 || rule.Burst > rule.Requests*10 {
+			return fmt.Errorf("rules[%d].burst must be between 0 and requests*10", index)
+		}
+		if rule.BanSeconds < 0 || rule.BanSeconds > 86400 {
+			return fmt.Errorf("rules[%d].ban_seconds must be between 0 and 86400", index)
+		}
+		if rule.StatusCode == 0 {
+			rule.StatusCode = http.StatusTooManyRequests
+		}
+		if rule.StatusCode < 400 || rule.StatusCode > 599 {
+			return fmt.Errorf("rules[%d].status_code must be between 400 and 599", index)
+		}
+		if err := normalizeConditions(&rule.Conditions, fmt.Sprintf("rules[%d].conditions", index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeConditions(conditions *RequestConditions, location string) error {
+	conditions.GroupOperator = normalizeBooleanOperator(conditions.GroupOperator)
+	if !booleanOperator(conditions.GroupOperator) {
+		return fmt.Errorf("%s.group_operator must be AND or OR", location)
+	}
+	if len(conditions.Groups) > 16 {
+		return fmt.Errorf("%s cannot contain more than 16 groups", location)
+	}
+	for index := range conditions.Groups {
+		group := &conditions.Groups[index]
+		group.Operator = normalizeBooleanOperator(group.Operator)
+		if !booleanOperator(group.Operator) {
+			return fmt.Errorf("%s.groups[%d].operator must be AND or OR", location, index)
+		}
+		if len(group.Rules) == 0 || len(group.Rules) > 64 {
+			return fmt.Errorf("%s.groups[%d] must contain between 1 and 64 rules", location, index)
+		}
+		if err := normalizeRequestRules(group.Rules, fmt.Sprintf("%s.groups[%d]", location, index)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func normalizeRequestRules(rules []WAFRequestRule, location string) error {
+	for index := range rules {
+		rule := &rules[index]
+		rule.Field = strings.ToUpper(strings.TrimSpace(rule.Field))
+		rule.Operator = strings.ToUpper(strings.TrimSpace(rule.Operator))
+		rule.Name = strings.TrimSpace(rule.Name)
+		rule.Value = strings.TrimSpace(rule.Value)
+		for valueIndex := range rule.Values {
+			rule.Values[valueIndex] = strings.TrimSpace(rule.Values[valueIndex])
+		}
+
+		switch rule.Field {
+		case "METHOD", "HOST", "PATH", "RAW_QUERY", "BODY", "CLIENT_IP", "USER_AGENT":
+		case "QUERY", "COOKIE":
+			if rule.Name == "" {
+				return fmt.Errorf("%s.rules[%d].name is required for %s", location, index, rule.Field)
+			}
+		case "HEADER":
+			rule.Name = http.CanonicalHeaderKey(rule.Name)
+			if rule.Name == "" {
+				return fmt.Errorf("%s.rules[%d].name is required for HEADER", location, index)
+			}
+		default:
+			return fmt.Errorf("%s.rules[%d].field %q is unsupported", location, index, rule.Field)
+		}
+
+		switch rule.Operator {
+		case "EXISTS":
+			rule.Value, rule.Values = "", nil
+		case "EQUALS", "CONTAINS", "PREFIX", "SUFFIX", "REGEX":
+			if rule.Value == "" {
+				return fmt.Errorf("%s.rules[%d].value is required", location, index)
+			}
+			if rule.Operator == "REGEX" {
+				if _, err := regexp.Compile(rule.Value); err != nil {
+					return fmt.Errorf("%s.rules[%d] has invalid regex: %w", location, index, err)
+				}
+			}
+		case "IN":
+			if len(rule.Values) == 0 {
+				return fmt.Errorf("%s.rules[%d].values is required for IN", location, index)
+			}
+		case "CIDR":
+			if rule.Field != "CLIENT_IP" {
+				return fmt.Errorf("%s.rules[%d] CIDR only supports CLIENT_IP", location, index)
+			}
+			values := rule.Values
+			if rule.Value != "" {
+				values = append(values, rule.Value)
+			}
+			if len(values) == 0 {
+				return fmt.Errorf("%s.rules[%d] requires at least one CIDR", location, index)
+			}
+			for _, value := range values {
+				if _, err := netip.ParsePrefix(value); err != nil {
+					return fmt.Errorf("%s.rules[%d] has invalid CIDR %q", location, index, value)
+				}
+			}
+			rule.Values, rule.Value = values, ""
+		default:
+			return fmt.Errorf("%s.rules[%d].operator %q is unsupported", location, index, rule.Operator)
+		}
+	}
+	return nil
+}
+
+func normalizeBooleanOperator(value string) string {
+	value = strings.ToUpper(strings.TrimSpace(value))
+	if value == "" {
+		return "AND"
+	}
+	return value
+}

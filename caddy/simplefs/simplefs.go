@@ -3,6 +3,7 @@
 package simplefs
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
@@ -101,6 +102,7 @@ type provider struct {
 	mu         sync.Mutex
 	capacityMu sync.Mutex
 	items      map[string]cacheItem
+	groups     map[string]map[string]struct{}
 	path       string
 	size       int
 	stale      time.Duration
@@ -133,6 +135,7 @@ func newProvider(config core.CacheProvider, logger core.Logger, stale time.Durat
 	}
 	return &provider{
 		items:  map[string]cacheItem{},
+		groups: map[string]map[string]struct{}{},
 		path:   path,
 		size:   size,
 		stale:  stale,
@@ -225,7 +228,7 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 
 	now := time.Now()
 	p.mu.Lock()
-	p.setLocked(variedKey, []byte(path), duration, true, now)
+	p.setLocked(variedKey, []byte(path), duration+p.stale, true, now)
 	mappingKey := core.MappingKeyPrefix + baseKey
 	previous, _ := p.itemLocked(mappingKey, now)
 	mapping, err := core.MappingUpdater(
@@ -241,6 +244,13 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 	)
 	if err == nil {
 		p.setLocked(mappingKey, mapping, duration+p.stale, false, now)
+		for _, group := range surrogateGroups(value) {
+			if p.groups[group] == nil {
+				p.groups[group] = map[string]struct{}{}
+			}
+			p.groups[group][variedKey] = struct{}{}
+			p.groups[group][mappingKey] = struct{}{}
+		}
 	}
 	p.mu.Unlock()
 	return err
@@ -281,6 +291,121 @@ func (p *provider) Reset() error {
 	p.mu.Unlock()
 	providers.Delete(p.path)
 	return nil
+}
+
+// Purge removes cached objects from one site-scoped provider.
+func Purge(path, purgeType string, hosts, values []string) (int, error) {
+	value, ok := providers.Load(path)
+	if !ok {
+		for _, storer := range core.GetRegisteredStorers() {
+			candidate, candidateOK := storer.(*provider)
+			if candidateOK && samePath(candidate.path, path) {
+				value, ok = candidate, true
+				providers.Store(path, candidate)
+				break
+			}
+		}
+	}
+	if !ok {
+		return 0, fmt.Errorf("cache provider %q is not active", path)
+	}
+	provider := value.(*provider)
+	provider.mu.Lock()
+	defer provider.mu.Unlock()
+
+	if purgeType == "ALL" {
+		count := len(provider.items)
+		for key := range provider.items {
+			provider.deleteLocked(key)
+		}
+		return count, nil
+	}
+	if purgeType == "TAG" {
+		count := 0
+		for _, group := range values {
+			for key := range provider.groups[group] {
+				if _, exists := provider.items[key]; exists {
+					provider.deleteLocked(key)
+					count++
+				}
+			}
+			delete(provider.groups, group)
+		}
+		return count, nil
+	}
+
+	markers, err := purgeMarkers(hosts, values)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for key := range provider.items {
+		matched := false
+		for _, marker := range markers {
+			index := strings.Index(key, marker)
+			if index < 0 {
+				continue
+			}
+			if purgeType == "PREFIX" {
+				matched = true
+				break
+			}
+			remainder := key[index+len(marker):]
+			if remainder == "" || strings.HasPrefix(remainder, "?") || strings.HasPrefix(remainder, "-") {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			provider.deleteLocked(key)
+			count++
+		}
+	}
+	return count, nil
+}
+
+func samePath(left, right string) bool {
+	if filepath.Clean(left) == filepath.Clean(right) {
+		return true
+	}
+	leftResolved, leftErr := filepath.EvalSymlinks(left)
+	rightResolved, rightErr := filepath.EvalSymlinks(right)
+	return leftErr == nil && rightErr == nil && leftResolved == rightResolved
+}
+
+func surrogateGroups(value []byte) []string {
+	response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(value)), nil)
+	if err != nil {
+		return nil
+	}
+	if response.Body != nil {
+		_ = response.Body.Close()
+	}
+	return strings.FieldsFunc(response.Header.Get("Surrogate-Key"), func(value rune) bool {
+		return value == ' ' || value == ',' || value == '\t'
+	})
+}
+
+func purgeMarkers(hosts, values []string) ([]string, error) {
+	markers := make([]string, 0, len(hosts)*len(values))
+	for _, value := range values {
+		if strings.HasPrefix(value, "/") {
+			for _, host := range hosts {
+				markers = append(markers, host+"-"+value)
+			}
+			continue
+		}
+		candidate := value
+		if !strings.Contains(candidate, "://") {
+			candidate = "//" + candidate
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil || parsed.Host == "" || parsed.Path == "" {
+			return nil, fmt.Errorf("invalid purge URL %q", value)
+		}
+		markers = append(markers, parsed.Host+"-"+parsed.EscapedPath())
+	}
+	return markers, nil
 }
 
 func (p *provider) ensureSpace(incoming uint64, configured limits) error {
@@ -409,6 +534,12 @@ func (p *provider) deleteLocked(key string) {
 		return
 	}
 	delete(p.items, key)
+	for group, keys := range p.groups {
+		delete(keys, key)
+		if len(keys) == 0 {
+			delete(p.groups, group)
+		}
+	}
 	if item.file {
 		_ = os.Remove(string(item.value))
 	}

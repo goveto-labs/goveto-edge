@@ -10,10 +10,11 @@ import (
 )
 
 type Handler struct {
-	XCache     bool           `json:"x_cache"`
-	Age        bool           `json:"age"`
-	DefaultTTL int            `json:"default_ttl"`
-	StatusTTL  map[string]int `json:"status_ttl,omitempty"`
+	XCache          bool           `json:"x_cache"`
+	Age             bool           `json:"age"`
+	DefaultTTL      int            `json:"default_ttl"`
+	StatusTTL       map[string]int `json:"status_ttl,omitempty"`
+	StaleIfErrorTTL int            `json:"stale_if_error_ttl,omitempty"`
 }
 
 func init() { caddy.RegisterModule(Handler{}) }
@@ -39,12 +40,20 @@ func (w *responseWriter) WriteHeader(status int) {
 	w.wroteHeader = true
 	header := w.Header()
 	if header.Get("Cache-Control") == "" {
-		ttl := w.policy.DefaultTTL
-		if configured, ok := w.policy.StatusTTL[strconv.Itoa(status)]; ok {
-			ttl = configured
-		}
-		if ttl > 0 {
-			header.Set("Cache-Control", "public, max-age="+strconv.Itoa(ttl))
+		if header.Get("Set-Cookie") != "" {
+			header.Set("Cache-Control", "private, no-store")
+		} else {
+			ttl := w.policy.DefaultTTL
+			if configured, ok := w.policy.StatusTTL[strconv.Itoa(status)]; ok {
+				ttl = configured
+			}
+			if ttl > 0 {
+				cacheControl := "public, max-age=" + strconv.Itoa(ttl)
+				if w.policy.StaleIfErrorTTL > 0 {
+					cacheControl += ", stale-if-error=" + strconv.Itoa(w.policy.StaleIfErrorTTL)
+				}
+				header.Set("Cache-Control", cacheControl)
+			}
 		}
 	}
 	if w.policy.XCache {

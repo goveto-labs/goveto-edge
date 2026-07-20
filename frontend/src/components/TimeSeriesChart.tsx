@@ -76,7 +76,7 @@ export function TimeSeriesChart({
     const hasData = data.length > 0;
 
     useLayoutEffect(() => {
-        if (!chartRef.current) return;
+        if (!hasData || !chartRef.current) return;
         const updateSize = () => {
             if (!chartRef.current) return;
             const rect = chartRef.current.getBoundingClientRect();
