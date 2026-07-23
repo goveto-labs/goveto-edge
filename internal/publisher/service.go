@@ -510,6 +510,9 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if err = json.Unmarshal(policy.CacheJson, &config.Cache); err != nil {
 			return config, nil, fmt.Errorf("decode cache policy: %w", err)
 		}
+		if err = json.Unmarshal(policy.CompressionJson, &config.Compression); err != nil {
+			return config, nil, fmt.Errorf("decode compression policy: %w", err)
+		}
 		if err = json.Unmarshal(policy.WafJson, &config.WAF); err != nil {
 			return config, nil, fmt.Errorf("decode WAF policy: %w", err)
 		}

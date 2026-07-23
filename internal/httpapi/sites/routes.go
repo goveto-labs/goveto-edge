@@ -65,6 +65,8 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/compression", getCompression(db), auth.RequireAuth, clusteraccess.Require(db))
+	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/compression", updateCompression(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security", getSecurity(db), auth.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/security", updateSecurity(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
 }

@@ -393,6 +393,7 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Name` (String)
   - `Cachejson` (Json)
+  - `Compressionjson` (Json)
   - `Wafjson` (Json)
   - `Ccjson` (Json)
   - `Accessjson` (Json)

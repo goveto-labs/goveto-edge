@@ -2,6 +2,7 @@ import type {
     CachePolicy,
     Certificate,
     ClusterChoice,
+    CompressionPolicy,
     DistributionItem,
     MonitoringOverview,
     NodeRequestLog,
@@ -18,6 +19,7 @@ import {
     ArrowLeft,
     BarChart3,
     Cloud,
+    FileArchive,
     FileText,
     Flame,
     Globe2,
@@ -53,6 +55,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
+import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteSecuritySettings } from '@/components/SiteSecuritySettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
@@ -70,6 +73,7 @@ type SettingsPage =
     | 'origins'
     | 'security'
     | 'cache'
+    | 'compression'
     | 'cache-operations';
 type Period = '24h' | '30d';
 type OriginDraft = SiteOrigin & { draft_id: string };
@@ -127,6 +131,7 @@ const settingsPages = [
     { id: 'origins' as const, label: 'Origins', icon: Server },
     { id: 'security' as const, label: 'Security', icon: ShieldCheck },
     { id: 'cache' as const, label: 'Cache', icon: HardDrive },
+    { id: 'compression' as const, label: 'Compression', icon: FileArchive },
     { id: 'cache-operations' as const, label: 'Cache operations', icon: Flame },
 ];
 const palette = ['#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#64748b'];
@@ -256,6 +261,7 @@ export default function SiteDetail() {
     const [site, setSite] = useState<SiteDetails | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
+    const [compression, setCompression] = useState<CompressionPolicy>({});
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
             enabled: false,
@@ -318,6 +324,7 @@ export default function SiteDetail() {
             const [
                 listenerResult,
                 cacheResult,
+                compressionResult,
                 securityResult,
                 clusterResult,
                 dnsResult,
@@ -325,6 +332,7 @@ export default function SiteDetail() {
             ] = await Promise.allSettled([
                 api.getListener(siteId),
                 api.getCache(siteId),
+                api.getCompression(siteId),
                 api.getSecurity(siteId),
                 clustersApi.list(),
                 dns.config(),
@@ -336,6 +344,8 @@ export default function SiteDetail() {
             else failures.push(`listener: ${loadErrorMessage(listenerResult.reason)}`);
             if (cacheResult.status === 'fulfilled') setCache(cacheResult.value);
             else failures.push(`cache: ${loadErrorMessage(cacheResult.reason)}`);
+            if (compressionResult.status === 'fulfilled') setCompression(compressionResult.value);
+            else failures.push(`compression: ${loadErrorMessage(compressionResult.reason)}`);
             if (securityResult.status === 'fulfilled')
                 setSecurity(withSecurityEditorIDs(securityResult.value));
             else failures.push(`security: ${loadErrorMessage(securityResult.reason)}`);
@@ -509,6 +519,11 @@ export default function SiteDetail() {
             const result = await api.updateCache(siteId, cache);
             setCache(result.cache);
         }, 'Cache settings saved and publishing queued.');
+    const saveCompression = () =>
+        runSave(async () => {
+            const result = await api.updateCompression(siteId, compression);
+            setCompression(result.compression);
+        }, 'Compression settings saved and publishing queued.');
     const saveSecurity = () =>
         runSave(async () => {
             const result = await api.updateSecurity(siteId, security);
@@ -1517,6 +1532,14 @@ export default function SiteDetail() {
                                                 saving={saving}
                                                 onChange={setCache}
                                                 onSave={() => void saveCache()}
+                                            />
+                                        )}
+                                        {settingsPage === 'compression' && (
+                                            <SiteCompressionSettings
+                                                compression={compression}
+                                                saving={saving}
+                                                onChange={setCompression}
+                                                onSave={() => void saveCompression()}
                                             />
                                         )}
                                         {settingsPage === 'security' && (

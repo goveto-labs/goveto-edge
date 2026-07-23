@@ -307,6 +307,11 @@ export interface SiteCacheUpdateResponse {
     publish_job?: PublishJob;
     publish_error?: string;
 }
+export interface SiteCompressionUpdateResponse {
+    compression: CompressionPolicy;
+    publish_job?: PublishJob;
+    publish_error?: string;
+}
 
 export interface WAFRequestRule {
     id?: string;
@@ -435,6 +440,17 @@ export interface CachePolicy {
             }>;
         }>;
     };
+}
+
+export interface CompressionPolicy {
+    enabled?: boolean;
+    extensions?: string[];
+    excluded_extensions?: string[];
+    mime_types?: string[];
+    recompress?: boolean;
+    minimum_length?: number;
+    maximum_length?: number;
+    excluded_paths?: string[];
 }
 
 export interface Certificate {

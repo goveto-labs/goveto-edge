@@ -31,21 +31,23 @@ func ApplyPolicyOptions(opts []PolicyQueryOption) PolicyQueryConfig {
 
 // PolicyQuery is the namespace for Policy query operations.
 type PolicyQuery struct {
-	Id         policyIdField
-	Name       policyNameField
-	CacheJson  policyCacheJsonField
-	WafJson    policyWafJsonField
-	CcJson     policyCcJsonField
-	AccessJson policyAccessJsonField
-	CreatedAt  policyCreatedAtField
-	UpdatedAt  policyUpdatedAtField
-	Sites      policySitesRelation
+	Id              policyIdField
+	Name            policyNameField
+	CacheJson       policyCacheJsonField
+	CompressionJson policyCompressionJsonField
+	WafJson         policyWafJsonField
+	CcJson          policyCcJsonField
+	AccessJson      policyAccessJsonField
+	CreatedAt       policyCreatedAtField
+	UpdatedAt       policyUpdatedAtField
+	Sites           policySitesRelation
 }
 
 const PolicyTable = "policies"
 const PolicyIdColumn = "id"
 const PolicyNameColumn = "name"
 const PolicyCacheJsonColumn = "cache_json"
+const PolicyCompressionJsonColumn = "compression_json"
 const PolicyWafJsonColumn = "waf_json"
 const PolicyCcJsonColumn = "cc_json"
 const PolicyAccessJsonColumn = "access_json"
@@ -54,15 +56,16 @@ const PolicyUpdatedAtColumn = "updated_at"
 
 // PolicyQuery provides query building methods for the Policy model.
 var Policy = PolicyQuery{
-	Id:         policyIdField{},
-	Name:       policyNameField{},
-	CacheJson:  policyCacheJsonField{},
-	WafJson:    policyWafJsonField{},
-	CcJson:     policyCcJsonField{},
-	AccessJson: policyAccessJsonField{},
-	CreatedAt:  policyCreatedAtField{},
-	UpdatedAt:  policyUpdatedAtField{},
-	Sites:      policySitesRelation{},
+	Id:              policyIdField{},
+	Name:            policyNameField{},
+	CacheJson:       policyCacheJsonField{},
+	CompressionJson: policyCompressionJsonField{},
+	WafJson:         policyWafJsonField{},
+	CcJson:          policyCcJsonField{},
+	AccessJson:      policyAccessJsonField{},
+	CreatedAt:       policyCreatedAtField{},
+	UpdatedAt:       policyUpdatedAtField{},
+	Sites:           policySitesRelation{},
 }
 
 // PolicyWhereClause represents a WHERE condition for Policy.
@@ -320,6 +323,52 @@ func (policyCacheJsonField) Asc() PolicyOrderByClause {
 // Desc returns a descending order clause for this field.
 func (policyCacheJsonField) Desc() PolicyOrderByClause {
 	return PolicyOrderByClause{Field: "cache_json", Direction: "DESC"}
+}
+
+// CompressionJsonField provides query operations for the compressionJson field.
+type policyCompressionJsonField struct{}
+
+// Equals creates an equality condition.
+func (policyCompressionJsonField) Equals(v json.RawMessage) PolicyWhereClause {
+	return PolicyWhereClause{Field: "compression_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (policyCompressionJsonField) Not(v json.RawMessage) PolicyWhereClause {
+	return PolicyWhereClause{Field: "compression_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (policyCompressionJsonField) In(vals ...json.RawMessage) PolicyWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PolicyWhereClause{Field: "compression_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (policyCompressionJsonField) NotIn(vals ...json.RawMessage) PolicyWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PolicyWhereClause{Field: "compression_json", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (policyCompressionJsonField) Set(v json.RawMessage) PolicySetClause {
+	return PolicySetClause{Field: "compression_json", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (policyCompressionJsonField) Asc() PolicyOrderByClause {
+	return PolicyOrderByClause{Field: "compression_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (policyCompressionJsonField) Desc() PolicyOrderByClause {
+	return PolicyOrderByClause{Field: "compression_json", Direction: "DESC"}
 }
 
 // WafJsonField provides query operations for the wafJson field.
@@ -633,20 +682,21 @@ type PolicyGroupByResult struct {
 
 // PolicyCreateInput holds data for creating a Policy record.
 type PolicyCreateInput struct {
-	Id         string
-	Name       string
-	CacheJson  json.RawMessage
-	WafJson    json.RawMessage
-	CcJson     json.RawMessage
-	AccessJson json.RawMessage
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Sites      *SiteCreateNestedInput
+	Id              string
+	Name            string
+	CacheJson       json.RawMessage
+	CompressionJson json.RawMessage
+	WafJson         json.RawMessage
+	CcJson          json.RawMessage
+	AccessJson      json.RawMessage
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Sites           *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d PolicyCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Name, d.CacheJson, d.WafJson, d.CcJson, d.AccessJson, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.Name, d.CacheJson, d.CompressionJson, d.WafJson, d.CcJson, d.AccessJson, d.CreatedAt, d.UpdatedAt}
 }
 
 // PolicyCreateNestedInput supports nested creates and connects.

@@ -16,6 +16,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 
+	_ "goveto-edge/caddy/compression"
 	cachefs "goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
@@ -299,7 +300,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 			})
 		}
 
-		handlers := make([]any, 0, 5)
+		handlers := make([]any, 0, 6)
 		wafPolicy, wafConfigured, err := decodeWAFPolicy(site.WAF)
 		if err != nil {
 			return nil, fmt.Errorf("site %s WAF policy: %w", id, err)
@@ -335,6 +336,22 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 						"Strict-Transport-Security": {value},
 					},
 				},
+			})
+		}
+		compressionPolicy, compressionConfigured, err := decodeCompressionPolicy(site.Compression)
+		if err != nil {
+			return nil, fmt.Errorf("site %s compression policy: %w", id, err)
+		}
+		if compressionConfigured && compressionPolicy.Enabled {
+			handlers = append(handlers, map[string]any{
+				"handler":             "goveto_compression",
+				"extensions":          compressionPolicy.Extensions,
+				"excluded_extensions": compressionPolicy.ExcludedExtensions,
+				"mime_types":          compressionPolicy.MIMETypes,
+				"recompress":          compressionPolicy.Recompress,
+				"minimum_length":      compressionPolicy.MinimumLength,
+				"maximum_length":      compressionPolicy.MaximumLength,
+				"excluded_paths":      compressionPolicy.ExcludedPaths,
 			})
 		}
 
@@ -536,6 +553,24 @@ func decodeCachePolicy(raw map[string]any) (cachepolicy.CachePolicy, bool, error
 	}
 
 	policy := cachepolicy.DefaultCachePolicy()
+	if err = json.Unmarshal(data, &policy); err != nil {
+		return policy, false, err
+	}
+	if err = policy.NormalizeAndValidate(); err != nil {
+		return policy, false, err
+	}
+	return policy, true, nil
+}
+
+func decodeCompressionPolicy(raw map[string]any) (cachepolicy.CompressionPolicy, bool, error) {
+	if raw == nil {
+		return cachepolicy.CompressionPolicy{}, false, nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return cachepolicy.CompressionPolicy{}, false, err
+	}
+	policy := cachepolicy.DefaultCompressionPolicy()
 	if err = json.Unmarshal(data, &policy); err != nil {
 		return policy, false, err
 	}

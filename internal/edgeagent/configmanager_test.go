@@ -327,6 +327,49 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	}
 }
 
+func TestCompressionConfigRendersAllSettings(t *testing.T) {
+	config := validHTTPConfig(t)
+	policy := cachepolicy.DefaultCompressionPolicy()
+	policy.Enabled = true
+	policy.Recompress = true
+	policy.MinimumLength = 2048
+	policy.MaximumLength = 4 << 20
+	policy.ExcludedPaths = []string{"/downloads", "/api/export"}
+	config.Compression = toMap(t, policy)
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		`"handler":"goveto_compression"`,
+		`"recompress":true`,
+		`"minimum_length":2048`,
+		`"maximum_length":4194304`,
+		`"excluded_paths":["/api/export","/downloads"]`,
+		`"mime_types"`,
+		`"excluded_extensions"`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing compression setting %s: %s", expected, text)
+		}
+	}
+}
+
+func TestCompressionConfigRejectsInvalidPolicy(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Compression = map[string]any{
+		"enabled":        true,
+		"extensions":     []string{"html"},
+		"minimum_length": 1000,
+		"maximum_length": 100,
+	}
+	if _, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host"); err == nil {
+		t.Fatal("expected invalid compression policy to fail")
+	}
+}
+
 func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
 	config := validHTTPConfig(t)
 	waf := cachepolicy.DefaultWAFPolicy()

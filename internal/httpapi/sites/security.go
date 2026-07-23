@@ -113,6 +113,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 					query.Policy.Id.Set(policyID),
 					query.Policy.Name.Set("site:"+site.Id),
 					query.Policy.CacheJson.Set(empty),
+					query.Policy.CompressionJson.Set(empty),
 					query.Policy.WafJson.Set(wafJSON),
 					query.Policy.CcJson.Set(rateLimitJSON),
 					query.Policy.AccessJson.Set(empty),

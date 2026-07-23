@@ -29,6 +29,7 @@ type SiteConfig struct {
 	Origins      []OriginConfig      `json:"origins"`
 	Scheduler    string              `json:"scheduler"`
 	Cache        map[string]any      `json:"cache,omitempty"`
+	Compression  map[string]any      `json:"compression,omitempty"`
 	WAF          map[string]any      `json:"waf,omitempty"`
 	Access       map[string]any      `json:"access,omitempty"`
 	RateLimit    map[string]any      `json:"rate_limit,omitempty"`

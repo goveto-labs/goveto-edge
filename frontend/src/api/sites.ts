@@ -1,8 +1,10 @@
 import type {
     CachePolicy,
+    CompressionPolicy,
     CreateSiteRequest,
     SecurityPolicy,
     SiteCacheUpdateResponse,
+    SiteCompressionUpdateResponse,
     SiteCreateResponse,
     SiteDetails,
     SiteListenerConfig,
@@ -37,6 +39,13 @@ export const sitesApi = (clusterId: string) => ({
         get<CachePolicy>(clusterPath(clusterId, `/sites/${siteId}/cache`)),
     updateCache: (siteId: string, payload: CachePolicy) =>
         put<SiteCacheUpdateResponse>(clusterPath(clusterId, `/sites/${siteId}/cache`), payload),
+    getCompression: (siteId: string) =>
+        get<CompressionPolicy>(clusterPath(clusterId, `/sites/${siteId}/compression`)),
+    updateCompression: (siteId: string, payload: CompressionPolicy) =>
+        put<SiteCompressionUpdateResponse>(
+            clusterPath(clusterId, `/sites/${siteId}/compression`),
+            payload
+        ),
     getSecurity: (siteId: string) =>
         get<SecurityPolicy>(clusterPath(clusterId, `/sites/${siteId}/security`)),
     updateSecurity: (siteId: string, payload: SecurityPolicy) =>

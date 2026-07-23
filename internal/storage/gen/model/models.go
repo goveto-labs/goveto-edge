@@ -321,15 +321,16 @@ type OriginPool struct {
 
 // Policy represents the Policy model.
 type Policy struct {
-	Id         string          `db:"id" json:"id"`
-	Name       string          `db:"name" json:"name"`
-	CacheJson  json.RawMessage `db:"cache_json" json:"cacheJson"`
-	WafJson    json.RawMessage `db:"waf_json" json:"wafJson"`
-	CcJson     json.RawMessage `db:"cc_json" json:"ccJson"`
-	AccessJson json.RawMessage `db:"access_json" json:"accessJson"`
-	CreatedAt  time.Time       `db:"created_at" json:"createdAt"`
-	UpdatedAt  time.Time       `db:"updated_at" json:"updatedAt"`
-	Sites      []*Site         `db:"-" json:"sites,omitempty"`
+	Id              string          `db:"id" json:"id"`
+	Name            string          `db:"name" json:"name"`
+	CacheJson       json.RawMessage `db:"cache_json" json:"cacheJson"`
+	CompressionJson json.RawMessage `db:"compression_json" json:"compressionJson"`
+	WafJson         json.RawMessage `db:"waf_json" json:"wafJson"`
+	CcJson          json.RawMessage `db:"cc_json" json:"ccJson"`
+	AccessJson      json.RawMessage `db:"access_json" json:"accessJson"`
+	CreatedAt       time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time       `db:"updated_at" json:"updatedAt"`
+	Sites           []*Site         `db:"-" json:"sites,omitempty"`
 }
 
 // PublishJob represents the PublishJob model.

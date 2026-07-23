@@ -485,15 +485,16 @@ model OriginPool {
 }
 
 model Policy {
-  id         String   @id @default(uuid())
-  name       String
-  cacheJson  Json     @map("cache_json")
-  wafJson    Json     @map("waf_json")
-  ccJson     Json     @map("cc_json")
-  accessJson Json     @map("access_json")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
-  sites      Site[]
+  id              String   @id @default(uuid())
+  name            String
+  cacheJson       Json     @map("cache_json")
+  compressionJson Json     @default("{}") @map("compression_json")
+  wafJson         Json     @map("waf_json")
+  ccJson          Json     @map("cc_json")
+  accessJson      Json     @map("access_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
+  sites           Site[]
 
   @@map("policies")
 }
