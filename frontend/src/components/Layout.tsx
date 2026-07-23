@@ -134,15 +134,6 @@ export function Layout() {
                     </div>
 
                     <div className='flex items-center gap-2 sm:gap-3'>
-                        <div className='hidden sm:block'>
-                            <Input
-                                aria-label='Search'
-                                className='w-48 lg:w-72'
-                                placeholder='Search nodes, sites, certs…'
-                                variant='secondary'
-                            />
-                        </div>
-
                         <div className='hidden w-40 md:block lg:w-48'>
                             <ClusterPicker />
                         </div>

@@ -1,6 +1,6 @@
 import { Button, Input, InputOTP, useOverlayState } from '@heroui/react';
 import { Globe, Loader2, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { ApiError } from '@/api';
@@ -16,7 +16,26 @@ function isTotpRequired(err: unknown): boolean {
     );
 }
 
+function useLoginSystemTheme() {
+    useLayoutEffect(() => {
+        const root = document.documentElement;
+        const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+        const previousTheme = root.getAttribute('data-theme');
+        const applyTheme = () =>
+            root.setAttribute('data-theme', colorScheme.matches ? 'dark' : 'light');
+
+        applyTheme();
+        colorScheme.addEventListener('change', applyTheme);
+        return () => {
+            colorScheme.removeEventListener('change', applyTheme);
+            if (previousTheme) root.setAttribute('data-theme', previousTheme);
+            else root.removeAttribute('data-theme');
+        };
+    }, []);
+}
+
 export default function Login() {
+    useLoginSystemTheme();
     const navigate = useNavigate();
     const { login } = useAuth();
     const otpModal = useOverlayState();
@@ -83,8 +102,8 @@ export default function Login() {
     };
 
     return (
-        <div className='grid min-h-screen'>
-            <main className='relative flex flex-col justify-center bg-background px-6 py-12 sm:px-10 lg:px-16'>
+        <div className='grid h-[100%] bg-background text-foreground'>
+            <main className='relative flex flex-col justify-center overflow-hidden bg-background px-6 py-12 sm:px-10 lg:px-16'>
                 <div className='mx-auto w-full max-w-[380px]'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
