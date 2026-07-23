@@ -34,9 +34,7 @@ export const nav: NavItemConfig[] = [
         path: '/nodes',
         label: 'Nodes',
         icon: Server,
-        children: [
-            { path: '/nodes/ssh-credentials', label: 'SSH credentials', icon: KeyRound },
-        ],
+        children: [{ path: '/nodes/ssh-credentials', label: 'SSH credentials', icon: KeyRound }],
     },
 
     {
@@ -100,9 +98,17 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
     return (
         <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>
             {nav.map((item) => {
+                const activeChild = item.children?.find(
+                    (child) =>
+                        location.pathname === child.path ||
+                        location.pathname.startsWith(`${child.path}/`)
+                );
                 const active =
                     location.pathname === item.path ||
-                    (item.path !== '/' && location.pathname.startsWith(`${item.path}/`));
+                    (item.path !== '/' &&
+                        !activeChild &&
+                        location.pathname.startsWith(`${item.path}/`));
+                const expanded = active || Boolean(activeChild);
                 return (
                     <div key={item.path}>
                         <NavItem
@@ -113,12 +119,12 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
                             onClick={onNavigate}
                             to={item.path}
                         />
-                        {!collapsed && active && item.children && (
+                        {!collapsed && expanded && item.children && (
                             <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
                                 {item.children.map((child) => (
                                     <NavItem
                                         key={child.path}
-                                        active={location.pathname === child.path}
+                                        active={activeChild?.path === child.path}
                                         icon={child.icon}
                                         label={child.label}
                                         onClick={onNavigate}
