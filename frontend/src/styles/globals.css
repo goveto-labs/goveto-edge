@@ -53,6 +53,30 @@ body {
     zoom: var(--app-zoom);
 }
 
+.waf-rule-list {
+    container-type: inline-size;
+}
+
+@container (min-width: 36rem) {
+    .waf-rule-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .waf-rule-actions {
+        grid-column: 1 / -1;
+    }
+}
+
+@container (min-width: 60rem) {
+    .waf-rule-row {
+        grid-template-columns: 150px 150px minmax(140px, 0.7fr) minmax(220px, 1fr) auto;
+    }
+
+    .waf-rule-actions {
+        grid-column: auto;
+    }
+}
+
 /*
  * HeroUI renders modal overlays through a body-level portal. Counter the
  * global application zoom so the fixed backdrop covers the visual viewport,

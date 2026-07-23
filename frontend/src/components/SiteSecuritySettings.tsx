@@ -157,10 +157,10 @@ function RuleRow({
     const needsValues = rule.operator === 'IN' || rule.operator === 'CIDR';
     const needsValue = rule.operator !== 'EXISTS' && !needsValues;
     return (
-        <div className='grid gap-2 border-t border-border px-4 py-3 first:border-t-0 lg:grid-cols-[150px_150px_minmax(140px,0.7fr)_minmax(220px,1fr)_auto]'>
+        <div className='waf-rule-row grid gap-2 border-t border-border px-4 py-3 first:border-t-0'>
             <select
                 aria-label='Request field'
-                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                className='min-w-0 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
                 value={rule.field}
                 onChange={(event) => {
                     const field = event.target.value;
@@ -185,7 +185,7 @@ function RuleRow({
             </select>
             <select
                 aria-label='Match operator'
-                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                className='min-w-0 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
                 value={rule.operator}
                 onChange={(event) =>
                     onChange({
@@ -209,6 +209,7 @@ function RuleRow({
             {needsName ? (
                 <Input
                     aria-label='Field name'
+                    className='min-w-0'
                     placeholder={
                         rule.field === 'QUERY'
                             ? 'token'
@@ -228,6 +229,7 @@ function RuleRow({
             {needsValues ? (
                 <Input
                     aria-label='Match values'
+                    className='min-w-0'
                     placeholder={
                         rule.operator === 'CIDR' ? '192.0.2.0/24, 2001:db8::/32' : 'GET, HEAD'
                     }
@@ -240,6 +242,7 @@ function RuleRow({
             ) : needsValue ? (
                 <Input
                     aria-label='Match value'
+                    className='min-w-0'
                     placeholder={rule.operator === 'REGEX' ? '^/api/' : '/admin'}
                     value={rule.value ?? ''}
                     variant='secondary'
@@ -250,7 +253,7 @@ function RuleRow({
                     No value required
                 </div>
             )}
-            <div className='flex items-center justify-end gap-1'>
+            <div className='waf-rule-actions flex flex-wrap items-center justify-end gap-1'>
                 <Button
                     size='sm'
                     variant={rule.negate ? 'secondary' : 'ghost'}
@@ -846,7 +849,7 @@ export function SiteSecuritySettings({
                                             <option value='OR'>Match any rule</option>
                                         </select>
                                     </div>
-                                    <div className='border-t border-border'>
+                                    <div className='waf-rule-list border-t border-border'>
                                         {group.rules.map((rule, ruleIndex) => (
                                             <RuleRow
                                                 key={rule.id}
