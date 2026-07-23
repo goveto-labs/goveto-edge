@@ -10,11 +10,13 @@ import type {
     NodeRuntimePoint,
     NodeSnapshot,
     NodeSSH,
+    SSHCredential,
+    SSHCredentialWriteRequest,
     TrafficPoint,
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
-import { Button, Input, TextArea } from '@heroui/react';
+import { Button, Input } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
@@ -22,8 +24,6 @@ import {
     FileText,
     Globe2,
     HardDrive,
-    KeyRound,
-    LockKeyhole,
     Network,
     Pencil,
     Plus,
@@ -39,7 +39,7 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
+import { ApiError, analyticsApi, clusterApi, nodesApi, sshCredentialsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
@@ -48,6 +48,8 @@ import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
+import { SSHCredentialDialog } from '@/components/SSHCredentialDialog.tsx';
+import { SSHCredentialSelect } from '@/components/SSHCredentialSelect.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
@@ -56,7 +58,6 @@ import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type DetailTab = 'overview' | 'details' | 'logs' | 'installation' | 'settings';
 type SettingsPage = 'network' | 'cache';
-type SSHAuthMethod = 'password' | 'private_key';
 const bytesPerGB = 1024 ** 3;
 
 function bytesToGB(value: number) {
@@ -284,10 +285,11 @@ export default function NodeDetail() {
     const { nodeId = '', '*': detailPath = '' } = useParams();
     const [searchParams] = useSearchParams();
     const trackInstallation = searchParams.get('track') === '1';
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
     const api = useMemo(() => nodesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
+    const credentialApi = useMemo(() => sshCredentialsApi(clusterId), [clusterId]);
     const pathParts = detailPath.split('/').filter(Boolean);
     const requestedTab = pathParts[0] || 'overview';
     const tab: DetailTab = tabs.some((item) => item.id === requestedTab)
@@ -301,6 +303,8 @@ export default function NodeDetail() {
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
     const [groups, setGroups] = useState<ClusterGroup[]>([]);
     const [regions, setRegions] = useState<ClusterRegion[]>([]);
+    const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([]);
+    const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [monitoringPeriod, setMonitoringPeriod] = useState<'24h' | '30d'>('24h');
@@ -326,12 +330,8 @@ export default function NodeDetail() {
     const [cacheMessage, setCacheMessage] = useState('');
 
     const [sshIp, setSshIp] = useState('');
-    const [sshPort, setSshPort] = useState('22');
-    const [sshUser, setSshUser] = useState('root');
-    const [authMethod, setAuthMethod] = useState<SSHAuthMethod>('password');
-    const [password, setPassword] = useState('');
-    const [privateKey, setPrivateKey] = useState('');
-    const [passphrase, setPassphrase] = useState('');
+    const [sshPort, setSshPort] = useState('');
+    const [sshCredentialId, setSSHCredentialId] = useState('');
     const [testing, setTesting] = useState(false);
     const [reinstalling, setReinstalling] = useState(false);
     const [testedFingerprint, setTestedFingerprint] = useState('');
@@ -346,36 +346,46 @@ export default function NodeDetail() {
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState('');
+    const isOwner = clusters.find((item) => item.id === clusterId)?.role === 'OWNER';
 
     const applyNode = useCallback((value: Node) => {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
         setCache(value.cacheConfig ?? null);
         setMaxSizeGB(bytesToGB(value.cacheConfig?.max_size_bytes ?? 0));
-        setSshIp((current) => current || value.addresses[0]?.address || '');
+        setSshIp((current) => current || value.sshHost || value.addresses[0]?.address || '');
+        setSshPort((current) => current || String(value.sshPort || 22));
+        setSSHCredentialId((current) => current || value.sshCredentialId || '');
     }, []);
 
     const load = useCallback(async () => {
         if (!clusterId || !nodeId) return;
         setLoading(true);
         try {
-            const [nodeData, lineData, groupData, regionData] = await Promise.all([
+            const [nodeData, lineData, groupData, regionData, credentials] = await Promise.all([
                 api.get(nodeId),
                 cluster.dnsLines(),
                 cluster.groups(),
                 cluster.regions(),
+                credentialApi.list(),
             ]);
             applyNode(nodeData);
             setDnsLines(lineData);
             setGroups(groupData);
             setRegions(regionData);
+            setSSHCredentials(credentials);
+            setSSHCredentialId((current) =>
+                credentials.some((credential) => credential.id === current)
+                    ? current
+                    : nodeData.sshCredentialId || credentials[0]?.id || ''
+            );
             setError('');
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load node');
         } finally {
             setLoading(false);
         }
-    }, [api, applyNode, cluster, clusterId, nodeId]);
+    }, [api, applyNode, cluster, clusterId, credentialApi, nodeId]);
 
     const refreshNode = useCallback(async () => {
         if (!nodeId) return;
@@ -386,6 +396,17 @@ export default function NodeDetail() {
     useEffect(() => {
         void load();
     }, [load]);
+
+    useEffect(() => {
+        if (!nodeId) return;
+        setSshIp('');
+        setSshPort('');
+        setSSHCredentialId('');
+        setTestedFingerprint('');
+        setTestAttemptFingerprint('');
+        setTestMessage('');
+        setTestError('');
+    }, [nodeId]);
 
     const loadInstallation = useCallback(
         async (showLoading = true) => {
@@ -655,20 +676,15 @@ export default function NodeDetail() {
         () => ({
             entry_ip: sshIp.trim(),
             port: Number(sshPort) || 22,
-            user: sshUser.trim(),
-            password: authMethod === 'password' ? password || undefined : undefined,
-            private_key: authMethod === 'private_key' ? privateKey || undefined : undefined,
-            passphrase: authMethod === 'private_key' ? passphrase || undefined : undefined,
+            credential_id: sshCredentialId,
         }),
-        [authMethod, passphrase, password, privateKey, sshIp, sshPort, sshUser]
+        [sshCredentialId, sshIp, sshPort]
     );
     const fingerprint = useMemo(() => JSON.stringify(ssh), [ssh]);
     const fingerprintRef = useRef(fingerprint);
     fingerprintRef.current = fingerprint;
     const connectionVerified = testedFingerprint === fingerprint;
-    const canTestConnection = Boolean(
-        sshIp.trim() && sshUser.trim() && (authMethod === 'password' ? password : privateKey)
-    );
+    const canTestConnection = Boolean(sshIp.trim() && sshCredentialId);
 
     const testConnection = async () => {
         const tested = fingerprint;
@@ -715,9 +731,6 @@ export default function NodeDetail() {
                     : current
             );
             setTestedFingerprint('');
-            setPassword('');
-            setPrivateKey('');
-            setPassphrase('');
             navigate(`/nodes/${node.id}/installation?track=1`);
         } catch (reinstallError) {
             setError(
@@ -1786,129 +1799,30 @@ export default function NodeDetail() {
                                             />
                                         </FormRow>
                                         <FormRow
-                                            htmlFor='reinstall-ssh-user'
-                                            label='SSH user'
+                                            hint='Choose the encrypted credential used for this installation.'
+                                            htmlFor='reinstall-ssh-credential'
+                                            label='SSH credential'
                                             required
                                         >
-                                            <Input
-                                                className='w-full'
-                                                id='reinstall-ssh-user'
-                                                required
-                                                value={sshUser}
-                                                variant='secondary'
-                                                onChange={(event) => setSshUser(event.target.value)}
+                                            <SSHCredentialSelect
+                                                credentials={sshCredentials}
+                                                id='reinstall-ssh-credential'
+                                                value={sshCredentialId}
+                                                onAdd={
+                                                    isOwner
+                                                        ? () => setCredentialDialogOpen(true)
+                                                        : undefined
+                                                }
+                                                onChange={setSSHCredentialId}
                                             />
+                                            {sshCredentials.length === 0 && (
+                                                <p className='mt-2 text-xs text-warning'>
+                                                    {isOwner
+                                                        ? 'Add an SSH credential before reinstalling this node.'
+                                                        : 'Ask the cluster owner to add an SSH credential.'}
+                                                </p>
+                                            )}
                                         </FormRow>
-                                        <FormRow label='Authentication method' required>
-                                            <div className='grid gap-3 sm:grid-cols-2'>
-                                                <button
-                                                    aria-pressed={authMethod === 'password'}
-                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
-                                                        authMethod === 'password'
-                                                            ? 'border-accent bg-accent/10'
-                                                            : 'border-border bg-surface hover:bg-surface-secondary'
-                                                    }`}
-                                                    type='button'
-                                                    onClick={() => {
-                                                        setAuthMethod('password');
-                                                        setPrivateKey('');
-                                                        setPassphrase('');
-                                                    }}
-                                                >
-                                                    <LockKeyhole className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
-                                                    <span>
-                                                        <span className='block text-sm font-semibold'>
-                                                            Password
-                                                        </span>
-                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
-                                                            Authenticate with the SSH account
-                                                            password.
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                                <button
-                                                    aria-pressed={authMethod === 'private_key'}
-                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
-                                                        authMethod === 'private_key'
-                                                            ? 'border-accent bg-accent/10'
-                                                            : 'border-border bg-surface hover:bg-surface-secondary'
-                                                    }`}
-                                                    type='button'
-                                                    onClick={() => {
-                                                        setAuthMethod('private_key');
-                                                        setPassword('');
-                                                    }}
-                                                >
-                                                    <KeyRound className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
-                                                    <span>
-                                                        <span className='block text-sm font-semibold'>
-                                                            Private key
-                                                        </span>
-                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
-                                                            Authenticate with a PEM-encoded private
-                                                            key.
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                            </div>
-                                        </FormRow>
-
-                                        {authMethod === 'password' ? (
-                                            <FormRow
-                                                htmlFor='reinstall-ssh-password'
-                                                label='Password'
-                                                required
-                                            >
-                                                <Input
-                                                    className='w-full'
-                                                    id='reinstall-ssh-password'
-                                                    required
-                                                    type='password'
-                                                    value={password}
-                                                    variant='secondary'
-                                                    onChange={(event) =>
-                                                        setPassword(event.target.value)
-                                                    }
-                                                />
-                                            </FormRow>
-                                        ) : (
-                                            <>
-                                                <FormRow
-                                                    hint='Paste the complete PEM key, including the BEGIN and END lines.'
-                                                    htmlFor='reinstall-ssh-key'
-                                                    label='Private key PEM'
-                                                    required
-                                                >
-                                                    <TextArea
-                                                        className='w-full font-mono text-xs'
-                                                        id='reinstall-ssh-key'
-                                                        required
-                                                        rows={8}
-                                                        spellCheck={false}
-                                                        value={privateKey}
-                                                        variant='secondary'
-                                                        onChange={(event) =>
-                                                            setPrivateKey(event.target.value)
-                                                        }
-                                                    />
-                                                </FormRow>
-                                                <FormRow
-                                                    htmlFor='reinstall-ssh-passphrase'
-                                                    label='Private key passphrase'
-                                                >
-                                                    <Input
-                                                        className='w-full'
-                                                        id='reinstall-ssh-passphrase'
-                                                        type='password'
-                                                        value={passphrase}
-                                                        variant='secondary'
-                                                        onChange={(event) =>
-                                                            setPassphrase(event.target.value)
-                                                        }
-                                                    />
-                                                </FormRow>
-                                            </>
-                                        )}
 
                                         <div className='border-t border-border py-4'>
                                             <div className='flex flex-wrap items-center gap-3'>
@@ -2143,6 +2057,18 @@ systemctl status goveto-edge-agent`}
                     </LoadingSurface>
                 </>
             )}
+            <SSHCredentialDialog
+                isOpen={credentialDialogOpen}
+                onOpenChange={setCredentialDialogOpen}
+                onSave={(payload: SSHCredentialWriteRequest) => credentialApi.create(payload)}
+                onSaved={(credential) => {
+                    setSSHCredentials((current) => [
+                        credential,
+                        ...current.filter((item) => item.id !== credential.id),
+                    ]);
+                    setSSHCredentialId(credential.id);
+                }}
+            />
         </div>
     );
 }

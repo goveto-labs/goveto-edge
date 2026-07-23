@@ -121,13 +121,37 @@ export interface NodeAddress {
     address: string;
 }
 
-export interface NodeSSH {
-    entry_ip: string;
-    port: number;
-    user: string;
+export type SSHAuthType = 'PASSWORD' | 'PRIVATE_KEY';
+
+export interface SSHCredential {
+    id: string;
+    name: string;
+    username: string;
+    auth_type: SSHAuthType;
+    node_count: number;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface SSHCredentialNode {
+    id: string;
+    name: string;
+    status: string;
+}
+
+export interface SSHCredentialWriteRequest {
+    name: string;
+    username: string;
+    auth_type: SSHAuthType;
     password?: string;
     private_key?: string;
     passphrase?: string;
+}
+
+export interface NodeSSH {
+    entry_ip: string;
+    port: number;
+    credential_id: string;
 }
 
 export interface SSHConnectionTestResponse {
@@ -166,6 +190,9 @@ export interface Node {
     createdAt: string;
     updatedAt: string;
     installError?: string;
+    sshCredentialId?: string;
+    sshHost?: string;
+    sshPort?: number;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     groupMemberships?: Array<{ nodeId: string; groupId: string }>;

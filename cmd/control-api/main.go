@@ -106,7 +106,7 @@ func main() {
 	go dnsService.Run(ctx)
 
 	installQueue := node.NewInstallQueue(redisClient, 0)
-	go node.NewInstallWorker(orm, installQueue).Run(ctx)
+	go node.NewInstallWorker(orm, installQueue, credentialCipher).Run(ctx)
 	go node.NewLifecycle(
 		orm,
 		credentialCipher,

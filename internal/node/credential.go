@@ -44,14 +44,35 @@ func (c *CredentialCipher) Derive(label string) []byte {
 }
 
 func (c *CredentialCipher) Encrypt(value string) (string, error) {
+	return c.encrypt(value, nil)
+}
+
+// EncryptScoped binds the ciphertext to a domain-specific context. A value
+// encrypted for one cluster or credential cannot be decrypted in another.
+func (c *CredentialCipher) EncryptScoped(scope, value string) (string, error) {
+	return c.encrypt(value, []byte(scope))
+}
+
+func (c *CredentialCipher) encrypt(value string, additionalData []byte) (string, error) {
 	nonce := make([]byte, c.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", err
 	}
-	sealed := c.aead.Seal(nonce, nonce, []byte(value), nil)
+	sealed := c.aead.Seal(nonce, nonce, []byte(value), additionalData)
 	return base64.RawStdEncoding.EncodeToString(sealed), nil
 }
+
 func (c *CredentialCipher) Decrypt(value string) (string, error) {
+	return c.decrypt(value, nil)
+}
+
+// DecryptScoped decrypts a value only when the original encryption context
+// matches scope.
+func (c *CredentialCipher) DecryptScoped(scope, value string) (string, error) {
+	return c.decrypt(value, []byte(scope))
+}
+
+func (c *CredentialCipher) decrypt(value string, additionalData []byte) (string, error) {
 	data, err := base64.RawStdEncoding.DecodeString(value)
 	if err != nil {
 		return "", err
@@ -59,6 +80,6 @@ func (c *CredentialCipher) Decrypt(value string) (string, error) {
 	if len(data) < c.aead.NonceSize() {
 		return "", errors.New("invalid encrypted node credential")
 	}
-	plain, err := c.aead.Open(nil, data[:c.aead.NonceSize()], data[c.aead.NonceSize():], nil)
+	plain, err := c.aead.Open(nil, data[:c.aead.NonceSize()], data[c.aead.NonceSize():], additionalData)
 	return string(plain), err
 }

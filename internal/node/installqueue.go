@@ -23,7 +23,7 @@ func NewInstallQueue(client *redis.Client, ttl time.Duration) *InstallQueue {
 func (q *InstallQueue) Enqueue(ctx context.Context, nodeID string, input InstallPayload) error {
 	payload, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("encode SSH install input: %w", err)
+		return fmt.Errorf("encode node install payload: %w", err)
 	}
 	if err := q.redis.Set(ctx, installKeyPrefix+nodeID, payload, q.ttl).Err(); err != nil {
 		return fmt.Errorf("queue node installation: %w", err)

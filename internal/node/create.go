@@ -8,17 +8,16 @@ import (
 	"strings"
 )
 
-// CreateInput contains persistent node metadata and one-time SSH installation
-// credentials. Password and private key values must never be written to the
-// node tables or logs.
+// CreateInput contains persistent node metadata and a reference to an encrypted
+// cluster SSH credential. Secret values never enter the public node payload.
 type CreateInput struct {
-	ClusterID  string          `json:"-"`
-	Name       string          `json:"name"`
-	Addresses  []string        `json:"addresses"`
-	DNSLineIDs []string        `json:"dns_line_ids"`
-	GroupIDs   []string        `json:"group_ids"`
-	RegionIDs  []string        `json:"region_ids"`
-	SSH        SSHInstallInput `json:"ssh"`
+	ClusterID  string              `json:"-"`
+	Name       string              `json:"name"`
+	Addresses  []string            `json:"addresses"`
+	DNSLineIDs []string            `json:"dns_line_ids"`
+	GroupIDs   []string            `json:"group_ids"`
+	RegionIDs  []string            `json:"region_ids"`
+	SSH        SSHInstallReference `json:"ssh"`
 }
 
 type SSHInstallInput struct {
@@ -30,10 +29,33 @@ type SSHInstallInput struct {
 	Passphrase    string `json:"passphrase,omitempty"`
 }
 
+// SSHInstallReference identifies a stored cluster SSH credential and the
+// network endpoint where it should be used.
+type SSHInstallReference struct {
+	EntryIP      string `json:"entry_ip"`
+	Port         uint16 `json:"port"`
+	CredentialID string `json:"credential_id"`
+}
+
+func (s *SSHInstallReference) Validate() error {
+	s.EntryIP = strings.TrimSpace(s.EntryIP)
+	s.CredentialID = strings.TrimSpace(s.CredentialID)
+	if net.ParseIP(s.EntryIP) == nil {
+		return errors.New("ssh.entry_ip must be a valid IP address")
+	}
+	if s.Port == 0 {
+		s.Port = 22
+	}
+	if s.CredentialID == "" {
+		return errors.New("ssh.credential_id is required")
+	}
+	return nil
+}
+
 type InstallPayload struct {
-	NodeID           string          `json:"node_id"`
-	CommunicationKey string          `json:"communication_key"`
-	SSH              SSHInstallInput `json:"ssh"`
+	NodeID           string           `json:"node_id"`
+	CommunicationKey string           `json:"communication_key,omitempty"`
+	SSH              *SSHInstallInput `json:"ssh,omitempty"`
 }
 
 func (i *CreateInput) Validate() error {

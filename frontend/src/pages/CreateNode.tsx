@@ -1,13 +1,18 @@
-import type { ClusterGroup, ClusterRegion, DNSLine, NodeSSH } from '@/api';
+import type {
+    ClusterGroup,
+    ClusterRegion,
+    DNSLine,
+    NodeSSH,
+    SSHCredential,
+    SSHCredentialWriteRequest,
+} from '@/api';
 
-import { Button, Input, TextArea } from '@heroui/react';
+import { Button, Input } from '@heroui/react';
 import {
     ArrowLeft,
     Check,
     ChevronDown,
     ChevronRight,
-    KeyRound,
-    LockKeyhole,
     Plus,
     Server,
     Trash2,
@@ -16,16 +21,17 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ApiError, clusterApi, nodesApi } from '@/api';
+import { ApiError, clusterApi, nodesApi, sshCredentialsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormError } from '@/components/FormField.tsx';
 import { FormRow } from '@/components/FormRow.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
+import { SSHCredentialDialog } from '@/components/SSHCredentialDialog.tsx';
+import { SSHCredentialSelect } from '@/components/SSHCredentialSelect.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 type CreationMode = 'single' | 'batch';
-type SSHAuthMethod = 'password' | 'private_key';
 
 function SectionHeader({ number, title }: { number: number; title: string }) {
     return (
@@ -77,15 +83,19 @@ function ModeTabs({
 
 export default function CreateNode() {
     const navigate = useNavigate();
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
     const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
+    const credentialApi = useMemo(() => sshCredentialsApi(clusterId), [clusterId]);
 
     const [mode, setMode] = useState<CreationMode>('single');
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
     const [groups, setGroups] = useState<ClusterGroup[]>([]);
     const [regions, setRegions] = useState<ClusterRegion[]>([]);
+    const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([]);
+    const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
     const [error, setError] = useState('');
+    const isOwner = clusters.find((item) => item.id === clusterId)?.role === 'OWNER';
 
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState('');
@@ -100,11 +110,7 @@ export default function CreateNode() {
     const [sshExpanded, setSshExpanded] = useState(true);
     const [sshIp, setSshIp] = useState('');
     const [sshPort, setSshPort] = useState('22');
-    const [sshUser, setSshUser] = useState('');
-    const [sshAuthMethod, setSshAuthMethod] = useState<SSHAuthMethod>('password');
-    const [sshPassword, setSshPassword] = useState('');
-    const [sshKey, setSshKey] = useState('');
-    const [sshPassphrase, setSshPassphrase] = useState('');
+    const [sshCredentialId, setSSHCredentialId] = useState('');
     const [testingConnection, setTestingConnection] = useState(false);
     const [testedSSHFingerprint, setTestedSSHFingerprint] = useState('');
     const [sshTestAttemptFingerprint, setSSHTestAttemptFingerprint] = useState('');
@@ -114,12 +120,9 @@ export default function CreateNode() {
         () => ({
             entry_ip: sshIp.trim(),
             port: Number(sshPort) || 22,
-            user: sshUser.trim(),
-            password: sshAuthMethod === 'password' ? sshPassword || undefined : undefined,
-            private_key: sshAuthMethod === 'private_key' ? sshKey || undefined : undefined,
-            passphrase: sshAuthMethod === 'private_key' ? sshPassphrase || undefined : undefined,
+            credential_id: sshCredentialId,
         }),
-        [sshAuthMethod, sshIp, sshKey, sshPassphrase, sshPassword, sshPort, sshUser]
+        [sshCredentialId, sshIp, sshPort]
     );
     const sshFingerprint = useMemo(() => JSON.stringify(sshPayload), [sshPayload]);
     const sshFingerprintRef = useRef(sshFingerprint);
@@ -172,19 +175,26 @@ export default function CreateNode() {
     const loadOptions = useCallback(async () => {
         if (!clusterId) return;
         try {
-            const [d, g, r] = await Promise.all([
+            const [d, g, r, credentials] = await Promise.all([
                 cluster.dnsLines(),
                 cluster.groups(),
                 cluster.regions(),
+                credentialApi.list(),
             ]);
             setDnsLines(d);
             setGroups(g);
             setRegions(r);
+            setSSHCredentials(credentials);
+            setSSHCredentialId((current) =>
+                credentials.some((credential) => credential.id === current)
+                    ? current
+                    : credentials[0]?.id || ''
+            );
             setError('');
         } catch (err) {
             setError(err instanceof ApiError ? err.message : 'Failed to load options');
         }
-    }, [cluster, clusterId]);
+    }, [cluster, clusterId, credentialApi]);
 
     useEffect(() => {
         loadOptions();
@@ -465,124 +475,31 @@ export default function CreateNode() {
                                             />
                                         </FormRow>
 
-                                        <FormRow htmlFor='node-ssh-user' label='SSH user' required>
-                                            <Input
-                                                id='node-ssh-user'
-                                                required
-                                                className='w-full'
-                                                variant='secondary'
-                                                value={sshUser}
-                                                onChange={(e) => setSshUser(e.target.value)}
+                                        <FormRow
+                                            hint='Credentials are encrypted and managed from the SSH credentials page.'
+                                            htmlFor='node-ssh-credential'
+                                            label='SSH credential'
+                                            required
+                                        >
+                                            <SSHCredentialSelect
+                                                credentials={sshCredentials}
+                                                id='node-ssh-credential'
+                                                value={sshCredentialId}
+                                                onAdd={
+                                                    isOwner
+                                                        ? () => setCredentialDialogOpen(true)
+                                                        : undefined
+                                                }
+                                                onChange={setSSHCredentialId}
                                             />
+                                            {sshCredentials.length === 0 && (
+                                                <p className='mt-2 text-xs text-warning'>
+                                                    {isOwner
+                                                        ? 'Add an SSH credential before creating a node.'
+                                                        : 'Ask the cluster owner to add an SSH credential.'}
+                                                </p>
+                                            )}
                                         </FormRow>
-
-                                        <FormRow label='Authentication method' required>
-                                            <div className='grid gap-3 sm:grid-cols-2'>
-                                                <button
-                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
-                                                        sshAuthMethod === 'password'
-                                                            ? 'border-accent bg-accent/10'
-                                                            : 'border-border bg-surface hover:bg-surface-secondary'
-                                                    }`}
-                                                    type='button'
-                                                    onClick={() => {
-                                                        setSshAuthMethod('password');
-                                                        setSshKey('');
-                                                        setSshPassphrase('');
-                                                    }}
-                                                >
-                                                    <LockKeyhole className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
-                                                    <span>
-                                                        <span className='block text-sm font-semibold'>
-                                                            Password
-                                                        </span>
-                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
-                                                            Authenticate with the SSH account
-                                                            password.
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                                <button
-                                                    className={`flex cursor-pointer items-start gap-3 rounded-xl border p-4 text-left transition-colors ${
-                                                        sshAuthMethod === 'private_key'
-                                                            ? 'border-accent bg-accent/10'
-                                                            : 'border-border bg-surface hover:bg-surface-secondary'
-                                                    }`}
-                                                    type='button'
-                                                    onClick={() => {
-                                                        setSshAuthMethod('private_key');
-                                                        setSshPassword('');
-                                                    }}
-                                                >
-                                                    <KeyRound className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
-                                                    <span>
-                                                        <span className='block text-sm font-semibold'>
-                                                            Private key
-                                                        </span>
-                                                        <span className='mt-1 block text-xs leading-5 text-muted'>
-                                                            Authenticate with a PEM-encoded private
-                                                            key.
-                                                        </span>
-                                                    </span>
-                                                </button>
-                                            </div>
-                                        </FormRow>
-
-                                        {sshAuthMethod === 'password' && (
-                                            <FormRow
-                                                htmlFor='node-ssh-password'
-                                                label='Password'
-                                                required
-                                            >
-                                                <Input
-                                                    id='node-ssh-password'
-                                                    className='w-full'
-                                                    required
-                                                    type='password'
-                                                    variant='secondary'
-                                                    value={sshPassword}
-                                                    onChange={(e) => setSshPassword(e.target.value)}
-                                                />
-                                            </FormRow>
-                                        )}
-
-                                        {sshAuthMethod === 'private_key' && (
-                                            <>
-                                                <FormRow
-                                                    hint='Paste the complete PEM key, including the BEGIN and END lines.'
-                                                    htmlFor='node-ssh-key'
-                                                    label='Private key PEM'
-                                                    required
-                                                >
-                                                    <TextArea
-                                                        id='node-ssh-key'
-                                                        className='w-full font-mono text-xs'
-                                                        required
-                                                        rows={8}
-                                                        spellCheck={false}
-                                                        variant='secondary'
-                                                        value={sshKey}
-                                                        onChange={(e) => setSshKey(e.target.value)}
-                                                    />
-                                                </FormRow>
-
-                                                <FormRow
-                                                    htmlFor='node-ssh-passphrase'
-                                                    label='Private key passphrase'
-                                                >
-                                                    <Input
-                                                        id='node-ssh-passphrase'
-                                                        className='w-full'
-                                                        type='password'
-                                                        variant='secondary'
-                                                        value={sshPassphrase}
-                                                        onChange={(e) =>
-                                                            setSshPassphrase(e.target.value)
-                                                        }
-                                                    />
-                                                </FormRow>
-                                            </>
-                                        )}
 
                                         <div className='border-t border-border py-4'>
                                             <div className='flex flex-wrap items-center gap-3'>
@@ -590,10 +507,7 @@ export default function CreateNode() {
                                                     isDisabled={
                                                         testingConnection ||
                                                         !sshIp.trim() ||
-                                                        !sshUser.trim() ||
-                                                        (sshAuthMethod === 'password'
-                                                            ? !sshPassword
-                                                            : !sshKey)
+                                                        !sshCredentialId
                                                     }
                                                     type='button'
                                                     variant='secondary'
@@ -647,6 +561,18 @@ export default function CreateNode() {
                     </div>
                 </form>
             )}
+            <SSHCredentialDialog
+                isOpen={credentialDialogOpen}
+                onOpenChange={setCredentialDialogOpen}
+                onSave={(payload: SSHCredentialWriteRequest) => credentialApi.create(payload)}
+                onSaved={(credential) => {
+                    setSSHCredentials((current) => [
+                        credential,
+                        ...current.filter((item) => item.id !== credential.id),
+                    ]);
+                    setSSHCredentialId(credential.id);
+                }}
+            />
         </div>
     );
 }

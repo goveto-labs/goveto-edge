@@ -8,6 +8,7 @@ import {
     Flame,
     Globe,
     HelpCircle,
+    KeyRound,
     LayoutDashboard,
     LogOut,
     Rocket,
@@ -29,7 +30,15 @@ interface NavItemConfig {
 
 export const nav: NavItemConfig[] = [
     { path: '/', label: 'Overview', icon: LayoutDashboard },
-    { path: '/nodes', label: 'Nodes', icon: Server },
+    {
+        path: '/nodes',
+        label: 'Nodes',
+        icon: Server,
+        children: [
+            { path: '/nodes/ssh-credentials', label: 'SSH credentials', icon: KeyRound },
+        ],
+    },
+
     {
         path: '/sites',
         label: 'Sites',

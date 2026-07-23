@@ -3,9 +3,18 @@ package node
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 )
+
+func TestInstallRejectsMissingSSHInput(t *testing.T) {
+	worker := &InstallWorker{}
+	err := worker.install(context.Background(), InstallPayload{NodeID: "node-1"})
+	if err == nil || err.Error() != "SSH installation input is missing" {
+		t.Fatalf("install() error = %v", err)
+	}
+}
 
 func TestShellQuote(t *testing.T) {
 	if got, want := shellQuote("it's safe"), `'it'\''s safe'`; got != want {

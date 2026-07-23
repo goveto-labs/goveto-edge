@@ -822,8 +822,8 @@ export function SiteSecuritySettings({
                                     <Trash2 className='h-4 w-4 text-danger' />
                                 </Button>
                             </div>
-                            <div className='grid lg:grid-cols-[minmax(0,1.12fr)_minmax(340px,.88fr)]'>
-                                <section className='min-w-0 border-b border-border lg:border-r lg:border-b-0'>
+                            <div className='grid 2xl:grid-cols-[minmax(0,1.12fr)_minmax(340px,.88fr)]'>
+                                <section className='min-w-0 border-b border-border 2xl:border-r 2xl:border-b-0'>
                                     <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-3'>
                                         <div>
                                             <p className='text-sm font-semibold'>1. Match rules</p>

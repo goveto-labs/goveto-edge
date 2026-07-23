@@ -50,6 +50,7 @@ type Client struct {
 	Policy                PolicyActions
 	PublishJob            PublishJobActions
 	PurgeJob              PurgeJobActions
+	SSHCredential         SSHCredentialActions
 	Site                  SiteActions
 	SiteCertificate       SiteCertificateActions
 	SiteDomain            SiteDomainActions
@@ -90,6 +91,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.Policy = PolicyActions{client: c}
 	c.PublishJob = PublishJobActions{client: c}
 	c.PurgeJob = PurgeJobActions{client: c}
+	c.SSHCredential = SSHCredentialActions{client: c}
 	c.Site = SiteActions{client: c}
 	c.SiteCertificate = SiteCertificateActions{client: c}
 	c.SiteDomain = SiteDomainActions{client: c}
@@ -290,6 +292,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.Policy = PolicyActions{client: txClient}
 	txClient.PublishJob = PublishJobActions{client: txClient}
 	txClient.PurgeJob = PurgeJobActions{client: txClient}
+	txClient.SSHCredential = SSHCredentialActions{client: txClient}
 	txClient.Site = SiteActions{client: txClient}
 	txClient.SiteCertificate = SiteCertificateActions{client: txClient}
 	txClient.SiteDomain = SiteDomainActions{client: txClient}
@@ -12021,7 +12024,7 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 
 func quotedNodeTable(c *Client) string { return c.quoteIdentifier("nodes") }
 func quotedNodeColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -12047,6 +12050,12 @@ func quoteNodeField(c *Client, field string) (string, error) {
 	case "status":
 		return c.quoteIdentifier(field), nil
 	case "install_error":
+		return c.quoteIdentifier(field), nil
+	case "ssh_credential_id":
+		return c.quoteIdentifier(field), nil
+	case "ssh_host":
+		return c.quoteIdentifier(field), nil
+	case "ssh_port":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -12261,14 +12270,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -12295,7 +12304,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -12547,7 +12556,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -12579,7 +12588,7 @@ func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -12610,7 +12619,7 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -12629,7 +12638,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "group_id", "region_id", "name", "version", "heartbeat_at", "status", "install_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -12702,7 +12711,7 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -12807,7 +12816,7 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -12831,7 +12840,7 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.GroupId, &item.RegionId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -25611,6 +25620,982 @@ func (a PurgeJobActions) GroupBy(ctx context.Context, fields []string, opts ...q
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("PurgeJob.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedSSHCredentialTable(c *Client) string { return c.quoteIdentifier("ssh_credentials") }
+func quotedSSHCredentialColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "username", "auth_type", "secret_encrypted", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSSHCredentialField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "username":
+		return c.quoteIdentifier(field), nil
+	case "auth_type":
+		return c.quoteIdentifier(field), nil
+	case "secret_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown SSHCredential field %q", field)
+	}
+}
+
+// buildSSHCredentialWhere recursively builds a WHERE clause string and arguments.
+func buildSSHCredentialWhere(c *Client, wheres []query.SSHCredentialWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.SSHCredentialWhereClause); ok {
+				sub, subArgs := buildSSHCredentialWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.SSHCredentialWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildSSHCredentialWhere(c, []query.SSHCredentialWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.SSHCredentialWhereClause); ok {
+				sub, subArgs := buildSSHCredentialWhere(c, []query.SSHCredentialWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteSSHCredentialField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// SSHCredentialActions provides database operations for the SSHCredential model.
+type SSHCredentialActions struct {
+	client *Client
+}
+
+// SSHCredentialCreateBuilder builds a SSHCredential create operation incrementally.
+type SSHCredentialCreateBuilder struct {
+	action SSHCredentialActions
+	sets   []query.SSHCredentialSetClause
+}
+
+// Create starts a staged SSHCredential create operation.
+func (a SSHCredentialActions) Create() SSHCredentialCreateBuilder {
+	return SSHCredentialCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b SSHCredentialCreateBuilder) Set(sets ...query.SSHCredentialSetClause) SSHCredentialCreateBuilder {
+	next := SSHCredentialCreateBuilder{
+		action: b.action,
+		sets:   make([]query.SSHCredentialSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b SSHCredentialCreateBuilder) Do(ctx context.Context) (*model.SSHCredential, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// SSHCredentialCreateManyBuilder builds a bulk SSHCredential insert operation.
+type SSHCredentialCreateManyBuilder struct {
+	action            SSHCredentialActions
+	data              []query.SSHCredentialCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk SSHCredential insert operation.
+func (a SSHCredentialActions) BulkCreate(data []query.SSHCredentialCreateInput) SSHCredentialCreateManyBuilder {
+	return SSHCredentialCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b SSHCredentialCreateManyBuilder) OnConflictDoNothing(columns ...string) SSHCredentialCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b SSHCredentialCreateManyBuilder) Returning(columns ...string) SSHCredentialCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b SSHCredentialCreateManyBuilder) BatchSize(n int) SSHCredentialCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b SSHCredentialCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSSHCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("SSHCredential.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("SSHCredential.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b SSHCredentialCreateManyBuilder) DoReturning(ctx context.Context) ([]model.SSHCredential, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.SSHCredential
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSSHCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "username", "auth_type", "secret_encrypted", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.SSHCredential
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b SSHCredentialCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "username", "auth_type", "secret_encrypted", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSSHCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("SSHCredential.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// SSHCredentialQueryBuilder builds a SSHCredential query incrementally.
+type SSHCredentialQueryBuilder struct {
+	action SSHCredentialActions
+	opts   []query.SSHCredentialQueryOption
+}
+
+// Query starts a staged SSHCredential query.
+func (a SSHCredentialActions) Query() SSHCredentialQueryBuilder {
+	return SSHCredentialQueryBuilder{action: a}
+}
+
+func (b SSHCredentialQueryBuilder) withOptions(opts ...query.SSHCredentialQueryOption) SSHCredentialQueryBuilder {
+	next := SSHCredentialQueryBuilder{
+		action: b.action,
+		opts:   make([]query.SSHCredentialQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b SSHCredentialQueryBuilder) Where(clauses ...query.SSHCredentialWhereClause) SSHCredentialQueryBuilder {
+	opts := make([]query.SSHCredentialQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b SSHCredentialQueryBuilder) OrderBy(clause query.SSHCredentialOrderByClause) SSHCredentialQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b SSHCredentialQueryBuilder) Include(clauses ...query.SSHCredentialIncludeClause) SSHCredentialQueryBuilder {
+	opts := make([]query.SSHCredentialQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b SSHCredentialQueryBuilder) Take(n int) SSHCredentialQueryBuilder {
+	return b.withOptions(query.SSHCredentialTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b SSHCredentialQueryBuilder) Skip(n int) SSHCredentialQueryBuilder {
+	return b.withOptions(query.SSHCredentialSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b SSHCredentialQueryBuilder) Do(ctx context.Context) ([]model.SSHCredential, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b SSHCredentialQueryBuilder) First(ctx context.Context) (*model.SSHCredential, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b SSHCredentialQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplySSHCredentialOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// SSHCredentialUpdateBuilder builds a SSHCredential update operation incrementally.
+type SSHCredentialUpdateBuilder struct {
+	action SSHCredentialActions
+	wheres []query.SSHCredentialWhereClause
+	sets   []query.SSHCredentialSetClause
+}
+
+// Update starts a staged SSHCredential update operation.
+func (a SSHCredentialActions) Update() SSHCredentialUpdateBuilder {
+	return SSHCredentialUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b SSHCredentialUpdateBuilder) Where(clauses ...query.SSHCredentialWhereClause) SSHCredentialUpdateBuilder {
+	next := SSHCredentialUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.SSHCredentialWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.SSHCredentialSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b SSHCredentialUpdateBuilder) Set(sets ...query.SSHCredentialSetClause) SSHCredentialUpdateBuilder {
+	next := SSHCredentialUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.SSHCredentialWhereClause(nil), b.wheres...),
+		sets:   make([]query.SSHCredentialSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b SSHCredentialUpdateBuilder) combinedWhere() (query.SSHCredentialWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SSHCredentialWhereClause{}, fmt.Errorf("SSHCredential.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SSHCredential.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b SSHCredentialUpdateBuilder) Do(ctx context.Context) (*model.SSHCredential, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b SSHCredentialUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// SSHCredentialDeleteBuilder builds a SSHCredential delete operation incrementally.
+type SSHCredentialDeleteBuilder struct {
+	action SSHCredentialActions
+	wheres []query.SSHCredentialWhereClause
+}
+
+// Delete starts a staged SSHCredential delete operation.
+func (a SSHCredentialActions) Delete() SSHCredentialDeleteBuilder {
+	return SSHCredentialDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b SSHCredentialDeleteBuilder) Where(clauses ...query.SSHCredentialWhereClause) SSHCredentialDeleteBuilder {
+	next := SSHCredentialDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.SSHCredentialWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b SSHCredentialDeleteBuilder) combinedWhere() (query.SSHCredentialWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SSHCredentialWhereClause{}, fmt.Errorf("SSHCredential.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SSHCredential.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b SSHCredentialDeleteBuilder) Do(ctx context.Context) (*model.SSHCredential, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b SSHCredentialDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple SSHCredential records.
+func (a SSHCredentialActions) FindMany(ctx context.Context, opts ...query.SSHCredentialQueryOption) ([]model.SSHCredential, error) {
+	cfg := query.ApplySSHCredentialOptions(opts)
+	q := "SELECT " + quotedSSHCredentialColumns(a.client) + " FROM " + quotedSSHCredentialTable(a.client)
+	argIdx := 0
+	where, args := buildSSHCredentialWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteSSHCredentialField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.SSHCredential
+	for rows.Next() {
+		var item model.SSHCredential
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SSHCredential.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching SSHCredential record.
+func (a SSHCredentialActions) FindFirst(ctx context.Context, opts ...query.SSHCredentialQueryOption) (*model.SSHCredential, error) {
+	opts = append(opts, query.SSHCredentialTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single SSHCredential record by unique constraint.
+func (a SSHCredentialActions) FindUnique(ctx context.Context, where query.SSHCredentialWhereClause) (*model.SSHCredential, error) {
+	argIdx := 0
+	whereSQL, args := buildSSHCredentialWhere(a.client, []query.SSHCredentialWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedSSHCredentialColumns(a.client) + " FROM " + quotedSSHCredentialTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.SSHCredential
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SSHCredential.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single SSHCredential record.
+func (a SSHCredentialActions) CreateOne(ctx context.Context, sets ...query.SSHCredentialSetClause) (*model.SSHCredential, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SSHCredential.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteSSHCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSSHCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSSHCredentialColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.SSHCredential
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SSHCredential.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple SSHCredential records.
+func (a SSHCredentialActions) CreateMany(ctx context.Context, data []query.SSHCredentialCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a SSHCredentialActions) buildSSHCredentialCreateManySQL(data []query.SSHCredentialCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "username", "auth_type", "secret_encrypted", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSSHCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single SSHCredential record matching the where clause.
+func (a SSHCredentialActions) UpdateOne(ctx context.Context, where query.SSHCredentialWhereClause, sets ...query.SSHCredentialSetClause) (*model.SSHCredential, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SSHCredential.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteSSHCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSSHCredentialWhere(a.client, []query.SSHCredentialWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSSHCredentialTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSSHCredentialColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SSHCredential
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SSHCredential.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple SSHCredential records matching the where clauses.
+func (a SSHCredentialActions) UpdateMany(ctx context.Context, wheres []query.SSHCredentialWhereClause, sets ...query.SSHCredentialSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("SSHCredential.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteSSHCredentialField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSSHCredentialWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSSHCredentialTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SSHCredential.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single SSHCredential record.
+func (a SSHCredentialActions) UpsertOne(ctx context.Context, where query.SSHCredentialWhereClause, create []query.SSHCredentialSetClause, update []query.SSHCredentialSetClause) (*model.SSHCredential, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("SSHCredential.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteSSHCredentialField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSSHCredentialTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteSSHCredentialField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteSSHCredentialField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteSSHCredentialField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSSHCredentialColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SSHCredential
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SSHCredential.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single SSHCredential record matching the where clause.
+func (a SSHCredentialActions) DeleteOne(ctx context.Context, where query.SSHCredentialWhereClause) (*model.SSHCredential, error) {
+	argIdx := 0
+	whereSQL, args := buildSSHCredentialWhere(a.client, []query.SSHCredentialWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedSSHCredentialTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSSHCredentialColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SSHCredential
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Username, &item.AuthType, &item.SecretEncrypted, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SSHCredential.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple SSHCredential records matching the where clauses.
+func (a SSHCredentialActions) DeleteMany(ctx context.Context, wheres ...query.SSHCredentialWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSSHCredentialWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedSSHCredentialTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SSHCredential.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of SSHCredential records matching the where clauses.
+func (a SSHCredentialActions) Count(ctx context.Context, wheres ...query.SSHCredentialWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSSHCredentialWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedSSHCredentialTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("SSHCredential.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for SSHCredential.
+func (a SSHCredentialActions) Aggregate(ctx context.Context, opts ...query.SSHCredentialAggregateOption) (*query.SSHCredentialAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSSHCredentialField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSSHCredentialTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.SSHCredentialAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("SSHCredential.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on SSHCredential.
+func (a SSHCredentialActions) GroupBy(ctx context.Context, fields []string, opts ...query.SSHCredentialAggregateOption) ([]query.SSHCredentialGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSSHCredentialField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSSHCredentialField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSSHCredentialTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("SSHCredential.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.SSHCredentialGroupByResult
+	for rows.Next() {
+		r := query.SSHCredentialGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("SSHCredential.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

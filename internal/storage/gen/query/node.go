@@ -40,6 +40,9 @@ type NodeQuery struct {
 	HeartbeatAt        nodeHeartbeatAtField
 	Status             nodeStatusField
 	InstallError       nodeInstallErrorField
+	SshCredentialId    nodeSshCredentialIdField
+	SshHost            nodeSshHostField
+	SshPort            nodeSshPortField
 	CreatedAt          nodeCreatedAtField
 	UpdatedAt          nodeUpdatedAtField
 	Cluster            nodeClusterRelation
@@ -53,6 +56,7 @@ type NodeQuery struct {
 	CacheConfig        nodeCacheConfigRelation
 	HardwareProfile    nodeHardwareProfileRelation
 	Credential         nodeCredentialRelation
+	SshCredential      nodeSshCredentialRelation
 	SiteConfigVersions nodeSiteConfigVersionsRelation
 }
 
@@ -66,6 +70,9 @@ const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
 const NodeStatusColumn = "status"
 const NodeInstallErrorColumn = "install_error"
+const NodeSshCredentialIdColumn = "ssh_credential_id"
+const NodeSshHostColumn = "ssh_host"
+const NodeSshPortColumn = "ssh_port"
 const NodeCreatedAtColumn = "created_at"
 const NodeUpdatedAtColumn = "updated_at"
 
@@ -80,6 +87,9 @@ var Node = NodeQuery{
 	HeartbeatAt:        nodeHeartbeatAtField{},
 	Status:             nodeStatusField{},
 	InstallError:       nodeInstallErrorField{},
+	SshCredentialId:    nodeSshCredentialIdField{},
+	SshHost:            nodeSshHostField{},
+	SshPort:            nodeSshPortField{},
 	CreatedAt:          nodeCreatedAtField{},
 	UpdatedAt:          nodeUpdatedAtField{},
 	Cluster:            nodeClusterRelation{},
@@ -93,6 +103,7 @@ var Node = NodeQuery{
 	CacheConfig:        nodeCacheConfigRelation{},
 	HardwareProfile:    nodeHardwareProfileRelation{},
 	Credential:         nodeCredentialRelation{},
+	SshCredential:      nodeSshCredentialRelation{},
 	SiteConfigVersions: nodeSiteConfigVersionsRelation{},
 }
 
@@ -759,6 +770,209 @@ func (nodeInstallErrorField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "install_error", Direction: "DESC"}
 }
 
+// SshCredentialIdField provides query operations for the sshCredentialId field.
+type nodeSshCredentialIdField struct{}
+
+// Equals creates an equality condition.
+func (nodeSshCredentialIdField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_credential_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeSshCredentialIdField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_credential_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeSshCredentialIdField) In(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_credential_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeSshCredentialIdField) NotIn(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_credential_id", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeSshCredentialIdField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_credential_id", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeSshCredentialIdField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "ssh_credential_id", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeSshCredentialIdField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "ssh_credential_id", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeSshCredentialIdField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_credential_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeSshCredentialIdField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_credential_id", Direction: "DESC"}
+}
+
+// SshHostField provides query operations for the sshHost field.
+type nodeSshHostField struct{}
+
+// Equals creates an equality condition.
+func (nodeSshHostField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeSshHostField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeSshHostField) In(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_host", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeSshHostField) NotIn(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_host", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (nodeSshHostField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (nodeSshHostField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (nodeSshHostField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeSshHostField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_host", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeSshHostField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "ssh_host", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeSshHostField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "ssh_host", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeSshHostField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_host", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeSshHostField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_host", Direction: "DESC"}
+}
+
+// SshPortField provides query operations for the sshPort field.
+type nodeSshPortField struct{}
+
+// Equals creates an equality condition.
+func (nodeSshPortField) Equals(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeSshPortField) Not(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeSshPortField) In(vals ...*int) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_port", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeSshPortField) NotIn(vals ...*int) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "ssh_port", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeSshPortField) Lt(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeSshPortField) Lte(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeSshPortField) Gt(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeSshPortField) Gte(v *int) NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeSshPortField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "ssh_port", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeSshPortField) Set(v int) NodeSetClause {
+	return NodeSetClause{Field: "ssh_port", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeSshPortField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "ssh_port", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeSshPortField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_port", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeSshPortField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "ssh_port", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type nodeCreatedAtField struct{}
 
@@ -979,6 +1193,14 @@ func (nodeCredentialRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "credential"}
 }
 
+// SshCredentialRelation provides relation query helpers for sshCredential.
+type nodeSshCredentialRelation struct{}
+
+// Fetch creates an include clause to fetch related sshCredential.
+func (nodeSshCredentialRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "sshCredential"}
+}
+
 // SiteConfigVersionsRelation provides relation query helpers for siteConfigVersions.
 type nodeSiteConfigVersionsRelation struct{}
 
@@ -1029,6 +1251,9 @@ type NodeCreateInput struct {
 	HeartbeatAt        **time.Time
 	Status             model.NodeStatus
 	InstallError       **string
+	SshCredentialId    **string
+	SshHost            **string
+	SshPort            **int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	Cluster            *ClusterCreateNestedInput
@@ -1042,12 +1267,13 @@ type NodeCreateInput struct {
 	CacheConfig        *NodeCacheConfigCreateNestedInput
 	HardwareProfile    *NodeHardwareProfileCreateNestedInput
 	Credential         *NodeCredentialCreateNestedInput
+	SshCredential      *SSHCredentialCreateNestedInput
 	SiteConfigVersions *NodeSiteConfigVersionCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

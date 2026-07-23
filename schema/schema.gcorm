@@ -156,6 +156,7 @@ model Cluster {
   certificates    Certificate[]
   originPools     OriginPool[]
   sites           Site[]
+  sshCredentials  SSHCredential[]
 
   @@unique([name])
   @@index([creatorId])
@@ -329,6 +330,9 @@ model Node {
   heartbeatAt        DateTime?               @map("heartbeat_at")
   status             NodeStatus              @default(PENDING)
   installError       String?                 @map("install_error") @db.Text
+  sshCredentialId    UUID?                   @map("ssh_credential_id")
+  sshHost            String?                 @map("ssh_host")
+  sshPort            Int?                    @map("ssh_port")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])
@@ -342,6 +346,7 @@ model Node {
   cacheConfig        NodeCacheConfig?
   hardwareProfile    NodeHardwareProfile?
   credential         NodeCredential?
+  sshCredential      SSHCredential?          @relation(fields: [sshCredentialId], references: [id])
   siteConfigVersions NodeSiteConfigVersion[]
 
   @@unique([clusterId, name])
@@ -349,6 +354,7 @@ model Node {
   @@index([groupId, status])
   @@index([regionId, status])
   @@index([heartbeatAt])
+  @@index([sshCredentialId])
   @@map("nodes")
 }
 
@@ -522,6 +528,23 @@ model PurgeJob {
   @@index([siteId, status])
   @@index([status, createdAt])
   @@map("purge_jobs")
+}
+
+model SSHCredential {
+  id              UUID        @id @default(uuid())
+  clusterId       String      @map("cluster_id")
+  name            String
+  username        String
+  authType        SSHAuthType @map("auth_type")
+  secretEncrypted String      @map("secret_encrypted") @db.Text
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @default(now()) @updatedAt @map("updated_at")
+  cluster         Cluster     @relation(fields: [clusterId], references: [id])
+  nodes           Node[]
+
+  @@unique([clusterId, name])
+  @@index([clusterId])
+  @@map("ssh_credentials")
 }
 
 model Site {

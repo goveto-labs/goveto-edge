@@ -12,7 +12,7 @@ func TestCreateInputJSONContract(t *testing.T) {
 		"dns_line_ids":["line-default","line-telecom"],
 		"group_ids":[],
 		"region_ids":[],
-		"ssh":{"entry_ip":"192.168.4.120","port":22,"user":"root","password":"secret"}
+		"ssh":{"entry_ip":"192.168.4.120","port":22,"credential_id":"credential-1"}
 	}`)
 	var input CreateInput
 	if err := json.Unmarshal(raw, &input); err != nil {
@@ -28,21 +28,13 @@ func TestCreateInputJSONContract(t *testing.T) {
 	if len(input.DNSLineIDs) != 2 || input.DNSLineIDs[1] != "line-telecom" {
 		t.Fatalf("dns_line_ids=%#v", input.DNSLineIDs)
 	}
-	if input.SSH.Password != "secret" || !input.SSH.UsesPassword() {
-		t.Fatal("SSH password did not survive JSON binding")
+	if input.SSH.CredentialID != "credential-1" {
+		t.Fatal("SSH credential reference did not survive JSON binding")
 	}
 }
 
-func TestInstallPayloadJSONPreservesPassword(t *testing.T) {
-	want := InstallPayload{
-		NodeID: "node-1",
-		SSH: SSHInstallInput{
-			EntryIP:  "192.168.4.120",
-			Port:     22,
-			User:     "root",
-			Password: "secret",
-		},
-	}
+func TestInstallPayloadJSONContainsOnlyNodeID(t *testing.T) {
+	want := InstallPayload{NodeID: "node-1"}
 	raw, err := json.Marshal(want)
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +43,10 @@ func TestInstallPayloadJSONPreservesPassword(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.SSH.Password != want.SSH.Password {
-		t.Fatal("SSH password was lost while passing through the install queue")
+	if got.NodeID != want.NodeID || got.SSH != nil || got.CommunicationKey != "" {
+		t.Fatalf("unexpected install payload: %#v", got)
+	}
+	if string(raw) != `{"node_id":"node-1"}` {
+		t.Fatalf("install payload contains unexpected data: %s", raw)
 	}
 }

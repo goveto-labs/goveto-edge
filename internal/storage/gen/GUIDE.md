@@ -270,6 +270,9 @@ query.PostAuthorIdColumn
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
   - `Installerror` (String, optional)
+  - `Sshcredentialid` (UUID, optional)
+  - `Sshhost` (String, optional)
+  - `Sshport` (Int, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -421,6 +424,20 @@ query.PostAuthorIdColumn
   - `Value` (String, optional)
   - `Status` ()
   - `Resultjson` (Json, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### SSHCredential
+
+- Client handle: `c.SSHCredential`
+- Query namespace: `query.SSHCredential`
+- Fields:
+  - `Id` (UUID, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Username` (String)
+  - `Authtype` ()
+  - `Secretencrypted` (String)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

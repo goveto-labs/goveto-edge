@@ -48,6 +48,7 @@ type ClusterQuery struct {
 	Certificates    clusterCertificatesRelation
 	OriginPools     clusterOriginPoolsRelation
 	Sites           clusterSitesRelation
+	SshCredentials  clusterSshCredentialsRelation
 }
 
 const ClusterTable = "clusters"
@@ -78,6 +79,7 @@ var Cluster = ClusterQuery{
 	Certificates:    clusterCertificatesRelation{},
 	OriginPools:     clusterOriginPoolsRelation{},
 	Sites:           clusterSitesRelation{},
+	SshCredentials:  clusterSshCredentialsRelation{},
 }
 
 // ClusterWhereClause represents a WHERE condition for Cluster.
@@ -651,6 +653,14 @@ func (clusterSitesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "sites"}
 }
 
+// SshCredentialsRelation provides relation query helpers for sshCredentials.
+type clusterSshCredentialsRelation struct{}
+
+// Fetch creates an include clause to fetch related sshCredentials.
+func (clusterSshCredentialsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "sshCredentials"}
+}
+
 // ClusterSetClause represents a field set operation for create/update.
 type ClusterSetClause struct {
 	Field string
@@ -702,6 +712,7 @@ type ClusterCreateInput struct {
 	Certificates    *CertificateCreateNestedInput
 	OriginPools     *OriginPoolCreateNestedInput
 	Sites           *SiteCreateNestedInput
+	SshCredentials  *SSHCredentialCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

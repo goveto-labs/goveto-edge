@@ -12,3 +12,4 @@ export { nodesApi } from './nodes.ts';
 export { publishApi } from './publish.ts';
 export { purgeApi } from './purge.ts';
 export { sitesApi } from './sites.ts';
+export { sshCredentialsApi } from './sshCredentials.ts';

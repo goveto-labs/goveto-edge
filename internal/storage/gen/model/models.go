@@ -54,6 +54,7 @@ type Cluster struct {
 	Certificates    []*Certificate      `db:"-" json:"certificates,omitempty"`
 	OriginPools     []*OriginPool       `db:"-" json:"originPools,omitempty"`
 	Sites           []*Site             `db:"-" json:"sites,omitempty"`
+	SshCredentials  []*SSHCredential    `db:"-" json:"sshCredentials,omitempty"`
 }
 
 // ClusterGroup represents the ClusterGroup model.
@@ -193,6 +194,9 @@ type Node struct {
 	HeartbeatAt        *time.Time               `db:"heartbeat_at" json:"heartbeatAt"`
 	Status             NodeStatus               `db:"status" json:"status"`
 	InstallError       *string                  `db:"install_error" json:"installError"`
+	SshCredentialId    *string                  `db:"ssh_credential_id" json:"sshCredentialId"`
+	SshHost            *string                  `db:"ssh_host" json:"sshHost"`
+	SshPort            *int                     `db:"ssh_port" json:"sshPort"`
 	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
 	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
 	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`
@@ -206,6 +210,7 @@ type Node struct {
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
 	HardwareProfile    *NodeHardwareProfile     `db:"-" json:"hardwareProfile,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
+	SshCredential      *SSHCredential           `db:"-" json:"sshCredential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }
 
@@ -351,6 +356,20 @@ type PurgeJob struct {
 	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
 	UpdatedAt  time.Time        `db:"updated_at" json:"updatedAt"`
 	Site       *Site            `db:"-" json:"site,omitempty"`
+}
+
+// SSHCredential represents the SSHCredential model.
+type SSHCredential struct {
+	Id              string      `db:"id" json:"id"`
+	ClusterId       string      `db:"cluster_id" json:"clusterId"`
+	Name            string      `db:"name" json:"name"`
+	Username        string      `db:"username" json:"username"`
+	AuthType        SSHAuthType `db:"auth_type" json:"authType"`
+	SecretEncrypted string      `db:"secret_encrypted" json:"secretEncrypted"`
+	CreatedAt       time.Time   `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time   `db:"updated_at" json:"updatedAt"`
+	Cluster         *Cluster    `db:"-" json:"cluster,omitempty"`
+	Nodes           []*Node     `db:"-" json:"nodes,omitempty"`
 }
 
 // Site represents the Site model.

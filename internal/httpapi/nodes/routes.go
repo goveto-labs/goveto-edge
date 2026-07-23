@@ -23,7 +23,12 @@ import (
 
 func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, dnsService *dnssync.Service) {
 	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials", listSSHCredentials(db), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/ssh-credentials", createSSHCredential(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.PUT("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", updateSSHCredential(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.DELETE("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", deleteSSHCredential(db), authn.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id/nodes", listSSHCredentialNodes(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
@@ -44,7 +49,7 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 }
 
 type testConnectionRequest struct {
-	SSH nodedomain.SSHInstallInput `json:"ssh"`
+	SSH nodedomain.SSHInstallReference `json:"ssh"`
 }
 
 type testConnectionResponse struct {
@@ -53,20 +58,26 @@ type testConnectionResponse struct {
 }
 
 type reinstallRequest struct {
-	SSH   nodedomain.SSHInstallInput `json:"ssh"`
-	Force bool                       `json:"force"`
+	SSH   nodedomain.SSHInstallReference `json:"ssh"`
+	Force bool                           `json:"force"`
 }
 
 // @summary Test node SSH connection
-// @description Validate SSH credentials and detect the remote architecture without creating a node.
+// @description Resolve a stored SSH credential and detect the remote architecture without creating a node.
 // @Tags nodes
-func testConnection() echo.HandlerFunc {
+func testConnection(db *client.Client, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input testConnectionRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
-		architecture, err := nodedomain.TestSSHConnection(c.Request().Context(), input.SSH)
+		_, sshInput, err := nodedomain.ResolveSSHInstallInput(
+			c.Request().Context(), db, cipher, c.Param("cluster_id"), input.SSH,
+		)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		architecture, err := nodedomain.TestSSHConnection(c.Request().Context(), sshInput)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
 		}
@@ -78,7 +89,7 @@ func testConnection() echo.HandlerFunc {
 }
 
 // @summary Reinstall node agent
-// @description Test one-time SSH credentials and enqueue agent reinstallation for an existing node.
+// @description Test a stored SSH credential and enqueue agent reinstallation for an existing node.
 // @Tags nodes
 func reinstall(
 	db *client.Client,
@@ -101,7 +112,13 @@ func reinstall(
 		if (node.Status == model.NodeStatusPENDING || node.Status == model.NodeStatusINSTALLING) && !input.Force {
 			return echo.NewHTTPError(http.StatusConflict, "node installation is already in progress")
 		}
-		if _, err := nodedomain.TestSSHConnection(ctx, input.SSH); err != nil {
+		sshCredential, sshInput, err := nodedomain.ResolveSSHInstallInput(
+			ctx, db, cipher, node.ClusterId, input.SSH,
+		)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if _, err := nodedomain.TestSSHConnection(ctx, sshInput); err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
 		}
 		credential, err := db.NodeCredential.FindUnique(
@@ -114,10 +131,6 @@ func reinstall(
 		if credential == nil {
 			return echo.NewHTTPError(http.StatusConflict, "node communication credential is missing")
 		}
-		communicationKey, err := cipher.Decrypt(credential.CommunicationKeyEncrypted)
-		if err != nil {
-			return err
-		}
 		if input.Force {
 			_ = queue.Delete(ctx, node.Id)
 		}
@@ -127,15 +140,14 @@ func reinstall(
 				query.Node.Status.Set(model.NodeStatusPENDING),
 				query.Node.InstallError.SetNull(),
 				query.Node.HeartbeatAt.SetNull(),
+				query.Node.SshCredentialId.Set(sshCredential.Id),
+				query.Node.SshHost.Set(input.SSH.EntryIP),
+				query.Node.SshPort.Set(int(input.SSH.Port)),
 			).
 			Do(ctx); err != nil {
 			return err
 		}
-		if err := queue.Enqueue(ctx, node.Id, nodedomain.InstallPayload{
-			NodeID:           node.Id,
-			CommunicationKey: communicationKey,
-			SSH:              input.SSH,
-		}); err != nil {
+		if err := queue.Enqueue(ctx, node.Id, nodedomain.InstallPayload{NodeID: node.Id}); err != nil {
 			message := "unable to queue node reinstallation: " + err.Error()
 			_, _ = db.Node.Update().
 				Where(query.Node.Id.Equals(node.Id)).
@@ -149,6 +161,10 @@ func reinstall(
 		node.Status = model.NodeStatusPENDING
 		node.InstallError = nil
 		node.HeartbeatAt = nil
+		node.SshCredentialId = &sshCredential.Id
+		node.SshHost = &input.SSH.EntryIP
+		sshPort := int(input.SSH.Port)
+		node.SshPort = &sshPort
 		if err := loadNodeRelations(ctx, db, node, true); err != nil {
 			return err
 		}
@@ -175,6 +191,15 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		if err := validateReferences(ctx, db, input); err != nil {
 			return err
 		}
+		sshCredential, sshInput, err := nodedomain.ResolveSSHInstallInput(
+			ctx, db, cipher, input.ClusterID, input.SSH,
+		)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		if _, err := nodedomain.TestSSHConnection(ctx, sshInput); err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
+		}
 
 		nodeID := uuid.NewString()
 		communicationKey, err := newCommunicationKey()
@@ -193,6 +218,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 				query.Node.ClusterId.Set(input.ClusterID),
 				query.Node.Name.Set(input.Name),
 				query.Node.Status.Set(model.NodeStatusPENDING),
+				query.Node.SshCredentialId.Set(sshCredential.Id),
+				query.Node.SshHost.Set(input.SSH.EntryIP),
+				query.Node.SshPort.Set(int(input.SSH.Port)),
 			}
 
 			if _, err := tx.Node.Create().Set(sets...).Do(ctx); err != nil {
@@ -257,11 +285,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			return err
 		}
 
-		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{
-			NodeID:           nodeID,
-			CommunicationKey: communicationKey,
-			SSH:              input.SSH,
-		}); err != nil {
+		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID}); err != nil {
 			message := "unable to queue node installation: " + err.Error()
 			_, _ = db.Node.Update().
 				Where(query.Node.Id.Equals(nodeID)).

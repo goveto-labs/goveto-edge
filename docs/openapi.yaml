@@ -10,6 +10,10 @@ tags:
     - name: auth
     - name: certificates
     - name: clusters
+    - name: clusters-analytics
+    - name: clusters-nodes
+    - name: clusters-sites
+    - name: clusters-ssh-credentials
     - name: dns
     - name: health
     - name: initialization
@@ -330,6 +334,47 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/analytics_DistributionItem'
+    /api/v1/clusters/{cluster_id}/analytics/nodes/logs:
+        get:
+            operationId: nodeLogs
+            summary: get /api/v1/clusters/{cluster_id}/analytics/nodes/logs
+            tags:
+                - clusters-analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: node_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_NodeRequestLog'
     /api/v1/clusters/{cluster_id}/analytics/nodes/runtime:
         get:
             operationId: nodeRuntime
@@ -510,6 +555,47 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/analytics_DistributionItem'
+    /api/v1/clusters/{cluster_id}/analytics/sites/logs:
+        get:
+            operationId: siteLogs
+            summary: get /api/v1/clusters/{cluster_id}/analytics/sites/logs
+            tags:
+                - clusters-analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: limit
+                  in: query
+                  schema:
+                    type: number
+                - name: site_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_NodeRequestLog'
     /api/v1/clusters/{cluster_id}/analytics/summary:
         get:
             operationId: summary
@@ -1478,7 +1564,7 @@ paths:
                                     items:
                                         type: string
                                 ssh:
-                                    $ref: '#/components/schemas/node_SSHInstallInput'
+                                    $ref: '#/components/schemas/node_SSHInstallReference'
             responses:
                 "202":
                     description: OK
@@ -1954,11 +2040,228 @@ paths:
                                                 type: string
                                                 enum:
                                                     - OFFLINE
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation:
+        get:
+            operationId: getInstallation
+            summary: get /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation
+            tags:
+                - clusters-nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            architectures:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            communication_key:
+                                                type: string
+                                            identity_json:
+                                                type: string
+                                            install_error:
+                                                type: string
+                                            node_id:
+                                                type: string
+                                            service_unit:
+                                                type: string
+                                                enum:
+                                                    - |
+                                                      [Unit]
+                                                      Description=Goveto Edge Agent
+                                                      After=network-online.target
+                                                      [Service]
+                                                      ExecStart=/usr/local/bin/goveto-edge-agent
+                                                      Restart=always
+                                                      RestartSec=3
+                                                      [Install]
+                                                      WantedBy=multi-user.target
+                                            status:
+                                                $ref: '#/components/schemas/model_NodeStatus'
+                                required:
+                                    - code
+                                    - data
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/binary/{arch}:
+        get:
+            operationId: downloadAgentBinary
+            summary: get /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/binary/{arch}
+            tags:
+                - clusters-nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: arch
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/identity:
+        get:
+            operationId: downloadIdentity
+            summary: get /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/identity
+            tags:
+                - clusters-nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/initialize:
+        post:
+            operationId: initializeManualInstallation
+            summary: Initialize a manually installed node agent
+            description: Verify the running agent, synchronize node configuration, and enter the normal health cycle.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            message:
+                                                type: object
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - ONLINE
+                                        required:
+                                            - id
+                                            - message
+                                            - status
+                                required:
+                                    - code
+                                    - data
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/service:
+        get:
+            operationId: downloadServiceUnit
+            summary: get /api/v1/clusters/{cluster_id}/nodes/{node_id}/installation/service
+            tags:
+                - clusters-nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/reinstall:
         post:
             operationId: reinstall
             summary: Reinstall node agent
-            description: Test one-time SSH credentials and enqueue agent reinstallation for an existing node.
+            description: Test a stored SSH credential and enqueue agent reinstallation for an existing node.
             tags:
                 - nodes
             security:
@@ -1988,7 +2291,7 @@ paths:
                                 force:
                                     type: boolean
                                 ssh:
-                                    $ref: '#/components/schemas/node_SSHInstallInput'
+                                    $ref: '#/components/schemas/node_SSHInstallReference'
             responses:
                 "202":
                     description: OK
@@ -2007,7 +2310,7 @@ paths:
         post:
             operationId: testConnection
             summary: Test node SSH connection
-            description: Validate SSH credentials and detect the remote architecture without creating a node.
+            description: Resolve a stored SSH credential and detect the remote architecture without creating a node.
             tags:
                 - nodes
             security:
@@ -2030,7 +2333,7 @@ paths:
                             type: object
                             properties:
                                 ssh:
-                                    $ref: '#/components/schemas/node_SSHInstallInput'
+                                    $ref: '#/components/schemas/node_SSHInstallReference'
             responses:
                 "200":
                     description: OK
@@ -2323,6 +2626,197 @@ paths:
                                                 type: string
                                                 enum:
                                                     - ACTIVE
+    /api/v1/clusters/{cluster_id}/sites/{site_id}:
+        get:
+            operationId: getDetails
+            summary: get /api/v1/clusters/{cluster_id}/sites/{site_id}
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            certificate_count:
+                                                type: number
+                                            certificate_ids:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            cluster_id:
+                                                type: string
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            domains:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            origins:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/sites_originInput'
+                                            status:
+                                                $ref: '#/components/schemas/model_SiteStatus'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            version:
+                                                type: number
+        patch:
+            operationId: updateDetails
+            summary: patch /api/v1/clusters/{cluster_id}/sites/{site_id}
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                certificate_ids:
+                                    type: array
+                                    items:
+                                        type: string
+                                cluster_id:
+                                    type: string
+                                domains:
+                                    type: array
+                                    items:
+                                        type: string
+                                name:
+                                    type: string
+                                origins:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/sites_originInput'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            certificate_count:
+                                                type: number
+                                            certificate_ids:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            cluster_id:
+                                                type: string
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            domains:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            origins:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/sites_originInput'
+                                            status:
+                                                $ref: '#/components/schemas/model_SiteStatus'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            version:
+                                                type: number
+        delete:
+            operationId: deleteSite
+            summary: delete /api/v1/clusters/{cluster_id}/sites/{site_id}
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
     /api/v1/clusters/{cluster_id}/sites/{site_id}/cache:
         get:
             operationId: getCache
@@ -2663,6 +3157,56 @@ paths:
                                                         type: boolean
                                                     tls_min_version:
                                                         $ref: '#/components/schemas/model_TLSMinVersion'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/prewarm:
+        post:
+            operationId: prewarm
+            summary: post /api/v1/clusters/{cluster_id}/sites/{site_id}/prewarm
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                urls:
+                                    type: array
+                                    items:
+                                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/purge_prewarmResult'
     /api/v1/clusters/{cluster_id}/sites/{site_id}/publish:
         get:
             operationId: listJobs
@@ -2982,6 +3526,416 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             value:
                                                 type: string
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/security:
+        get:
+            operationId: getSecurity
+            summary: Get site security policy
+            description: Get the WAF and CC rate-limit policy for a site.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            rate_limit:
+                                                type: object
+                                                properties:
+                                                    enabled:
+                                                        type: boolean
+                                                    rules:
+                                                        type: array
+                                                        items:
+                                                            $ref: '#/components/schemas/policy_RateLimitRule'
+                                            waf:
+                                                type: object
+                                                properties:
+                                                    block_response:
+                                                        type: object
+                                                        properties:
+                                                            type:
+                                                                type: string
+                                                                enum:
+                                                                    - DEFAULT
+                                                    block_status:
+                                                        type: number
+                                                    enabled:
+                                                        type: boolean
+                                                    groups:
+                                                        type: array
+                                                        items:
+                                                            $ref: '#/components/schemas/policy_WAFRuleGroup'
+                                                    max_body_bytes:
+                                                        type: number
+                                                    mode:
+                                                        type: string
+                                                        enum:
+                                                            - BLOCK
+                                                    presets:
+                                                        type: array
+                                                        items:
+                                                            type: string
+        put:
+            operationId: updateSecurity
+            summary: Update site security policy
+            description: Update WAF and CC rate-limit rules and enqueue a site publish.
+            tags:
+                - sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                publish_error:
+                                    type: string
+                                publish_job:
+                                    $ref: '#/components/schemas/types_PublishJob'
+                                rate_limit:
+                                    $ref: '#/components/schemas/policy_RateLimitPolicy'
+                                waf:
+                                    $ref: '#/components/schemas/policy_WAFPolicy'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            rate_limit:
+                                                $ref: '#/components/schemas/policy_RateLimitPolicy'
+                                            waf:
+                                                $ref: '#/components/schemas/policy_WAFPolicy'
+    /api/v1/clusters/{cluster_id}/ssh-credentials:
+        get:
+            operationId: listSSHCredentials
+            summary: get /api/v1/clusters/{cluster_id}/ssh-credentials
+            tags:
+                - clusters-ssh-credentials
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/nodes_sshCredentialResponse'
+        post:
+            operationId: createSSHCredential
+            summary: post /api/v1/clusters/{cluster_id}/ssh-credentials
+            tags:
+                - clusters-ssh-credentials
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                auth_type:
+                                    $ref: '#/components/schemas/model_SSHAuthType'
+                                name:
+                                    type: string
+                                passphrase:
+                                    type: string
+                                password:
+                                    type: string
+                                private_key:
+                                    type: string
+                                username:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            auth_type:
+                                                $ref: '#/components/schemas/model_SSHAuthType'
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            node_count:
+                                                type: number
+                                                enum:
+                                                    - 0
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            username:
+                                                type: string
+    /api/v1/clusters/{cluster_id}/ssh-credentials/{credential_id}:
+        put:
+            operationId: updateSSHCredential
+            summary: put /api/v1/clusters/{cluster_id}/ssh-credentials/{credential_id}
+            tags:
+                - clusters-ssh-credentials
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: credential_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                auth_type:
+                                    $ref: '#/components/schemas/model_SSHAuthType'
+                                name:
+                                    type: string
+                                passphrase:
+                                    type: string
+                                password:
+                                    type: string
+                                private_key:
+                                    type: string
+                                username:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            auth_type:
+                                                $ref: '#/components/schemas/model_SSHAuthType'
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            node_count:
+                                                type: number
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            username:
+                                                type: string
+        delete:
+            operationId: deleteSSHCredential
+            summary: delete /api/v1/clusters/{cluster_id}/ssh-credentials/{credential_id}
+            tags:
+                - clusters-ssh-credentials
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: credential_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - conflict
+                                    data:
+                                        type: object
+                                        properties:
+                                            nodes:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/nodes_sshCredentialNodeResponse'
+                                        required:
+                                            - nodes
+                                    msg:
+                                        type: string
+                                        enum:
+                                            - SSH credential is still used by nodes; reinstall those nodes with another credential first
+    /api/v1/clusters/{cluster_id}/ssh-credentials/{credential_id}/nodes:
+        get:
+            operationId: listSSHCredentialNodes
+            summary: get /api/v1/clusters/{cluster_id}/ssh-credentials/{credential_id}/nodes
+            tags:
+                - clusters-ssh-credentials
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: credential_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/nodes_sshCredentialNodeResponse'
     /api/v1/init:
         post:
             operationId: initialize
@@ -3188,12 +4142,43 @@ components:
         analytics_MonitoringOverview:
             type: object
             properties:
+                current_bandwidth_bps:
+                    type: number
                 month:
                     $ref: '#/components/schemas/analytics_UsageTotal'
+                month_peak_bandwidth_bps:
+                    type: number
                 today:
                     $ref: '#/components/schemas/analytics_UsageTotal'
+                today_peak_bandwidth_bps:
+                    type: number
+                today_unique_ips:
+                    type: number
                 yesterday:
                     $ref: '#/components/schemas/analytics_UsageTotal'
+        analytics_NodeRequestLog:
+            type: object
+            properties:
+                cache_status:
+                    type: string
+                duration_us:
+                    type: number
+                event_time:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hostname:
+                    type: string
+                method:
+                    type: string
+                path:
+                    type: string
+                request_id:
+                    type: string
+                status_code:
+                    type: number
+                upstream_address:
+                    type: string
         analytics_NodeRuntimePoint:
             type: object
             properties:
@@ -3234,6 +4219,8 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 cache_directory:
                     type: string
+                cache_egress_bytes_per_second:
+                    type: number
                 cache_used_bytes:
                     type: number
                 connections:
@@ -3245,8 +4232,6 @@ components:
                 disk_used_bytes:
                     type: number
                 egress_bytes_per_second:
-                    type: number
-                cache_egress_bytes_per_second:
                     type: number
                 ingress_bytes_per_second:
                     type: number
@@ -3266,6 +4251,15 @@ components:
                     type: boolean
                 requests_per_minute:
                     type: number
+        analytics_SiteRate:
+            type: object
+            properties:
+                bandwidth_bps:
+                    type: number
+                qps:
+                    type: number
+                site_id:
+                    type: string
         analytics_Summary:
             type: object
             properties:
@@ -3476,6 +4470,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_Site'
+                sshCredentials:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_SSHCredential'
                 updatedAt:
                     type: string
                     format: date-time
@@ -3773,8 +4771,6 @@ components:
                         $ref: '#/components/schemas/model_NodeGroupMembership'
                 hardwareProfile:
                     $ref: '#/components/schemas/model_NodeHardwareProfile'
-                hardwareProfile:
-                    $ref: '#/components/schemas/model_NodeHardwareProfile'
                 heartbeatAt:
                     type: string
                     format: date-time
@@ -3797,6 +4793,14 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_NodeSiteConfigVersion'
+                sshCredential:
+                    $ref: '#/components/schemas/model_SSHCredential'
+                sshCredentialId:
+                    type: string
+                sshHost:
+                    type: string
+                sshPort:
+                    type: number
                 status:
                     $ref: '#/components/schemas/model_NodeStatus'
                 updatedAt:
@@ -3850,26 +4854,6 @@ components:
             properties:
                 communicationKeyEncrypted:
                     type: string
-                node:
-                    $ref: '#/components/schemas/model_Node'
-                nodeId:
-                    type: string
-        model_NodeHardwareProfile:
-            type: object
-            properties:
-                architecture:
-                    type: string
-                benchmarkBytes:
-                    type: number
-                benchmarkDurationMs:
-                    type: number
-                cacheDiskWriteBytesPerSecond:
-                    type: number
-                cpuModel:
-                    type: string
-                measuredAt:
-                    type: string
-                    format: date-time
                 node:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
@@ -4088,6 +5072,37 @@ components:
                     type: string
         model_PurgeType:
             type: string
+        model_SSHAuthType:
+            type: string
+        model_SSHCredential:
+            type: object
+            properties:
+                authType:
+                    $ref: '#/components/schemas/model_SSHAuthType'
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_Node'
+                secretEncrypted:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                username:
+                    type: string
         model_Site:
             type: object
             properties:
@@ -4302,21 +5317,24 @@ components:
                     type: string
         model_UserStatus:
             type: string
-        node_SSHInstallInput:
+        node_SSHCredentialSecret:
             type: object
             properties:
-                entry_ip:
-                    type: string
                 passphrase:
                     type: string
                 password:
                     type: string
-                port:
-                    type: number
                 private_key:
                     type: string
-                user:
+        node_SSHInstallReference:
+            type: object
+            properties:
+                credential_id:
                     type: string
+                entry_ip:
+                    type: string
+                port:
+                    type: number
         nodes_cacheUpdateResponse:
             type: object
             properties:
@@ -4326,6 +5344,36 @@ components:
                     type: string
                 synced:
                     type: boolean
+        nodes_sshCredentialNodeResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                name:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_NodeStatus'
+        nodes_sshCredentialResponse:
+            type: object
+            properties:
+                auth_type:
+                    $ref: '#/components/schemas/model_SSHAuthType'
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                node_count:
+                    type: number
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                username:
+                    type: string
         policy_CacheConditionGroup:
             type: object
             properties:
@@ -4399,6 +5447,132 @@ components:
                     type: object
                     additionalProperties:
                         type: number
+        policy_RateLimitPolicy:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_RateLimitRule'
+        policy_RateLimitRule:
+            type: object
+            properties:
+                ban_seconds:
+                    type: number
+                burst:
+                    type: number
+                conditions:
+                    $ref: '#/components/schemas/policy_RequestConditions'
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                key:
+                    type: string
+                key_name:
+                    type: string
+                name:
+                    type: string
+                requests:
+                    type: number
+                status_code:
+                    type: number
+                window_seconds:
+                    type: number
+        policy_RequestConditionGroup:
+            type: object
+            properties:
+                operator:
+                    type: string
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFRequestRule'
+        policy_RequestConditions:
+            type: object
+            properties:
+                group_operator:
+                    type: string
+                groups:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_RequestConditionGroup'
+        policy_WAFPolicy:
+            type: object
+            properties:
+                block_response:
+                    $ref: '#/components/schemas/policy_WAFResponse'
+                block_status:
+                    type: number
+                enabled:
+                    type: boolean
+                groups:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFRuleGroup'
+                max_body_bytes:
+                    type: number
+                mode:
+                    type: string
+                presets:
+                    type: array
+                    items:
+                        type: string
+        policy_WAFRequestRule:
+            type: object
+            properties:
+                case_sensitive:
+                    type: boolean
+                field:
+                    type: string
+                name:
+                    type: string
+                negate:
+                    type: boolean
+                operator:
+                    type: string
+                value:
+                    type: string
+                values:
+                    type: array
+                    items:
+                        type: string
+        policy_WAFResponse:
+            type: object
+            properties:
+                body:
+                    type: string
+                type:
+                    type: string
+        policy_WAFRuleGroup:
+            type: object
+            properties:
+                action:
+                    type: string
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                name:
+                    type: string
+                operator:
+                    type: string
+                redirect_status:
+                    type: number
+                redirect_url:
+                    type: string
+                response:
+                    $ref: '#/components/schemas/policy_WAFResponse'
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFRequestRule'
+                status_code:
+                    type: number
+                tag:
+                    type: string
         publish_clusterPublishStatus:
             type: object
             properties:
@@ -4418,7 +5592,25 @@ components:
                     type: number
                 state:
                     type: string
+        purge_prewarmResult:
+            type: object
+            properties:
+                error:
+                    type: string
+                status_code:
+                    type: number
+                success:
+                    type: boolean
+                url:
+                    type: string
         query_NodeCacheConfigSetClause:
+            type: object
+            properties:
+                field:
+                    type: string
+                value:
+                    type: object
+        query_SSHCredentialSetClause:
             type: object
             properties:
                 field:
@@ -4483,9 +5675,57 @@ components:
                     $ref: '#/components/schemas/model_OriginProtocol'
                 weight:
                     type: number
+        sites_securityPolicyResponse:
+            type: object
+            properties:
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
+                rate_limit:
+                    $ref: '#/components/schemas/policy_RateLimitPolicy'
+                waf:
+                    $ref: '#/components/schemas/policy_WAFPolicy'
+        sites_siteDetails:
+            type: object
+            properties:
+                certificate_count:
+                    type: number
+                certificate_ids:
+                    type: array
+                    items:
+                        type: string
+                cluster_id:
+                    type: string
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                domains:
+                    type: array
+                    items:
+                        type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                origins:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/sites_originInput'
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: number
         sites_siteSummary:
             type: object
             properties:
+                bandwidth_bps:
+                    type: number
                 certificate_count:
                     type: number
                 domains:
@@ -4496,6 +5736,8 @@ components:
                     type: string
                 name:
                     type: string
+                qps:
+                    type: number
                 status:
                     $ref: '#/components/schemas/model_SiteStatus'
                 updated_at:
@@ -4630,6 +5872,10 @@ components:
                         $ref: '#/components/schemas/types_NodeAddress'
                 cacheConfig:
                     $ref: '#/components/schemas/types_NodeCacheConfig'
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
                 dnsLines:
                     type: array
                     items:
@@ -4640,6 +5886,10 @@ components:
                         $ref: '#/components/schemas/types_NodeGroupMembership'
                 hardwareProfile:
                     $ref: '#/components/schemas/types_NodeHardwareProfile'
+                heartbeatAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
                 id:
                     type: string
                 installError:
@@ -4654,8 +5904,20 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/types_SiteConfigVersion'
+                sshCredentialId:
+                    type: string
+                sshHost:
+                    type: string
+                sshPort:
+                    type: number
                 status:
                     $ref: '#/components/schemas/model_NodeStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: string
         types_NodeAddress:
             type: object
             properties:

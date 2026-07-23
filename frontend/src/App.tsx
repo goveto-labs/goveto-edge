@@ -22,6 +22,7 @@ import Register from '@/pages/Register.tsx';
 import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
 import SitesAccessLogs from '@/pages/SitesAccessLogs.tsx';
+import SSHCredentials from '@/pages/SSHCredentials.tsx';
 
 export default function App() {
     return (
@@ -45,6 +46,7 @@ export default function App() {
                                     <Route element={<Nodes />} path='/nodes' />
                                     <Route element={<CreateNode />} path='/nodes/create' />
                                     <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
+                                    <Route element={<SSHCredentials />} path='/nodes/ssh-credentials' />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<CreateSite />} path='/sites/create' />
                                     <Route element={<SitesAccessLogs />} path='/sites/logs' />

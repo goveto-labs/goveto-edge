@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -21,12 +22,13 @@ import (
 )
 
 type InstallWorker struct {
-	db    *client.Client
-	queue *InstallQueue
+	db     *client.Client
+	queue  *InstallQueue
+	cipher *CredentialCipher
 }
 
-func NewInstallWorker(db *client.Client, queue *InstallQueue) *InstallWorker {
-	return &InstallWorker{db: db, queue: queue}
+func NewInstallWorker(db *client.Client, queue *InstallQueue, cipher *CredentialCipher) *InstallWorker {
+	return &InstallWorker{db: db, queue: queue, cipher: cipher}
 }
 func (w *InstallWorker) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
@@ -45,10 +47,11 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 	if err != nil || payload == nil {
 		return
 	}
+	nodeID := payload.NodeID
 
 	claimed, err := w.db.Node.Update().
 		Where(
-			query.Node.Id.Equals(payload.NodeID),
+			query.Node.Id.Equals(nodeID),
 			query.Node.Status.Equals(model.NodeStatusPENDING),
 		).
 		Set(
@@ -59,22 +62,24 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 	if err == nil && claimed == 0 {
 		return
 	}
-	slog.Info(
-		"node installation claimed",
-		"node_id", payload.NodeID,
-		"ssh_host", payload.SSH.EntryIP,
-		"ssh_port", payload.SSH.Port,
-		"ssh_user", payload.SSH.User,
-	)
-
 	if err == nil {
+		payload, err = w.resolveInstallPayload(ctx, payload)
+	}
+	if err == nil {
+		slog.Info(
+			"node installation claimed",
+			"node_id", payload.NodeID,
+			"ssh_host", payload.SSH.EntryIP,
+			"ssh_port", payload.SSH.Port,
+			"ssh_user", payload.SSH.User,
+		)
 		err = w.install(ctx, *payload)
 	}
 	if err != nil {
 		message := installErrorMessage(err)
-		slog.Error("node installation failed", "node_id", payload.NodeID, "error", message)
+		slog.Error("node installation failed", "node_id", nodeID, "error", message)
 		_, _ = w.db.Node.Update().
-			Where(query.Node.Id.Equals(payload.NodeID)).
+			Where(query.Node.Id.Equals(nodeID)).
 			Set(
 				query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
 				query.Node.InstallError.Set(message),
@@ -83,7 +88,7 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 		return
 	}
 	if _, updateErr := w.db.Node.Update().
-		Where(query.Node.Id.Equals(payload.NodeID)).
+		Where(query.Node.Id.Equals(nodeID)).
 		Set(
 			query.Node.Status.Set(model.NodeStatusOFFLINE),
 			query.Node.InstallError.SetNull(),
@@ -91,14 +96,66 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 		DoMany(ctx); updateErr != nil {
 		slog.Error(
 			"node installation completed but status update failed",
-			"node_id", payload.NodeID,
+			"node_id", nodeID,
 			"error", updateErr,
 		)
 		return
 	}
-	slog.Info("node installation commands completed", "node_id", payload.NodeID)
+	slog.Info("node installation commands completed", "node_id", nodeID)
 }
+
+func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *InstallPayload) (*InstallPayload, error) {
+	// Continue to accept already-queued legacy payloads during rollout, while
+	// all newly enqueued jobs contain only the node ID.
+	if payload.CommunicationKey != "" && payload.SSH != nil && payload.SSH.User != "" {
+		return payload, nil
+	}
+	node, err := w.db.Node.FindUnique(ctx, query.Node.Id.Equals(payload.NodeID))
+	if err != nil {
+		return nil, err
+	}
+	if node == nil {
+		return nil, fmt.Errorf("node %s was not found", payload.NodeID)
+	}
+	if node.SshCredentialId == nil || node.SshHost == nil || node.SshPort == nil {
+		return nil, errors.New("node SSH installation configuration is missing")
+	}
+	if *node.SshPort < 1 || *node.SshPort > 65535 {
+		return nil, errors.New("node SSH port is invalid")
+	}
+	communicationCredential, err := w.db.NodeCredential.FindUnique(
+		ctx,
+		query.NodeCredential.NodeId.Equals(node.Id),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if communicationCredential == nil {
+		return nil, errors.New("node communication credential is missing")
+	}
+	communicationKey, err := w.cipher.Decrypt(communicationCredential.CommunicationKeyEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt node communication credential: %w", err)
+	}
+	_, sshInput, err := ResolveSSHInstallInput(ctx, w.db, w.cipher, node.ClusterId, SSHInstallReference{
+		EntryIP:      *node.SshHost,
+		Port:         uint16(*node.SshPort),
+		CredentialID: *node.SshCredentialId,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &InstallPayload{
+		NodeID:           node.Id,
+		CommunicationKey: communicationKey,
+		SSH:              &sshInput,
+	}, nil
+}
+
 func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) error {
+	if payload.SSH == nil {
+		return errors.New("SSH installation input is missing")
+	}
 	logger := slog.With(
 		"node_id", payload.NodeID,
 		"ssh_target", net.JoinHostPort(payload.SSH.EntryIP, fmt.Sprint(payload.SSH.Port)),
@@ -106,7 +163,7 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 	installCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
 	defer cancel()
 	logger.Info("connecting to node over SSH")
-	connection, err := connectSSH(installCtx, payload.SSH)
+	connection, err := connectSSH(installCtx, *payload.SSH)
 	if err != nil {
 		return err
 	}
