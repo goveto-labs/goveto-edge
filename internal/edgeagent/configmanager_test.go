@@ -358,6 +358,27 @@ func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
 	}
 }
 
+func TestCaptchaConfigPassesPublishedChallengeSecret(t *testing.T) {
+	config := validHTTPConfig(t)
+	waf := cachepolicy.DefaultWAFPolicy()
+	waf.Enabled = true
+	waf.Presets = nil
+	waf.Groups = []cachepolicy.WAFRuleGroup{{
+		ID: "shield", Enabled: true, Operator: "AND", Action: cachepolicy.WAFActionCaptcha,
+		Rules: []cachepolicy.WAFRequestRule{{Field: "PATH", Operator: "PREFIX", Value: "/"}},
+	}}
+	config.WAF = toMap(t, waf)
+	config.WAF["challenge_secret"] = "published-secret"
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"challenge_secret":"published-secret"`) {
+		t.Fatalf("rendered config omitted CAPTCHA challenge secret: %s", encoded)
+	}
+}
+
 func freePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

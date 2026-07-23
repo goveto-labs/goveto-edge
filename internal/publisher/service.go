@@ -4,6 +4,7 @@ package publisher
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -512,6 +513,10 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if err = json.Unmarshal(policy.WafJson, &config.WAF); err != nil {
 			return config, nil, fmt.Errorf("decode WAF policy: %w", err)
 		}
+		if config.WAF == nil {
+			config.WAF = map[string]any{}
+		}
+		config.WAF["challenge_secret"] = wafChallengeSecret(s.cipher, site.Id)
 		if err = json.Unmarshal(policy.AccessJson, &config.Access); err != nil {
 			return config, nil, fmt.Errorf("decode access policy: %w", err)
 		}
@@ -552,6 +557,12 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		return config, nil, errors.New("cluster has no publishable nodes")
 	}
 	return config, targets, nil
+}
+
+func wafChallengeSecret(cipher *node.CredentialCipher, siteID string) string {
+	return base64.RawURLEncoding.EncodeToString(
+		cipher.Derive("goveto-edge/waf-challenge/v2\x00" + siteID),
+	)
 }
 
 // Sites can be created without a certificate. Keep those sites reachable over

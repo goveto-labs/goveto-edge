@@ -3,13 +3,18 @@ package node
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"io"
 )
 
-type CredentialCipher struct{ aead cipher.AEAD }
+type CredentialCipher struct {
+	aead cipher.AEAD
+	key  []byte
+}
 
 func NewCredentialCipher(encodedKey string) (*CredentialCipher, error) {
 	key, err := base64.StdEncoding.DecodeString(encodedKey)
@@ -27,7 +32,15 @@ func NewCredentialCipher(encodedKey string) (*CredentialCipher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &CredentialCipher{aead: aead}, nil
+	return &CredentialCipher{aead: aead, key: append([]byte(nil), key...)}, nil
+}
+
+// Derive returns a stable, domain-separated secret without exposing the
+// credential encryption master key.
+func (c *CredentialCipher) Derive(label string) []byte {
+	mac := hmac.New(sha256.New, c.key)
+	_, _ = io.WriteString(mac, label)
+	return mac.Sum(nil)
 }
 
 func (c *CredentialCipher) Encrypt(value string) (string, error) {

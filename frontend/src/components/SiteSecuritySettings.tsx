@@ -3,11 +3,12 @@ import type {
     RequestConditionGroup,
     SecurityPolicy,
     WAFRequestRule,
+    WAFResponse,
     WAFRuleGroup,
 } from '@/api';
 
 import { Button, Input } from '@heroui/react';
-import { Plus, Save, ShieldCheck, Trash2, Zap } from 'lucide-react';
+import { Bot, Plus, Save, ShieldCheck, Trash2, Zap } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -46,6 +47,15 @@ const operators = [
     ['CIDR', 'In CIDR list'],
 ] as const;
 
+const wafActions = [
+    ['SHOW_PAGE', 'Show page', 'Return the built-in block page or custom content.'],
+    ['BLOCK', 'Block', 'Stop immediately with an empty error response.'],
+    ['CAPTCHA', 'CAPTCHA', 'Run the Scrypt five-second shield and browser integrity checks.'],
+    ['REDIRECT', 'Redirect', 'Send the visitor to another URL or path.'],
+    ['ALLOW', 'Allow', 'Bypass managed presets and continue the request.'],
+    ['TAG', 'TAG', 'Attach a trusted edge tag and continue.'],
+] as const;
+
 function newRule(): WAFRequestRule {
     return { id: crypto.randomUUID(), field: 'PATH', operator: 'PREFIX', value: '/' };
 }
@@ -56,8 +66,9 @@ function newWAFGroup(): WAFRuleGroup {
         name: 'Custom rule group',
         enabled: true,
         operator: 'AND',
-        action: 'BLOCK',
+        action: 'SHOW_PAGE',
         status_code: 403,
+        response: { type: 'DEFAULT' },
         rules: [newRule()],
     };
 }
@@ -86,6 +97,18 @@ function splitValues(value: string) {
         .split(',')
         .map((item) => item.trim())
         .filter(Boolean);
+}
+
+function isValidResponse(response: WAFResponse) {
+    if (response.type === 'DEFAULT') return true;
+    if (!response.body || new TextEncoder().encode(response.body).length > 131_072) return false;
+    if (response.type !== 'JSON') return true;
+    try {
+        JSON.parse(response.body);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function LabeledInput({
@@ -390,6 +413,179 @@ function ConditionGroups({
     );
 }
 
+function ResponseEditor({
+    response,
+    onChange,
+}: {
+    response: WAFResponse;
+    onChange: (response: WAFResponse) => void;
+}) {
+    const custom = response.type !== 'DEFAULT';
+    return (
+        <div className='grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]'>
+            <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                <span>Response content</span>
+                <select
+                    className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                    value={response.type}
+                    onChange={(event) =>
+                        onChange({
+                            type: event.target.value as WAFResponse['type'],
+                            body: event.target.value === 'DEFAULT' ? undefined : response.body,
+                        })
+                    }
+                >
+                    <option value='DEFAULT'>Default WAF page</option>
+                    <option value='HTML'>Custom HTML</option>
+                    <option value='TEXT'>Plain text</option>
+                    <option value='JSON'>JSON</option>
+                </select>
+                <span className='text-xs font-normal leading-5 text-muted'>
+                    {response.type === 'DEFAULT'
+                        ? 'Uses the embedded Goveto Edge block page.'
+                        : 'Maximum response body size is 128 KiB.'}
+                </span>
+            </label>
+            {custom ? (
+                <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                    <span>{response.type === 'HTML' ? 'HTML document' : 'Response body'}</span>
+                    <textarea
+                        className='min-h-36 w-full resize-y rounded-lg border border-border bg-surface-secondary px-3 py-2 font-mono text-xs leading-5 text-foreground outline-none focus:border-primary'
+                        placeholder={
+                            response.type === 'HTML'
+                                ? '<!doctype html>…'
+                                : response.type === 'JSON'
+                                  ? '{"error":"request blocked"}'
+                                  : 'Request blocked by security policy.'
+                        }
+                        value={response.body ?? ''}
+                        onChange={(event) => onChange({ ...response, body: event.target.value })}
+                    />
+                </label>
+            ) : (
+                <div className='flex min-h-36 items-center justify-center rounded-lg border border-dashed border-border bg-surface-secondary/20 px-5 text-center text-xs leading-5 text-muted'>
+                    The built-in page includes the HTTP status, matched rule reference and a
+                    no-index directive.
+                </div>
+            )}
+        </div>
+    );
+}
+
+function WAFActionEditor({
+    group,
+    defaultStatus,
+    onChange,
+}: {
+    group: WAFRuleGroup;
+    defaultStatus: number;
+    onChange: (group: WAFRuleGroup) => void;
+}) {
+    return (
+        <div className='space-y-4'>
+            <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-3'>
+                {wafActions.map(([value, label, description]) => {
+                    const selected = group.action === value;
+                    return (
+                        <button
+                            aria-pressed={selected}
+                            className={`min-h-20 rounded-xl border px-3.5 py-3 text-left transition-colors active:translate-y-px ${
+                                selected
+                                    ? 'border-primary bg-primary/8 ring-1 ring-primary/20'
+                                    : 'border-border/70 bg-surface hover:border-border'
+                            }`}
+                            key={value}
+                            type='button'
+                            onClick={() => onChange({ ...group, action: value })}
+                        >
+                            <span className='block text-sm font-semibold'>{label}</span>
+                            <span className='mt-1 block text-xs leading-5 text-muted'>
+                                {description}
+                            </span>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {(group.action === 'SHOW_PAGE' || group.action === 'BLOCK') && (
+                <div className='grid gap-4 rounded-xl border border-border/70 bg-surface-secondary/20 p-4'>
+                    <LabeledInput
+                        label='HTTP response status'
+                        max={599}
+                        min={400}
+                        type='number'
+                        value={String(group.status_code ?? defaultStatus)}
+                        onChange={(value) => onChange({ ...group, status_code: Number(value) })}
+                    />
+                    {group.action === 'SHOW_PAGE' && (
+                        <ResponseEditor
+                            response={group.response ?? { type: 'DEFAULT' }}
+                            onChange={(response) => onChange({ ...group, response })}
+                        />
+                    )}
+                </div>
+            )}
+            {group.action === 'CAPTCHA' && (
+                <div className='flex gap-3 rounded-xl border border-primary/25 bg-primary/5 p-4'>
+                    <Bot className='mt-0.5 h-5 w-5 shrink-0 text-primary' />
+                    <div>
+                        <p className='text-sm font-semibold'>Memory-hard browser challenge</p>
+                        <p className='mt-1 text-xs leading-5 text-muted'>
+                            Runs Scrypt in an isolated Worker, checks high-confidence automation and
+                            environment consistency, then grants a 30-minute request-bound
+                            clearance.
+                        </p>
+                    </div>
+                </div>
+            )}
+            {group.action === 'REDIRECT' && (
+                <div className='grid gap-3 rounded-xl border border-border/70 bg-surface-secondary/20 p-4 md:grid-cols-[1fr_180px]'>
+                    <LabeledInput
+                        label='Destination URL or path'
+                        value={group.redirect_url ?? ''}
+                        onChange={(value) => onChange({ ...group, redirect_url: value })}
+                    />
+                    <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                        <span>Redirect status</span>
+                        <select
+                            className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                            value={group.redirect_status ?? 302}
+                            onChange={(event) =>
+                                onChange({ ...group, redirect_status: Number(event.target.value) })
+                            }
+                        >
+                            <option value={301}>301 Permanent</option>
+                            <option value={302}>302 Temporary</option>
+                            <option value={303}>303 See other</option>
+                            <option value={307}>307 Preserve method</option>
+                            <option value={308}>308 Permanent, preserve method</option>
+                        </select>
+                    </label>
+                </div>
+            )}
+            {group.action === 'TAG' && (
+                <div className='rounded-xl border border-border/70 bg-surface-secondary/20 p-4'>
+                    <LabeledInput
+                        label='Edge tag'
+                        value={group.tag ?? ''}
+                        onChange={(value) => onChange({ ...group, tag: value })}
+                    />
+                    <p className='mt-2 text-xs leading-5 text-muted'>
+                        Added to the upstream request as X-Goveto-WAF-Tags and exposed on the edge
+                        response for observability.
+                    </p>
+                </div>
+            )}
+            {group.action === 'ALLOW' && (
+                <div className='rounded-xl border border-border/70 bg-surface-secondary/20 p-4 text-xs leading-5 text-muted'>
+                    Matching requests bypass managed WAF presets and continue to cache and origin
+                    handling. Place narrow allow rules before broader blocking groups.
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function SiteSecuritySettings({
     policy,
     saving,
@@ -407,12 +603,18 @@ export function SiteSecuritySettings({
             policy.waf.block_status <= 599 &&
             policy.waf.max_body_bytes >= 0 &&
             policy.waf.max_body_bytes <= 1_048_576 &&
+            isValidResponse(policy.waf.block_response) &&
             policy.waf.groups.every(
                 (group) =>
                     group.id.trim() &&
                     group.rules.length > 0 &&
-                    (group.status_code ?? policy.waf.block_status) >= 400 &&
-                    (group.status_code ?? policy.waf.block_status) <= 599
+                    (!['SHOW_PAGE', 'BLOCK'].includes(group.action) ||
+                        ((group.status_code ?? policy.waf.block_status) >= 400 &&
+                            (group.status_code ?? policy.waf.block_status) <= 599)) &&
+                    (group.action !== 'SHOW_PAGE' ||
+                        isValidResponse(group.response ?? { type: 'DEFAULT' })) &&
+                    (group.action !== 'REDIRECT' || Boolean(group.redirect_url?.trim())) &&
+                    (group.action !== 'TAG' || Boolean(group.tag?.trim()))
             ) &&
             policy.rate_limit.rules.every(
                 (rule) =>
@@ -428,6 +630,10 @@ export function SiteSecuritySettings({
 
     const updateWAFGroups = (groups: WAFRuleGroup[]) =>
         onChange({ ...policy, waf: { ...policy.waf, groups } });
+    const updateWAFGroup = (index: number, group: WAFRuleGroup) =>
+        updateWAFGroups(
+            policy.waf.groups.map((item, current) => (current === index ? group : item))
+        );
     const updateRateRules = (rules: RateLimitRule[]) =>
         onChange({ ...policy, rate_limit: { ...policy.rate_limit, rules } });
 
@@ -497,6 +703,25 @@ export function SiteSecuritySettings({
                     />
                 </div>
 
+                <div className='space-y-3 rounded-xl border border-border/70 p-4'>
+                    <div>
+                        <h3 className='text-sm font-semibold'>Managed WAF block response</h3>
+                        <p className='mt-1 text-xs leading-5 text-muted'>
+                            Used when a managed attack preset blocks a request. The default is the
+                            embedded Goveto Edge WAF page.
+                        </p>
+                    </div>
+                    <ResponseEditor
+                        response={policy.waf.block_response}
+                        onChange={(blockResponse) =>
+                            onChange({
+                                ...policy,
+                                waf: { ...policy.waf, block_response: blockResponse },
+                            })
+                        }
+                    />
+                </div>
+
                 <div className='space-y-3'>
                     <div>
                         <h3 className='text-sm font-semibold'>Managed presets</h3>
@@ -559,89 +784,27 @@ export function SiteSecuritySettings({
                     )}
                     {policy.waf.groups.map((group, groupIndex) => (
                         <div
-                            className='overflow-hidden rounded-xl border border-border/70'
+                            className='overflow-hidden rounded-2xl border border-border/70'
                             key={group.id}
                         >
-                            <div className='grid gap-3 bg-surface-secondary/25 px-4 py-3 md:grid-cols-[minmax(180px,1fr)_130px_130px_100px_110px_auto]'>
+                            <div className='flex flex-col gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3 sm:flex-row sm:items-center'>
                                 <Input
                                     aria-label='WAF group name'
+                                    className='min-w-0 flex-1'
                                     value={group.name}
                                     variant='secondary'
                                     onChange={(event) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? { ...item, name: event.target.value }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <select
-                                    aria-label='WAF group operator'
-                                    className='rounded-lg border border-border bg-surface px-3 py-2 text-sm'
-                                    value={group.operator}
-                                    onChange={(event) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? { ...item, operator: event.target.value }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                >
-                                    <option value='AND'>All rules</option>
-                                    <option value='OR'>Any rule</option>
-                                </select>
-                                <select
-                                    aria-label='WAF group action'
-                                    className='rounded-lg border border-border bg-surface px-3 py-2 text-sm'
-                                    value={group.action}
-                                    onChange={(event) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? { ...item, action: event.target.value }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                >
-                                    <option value='BLOCK'>Block</option>
-                                    <option value='MONITOR'>Monitor</option>
-                                    <option value='ALLOW'>Allow</option>
-                                </select>
-                                <Input
-                                    aria-label='WAF group response status'
-                                    disabled={group.action !== 'BLOCK'}
-                                    max={599}
-                                    min={400}
-                                    type='number'
-                                    value={String(group.status_code ?? policy.waf.block_status)}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? {
-                                                          ...item,
-                                                          status_code: Number(event.target.value),
-                                                      }
-                                                    : item
-                                            )
-                                        )
+                                        updateWAFGroup(groupIndex, {
+                                            ...group,
+                                            name: event.target.value,
+                                        })
                                     }
                                 />
                                 <ToggleSwitch
                                     isSelected={group.enabled}
                                     label='Enable group'
                                     onChange={(enabled) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex ? { ...item, enabled } : item
-                                            )
-                                        )
+                                        updateWAFGroup(groupIndex, { ...group, enabled })
                                     }
                                 />
                                 <Button
@@ -659,61 +822,85 @@ export function SiteSecuritySettings({
                                     <Trash2 className='h-4 w-4 text-danger' />
                                 </Button>
                             </div>
-                            {group.rules.map((rule, ruleIndex) => (
-                                <RuleRow
-                                    key={rule.id}
-                                    removeDisabled={group.rules.length === 1}
-                                    rule={rule}
-                                    onChange={(nextRule) =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? {
-                                                          ...item,
-                                                          rules: item.rules.map(
-                                                              (current, currentIndex) =>
-                                                                  currentIndex === ruleIndex
-                                                                      ? nextRule
-                                                                      : current
-                                                          ),
-                                                      }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                    onRemove={() =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? {
-                                                          ...item,
-                                                          rules: item.rules.filter(
-                                                              (_, currentIndex) =>
-                                                                  currentIndex !== ruleIndex
-                                                          ),
-                                                      }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                            ))}
-                            <div className='border-t border-border px-4 py-2.5'>
-                                <Button
-                                    size='sm'
-                                    variant='ghost'
-                                    onPress={() =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.map((item, index) =>
-                                                index === groupIndex
-                                                    ? { ...item, rules: [...item.rules, newRule()] }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                >
-                                    <Plus className='mr-1.5 h-3.5 w-3.5' /> Add rule
-                                </Button>
+                            <div className='grid lg:grid-cols-[minmax(0,1.12fr)_minmax(340px,.88fr)]'>
+                                <section className='min-w-0 border-b border-border lg:border-r lg:border-b-0'>
+                                    <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-3'>
+                                        <div>
+                                            <p className='text-sm font-semibold'>1. Match rules</p>
+                                            <p className='mt-0.5 text-xs text-muted'>
+                                                Define which requests enter this group.
+                                            </p>
+                                        </div>
+                                        <select
+                                            aria-label='WAF group operator'
+                                            className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                            value={group.operator}
+                                            onChange={(event) =>
+                                                updateWAFGroup(groupIndex, {
+                                                    ...group,
+                                                    operator: event.target.value,
+                                                })
+                                            }
+                                        >
+                                            <option value='AND'>Match all rules</option>
+                                            <option value='OR'>Match any rule</option>
+                                        </select>
+                                    </div>
+                                    <div className='border-t border-border'>
+                                        {group.rules.map((rule, ruleIndex) => (
+                                            <RuleRow
+                                                key={rule.id}
+                                                removeDisabled={group.rules.length === 1}
+                                                rule={rule}
+                                                onChange={(nextRule) =>
+                                                    updateWAFGroup(groupIndex, {
+                                                        ...group,
+                                                        rules: group.rules.map((current, index) =>
+                                                            index === ruleIndex ? nextRule : current
+                                                        ),
+                                                    })
+                                                }
+                                                onRemove={() =>
+                                                    updateWAFGroup(groupIndex, {
+                                                        ...group,
+                                                        rules: group.rules.filter(
+                                                            (_, index) => index !== ruleIndex
+                                                        ),
+                                                    })
+                                                }
+                                            />
+                                        ))}
+                                    </div>
+                                    <div className='border-t border-border px-4 py-2.5'>
+                                        <Button
+                                            size='sm'
+                                            variant='ghost'
+                                            onPress={() =>
+                                                updateWAFGroup(groupIndex, {
+                                                    ...group,
+                                                    rules: [...group.rules, newRule()],
+                                                })
+                                            }
+                                        >
+                                            <Plus className='mr-1.5 h-3.5 w-3.5' /> Add rule
+                                        </Button>
+                                    </div>
+                                </section>
+                                <section className='min-w-0 bg-surface-secondary/10 p-4'>
+                                    <div className='mb-3'>
+                                        <p className='text-sm font-semibold'>2. Execute action</p>
+                                        <p className='mt-0.5 text-xs text-muted'>
+                                            Choose exactly what the edge does after a match.
+                                        </p>
+                                    </div>
+                                    <WAFActionEditor
+                                        defaultStatus={policy.waf.block_status}
+                                        group={group}
+                                        onChange={(nextGroup) =>
+                                            updateWAFGroup(groupIndex, nextGroup)
+                                        }
+                                    />
+                                </section>
                             </div>
                         </div>
                     ))}

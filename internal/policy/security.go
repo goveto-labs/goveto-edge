@@ -1,10 +1,12 @@
 package policy
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -13,6 +15,19 @@ import (
 const (
 	WAFModeBlock   = "BLOCK"
 	WAFModeMonitor = "MONITOR"
+
+	WAFActionShowPage = "SHOW_PAGE"
+	WAFActionBlock    = "BLOCK"
+	WAFActionCaptcha  = "CAPTCHA"
+	WAFActionRedirect = "REDIRECT"
+	WAFActionAllow    = "ALLOW"
+	WAFActionTag      = "TAG"
+	WAFActionMonitor  = "MONITOR"
+
+	WAFResponseDefault = "DEFAULT"
+	WAFResponseHTML    = "HTML"
+	WAFResponseText    = "TEXT"
+	WAFResponseJSON    = "JSON"
 )
 
 var supportedWAFPresets = map[string]struct{}{
@@ -25,22 +40,32 @@ var supportedWAFPresets = map[string]struct{}{
 }
 
 type WAFPolicy struct {
-	Enabled      bool           `json:"enabled"`
-	Mode         string         `json:"mode"`
-	BlockStatus  int            `json:"block_status"`
-	MaxBodyBytes int64          `json:"max_body_bytes"`
-	Presets      []string       `json:"presets"`
-	Groups       []WAFRuleGroup `json:"groups"`
+	Enabled       bool           `json:"enabled"`
+	Mode          string         `json:"mode"`
+	BlockStatus   int            `json:"block_status"`
+	BlockResponse WAFResponse    `json:"block_response"`
+	MaxBodyBytes  int64          `json:"max_body_bytes"`
+	Presets       []string       `json:"presets"`
+	Groups        []WAFRuleGroup `json:"groups"`
 }
 
 type WAFRuleGroup struct {
-	ID         string           `json:"id"`
-	Name       string           `json:"name"`
-	Enabled    bool             `json:"enabled"`
-	Operator   string           `json:"operator"`
-	Action     string           `json:"action"`
-	StatusCode int              `json:"status_code,omitempty"`
-	Rules      []WAFRequestRule `json:"rules"`
+	ID             string           `json:"id"`
+	Name           string           `json:"name"`
+	Enabled        bool             `json:"enabled"`
+	Operator       string           `json:"operator"`
+	Action         string           `json:"action"`
+	StatusCode     int              `json:"status_code,omitempty"`
+	Response       WAFResponse      `json:"response,omitempty"`
+	RedirectURL    string           `json:"redirect_url,omitempty"`
+	RedirectStatus int              `json:"redirect_status,omitempty"`
+	Tag            string           `json:"tag,omitempty"`
+	Rules          []WAFRequestRule `json:"rules"`
+}
+
+type WAFResponse struct {
+	Type string `json:"type"`
+	Body string `json:"body,omitempty"`
 }
 
 type WAFRequestRule struct {
@@ -84,14 +109,16 @@ type RequestConditionGroup struct {
 
 func DefaultWAFPolicy() WAFPolicy {
 	return WAFPolicy{
-		Mode:         WAFModeBlock,
-		BlockStatus:  http.StatusForbidden,
-		MaxBodyBytes: 64 << 10,
-		Presets:      []string{"SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION", "SCANNER", "BAD_BOTS"},
+		Mode:          WAFModeBlock,
+		BlockStatus:   http.StatusForbidden,
+		BlockResponse: WAFResponse{Type: WAFResponseDefault},
+		MaxBodyBytes:  64 << 10,
+		Presets:       []string{"SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION", "SCANNER", "BAD_BOTS"},
+		Groups:        []WAFRuleGroup{},
 	}
 }
 
-func DefaultRateLimitPolicy() RateLimitPolicy { return RateLimitPolicy{} }
+func DefaultRateLimitPolicy() RateLimitPolicy { return RateLimitPolicy{Rules: []RateLimitRule{}} }
 
 func (p *WAFPolicy) NormalizeAndValidate() error {
 	p.Mode = strings.ToUpper(strings.TrimSpace(p.Mode))
@@ -127,6 +154,12 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 		p.Presets[index] = preset
 	}
 	sort.Strings(p.Presets)
+	if p.Presets == nil {
+		p.Presets = []string{}
+	}
+	if p.Groups == nil {
+		p.Groups = []WAFRuleGroup{}
+	}
 
 	if len(p.Groups) > 64 {
 		return errors.New("WAF policy cannot contain more than 64 groups")
@@ -151,14 +184,30 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 		if group.Action == "" {
 			group.Action = "BLOCK"
 		}
-		if group.Action != "BLOCK" && group.Action != "MONITOR" && group.Action != "ALLOW" {
-			return fmt.Errorf("groups[%d].action must be BLOCK, MONITOR or ALLOW", index)
+		switch group.Action {
+		case WAFActionShowPage, WAFActionBlock, WAFActionCaptcha, WAFActionRedirect, WAFActionAllow, WAFActionTag, WAFActionMonitor:
+		default:
+			return fmt.Errorf("groups[%d].action is unsupported", index)
 		}
 		if group.StatusCode == 0 {
 			group.StatusCode = p.BlockStatus
 		}
-		if group.StatusCode < 400 || group.StatusCode > 599 {
+		if (group.Action == WAFActionShowPage || group.Action == WAFActionBlock) && (group.StatusCode < 400 || group.StatusCode > 599) {
 			return fmt.Errorf("groups[%d].status_code must be between 400 and 599", index)
+		}
+		if err := normalizeWAFResponse(&group.Response, fmt.Sprintf("groups[%d].response", index)); err != nil {
+			return err
+		}
+		if group.Action == WAFActionRedirect {
+			if err := normalizeRedirect(group, index); err != nil {
+				return err
+			}
+		}
+		if group.Action == WAFActionTag {
+			group.Tag = strings.TrimSpace(group.Tag)
+			if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$`).MatchString(group.Tag) {
+				return fmt.Errorf("groups[%d].tag must be 1-64 safe characters", index)
+			}
 		}
 		if len(group.Rules) == 0 || len(group.Rules) > 64 {
 			return fmt.Errorf("groups[%d] must contain between 1 and 64 rules", index)
@@ -167,10 +216,61 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 			return err
 		}
 	}
+	if err := normalizeWAFResponse(&p.BlockResponse, "block_response"); err != nil {
+		return err
+	}
 	return nil
 }
 
+func normalizeWAFResponse(response *WAFResponse, location string) error {
+	response.Type = strings.ToUpper(strings.TrimSpace(response.Type))
+	if response.Type == "" {
+		response.Type = WAFResponseDefault
+	}
+	if len(response.Body) > 128<<10 {
+		return fmt.Errorf("%s.body cannot exceed 131072 bytes", location)
+	}
+	switch response.Type {
+	case WAFResponseDefault:
+		response.Body = ""
+	case WAFResponseHTML, WAFResponseText:
+		if response.Body == "" {
+			return fmt.Errorf("%s.body is required for %s", location, response.Type)
+		}
+	case WAFResponseJSON:
+		if !json.Valid([]byte(response.Body)) {
+			return fmt.Errorf("%s.body must contain valid JSON", location)
+		}
+	default:
+		return fmt.Errorf("%s.type must be DEFAULT, HTML, TEXT or JSON", location)
+	}
+	return nil
+}
+
+func normalizeRedirect(group *WAFRuleGroup, index int) error {
+	group.RedirectURL = strings.TrimSpace(group.RedirectURL)
+	if strings.ContainsAny(group.RedirectURL, "\r\n") || group.RedirectURL == "" {
+		return fmt.Errorf("groups[%d].redirect_url is invalid", index)
+	}
+	parsed, err := url.Parse(group.RedirectURL)
+	if err != nil || (parsed.IsAbs() && parsed.Scheme != "http" && parsed.Scheme != "https") || (!parsed.IsAbs() && !strings.HasPrefix(group.RedirectURL, "/")) {
+		return fmt.Errorf("groups[%d].redirect_url must be an HTTP(S) URL or absolute path", index)
+	}
+	if group.RedirectStatus == 0 {
+		group.RedirectStatus = http.StatusFound
+	}
+	switch group.RedirectStatus {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return nil
+	default:
+		return fmt.Errorf("groups[%d].redirect_status is unsupported", index)
+	}
+}
+
 func (p *RateLimitPolicy) NormalizeAndValidate() error {
+	if p.Rules == nil {
+		p.Rules = []RateLimitRule{}
+	}
 	if len(p.Rules) > 64 {
 		return errors.New("rate-limit policy cannot contain more than 64 rules")
 	}

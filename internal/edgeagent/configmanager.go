@@ -309,12 +309,16 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 			return nil, fmt.Errorf("site %s rate-limit policy: %w", id, err)
 		}
 		if (wafConfigured && wafPolicy.Enabled) || (rateLimitConfigured && rateLimitPolicy.Enabled) {
-			handlers = append(handlers, map[string]any{
+			securityHandler := map[string]any{
 				"handler":    "goveto_waf",
 				"site_id":    id,
 				"waf":        wafPolicy,
 				"rate_limit": rateLimitPolicy,
-			})
+			}
+			if secret := stringMapValue(site.WAF, "challenge_secret"); secret != "" {
+				securityHandler["challenge_secret"] = secret
+			}
+			handlers = append(handlers, securityHandler)
 		}
 		if listener.HSTSEnabled {
 			value := "max-age=" + strconv.Itoa(listener.HSTSMaxAge)
@@ -622,6 +626,11 @@ func staleIfErrorTTL(policy cachepolicy.CachePolicy) int {
 		return 0
 	}
 	return policy.Stale.IfErrorSeconds
+}
+
+func stringMapValue(values map[string]any, key string) string {
+	value, _ := values[key].(string)
+	return value
 }
 
 func keys(values map[string]struct{}) []string {

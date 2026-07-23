@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/model"
 )
 
@@ -17,6 +18,17 @@ func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
 	}
 	if len(failed) != 1 || failed[0].NodeID != "b" || failed[0].Error != "timeout" {
 		t.Fatalf("unexpected failed results: %#v", failed)
+	}
+}
+
+func TestWAFChallengeSecretIsStableAndSiteScoped(t *testing.T) {
+	cipher, err := node.NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := wafChallengeSecret(cipher, "site-1")
+	if one != wafChallengeSecret(cipher, "site-1") || one == wafChallengeSecret(cipher, "site-2") {
+		t.Fatal("WAF challenge secret is not stable and site-scoped")
 	}
 }
 

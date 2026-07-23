@@ -2,7 +2,9 @@ package waf
 
 import (
 	"bytes"
+	"embed"
 	"fmt"
+	"html/template"
 	"io"
 	"net"
 	"net/http"
@@ -20,13 +22,15 @@ import (
 )
 
 type Handler struct {
-	SiteID    string                 `json:"site_id"`
-	WAF       policy.WAFPolicy       `json:"waf"`
-	RateLimit policy.RateLimitPolicy `json:"rate_limit"`
+	SiteID          string                 `json:"site_id"`
+	ChallengeSecret string                 `json:"challenge_secret,omitempty"`
+	WAF             policy.WAFPolicy       `json:"waf"`
+	RateLimit       policy.RateLimitPolicy `json:"rate_limit"`
 
-	groups      []compiledGroup
-	rateRules   []compiledRateRule
-	inspectBody bool
+	groups       []compiledGroup
+	rateRules    []compiledRateRule
+	inspectBody  bool
+	challengeKey []byte
 }
 
 type compiledGroup struct {
@@ -62,7 +66,24 @@ type requestData struct {
 	ip      string
 }
 
-func init() { caddy.RegisterModule(Handler{}) }
+type wafDecision struct {
+	id             string
+	action         string
+	status         int
+	response       policy.WAFResponse
+	redirectURL    string
+	redirectStatus int
+	tag            string
+}
+
+//go:embed templates/*.html templates/*.js
+var pageFiles embed.FS
+
+var pageTemplates = template.Must(template.ParseFS(pageFiles, "templates/*.html"))
+
+func init() {
+	caddy.RegisterModule(Handler{})
+}
 
 func (Handler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "http.handlers.goveto_waf", New: func() caddy.Module { return new(Handler) }}
@@ -77,6 +98,13 @@ func (h *Handler) Provision(_ caddy.Context) error {
 	}
 	if err := h.RateLimit.NormalizeAndValidate(); err != nil {
 		return fmt.Errorf("invalid rate-limit policy: %w", err)
+	}
+	if h.hasCaptchaGroup() {
+		key, err := decodeChallengeSecret(h.ChallengeSecret)
+		if err != nil {
+			return err
+		}
+		h.challengeKey = key
 	}
 
 	h.groups = make([]compiledGroup, 0, len(h.WAF.Groups))
@@ -126,18 +154,23 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	}
 
 	if h.WAF.Enabled {
-		if id, action, status := h.matchWAF(data); id != "" {
-			if action == "ALLOW" {
+		if decision := h.matchWAF(data); decision != nil {
+			if decision.action == policy.WAFActionAllow {
 				return next.ServeHTTP(w, r)
 			}
-			if action == "MONITOR" || h.WAF.Mode == policy.WAFModeMonitor {
+			if decision.action == policy.WAFActionMonitor || h.WAF.Mode == policy.WAFModeMonitor {
 				w.Header().Set("X-Goveto-WAF", "MONITOR")
-				w.Header().Set("X-Goveto-WAF-Rule", id)
+				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+			} else if decision.action == policy.WAFActionTag {
+				appendTag(r.Header, "X-Goveto-WAF-Tags", decision.tag)
+				w.Header().Set("X-Goveto-WAF", "TAG")
+				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+				w.Header().Set("X-Goveto-WAF-Tag", decision.tag)
+			} else if decision.action == policy.WAFActionCaptcha && h.hasClearance(r, decision.id, data.ip) {
+				w.Header().Set("X-Goveto-WAF", "CAPTCHA-PASS")
+				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
 			} else {
-				w.Header().Set("X-Goveto-WAF", "BLOCK")
-				w.Header().Set("X-Goveto-WAF-Rule", id)
-				http.Error(w, http.StatusText(status), status)
-				return nil
+				return h.executeDecision(w, r, data.ip, *decision)
 			}
 		}
 	}
@@ -165,24 +198,120 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	return next.ServeHTTP(w, r)
 }
 
-func (h Handler) matchWAF(data requestData) (string, string, int) {
+func (h Handler) matchWAF(data requestData) *wafDecision {
 	for _, group := range h.groups {
-		if group.Action != "ALLOW" || !group.match(data) {
+		if group.Action != policy.WAFActionAllow || !group.match(data) {
 			continue
 		}
-		return group.ID, group.Action, group.StatusCode
+		return decisionForGroup(group)
 	}
 	for _, preset := range h.WAF.Presets {
 		if matchPreset(preset, data) {
-			return "preset:" + preset, "BLOCK", h.WAF.BlockStatus
+			return &wafDecision{
+				id:       "preset:" + preset,
+				action:   policy.WAFActionShowPage,
+				status:   h.WAF.BlockStatus,
+				response: h.WAF.BlockResponse,
+			}
 		}
 	}
 	for _, group := range h.groups {
-		if group.Action != "ALLOW" && group.match(data) {
-			return group.ID, group.Action, group.StatusCode
+		if group.Action != policy.WAFActionAllow && group.match(data) {
+			return decisionForGroup(group)
 		}
 	}
-	return "", "", 0
+	return nil
+}
+
+func decisionForGroup(group compiledGroup) *wafDecision {
+	return &wafDecision{
+		id:             group.ID,
+		action:         group.Action,
+		status:         group.StatusCode,
+		response:       group.Response,
+		redirectURL:    group.RedirectURL,
+		redirectStatus: group.RedirectStatus,
+		tag:            group.Tag,
+	}
+}
+
+func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip string, decision wafDecision) error {
+	w.Header().Set("Cache-Control", "private, no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+	switch decision.action {
+	case policy.WAFActionShowPage:
+		w.Header().Set("X-Goveto-WAF", "BLOCK")
+		writeWAFResponse(w, decision.status, decision.id, decision.response)
+	case policy.WAFActionBlock:
+		w.Header().Set("X-Goveto-WAF", "BLOCK")
+		w.WriteHeader(decision.status)
+	case policy.WAFActionRedirect:
+		w.Header().Set("X-Goveto-WAF", "REDIRECT")
+		http.Redirect(w, r, decision.redirectURL, decision.redirectStatus)
+	case policy.WAFActionCaptcha:
+		w.Header().Set("X-Goveto-WAF", "CAPTCHA")
+		if h.completeChallenge(w, r, decision.id, ip) {
+			return nil
+		}
+		token, err := h.challengeToken(decision.id, r, ip)
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; worker-src blob:")
+		page, err := renderPage("captcha.html", struct {
+			Token        string
+			WorkerSource template.JS
+		}{Token: token, WorkerSource: powWorkerSourceJSON})
+		if err != nil {
+			return err
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, page)
+	}
+	return nil
+}
+
+func writeWAFResponse(w http.ResponseWriter, status int, ruleID string, response policy.WAFResponse) {
+	body := response.Body
+	contentType := "text/html; charset=utf-8"
+	switch response.Type {
+	case policy.WAFResponseHTML:
+	case policy.WAFResponseText:
+		contentType = "text/plain; charset=utf-8"
+	case policy.WAFResponseJSON:
+		contentType = "application/json; charset=utf-8"
+	default:
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; style-src 'unsafe-inline'")
+		body, _ = renderPage("block.html", struct {
+			Status int
+			RuleID string
+		}{Status: status, RuleID: ruleID})
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.WriteHeader(status)
+	_, _ = io.WriteString(w, body)
+}
+
+func appendTag(header http.Header, name, tag string) {
+	values := header.Values(name)
+	for _, value := range values {
+		for _, existing := range strings.Split(value, ",") {
+			if strings.TrimSpace(existing) == tag {
+				return
+			}
+		}
+	}
+	header.Add(name, tag)
+}
+
+func renderPage(name string, data any) (string, error) {
+	var output bytes.Buffer
+	if err := pageTemplates.ExecuteTemplate(&output, name, data); err != nil {
+		return "", err
+	}
+	return output.String(), nil
 }
 
 func (g compiledGroup) match(data requestData) bool {

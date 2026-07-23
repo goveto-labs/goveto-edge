@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Request blocked</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --border: #e2e8f0;
+    --text: #0f172a;
+    --muted: #475569;
+    --faint: #64748b;
+    --accent: #b91c1c;
+    --hover: #f1f5f9;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0d10;
+      --panel: #14181d;
+      --border: #262d36;
+      --text: #e8eaed;
+      --muted: #9aa7b4;
+      --faint: #7c8896;
+      --accent: #f87171;
+      --hover: #1c222a;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100dvh;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { width: 100%; max-width: 600px; }
+  .status {
+    margin: 0 0 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .status .code { color: var(--accent); font-weight: 600; }
+  .status .reason { color: var(--faint); }
+  h1 {
+    margin: 0 0 12px;
+    font-size: clamp(28px, 5vw, 38px);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-weight: 650;
+  }
+  .lede {
+    margin: 0 0 28px;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 60ch;
+  }
+  .details {
+    margin: 0 0 28px;
+    padding: 0;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 16px;
+    padding: 14px 18px;
+  }
+  .row + .row { border-top: 1px solid var(--border); }
+  dt {
+    flex: 0 0 96px;
+    font-size: 13px;
+    color: var(--faint);
+  }
+  dd {
+    margin: 0;
+    flex: 1 1 240px;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  code, time {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13.5px;
+    overflow-wrap: anywhere;
+  }
+  button {
+    margin-left: auto;
+    flex: none;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button:hover { background: var(--hover); }
+  button:active { transform: translateY(1px); }
+  button:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+  .note {
+    margin: 0 0 24px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--muted);
+    max-width: 60ch;
+  }
+  .edge {
+    margin: 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--faint);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+</style>
+</head>
+<body data-request-id="" data-time="">
+<main aria-labelledby="title">
+  <p class="status"><span class="code">403</span> <span class="reason">Forbidden</span></p>
+  <h1 id="title">Request blocked</h1>
+  <p class="lede">This website's security service refused your request before it reached the server. It can happen when traffic matches a firewall rule.</p>
+
+  <dl class="details">
+    <div class="row">
+      <dt>Request ID</dt>
+      <dd>
+        <code id="rid">Requires JavaScript</code>
+        <button id="copy" type="button" aria-label="Copy Request ID">Copy</button>
+      </dd>
+    </div>
+    <div class="row">
+      <dt>Time</dt>
+      <dd><time id="ts"></time></dd>
+    </div>
+  </dl>
+
+  <p class="note">Think this is a mistake? Contact the site owner and quote the Request ID. They can trace it in the firewall logs.</p>
+  <p class="edge">Goveto Edge</p>
+  <span class="sr-only" id="copy-status" aria-live="polite"></span>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  const requestId = "{{.RuleID}}"
+  document.getElementById("rid").textContent = requestId
+  
+  var date = new Date()
+  var timeEl = document.getElementById("ts");
+  timeEl.setAttribute("datetime", date.toISOString());
+  timeEl.textContent = date.toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
+
+  var copyBtn = document.getElementById("copy");
+  var copyStatus = document.getElementById("copy-status");
+  var resetTimer = null;
+
+  function announce(ok) {
+    copyBtn.textContent = ok ? "Copied" : "Copy failed";
+    copyStatus.textContent = ok
+      ? "Request ID copied to clipboard."
+      : "Copy failed. Select the ID and copy it manually.";
+    if (resetTimer) clearTimeout(resetTimer);
+    resetTimer = setTimeout(function () {
+      copyBtn.textContent = "Copy";
+      copyStatus.textContent = "";
+    }, 2000);
+  }
+
+  function legacyCopy() {
+    var ta = document.createElement("textarea");
+    ta.value = requestId;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "absolute";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    document.body.removeChild(ta);
+    announce(ok);
+  }
+
+  copyBtn.addEventListener("click", function () {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(requestId).then(function () { announce(true); }, legacyCopy);
+    } else {
+      legacyCopy();
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -28,6 +28,19 @@ func TestCredentialCipherRoundTrip(t *testing.T) {
 	}
 }
 
+func TestCredentialCipherDerivesStableDomainSeparatedSecrets(t *testing.T) {
+	cipher, err := NewCredentialCipher("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	one := cipher.Derive("waf/site-1")
+	two := cipher.Derive("waf/site-1")
+	other := cipher.Derive("waf/site-2")
+	if string(one) != string(two) || string(one) == string(other) || len(one) != 32 {
+		t.Fatalf("unexpected derived secrets: one=%x two=%x other=%x", one, two, other)
+	}
+}
+
 func TestCredentialCipherRejectsInvalidInput(t *testing.T) {
 	if _, err := NewCredentialCipher(base64.StdEncoding.EncodeToString([]byte("short"))); err == nil {
 		t.Fatal("expected invalid key length error")

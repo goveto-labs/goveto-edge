@@ -299,7 +299,16 @@ export interface WAFRuleGroup {
     operator: string;
     action: string;
     status_code?: number;
+    response?: WAFResponse;
+    redirect_url?: string;
+    redirect_status?: number;
+    tag?: string;
     rules: WAFRequestRule[];
+}
+
+export interface WAFResponse {
+    type: 'DEFAULT' | 'HTML' | 'TEXT' | 'JSON';
+    body?: string;
 }
 
 export interface RequestConditionGroup {
@@ -332,6 +341,7 @@ export interface SecurityPolicy {
         enabled: boolean;
         mode: string;
         block_status: number;
+        block_response: WAFResponse;
         max_body_bytes: number;
         presets: string[];
         groups: WAFRuleGroup[];

@@ -78,9 +78,12 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
     return {
         waf: {
             ...policy.waf,
-            groups: policy.waf.groups.map((group) => ({
+            block_response: policy.waf.block_response ?? { type: 'DEFAULT' },
+            presets: policy.waf.presets ?? [],
+            groups: (policy.waf.groups ?? []).map((group) => ({
                 ...group,
-                rules: group.rules.map((rule) => ({
+                response: group.response ?? { type: 'DEFAULT' },
+                rules: (group.rules ?? []).map((rule) => ({
                     ...rule,
                     id: rule.id ?? crypto.randomUUID(),
                 })),
@@ -88,14 +91,15 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
         },
         rate_limit: {
             ...policy.rate_limit,
-            rules: policy.rate_limit.rules.map((rule) => ({
+            rules: (policy.rate_limit.rules ?? []).map((rule) => ({
                 ...rule,
                 conditions: {
                     ...rule.conditions,
-                    groups: rule.conditions.groups.map((group) => ({
+                    group_operator: rule.conditions?.group_operator ?? 'AND',
+                    groups: (rule.conditions?.groups ?? []).map((group) => ({
                         ...group,
                         id: group.id ?? crypto.randomUUID(),
-                        rules: group.rules.map((condition) => ({
+                        rules: (group.rules ?? []).map((condition) => ({
                             ...condition,
                             id: condition.id ?? crypto.randomUUID(),
                         })),
@@ -104,6 +108,10 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
             })),
         },
     };
+}
+
+function loadErrorMessage(error: unknown) {
+    return error instanceof ApiError ? error.message : 'request failed';
 }
 
 const tabs = [
@@ -253,6 +261,7 @@ export default function SiteDetail() {
             enabled: false,
             mode: 'BLOCK',
             block_status: 403,
+            block_response: { type: 'DEFAULT' },
             max_body_bytes: 65536,
             presets: [],
             groups: [],
@@ -293,31 +302,9 @@ export default function SiteDetail() {
         if (!clusterId || !siteId) return;
         setLoading(true);
         try {
-            const [
-                siteData,
-                listenerData,
-                cacheData,
-                securityData,
-                clusterData,
-                dnsData,
-                certificateData,
-            ] = await Promise.all([
-                api.get(siteId),
-                api.getListener(siteId),
-                api.getCache(siteId),
-                api.getSecurity(siteId),
-                clustersApi.list(),
-                dns.config(),
-                certificateApi.list(),
-            ]);
+            const siteData = await api.get(siteId);
             setSite(siteData);
-            setListener(listenerData);
-            setCache(cacheData);
-            setSecurity(withSecurityEditorIDs(securityData));
-            setClusters(clusterData.clusters);
-            setCertificates(certificateData);
             setCertificateIds(new Set(siteData.certificate_ids));
-            setCnameTarget(dnsData.primary_hostname || '');
             setName(siteData.name);
             setTargetCluster(siteData.cluster_id);
             setDomainText(siteData.domains.join('\n'));
@@ -327,7 +314,44 @@ export default function SiteDetail() {
                     draft_id: `${siteData.id}-${index}`,
                 }))
             );
-            setError('');
+
+            const [
+                listenerResult,
+                cacheResult,
+                securityResult,
+                clusterResult,
+                dnsResult,
+                certificateResult,
+            ] = await Promise.allSettled([
+                api.getListener(siteId),
+                api.getCache(siteId),
+                api.getSecurity(siteId),
+                clustersApi.list(),
+                dns.config(),
+                certificateApi.list(),
+            ]);
+
+            const failures: string[] = [];
+            if (listenerResult.status === 'fulfilled') setListener(listenerResult.value);
+            else failures.push(`listener: ${loadErrorMessage(listenerResult.reason)}`);
+            if (cacheResult.status === 'fulfilled') setCache(cacheResult.value);
+            else failures.push(`cache: ${loadErrorMessage(cacheResult.reason)}`);
+            if (securityResult.status === 'fulfilled')
+                setSecurity(withSecurityEditorIDs(securityResult.value));
+            else failures.push(`security: ${loadErrorMessage(securityResult.reason)}`);
+            if (clusterResult.status === 'fulfilled') setClusters(clusterResult.value.clusters);
+            else failures.push(`clusters: ${loadErrorMessage(clusterResult.reason)}`);
+            if (dnsResult.status === 'fulfilled')
+                setCnameTarget(dnsResult.value.primary_hostname || '');
+            else failures.push(`DNS: ${loadErrorMessage(dnsResult.reason)}`);
+            if (certificateResult.status === 'fulfilled') setCertificates(certificateResult.value);
+            else failures.push(`certificates: ${loadErrorMessage(certificateResult.reason)}`);
+
+            setError(
+                failures.length > 0
+                    ? `Site loaded, but some settings are unavailable: ${failures.join('; ')}`
+                    : ''
+            );
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load site');
         } finally {

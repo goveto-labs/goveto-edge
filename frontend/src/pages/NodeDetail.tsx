@@ -127,11 +127,6 @@ function InstallationProgress({ status }: { status: string }) {
                             </span>
                             <span className='text-xs font-medium'>{step}</span>
                         </div>
-                        {active && status !== 'ONLINE' && (
-                            <div className='mt-2 h-1 overflow-hidden rounded-full bg-primary/15'>
-                                <div className='local-loading-progress h-full bg-primary' />
-                            </div>
-                        )}
                     </div>
                 );
             })}

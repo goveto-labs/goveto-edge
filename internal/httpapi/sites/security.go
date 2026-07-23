@@ -51,6 +51,12 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 				return err
 			}
 		}
+		if err = result.WAF.NormalizeAndValidate(); err != nil {
+			return err
+		}
+		if err = result.RateLimit.NormalizeAndValidate(); err != nil {
+			return err
+		}
 		return types.JSON(c, http.StatusOK, result)
 	}
 }
