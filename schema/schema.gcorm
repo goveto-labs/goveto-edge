@@ -605,6 +605,7 @@ model OriginBackend {
   address      String
   hostHeader   String?        @map("host_header")
   weight       Int            @default(1)
+  priority     Int            @default(0)
   enabled      Boolean        @default(true)
   createdAt    DateTime       @default(now()) @map("created_at")
   originPool   OriginPool     @relation(fields: [originPoolId], references: [id])
@@ -614,18 +615,19 @@ model OriginBackend {
 }
 
 model OriginPool {
-  id        String          @id @default(uuid())
-  clusterId String          @map("cluster_id")
-  name      String
-  scheduler String          @default("round_robin")
-  healthUri String          @default("/health") @map("health_uri")
-  timeout   Int             @default(10000)
-  headers   Json
-  createdAt DateTime        @default(now()) @map("created_at")
-  updatedAt DateTime        @default(now()) @updatedAt @map("updated_at")
-  cluster   Cluster         @relation(fields: [clusterId], references: [id])
-  backends  OriginBackend[]
-  sites     Site[]
+  id         String          @id @default(uuid())
+  clusterId  String          @map("cluster_id")
+  name       String
+  scheduler  String          @default("round_robin")
+  healthUri  String          @default("/health") @map("health_uri")
+  timeout    Int             @default(10000)
+  headers    Json
+  governance Json            @default("{}")
+  createdAt  DateTime        @default(now()) @map("created_at")
+  updatedAt  DateTime        @default(now()) @updatedAt @map("updated_at")
+  cluster    Cluster         @relation(fields: [clusterId], references: [id])
+  backends   OriginBackend[]
+  sites      Site[]
 
   @@index([clusterId])
   @@map("origin_pools")

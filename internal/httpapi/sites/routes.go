@@ -18,6 +18,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
@@ -30,12 +31,14 @@ type originInput struct {
 	Address    string               `json:"address"`
 	HostHeader string               `json:"host_header"`
 	Weight     int                  `json:"weight"`
+	Priority   int                  `json:"priority"`
 }
 type createRequest struct {
-	Name           string        `json:"name"`
-	Domains        []string      `json:"domains"`
-	CertificateIDs []string      `json:"certificate_ids"`
-	Origins        []originInput `json:"origins"`
+	Name           string                           `json:"name"`
+	Domains        []string                         `json:"domains"`
+	CertificateIDs []string                         `json:"certificate_ids"`
+	Origins        []originInput                    `json:"origins"`
+	OriginPolicy   *edgeprotocol.OriginPolicyConfig `json:"origin_policy"`
 }
 type createResponse struct {
 	ID           string            `json:"id"`
@@ -168,7 +171,19 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 			if input.Origins[index].Weight <= 0 {
 				input.Origins[index].Weight = 1
 			}
+			if input.Origins[index].Priority < 0 {
+				return echo.NewHTTPError(http.StatusBadRequest, "origin priority must not be negative")
+			}
 		}
+		originPolicy := edgeprotocol.DefaultOriginPolicy()
+		if input.OriginPolicy != nil {
+			originPolicy = edgeprotocol.NormalizeOriginPolicy(*input.OriginPolicy)
+		}
+		if err := edgeprotocol.ValidateOriginPolicy(originPolicy); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		governance, _ := json.Marshal(originPolicy)
+		headers, _ := json.Marshal(originPolicy.Headers)
 
 		ctx := c.Request().Context()
 		for _, certificateID := range input.CertificateIDs {
@@ -209,13 +224,15 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				}
 			}
 
-			emptyHeaders := json.RawMessage(`{}`)
 			if _, err := tx.OriginPool.Create().
 				Set(
 					query.OriginPool.Id.Set(poolID),
 					query.OriginPool.ClusterId.Set(c.Param("cluster_id")),
 					query.OriginPool.Name.Set(input.Name),
-					query.OriginPool.Headers.Set(emptyHeaders),
+					query.OriginPool.HealthUri.Set(originPolicy.HealthURI),
+					query.OriginPool.Timeout.Set(originPolicy.TimeoutMS),
+					query.OriginPool.Headers.Set(headers),
+					query.OriginPool.Governance.Set(governance),
 				).
 				Do(ctx); err != nil {
 				return err
@@ -227,6 +244,7 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 					query.OriginBackend.Protocol.Set(origin.Protocol),
 					query.OriginBackend.Address.Set(origin.Address),
 					query.OriginBackend.Weight.Set(origin.Weight),
+					query.OriginBackend.Priority.Set(origin.Priority),
 				}
 				if strings.TrimSpace(origin.HostHeader) != "" {
 					sets = append(sets, query.OriginBackend.HostHeader.Set(

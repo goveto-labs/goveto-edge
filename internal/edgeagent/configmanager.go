@@ -2,7 +2,10 @@ package edgeagent
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"net/http"
@@ -12,11 +15,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 
 	_ "goveto-edge/caddy/compression"
+	_ "goveto-edge/caddy/origingovernance"
 	cachefs "goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
@@ -359,45 +364,109 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			})
 		}
 
+		originPolicy := edgeprotocol.NormalizeOriginPolicy(site.OriginPolicy)
 		upstreams := make([]any, 0, len(site.Origins))
-		var hostHeader string
+		originBackends := make([]any, 0, len(site.Origins))
 		for _, origin := range site.Origins {
-			upstreams = append(upstreams, map[string]any{"dial": origin.Address})
-			if hostHeader == "" {
-				hostHeader = origin.HostHeader
+			dial := originDialAddress(origin.Address, originPolicy.Transport.IPVersion)
+			upstream := map[string]any{"dial": dial}
+			if originPolicy.PassiveHealth.UnhealthyRequestCount > 0 {
+				upstream["max_requests"] = originPolicy.PassiveHealth.UnhealthyRequestCount
 			}
+			upstreams = append(upstreams, upstream)
+			weight := origin.Weight
+			if weight < 1 {
+				weight = 1
+			}
+			originBackends = append(originBackends, map[string]any{
+				"dial": dial, "host_header": origin.HostHeader, "weight": weight, "priority": origin.Priority,
+			})
 		}
 
 		policy := site.Scheduler
 		if policy == "" {
 			policy = "round_robin"
 		}
-		if policy == "ip_hash" {
-			policy = "client_ip_hash"
+		if !supportedOriginScheduler(policy) {
+			return nil, fmt.Errorf("unsupported Caddy scheduler %q", policy)
 		}
-		if _, err := caddy.GetModule("http.reverse_proxy.selection_policies." + policy); err != nil {
-			return nil, fmt.Errorf("unsupported Caddy scheduler %q: %w", policy, err)
-		}
-
 		reverseProxy := map[string]any{
 			"handler":   "reverse_proxy",
 			"upstreams": upstreams,
 			"load_balancing": map[string]any{
-				"selection_policy": map[string]any{"policy": policy},
+				"selection_policy": map[string]any{
+					"policy": "goveto_origin", "site_id": id, "scheduler": policy, "backends": originBackends,
+				},
+				"retries":      originPolicy.Retry.Retries,
+				"try_duration": durationMS(originPolicy.Retry.TryDurationMS),
+				"try_interval": durationMS(originPolicy.Retry.TryIntervalMS),
+				"retry_match": []any{map[string]any{
+					"method":     []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodTrace},
+					"expression": "{http.reverse_proxy.is_transport_error} == true || {http.reverse_proxy.status_code} in [502, 503, 504]",
+				}},
 			},
 		}
-		if strings.EqualFold(site.Origins[0].Protocol, "https") {
-			reverseProxy["transport"] = map[string]any{
-				"protocol": "http",
-				"tls":      map[string]any{},
+		healthChecks := map[string]any{}
+		if originPolicy.ActiveHealth.Enabled {
+			healthHeaders := cloneHeaders(originPolicy.ActiveHealth.Headers)
+			if originPolicy.ActiveHealth.Host != "" {
+				healthHeaders["Host"] = []string{originPolicy.ActiveHealth.Host}
+			}
+			healthChecks["active"] = map[string]any{
+				"uri": originPolicy.HealthURI, "method": strings.ToUpper(originPolicy.ActiveHealth.Method),
+				"headers": healthHeaders, "expect_status": originPolicy.ActiveHealth.ExpectedStatus,
+				"expect_body": originPolicy.ActiveHealth.ExpectedBody,
+				"interval":    durationMS(originPolicy.ActiveHealth.IntervalMS),
+				"timeout":     durationMS(originPolicy.ActiveHealth.TimeoutMS),
+				"passes":      originPolicy.ActiveHealth.Passes, "fails": originPolicy.ActiveHealth.Fails,
 			}
 		}
-		if hostHeader != "" {
-			reverseProxy["headers"] = map[string]any{
-				"request": map[string]any{
-					"set": map[string][]string{"Host": {hostHeader}},
-				},
+		if originPolicy.PassiveHealth.Enabled {
+			healthChecks["passive"] = map[string]any{
+				"fail_duration":           durationMS(originPolicy.PassiveHealth.FailDurationMS),
+				"max_fails":               originPolicy.PassiveHealth.MaxFails,
+				"unhealthy_status":        originPolicy.PassiveHealth.UnhealthyStatus,
+				"unhealthy_latency":       durationMS(originPolicy.PassiveHealth.UnhealthyLatencyMS),
+				"unhealthy_request_count": originPolicy.PassiveHealth.UnhealthyRequestCount,
 			}
+		}
+		if len(healthChecks) > 0 {
+			reverseProxy["health_checks"] = healthChecks
+		}
+
+		transport := map[string]any{
+			"protocol":                "goveto_http",
+			"site_id":                 id,
+			"dial_timeout":            durationMS(originPolicy.Transport.DialTimeoutMS),
+			"response_header_timeout": durationMS(originPolicy.Transport.ResponseHeaderTimeoutMS),
+			"read_timeout":            durationMS(originPolicy.Transport.ReadTimeoutMS),
+			"write_timeout":           durationMS(originPolicy.Transport.WriteTimeoutMS),
+		}
+		if strings.EqualFold(site.Origins[0].Protocol, "https") {
+			tlsConfig := map[string]any{
+				"handshake_timeout":    durationMS(originPolicy.Transport.TLSHandshakeTimeoutMS),
+				"server_name":          originPolicy.Transport.TLSServerName,
+				"insecure_skip_verify": originPolicy.Transport.TLSInsecureSkipVerify,
+			}
+			trustedCertificates, err := inlineCACertificates(originPolicy.Transport.TLSRootCAPEM)
+			if err != nil {
+				return nil, fmt.Errorf("site %s origin private CA: %w", id, err)
+			}
+			if len(trustedCertificates) > 0 {
+				tlsConfig["ca"] = map[string]any{"provider": "inline", "trusted_ca_certs": trustedCertificates}
+			}
+			transport["tls"] = tlsConfig
+			transport["client_certificate_pem"] = originPolicy.Transport.TLSClientCertificatePEM
+			transport["client_private_key_pem"] = originPolicy.Transport.TLSClientPrivateKeyPEM
+		}
+		reverseProxy["transport"] = transport
+
+		requestHeaders := cloneHeaders(originPolicy.Headers)
+		requestHeaders["Host"] = []string{"{goveto.origin.host}"}
+		reverseProxy["headers"] = map[string]any{"request": map[string]any{"set": requestHeaders}}
+
+		originMetrics := map[string]any{
+			"handler": "goveto_origin_metrics", "site_id": id, "timeout": durationMS(originPolicy.TimeoutMS),
 		}
 
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
@@ -431,7 +500,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 					"status_ttl":         cachePolicy.TTL.Status,
 					"stale_if_error_ttl": staleIfErrorTTL(cachePolicy),
 				},
-				reverseProxy,
+				originMetrics, reverseProxy,
 			)
 
 			methods := []string{http.MethodGet, http.MethodHead}
@@ -470,7 +539,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			})
 		}
 
-		handlers = append(handlers, reverseProxy)
+		handlers = append(handlers, originMetrics, reverseProxy)
 		routes = append(routes, map[string]any{
 			"@id": "site_" + id,
 			"match": []any{
@@ -665,6 +734,65 @@ func staleIfErrorTTL(policy cachepolicy.CachePolicy) int {
 		return 0
 	}
 	return policy.Stale.IfErrorSeconds
+}
+
+func durationMS(value int) time.Duration {
+	return time.Duration(value) * time.Millisecond
+}
+
+func originDialAddress(address, policy string) string {
+	switch policy {
+	case "ipv4":
+		return "tcp4/" + address
+	case "ipv6":
+		return "tcp6/" + address
+	default:
+		return address
+	}
+}
+
+func supportedOriginScheduler(policy string) bool {
+	switch policy {
+	case "round_robin", "weighted_round_robin", "least_conn", "random", "first", "ip_hash":
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneHeaders(source map[string][]string) map[string][]string {
+	target := make(map[string][]string, len(source)+1)
+	for name, values := range source {
+		target[name] = append([]string(nil), values...)
+	}
+	return target
+}
+
+func inlineCACertificates(pemValues []string) ([]string, error) {
+	var certificates []string
+	for index, value := range pemValues {
+		remaining := []byte(value)
+		found := false
+		for len(strings.TrimSpace(string(remaining))) > 0 {
+			block, rest := pem.Decode(remaining)
+			if block == nil {
+				return nil, fmt.Errorf("entry %d contains invalid PEM", index)
+			}
+			remaining = rest
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+				return nil, fmt.Errorf("entry %d: %w", index, err)
+			}
+			certificates = append(certificates, base64.StdEncoding.EncodeToString(block.Bytes))
+			found = true
+		}
+		if !found {
+			return nil, fmt.Errorf("entry %d contains no certificate", index)
+		}
+	}
+	return certificates, nil
 }
 
 func stringMapValue(values map[string]any, key string) string {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
 
 	"goveto-edge/caddy/agentlog"
@@ -184,7 +185,7 @@ func TestHTTPSOriginRendersTLSTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(encoded), `"transport":{"protocol":"http","tls":{}}`) {
+	if !strings.Contains(string(encoded), `"protocol":"goveto_http"`) || !strings.Contains(string(encoded), `"tls":{`) {
 		t.Fatalf("HTTPS transport missing: %s", encoded)
 	}
 }
@@ -222,10 +223,10 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	if strings.Contains(raw, "goveto_agent") {
 		t.Fatalf("management API leaked onto the user traffic listener: %s", raw)
 	}
-	if !strings.Contains(raw, `"policy":"client_ip_hash"`) {
+	if !strings.Contains(raw, `"policy":"goveto_origin"`) || !strings.Contains(raw, `"scheduler":"ip_hash"`) {
 		t.Fatalf("ip_hash was not mapped: %s", raw)
 	}
-	if !strings.Contains(raw, `"Host":["origin.internal"]`) {
+	if !strings.Contains(raw, `"host_header":"origin.internal"`) || !strings.Contains(raw, `"Host":["{goveto.origin.host}"]`) {
 		t.Fatalf("host header missing: %s", raw)
 	}
 	if !strings.Contains(raw, `"handler":"cache"`) {
@@ -296,6 +297,113 @@ func TestMixedOriginProtocolsRejected(t *testing.T) {
 	config.Origins = append(config.Origins, OriginConfig{Protocol: "https", Address: "origin-2:443"})
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected mixed protocols to be rejected")
+	}
+}
+
+func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Origins = []OriginConfig{
+		{Protocol: "https", Address: "[2001:db8::1]:443", HostHeader: "primary.internal", Weight: 7},
+		{Protocol: "https", Address: "[2001:db8::2]:443", HostHeader: "backup.internal", Weight: 2, Priority: 10},
+	}
+	config.OriginPolicy = edgeprotocol.OriginPolicyConfig{
+		HealthURI: "/ready?deep=1", TimeoutMS: 17000,
+		Headers: map[string][]string{"X-Origin-Token": {"secret"}},
+		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
+			Enabled: true, Method: "HEAD", Host: "health.internal",
+			Headers: map[string][]string{"X-Health": {"probe"}}, ExpectedStatus: 204,
+			ExpectedBody: "ready", IntervalMS: 4000, TimeoutMS: 1200, Passes: 3, Fails: 4,
+		},
+		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+			Enabled: true, FailDurationMS: 45000, MaxFails: 5,
+			UnhealthyStatus: []int{500, 503}, UnhealthyLatencyMS: 2500, UnhealthyRequestCount: 64,
+		},
+		Transport: edgeprotocol.OriginTransportConfig{
+			DialTimeoutMS: 1100, TLSHandshakeTimeoutMS: 2200, ResponseHeaderTimeoutMS: 3300,
+			ReadTimeoutMS: 4400, WriteTimeoutMS: 5500, IPVersion: "ipv6",
+			TLSServerName: "tls.internal", TLSInsecureSkipVerify: true,
+			TLSClientCertificatePEM: "CLIENT CERT", TLSClientPrivateKeyPEM: "CLIENT KEY",
+		},
+		Retry: edgeprotocol.OriginRetryConfig{Retries: 4, TryDurationMS: 6000, TryIntervalMS: 300},
+	}
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	for _, expected := range []string{
+		`"dial":"tcp6/[2001:db8::1]:443"`, `"weight":7`, `"priority":10`,
+		`"uri":"/ready?deep=1"`, `"method":"HEAD"`, `"Host":["health.internal"]`,
+		`"expect_status":204`, `"expect_body":"ready"`, `"passes":3`, `"fails":4`,
+		`"max_fails":5`, `"unhealthy_status":[500,503]`, `"unhealthy_request_count":64`,
+		`"dial_timeout":1100000000`, `"handshake_timeout":2200000000`,
+		`"response_header_timeout":3300000000`, `"read_timeout":4400000000`, `"write_timeout":5500000000`,
+		`"server_name":"tls.internal"`, `"insecure_skip_verify":true`,
+		`"client_certificate_pem":"CLIENT CERT"`, `"client_private_key_pem":"CLIENT KEY"`,
+		`"X-Origin-Token":["secret"]`, `"handler":"goveto_origin_metrics"`, `"timeout":17000000000`,
+		`"retries":4`, `"try_duration":6000000000`, `"try_interval":300000000`,
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("missing origin governance setting %s in %s", expected, raw)
+		}
+	}
+	if !strings.Contains(raw, `"method":["GET","HEAD","PUT","DELETE","OPTIONS","TRACE"]`) || strings.Contains(raw, `"method":["GET","HEAD","POST"`) {
+		t.Fatalf("retry matcher is not restricted to idempotent methods: %s", raw)
+	}
+}
+
+func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
+	ensureAgentLogSink(t)
+	origins := make([]*httptest.Server, 0, 2)
+	addresses := make([]string, 0, 2)
+	for index := range 2 {
+		name := "origin-" + strconv.Itoa(index+1)
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			_, _ = w.Write([]byte(name + ":" + request.Host))
+		}))
+		origins = append(origins, server)
+		addresses = append(addresses, strings.TrimPrefix(server.URL, "http://"))
+	}
+	defer func() {
+		for _, server := range origins {
+			server.Close()
+		}
+	}()
+
+	port := freePort(t)
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
+	config := SiteConfig{
+		SiteID: "host-isolation", Version: 1, Domains: []string{"hosts.example.test"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
+		Origins: []OriginConfig{
+			{Protocol: "http", Address: addresses[0], HostHeader: "one.internal", Weight: 1},
+			{Protocol: "http", Address: addresses[1], HostHeader: "two.internal", Weight: 1},
+		},
+		OriginPolicy: edgeprotocol.OriginPolicyConfig{
+			HealthURI: "/", TimeoutMS: 2000,
+			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
+			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
+		},
+	}
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatalf("apply site: %v", err)
+	}
+	defer manager.Stop()
+
+	bodies := map[string]bool{}
+	for range 4 {
+		request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
+		request.Host = "hosts.example.test"
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		bodies[string(body)] = true
+	}
+	if !bodies["origin-1:one.internal"] || !bodies["origin-2:two.internal"] {
+		t.Fatalf("per-origin Host headers were not preserved: %#v", bodies)
 	}
 }
 

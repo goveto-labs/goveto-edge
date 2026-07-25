@@ -395,6 +395,7 @@ type OriginBackend struct {
 	Address      string         `db:"address" json:"address"`
 	HostHeader   *string        `db:"host_header" json:"hostHeader"`
 	Weight       int            `db:"weight" json:"weight"`
+	Priority     int            `db:"priority" json:"priority"`
 	Enabled      bool           `db:"enabled" json:"enabled"`
 	CreatedAt    time.Time      `db:"created_at" json:"createdAt"`
 	OriginPool   *OriginPool    `db:"-" json:"originPool,omitempty"`
@@ -402,18 +403,19 @@ type OriginBackend struct {
 
 // OriginPool represents the OriginPool model.
 type OriginPool struct {
-	Id        string           `db:"id" json:"id"`
-	ClusterId string           `db:"cluster_id" json:"clusterId"`
-	Name      string           `db:"name" json:"name"`
-	Scheduler string           `db:"scheduler" json:"scheduler"`
-	HealthUri string           `db:"health_uri" json:"healthUri"`
-	Timeout   int              `db:"timeout" json:"timeout"`
-	Headers   json.RawMessage  `db:"headers" json:"headers"`
-	CreatedAt time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt time.Time        `db:"updated_at" json:"updatedAt"`
-	Cluster   *Cluster         `db:"-" json:"cluster,omitempty"`
-	Backends  []*OriginBackend `db:"-" json:"backends,omitempty"`
-	Sites     []*Site          `db:"-" json:"sites,omitempty"`
+	Id         string           `db:"id" json:"id"`
+	ClusterId  string           `db:"cluster_id" json:"clusterId"`
+	Name       string           `db:"name" json:"name"`
+	Scheduler  string           `db:"scheduler" json:"scheduler"`
+	HealthUri  string           `db:"health_uri" json:"healthUri"`
+	Timeout    int              `db:"timeout" json:"timeout"`
+	Headers    json.RawMessage  `db:"headers" json:"headers"`
+	Governance json.RawMessage  `db:"governance" json:"governance"`
+	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt  time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster    *Cluster         `db:"-" json:"cluster,omitempty"`
+	Backends   []*OriginBackend `db:"-" json:"backends,omitempty"`
+	Sites      []*Site          `db:"-" json:"sites,omitempty"`
 }
 
 // Policy represents the Policy model.

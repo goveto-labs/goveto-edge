@@ -464,6 +464,7 @@ query.PostAuthorIdColumn
   - `Address` (String)
   - `Hostheader` (String, optional)
   - `Weight` (Int)
+  - `Priority` (Int)
   - `Enabled` (Boolean)
   - `Createdat` (DateTime)
 
@@ -479,6 +480,7 @@ query.PostAuthorIdColumn
   - `Healthuri` (String)
   - `Timeout` (Int)
   - `Headers` (Json)
+  - `Governance` (Json)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	origingovernance "goveto-edge/caddy/origingovernance"
 	cachefs "goveto-edge/caddy/simplefs"
 	"goveto-edge/internal/edgeprotocol"
 
@@ -128,6 +129,26 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	}
 	payload, _ := json.Marshal(payloadMap)
 	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
+	appendOriginMetrics(queue)
+}
+
+func appendOriginMetrics(queue *LogQueue) {
+	minute := time.Now().UTC().Truncate(time.Minute)
+	for _, metric := range origingovernance.SnapshotAndReset() {
+		appendOriginMetric(queue, minute, metric)
+	}
+}
+
+func appendOriginMetric(queue *LogQueue, minute time.Time, metric origingovernance.Metric) {
+	payload, err := json.Marshal(map[string]any{
+		"minute": minute, "site_id": metric.SiteID, "origin_address": metric.OriginAddress,
+		"healthy": metric.Healthy, "available": metric.Available, "fails": metric.Fails,
+		"requests": metric.Requests, "errors": metric.Errors,
+		"average_latency_ms": metric.AverageLatencyMS, "error_rate": metric.ErrorRate,
+	})
+	if err == nil {
+		_, _ = queue.Append(LogRecord{Type: "origin_health", Payload: payload})
+	}
 }
 
 func cacheDirectorySize(path string) (uint64, error) {

@@ -1,6 +1,7 @@
 package sites
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
+	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
@@ -17,25 +19,27 @@ import (
 )
 
 type siteDetails struct {
-	ID             string           `json:"id"`
-	ClusterID      string           `json:"cluster_id"`
-	Name           string           `json:"name"`
-	Status         model.SiteStatus `json:"status"`
-	Domains        []string         `json:"domains"`
-	CertificateIDs []string         `json:"certificate_ids"`
-	Origins        []originInput    `json:"origins"`
-	Version        int64            `json:"version"`
-	CreatedAt      time.Time        `json:"created_at"`
-	UpdatedAt      time.Time        `json:"updated_at"`
-	Certificates   int              `json:"certificate_count"`
+	ID             string                          `json:"id"`
+	ClusterID      string                          `json:"cluster_id"`
+	Name           string                          `json:"name"`
+	Status         model.SiteStatus                `json:"status"`
+	Domains        []string                        `json:"domains"`
+	CertificateIDs []string                        `json:"certificate_ids"`
+	Origins        []originInput                   `json:"origins"`
+	OriginPolicy   edgeprotocol.OriginPolicyConfig `json:"origin_policy"`
+	Version        int64                           `json:"version"`
+	CreatedAt      time.Time                       `json:"created_at"`
+	UpdatedAt      time.Time                       `json:"updated_at"`
+	Certificates   int                             `json:"certificate_count"`
 }
 
 type updateDetailsRequest struct {
-	Name           *string        `json:"name"`
-	ClusterID      *string        `json:"cluster_id"`
-	CertificateIDs *[]string      `json:"certificate_ids"`
-	Domains        *[]string      `json:"domains"`
-	Origins        *[]originInput `json:"origins"`
+	Name           *string                          `json:"name"`
+	ClusterID      *string                          `json:"cluster_id"`
+	CertificateIDs *[]string                        `json:"certificate_ids"`
+	Domains        *[]string                        `json:"domains"`
+	Origins        *[]originInput                   `json:"origins"`
+	OriginPolicy   *edgeprotocol.OriginPolicyConfig `json:"origin_policy"`
 }
 
 func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
@@ -55,6 +59,17 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 	if err != nil {
 		return siteDetails{}, err
 	}
+	pool, err := db.OriginPool.FindUnique(ctx, query.OriginPool.Id.Equals(site.OriginPoolId))
+	if err != nil {
+		return siteDetails{}, err
+	}
+	if pool == nil {
+		return siteDetails{}, echo.NewHTTPError(http.StatusInternalServerError, "origin pool not found")
+	}
+	originPolicy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.HealthUri, pool.Timeout)
+	if err != nil {
+		return siteDetails{}, err
+	}
 	certificates, err := db.SiteCertificate.Query().Where(query.SiteCertificate.SiteId.Equals(site.Id)).Do(ctx)
 	if err != nil {
 		return siteDetails{}, err
@@ -64,6 +79,7 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 		Domains: make([]string, len(domains)), CertificateIDs: make([]string, len(certificates)), Origins: make([]originInput, len(backends)),
 		Version: site.Version, CreatedAt: site.CreatedAt, UpdatedAt: site.UpdatedAt,
 		Certificates: len(certificates),
+		OriginPolicy: originPolicy,
 	}
 	for index, domain := range domains {
 		result.Domains[index] = domain.Hostname
@@ -72,7 +88,7 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 		result.CertificateIDs[index] = certificate.CertificateId
 	}
 	for index, backend := range backends {
-		result.Origins[index] = originInput{Protocol: backend.Protocol, Address: backend.Address, Weight: backend.Weight}
+		result.Origins[index] = originInput{Protocol: backend.Protocol, Address: backend.Address, Weight: backend.Weight, Priority: backend.Priority}
 		if backend.HostHeader != nil {
 			result.Origins[index].HostHeader = *backend.HostHeader
 		}
@@ -86,6 +102,7 @@ func getDetails(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		result.OriginPolicy = redactOriginPolicy(result.OriginPolicy)
 		return types.JSON(c, http.StatusOK, result)
 	}
 }
@@ -132,6 +149,17 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 				if origins[index].Weight <= 0 {
 					origins[index].Weight = 1
 				}
+				if origins[index].Priority < 0 {
+					return echo.NewHTTPError(http.StatusBadRequest, "origin priority must not be negative")
+				}
+			}
+		}
+		originPolicy := current.OriginPolicy
+		if input.OriginPolicy != nil {
+			candidate := preserveOriginMTLS(*input.OriginPolicy, current.OriginPolicy)
+			originPolicy = edgeprotocol.NormalizeOriginPolicy(candidate)
+			if err = edgeprotocol.ValidateOriginPolicy(originPolicy); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}
 		}
 		targetCluster := current.ClusterID
@@ -195,7 +223,18 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 			if _, updateErr := tx.Site.Update().Where(query.Site.Id.Equals(current.ID)).Set(sets...).Do(ctx); updateErr != nil {
 				return updateErr
 			}
-			if _, updateErr := tx.OriginPool.Update().Where(query.OriginPool.Id.Equals(siteModel.OriginPoolId)).Set(query.OriginPool.Name.Set(name), query.OriginPool.ClusterId.Set(targetCluster)).Do(ctx); updateErr != nil {
+			poolSets := []query.OriginPoolSetClause{query.OriginPool.Name.Set(name), query.OriginPool.ClusterId.Set(targetCluster)}
+			if input.OriginPolicy != nil {
+				governance, _ := json.Marshal(originPolicy)
+				headers, _ := json.Marshal(originPolicy.Headers)
+				poolSets = append(poolSets,
+					query.OriginPool.HealthUri.Set(originPolicy.HealthURI),
+					query.OriginPool.Timeout.Set(originPolicy.TimeoutMS),
+					query.OriginPool.Headers.Set(headers),
+					query.OriginPool.Governance.Set(governance),
+				)
+			}
+			if _, updateErr := tx.OriginPool.Update().Where(query.OriginPool.Id.Equals(siteModel.OriginPoolId)).Set(poolSets...).Do(ctx); updateErr != nil {
 				return updateErr
 			}
 			if input.Domains != nil {
@@ -217,7 +256,7 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 					return deleteErr
 				}
 				for _, origin := range origins {
-					clauses := []query.OriginBackendSetClause{query.OriginBackend.OriginPoolId.Set(site.OriginPoolId), query.OriginBackend.Protocol.Set(origin.Protocol), query.OriginBackend.Address.Set(origin.Address), query.OriginBackend.Weight.Set(origin.Weight)}
+					clauses := []query.OriginBackendSetClause{query.OriginBackend.OriginPoolId.Set(site.OriginPoolId), query.OriginBackend.Protocol.Set(origin.Protocol), query.OriginBackend.Address.Set(origin.Address), query.OriginBackend.Weight.Set(origin.Weight), query.OriginBackend.Priority.Set(origin.Priority)}
 					if origin.HostHeader != "" {
 						clauses = append(clauses, query.OriginBackend.HostHeader.Set(origin.HostHeader))
 					}
@@ -258,9 +297,26 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 		current.CertificateIDs = certificateIDs
 		current.Certificates = len(certificateIDs)
 		current.Origins = origins
+		current.OriginPolicy = originPolicy
 		current.UpdatedAt = time.Now().UTC()
+		current.OriginPolicy = redactOriginPolicy(current.OriginPolicy)
 		return types.JSON(c, http.StatusOK, current)
 	}
+}
+
+func redactOriginPolicy(policy edgeprotocol.OriginPolicyConfig) edgeprotocol.OriginPolicyConfig {
+	policy.Transport.MTLSConfigured = policy.Transport.TLSClientCertificatePEM != "" && policy.Transport.TLSClientPrivateKeyPEM != ""
+	policy.Transport.TLSClientCertificatePEM = ""
+	policy.Transport.TLSClientPrivateKeyPEM = ""
+	return policy
+}
+
+func preserveOriginMTLS(candidate, current edgeprotocol.OriginPolicyConfig) edgeprotocol.OriginPolicyConfig {
+	if candidate.Transport.MTLSConfigured && candidate.Transport.TLSClientCertificatePEM == "" && candidate.Transport.TLSClientPrivateKeyPEM == "" {
+		candidate.Transport.TLSClientCertificatePEM = current.Transport.TLSClientCertificatePEM
+		candidate.Transport.TLSClientPrivateKeyPEM = current.Transport.TLSClientPrivateKeyPEM
+	}
+	return candidate
 }
 
 func deleteSite(db *client.Client) echo.HandlerFunc {

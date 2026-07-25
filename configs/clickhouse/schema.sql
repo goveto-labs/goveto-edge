@@ -250,6 +250,19 @@ ORDER BY (cluster_id, site_id, dimension, bucket, cityHash64(value), value)
 TTL bucket + INTERVAL 31 DAY DELETE;
 
 -- Agent-reported host metrics remain independent from HTTP request analytics.
+CREATE TABLE IF NOT EXISTS goveto.origin_health_metrics_minute
+(
+    minute DateTime('UTC'), cluster_id UUID, node_id UUID, site_id UUID,
+    origin_address String,
+    healthy Bool, available Bool, fails UInt32,
+    requests UInt64, errors UInt64,
+    average_latency_ms Float64, error_rate Float64
+)
+ENGINE = MergeTree
+PARTITION BY toDate(minute)
+ORDER BY (cluster_id, site_id, origin_address, minute, node_id)
+TTL minute + INTERVAL 31 DAY DELETE;
+
 CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute
 (
     minute DateTime('UTC'), cluster_id UUID, node_id UUID,

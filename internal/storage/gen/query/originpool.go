@@ -31,18 +31,19 @@ func ApplyOriginPoolOptions(opts []OriginPoolQueryOption) OriginPoolQueryConfig 
 
 // OriginPoolQuery is the namespace for OriginPool query operations.
 type OriginPoolQuery struct {
-	Id        originPoolIdField
-	ClusterId originPoolClusterIdField
-	Name      originPoolNameField
-	Scheduler originPoolSchedulerField
-	HealthUri originPoolHealthUriField
-	Timeout   originPoolTimeoutField
-	Headers   originPoolHeadersField
-	CreatedAt originPoolCreatedAtField
-	UpdatedAt originPoolUpdatedAtField
-	Cluster   originPoolClusterRelation
-	Backends  originPoolBackendsRelation
-	Sites     originPoolSitesRelation
+	Id         originPoolIdField
+	ClusterId  originPoolClusterIdField
+	Name       originPoolNameField
+	Scheduler  originPoolSchedulerField
+	HealthUri  originPoolHealthUriField
+	Timeout    originPoolTimeoutField
+	Headers    originPoolHeadersField
+	Governance originPoolGovernanceField
+	CreatedAt  originPoolCreatedAtField
+	UpdatedAt  originPoolUpdatedAtField
+	Cluster    originPoolClusterRelation
+	Backends   originPoolBackendsRelation
+	Sites      originPoolSitesRelation
 }
 
 const OriginPoolTable = "origin_pools"
@@ -53,23 +54,25 @@ const OriginPoolSchedulerColumn = "scheduler"
 const OriginPoolHealthUriColumn = "health_uri"
 const OriginPoolTimeoutColumn = "timeout"
 const OriginPoolHeadersColumn = "headers"
+const OriginPoolGovernanceColumn = "governance"
 const OriginPoolCreatedAtColumn = "created_at"
 const OriginPoolUpdatedAtColumn = "updated_at"
 
 // OriginPoolQuery provides query building methods for the OriginPool model.
 var OriginPool = OriginPoolQuery{
-	Id:        originPoolIdField{},
-	ClusterId: originPoolClusterIdField{},
-	Name:      originPoolNameField{},
-	Scheduler: originPoolSchedulerField{},
-	HealthUri: originPoolHealthUriField{},
-	Timeout:   originPoolTimeoutField{},
-	Headers:   originPoolHeadersField{},
-	CreatedAt: originPoolCreatedAtField{},
-	UpdatedAt: originPoolUpdatedAtField{},
-	Cluster:   originPoolClusterRelation{},
-	Backends:  originPoolBackendsRelation{},
-	Sites:     originPoolSitesRelation{},
+	Id:         originPoolIdField{},
+	ClusterId:  originPoolClusterIdField{},
+	Name:       originPoolNameField{},
+	Scheduler:  originPoolSchedulerField{},
+	HealthUri:  originPoolHealthUriField{},
+	Timeout:    originPoolTimeoutField{},
+	Headers:    originPoolHeadersField{},
+	Governance: originPoolGovernanceField{},
+	CreatedAt:  originPoolCreatedAtField{},
+	UpdatedAt:  originPoolUpdatedAtField{},
+	Cluster:    originPoolClusterRelation{},
+	Backends:   originPoolBackendsRelation{},
+	Sites:      originPoolSitesRelation{},
 }
 
 // OriginPoolWhereClause represents a WHERE condition for OriginPool.
@@ -578,6 +581,52 @@ func (originPoolHeadersField) Desc() OriginPoolOrderByClause {
 	return OriginPoolOrderByClause{Field: "headers", Direction: "DESC"}
 }
 
+// GovernanceField provides query operations for the governance field.
+type originPoolGovernanceField struct{}
+
+// Equals creates an equality condition.
+func (originPoolGovernanceField) Equals(v json.RawMessage) OriginPoolWhereClause {
+	return OriginPoolWhereClause{Field: "governance", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (originPoolGovernanceField) Not(v json.RawMessage) OriginPoolWhereClause {
+	return OriginPoolWhereClause{Field: "governance", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (originPoolGovernanceField) In(vals ...json.RawMessage) OriginPoolWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return OriginPoolWhereClause{Field: "governance", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (originPoolGovernanceField) NotIn(vals ...json.RawMessage) OriginPoolWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return OriginPoolWhereClause{Field: "governance", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (originPoolGovernanceField) Set(v json.RawMessage) OriginPoolSetClause {
+	return OriginPoolSetClause{Field: "governance", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (originPoolGovernanceField) Asc() OriginPoolOrderByClause {
+	return OriginPoolOrderByClause{Field: "governance", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (originPoolGovernanceField) Desc() OriginPoolOrderByClause {
+	return OriginPoolOrderByClause{Field: "governance", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type originPoolCreatedAtField struct{}
 
@@ -767,23 +816,24 @@ type OriginPoolGroupByResult struct {
 
 // OriginPoolCreateInput holds data for creating a OriginPool record.
 type OriginPoolCreateInput struct {
-	Id        string
-	ClusterId string
-	Name      string
-	Scheduler string
-	HealthUri string
-	Timeout   int
-	Headers   json.RawMessage
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Cluster   *ClusterCreateNestedInput
-	Backends  *OriginBackendCreateNestedInput
-	Sites     *SiteCreateNestedInput
+	Id         string
+	ClusterId  string
+	Name       string
+	Scheduler  string
+	HealthUri  string
+	Timeout    int
+	Headers    json.RawMessage
+	Governance json.RawMessage
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+	Cluster    *ClusterCreateNestedInput
+	Backends   *OriginBackendCreateNestedInput
+	Sites      *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d OriginPoolCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.HealthUri, d.Timeout, d.Headers, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.HealthUri, d.Timeout, d.Headers, d.Governance, d.CreatedAt, d.UpdatedAt}
 }
 
 // OriginPoolCreateNestedInput supports nested creates and connects.

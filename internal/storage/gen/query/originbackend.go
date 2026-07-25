@@ -37,6 +37,7 @@ type OriginBackendQuery struct {
 	Address      originBackendAddressField
 	HostHeader   originBackendHostHeaderField
 	Weight       originBackendWeightField
+	Priority     originBackendPriorityField
 	Enabled      originBackendEnabledField
 	CreatedAt    originBackendCreatedAtField
 	OriginPool   originBackendOriginPoolRelation
@@ -49,6 +50,7 @@ const OriginBackendProtocolColumn = "protocol"
 const OriginBackendAddressColumn = "address"
 const OriginBackendHostHeaderColumn = "host_header"
 const OriginBackendWeightColumn = "weight"
+const OriginBackendPriorityColumn = "priority"
 const OriginBackendEnabledColumn = "enabled"
 const OriginBackendCreatedAtColumn = "created_at"
 
@@ -60,6 +62,7 @@ var OriginBackend = OriginBackendQuery{
 	Address:      originBackendAddressField{},
 	HostHeader:   originBackendHostHeaderField{},
 	Weight:       originBackendWeightField{},
+	Priority:     originBackendPriorityField{},
 	Enabled:      originBackendEnabledField{},
 	CreatedAt:    originBackendCreatedAtField{},
 	OriginPool:   originBackendOriginPoolRelation{},
@@ -520,6 +523,72 @@ func (originBackendWeightField) Desc() OriginBackendOrderByClause {
 	return OriginBackendOrderByClause{Field: "weight", Direction: "DESC"}
 }
 
+// PriorityField provides query operations for the priority field.
+type originBackendPriorityField struct{}
+
+// Equals creates an equality condition.
+func (originBackendPriorityField) Equals(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (originBackendPriorityField) Not(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (originBackendPriorityField) In(vals ...int) OriginBackendWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return OriginBackendWhereClause{Field: "priority", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (originBackendPriorityField) NotIn(vals ...int) OriginBackendWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return OriginBackendWhereClause{Field: "priority", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (originBackendPriorityField) Lt(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (originBackendPriorityField) Lte(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (originBackendPriorityField) Gt(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (originBackendPriorityField) Gte(v int) OriginBackendWhereClause {
+	return OriginBackendWhereClause{Field: "priority", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (originBackendPriorityField) Set(v int) OriginBackendSetClause {
+	return OriginBackendSetClause{Field: "priority", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (originBackendPriorityField) Asc() OriginBackendOrderByClause {
+	return OriginBackendOrderByClause{Field: "priority", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (originBackendPriorityField) Desc() OriginBackendOrderByClause {
+	return OriginBackendOrderByClause{Field: "priority", Direction: "DESC"}
+}
+
 // EnabledField provides query operations for the enabled field.
 type originBackendEnabledField struct{}
 
@@ -679,6 +748,7 @@ type OriginBackendCreateInput struct {
 	Address      string
 	HostHeader   **string
 	Weight       int
+	Priority     int
 	Enabled      bool
 	CreatedAt    time.Time
 	OriginPool   *OriginPoolCreateNestedInput
@@ -686,7 +756,7 @@ type OriginBackendCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d OriginBackendCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.OriginPoolId, d.Protocol, d.Address, d.HostHeader, d.Weight, d.Enabled, d.CreatedAt}
+	return []any{d.Id, d.OriginPoolId, d.Protocol, d.Address, d.HostHeader, d.Weight, d.Priority, d.Enabled, d.CreatedAt}
 }
 
 // OriginBackendCreateNestedInput supports nested creates and connects.

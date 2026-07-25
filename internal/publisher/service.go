@@ -468,6 +468,10 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 			OCSPStaplingEnabled:   listener.OcspStaplingEnabled,
 		},
 	}
+	config.OriginPolicy, err = edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.HealthUri, pool.Timeout)
+	if err != nil {
+		return edgeprotocol.SiteConfig{}, nil, fmt.Errorf("origin pool %s: %w", pool.Id, err)
+	}
 	for _, item := range domains {
 		config.Domains = append(config.Domains, item.Hostname)
 	}
@@ -477,6 +481,7 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 			Address:    item.Address,
 			HostHeader: value(item.HostHeader),
 			Weight:     item.Weight,
+			Priority:   item.Priority,
 		})
 	}
 

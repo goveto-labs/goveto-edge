@@ -56,6 +56,14 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 
 	events := make([]WebRequestLog, 0, len(records))
 	for _, r := range records {
+		if r.Type == "origin_health" {
+			if metric, ok := decodeOriginHealth(r.Payload, clusterID, nodeID); ok {
+				if err := i.store.InsertOriginHealth(ctx, metric); err != nil {
+					return err
+				}
+			}
+			continue
+		}
 		if r.Type == "node_runtime" {
 			var m struct {
 				Minute         time.Time `json:"minute"`
@@ -124,4 +132,28 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 	}
 
 	return i.store.Insert(ctx, events)
+}
+
+func decodeOriginHealth(payload []byte, clusterID, nodeID string) (OriginHealthMetric, bool) {
+	var metric struct {
+		Minute           time.Time `json:"minute"`
+		SiteID           string    `json:"site_id"`
+		OriginAddress    string    `json:"origin_address"`
+		Healthy          bool      `json:"healthy"`
+		Available        bool      `json:"available"`
+		Fails            int       `json:"fails"`
+		Requests         uint64    `json:"requests"`
+		Errors           uint64    `json:"errors"`
+		AverageLatencyMS float64   `json:"average_latency_ms"`
+		ErrorRate        float64   `json:"error_rate"`
+	}
+	if json.Unmarshal(payload, &metric) != nil || metric.SiteID == "" || metric.OriginAddress == "" || metric.Minute.IsZero() {
+		return OriginHealthMetric{}, false
+	}
+	return OriginHealthMetric{
+		Minute: metric.Minute, ClusterID: clusterID, NodeID: nodeID, SiteID: metric.SiteID,
+		OriginAddress: metric.OriginAddress, Healthy: metric.Healthy, Available: metric.Available,
+		Fails: metric.Fails, Requests: metric.Requests, Errors: metric.Errors,
+		AverageLatencyMS: metric.AverageLatencyMS, ErrorRate: metric.ErrorRate,
+	}, true
 }

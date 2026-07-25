@@ -1,6 +1,9 @@
 package edgeprotocol
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestSiteConfigValidateRequiredFields(t *testing.T) {
 	if err := (SiteConfig{}).Validate(); err == nil {
@@ -81,6 +84,50 @@ func TestSiteConfigValidateMixedOrigins(t *testing.T) {
 	}
 	if err := config.Validate(); err == nil {
 		t.Fatal("expected mixed origin rejection")
+	}
+}
+
+func TestDecodeOriginPolicyMergesLegacyColumnsAndGovernance(t *testing.T) {
+	governance := json.RawMessage(`{
+		"health_uri":"/ignored","timeout_ms":1,
+		"active_health":{"enabled":true,"method":"HEAD","expected_status":204,"fails":4},
+		"passive_health":{"enabled":true,"max_fails":5},
+		"transport":{"ip_version":"ipv4","tls_server_name":"origin.internal"},
+		"retry":{"retries":4,"try_duration_ms":8000,"try_interval_ms":400}
+	}`)
+	policy, err := DecodeOriginPolicy(governance, json.RawMessage(`{"X-Origin":"pool"}`), "/ready", 12000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.HealthURI != "/ready" || policy.TimeoutMS != 12000 || policy.Headers["X-Origin"][0] != "pool" {
+		t.Fatalf("legacy columns did not override governance: %#v", policy)
+	}
+	if policy.ActiveHealth.Method != "HEAD" || policy.ActiveHealth.ExpectedStatus != 204 || policy.ActiveHealth.Fails != 4 {
+		t.Fatalf("active health policy lost: %#v", policy.ActiveHealth)
+	}
+	if policy.ActiveHealth.IntervalMS != 30000 || policy.PassiveHealth.FailDurationMS != 30000 {
+		t.Fatalf("missing governance defaults: %#v", policy)
+	}
+	if policy.Transport.IPVersion != "ipv4" || policy.Transport.TLSServerName != "origin.internal" || policy.Retry.Retries != 4 {
+		t.Fatalf("transport/retry policy lost: %#v", policy)
+	}
+}
+
+func TestValidateOriginPolicyRejectsUnsafeValues(t *testing.T) {
+	policy := DefaultOriginPolicy()
+	policy.Transport.IPVersion = "prefer_magic"
+	if err := ValidateOriginPolicy(policy); err == nil {
+		t.Fatal("invalid IP policy was accepted")
+	}
+	policy = DefaultOriginPolicy()
+	policy.Transport.TLSClientCertificatePEM = "certificate"
+	if err := ValidateOriginPolicy(policy); err == nil {
+		t.Fatal("incomplete mTLS pair was accepted")
+	}
+	policy = DefaultOriginPolicy()
+	policy.Headers = map[string][]string{"Bad Header": {"value"}}
+	if err := ValidateOriginPolicy(policy); err == nil {
+		t.Fatal("invalid origin header was accepted")
 	}
 }
 

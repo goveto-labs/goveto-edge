@@ -102,6 +102,26 @@ type NodeRuntimeMetric struct {
 	DiskUsed, DiskTotal     uint64
 }
 
+type OriginHealthMetric struct {
+	Minute                      time.Time
+	ClusterID, NodeID, SiteID   string
+	OriginAddress               string
+	Healthy, Available          bool
+	Fails                       int
+	Requests, Errors            uint64
+	AverageLatencyMS, ErrorRate float64
+}
+
+func (s *Store) InsertOriginHealth(ctx context.Context, m OriginHealthMetric) error {
+	return s.db.Exec(ctx, `INSERT INTO goveto.origin_health_metrics_minute (
+		minute, cluster_id, node_id, site_id, origin_address, healthy, available,
+		fails, requests, errors, average_latency_ms, error_rate
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+		m.Minute, m.ClusterID, m.NodeID, m.SiteID, m.OriginAddress, m.Healthy, m.Available,
+		m.Fails, m.Requests, m.Errors, m.AverageLatencyMS, m.ErrorRate,
+	)
+}
+
 func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 	return s.db.Exec(ctx, `INSERT INTO goveto.node_runtime_metrics_minute (
 		minute,

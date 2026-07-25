@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	gnet "github.com/shirou/gopsutil/v4/net"
+	origingovernance "goveto-edge/caddy/origingovernance"
 )
 
 func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
@@ -36,6 +38,7 @@ func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
 }
 
 func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
+	origingovernance.ResetMetrics()
 	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -71,6 +74,32 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	}
 	if _, ok := payload["cache_max_bytes"]; ok {
 		t.Fatalf("runtime metrics must not expose cache max size: %#v", payload)
+	}
+}
+
+func TestAppendOriginMetricWritesHealthLatencyAndErrorRate(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	appendOriginMetric(queue, time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC), origingovernance.Metric{
+		SiteID: "site-1", OriginAddress: "origin:443", Healthy: true, Available: true,
+		Fails: 1, Requests: 20, Errors: 2, AverageLatencyMS: 12.5, ErrorRate: 0.1,
+	})
+	batch, err := queue.Batch(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || batch[0].Type != "origin_health" {
+		t.Fatalf("unexpected origin metric batch: %#v", batch)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(batch[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["site_id"] != "site-1" || payload["origin_address"] != "origin:443" || payload["error_rate"] != 0.1 {
+		t.Fatalf("origin metric payload = %#v", payload)
 	}
 }
 

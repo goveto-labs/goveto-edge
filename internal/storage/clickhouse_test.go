@@ -69,6 +69,9 @@ func TestEmbeddedClickHouseSchemaIsExecutableStatementList(t *testing.T) {
 	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute") {
 		t.Fatal("embedded schema does not create node runtime metrics table")
 	}
+	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS goveto.origin_health_metrics_minute") {
+		t.Fatal("embedded schema does not create origin health metrics table")
+	}
 }
 
 func TestApplyClickHouseDailyRollupReplacesDate(t *testing.T) {
