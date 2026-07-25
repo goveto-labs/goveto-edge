@@ -102,6 +102,27 @@ enum UserStatus {
   DISABLED
 }
 
+model AgentTask {
+  id          UUID      @id @default(uuid())
+  nodeId      UUID      @map("node_id")
+  kind        String
+  payload     Json
+  status      JobStatus @default(PENDING)
+  leaseOwner  String?   @map("lease_owner")
+  leaseUntil  DateTime? @map("lease_until")
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(8) @map("max_attempts")
+  resultJson  Json?     @map("result_json")
+  error       String?   @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
+  node        Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, status, createdAt])
+  @@index([status, leaseUntil])
+  @@map("agent_tasks")
+}
+
 model AuditLog {
   id         String   @id @default(uuid())
   actorId    String?  @map("actor_id")
@@ -346,6 +367,7 @@ model Node {
   cacheConfig        NodeCacheConfig?
   hardwareProfile    NodeHardwareProfile?
   credential         NodeCredential?
+  agentTasks         AgentTask[]
   sshCredential      SSHCredential?          @relation(fields: [sshCredentialId], references: [id])
   siteConfigVersions NodeSiteConfigVersion[]
 
@@ -384,9 +406,16 @@ model NodeCacheConfig {
 }
 
 model NodeCredential {
-  nodeId                    UUID   @id @map("node_id")
-  communicationKeyEncrypted String @map("communication_key_encrypted")
-  node                      Node   @relation(fields: [nodeId], references: [id])
+  nodeId                        UUID      @id @map("node_id")
+  certificateSerial             String?   @unique @map("certificate_serial")
+  certificateNotAfter           DateTime? @map("certificate_not_after")
+  bootstrapIdentityEncrypted    String?   @db.Text @map("bootstrap_identity_encrypted")
+  previousCertificateSerial     String?   @map("previous_certificate_serial")
+  previousCertificateValidUntil DateTime? @map("previous_certificate_valid_until")
+  rotationCsrSha256             String?   @map("rotation_csr_sha256")
+  rotationCertificatePem        String?   @db.Text @map("rotation_certificate_pem")
+  revokedAt                     DateTime? @map("revoked_at")
+  node                          Node      @relation(fields: [nodeId], references: [id])
 
   @@map("node_credentials")
 }

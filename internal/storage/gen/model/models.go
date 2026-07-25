@@ -6,6 +6,24 @@ import (
 	"time"
 )
 
+// AgentTask represents the AgentTask model.
+type AgentTask struct {
+	Id          string           `db:"id" json:"id"`
+	NodeId      string           `db:"node_id" json:"nodeId"`
+	Kind        string           `db:"kind" json:"kind"`
+	Payload     json.RawMessage  `db:"payload" json:"payload"`
+	Status      JobStatus        `db:"status" json:"status"`
+	LeaseOwner  *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil  *time.Time       `db:"lease_until" json:"leaseUntil"`
+	Attempts    int              `db:"attempts" json:"attempts"`
+	MaxAttempts int              `db:"max_attempts" json:"maxAttempts"`
+	ResultJson  *json.RawMessage `db:"result_json" json:"resultJson"`
+	Error       *string          `db:"error" json:"error"`
+	CreatedAt   time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt   time.Time        `db:"updated_at" json:"updatedAt"`
+	Node        *Node            `db:"-" json:"node,omitempty"`
+}
+
 // AuditLog represents the AuditLog model.
 type AuditLog struct {
 	Id         string           `db:"id" json:"id"`
@@ -210,6 +228,7 @@ type Node struct {
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
 	HardwareProfile    *NodeHardwareProfile     `db:"-" json:"hardwareProfile,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
+	AgentTasks         []*AgentTask             `db:"-" json:"agentTasks,omitempty"`
 	SshCredential      *SSHCredential           `db:"-" json:"sshCredential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }
@@ -238,9 +257,16 @@ type NodeCacheConfig struct {
 
 // NodeCredential represents the NodeCredential model.
 type NodeCredential struct {
-	NodeId                    string `db:"node_id" json:"nodeId"`
-	CommunicationKeyEncrypted string `db:"communication_key_encrypted" json:"communicationKeyEncrypted"`
-	Node                      *Node  `db:"-" json:"node,omitempty"`
+	NodeId                        string     `db:"node_id" json:"nodeId"`
+	CertificateSerial             *string    `db:"certificate_serial" json:"certificateSerial"`
+	CertificateNotAfter           *time.Time `db:"certificate_not_after" json:"certificateNotAfter"`
+	BootstrapIdentityEncrypted    *string    `db:"bootstrap_identity_encrypted" json:"bootstrapIdentityEncrypted"`
+	PreviousCertificateSerial     *string    `db:"previous_certificate_serial" json:"previousCertificateSerial"`
+	PreviousCertificateValidUntil *time.Time `db:"previous_certificate_valid_until" json:"previousCertificateValidUntil"`
+	RotationCsrSha256             *string    `db:"rotation_csr_sha256" json:"rotationCsrSha256"`
+	RotationCertificatePem        *string    `db:"rotation_certificate_pem" json:"rotationCertificatePem"`
+	RevokedAt                     *time.Time `db:"revoked_at" json:"revokedAt"`
+	Node                          *Node      `db:"-" json:"node,omitempty"`
 }
 
 // NodeDNSLine represents the NodeDNSLine model.

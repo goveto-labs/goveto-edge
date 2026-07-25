@@ -69,7 +69,6 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 
 	port := freePort(t)
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
-	manager.SetAgentHost("node-id")
 	manager.nodeConfig = NodeConfig{
 		CacheDirectory:      filepath.Join(t.TempDir(), "cache"),
 		MaxSizeBytes:        64 << 20,

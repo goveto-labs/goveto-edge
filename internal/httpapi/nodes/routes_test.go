@@ -9,7 +9,7 @@ import (
 
 func TestRegisterIncludesSSHCredentialRoutes(t *testing.T) {
 	e := echo.New()
-	Register(e, nil, nil, nil, nil)
+	Register(e, nil, nil, nil, nil, nil, nil)
 
 	routes := e.Router().Routes()
 	for _, expected := range []struct {
@@ -21,6 +21,10 @@ func TestRegisterIncludesSSHCredentialRoutes(t *testing.T) {
 		{http.MethodPut, "/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id"},
 		{http.MethodDelete, "/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id"},
 		{http.MethodGet, "/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id/nodes"},
+		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke"},
+		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/disable"},
+		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/enable"},
+		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall"},
 	} {
 		if _, err := routes.FindByMethodPath(expected.method, expected.path); err != nil {
 			t.Errorf("route %s %s is not registered", expected.method, expected.path)

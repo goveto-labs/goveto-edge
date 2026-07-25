@@ -23,7 +23,6 @@ func TestAgentSecurityEndToEnd(t *testing.T) {
 
 	port := freePort(t)
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
-	manager.SetAgentHost("node-id")
 	config := SiteConfig{
 		SiteID:   "secure-site",
 		Version:  1,

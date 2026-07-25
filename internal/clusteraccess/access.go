@@ -27,6 +27,21 @@ func Require(db *client.Client) echo.MiddlewareFunc {
 	}
 }
 
+func RequireOwner(db *client.Client) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			_, owner, err := Check(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentUID(c))
+			if err != nil {
+				return err
+			}
+			if !owner {
+				return echo.NewHTTPError(http.StatusForbidden, "cluster owner access required")
+			}
+			return next(c)
+		}
+	}
+}
+
 func Check(ctx context.Context, db *client.Client, clusterID, uid string) (allowed, owner bool, err error) {
 	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
 	if err != nil {

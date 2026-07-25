@@ -1890,6 +1890,55 @@ paths:
                                                 $ref: '#/components/schemas/types_NodeCacheConfig'
                                             synced:
                                                 type: boolean
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/credentials/revoke:
+        post:
+            operationId: revokeNodeCredential
+            summary: Revoke node management credential
+            description: Revoke the active mTLS certificate and disconnect the management channel. Reinstallation is required to admit the node again.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            message:
+                                                type: string
+                                                enum:
+                                                    - management credential revoked; reinstall the node to reconnect
+                                            status:
+                                                type: string
+                                                enum:
+                                                    - OFFLINE
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/disable:
         post:
             operationId: disableNode
@@ -1995,7 +2044,7 @@ paths:
         post:
             operationId: enableNode
             summary: Enable node
-            description: Re-enable a disabled node and wait for health checks.
+            description: Re-enable a disabled node and wait for its management channel.
             tags:
                 - nodes
             security:
@@ -2035,7 +2084,7 @@ paths:
                                             message:
                                                 type: string
                                                 enum:
-                                                    - waiting for health check
+                                                    - waiting for the agent management channel
                                             status:
                                                 type: string
                                                 enum:
@@ -2051,7 +2100,7 @@ paths:
             x-middlewares:
                 - Session
                 - RequireAuth
-                - Require
+                - RequireOwner
             parameters:
                 - name: cluster_id
                   in: path
@@ -2082,8 +2131,6 @@ paths:
                                                 type: array
                                                 items:
                                                     type: string
-                                            communication_key:
-                                                type: string
                                             identity_json:
                                                 type: string
                                             install_error:
@@ -2154,7 +2201,7 @@ paths:
             x-middlewares:
                 - Session
                 - RequireAuth
-                - Require
+                - RequireOwner
             parameters:
                 - name: cluster_id
                   in: path
@@ -2215,7 +2262,9 @@ paths:
                                             id:
                                                 type: string
                                             message:
-                                                type: object
+                                                type: string
+                                                enum:
+                                                    - node initialized through the mTLS management channel
                                             status:
                                                 type: string
                                                 enum:
@@ -2992,6 +3041,140 @@ paths:
                                         properties:
                                             cache:
                                                 $ref: '#/components/schemas/policy_CachePolicy'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/compression:
+        get:
+            operationId: getCompression
+            summary: get /api/v1/clusters/{cluster_id}/sites/{site_id}/compression
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            enabled:
+                                                type: boolean
+                                            excluded_extensions:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            excluded_paths:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            extensions:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            maximum_length:
+                                                type: number
+                                            mime_types:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            minimum_length:
+                                                type: number
+                                                enum:
+                                                    - 1024
+                                            recompress:
+                                                type: boolean
+        put:
+            operationId: updateCompression
+            summary: put /api/v1/clusters/{cluster_id}/sites/{site_id}/compression
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Session
+                - RequireAuth
+                - Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                enabled:
+                                    type: boolean
+                                excluded_extensions:
+                                    type: array
+                                    items:
+                                        type: string
+                                excluded_paths:
+                                    type: array
+                                    items:
+                                        type: string
+                                extensions:
+                                    type: array
+                                    items:
+                                        type: string
+                                maximum_length:
+                                    type: number
+                                mime_types:
+                                    type: array
+                                    items:
+                                        type: string
+                                minimum_length:
+                                    type: number
+                                recompress:
+                                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            compression:
+                                                $ref: '#/components/schemas/policy_CompressionPolicy'
     /api/v1/clusters/{cluster_id}/sites/{site_id}/listener:
         get:
             operationId: getListener
@@ -4355,6 +4538,58 @@ components:
                     type: string
                 sort_order:
                     type: number
+        edgecontrol_CredentialBundle:
+            type: object
+            properties:
+                ca_certificate_pem:
+                    type: string
+                certificate_pem:
+                    type: string
+                gateway_address:
+                    type: string
+                node_id:
+                    type: string
+                private_key_pem:
+                    type: string
+                server_name:
+                    type: string
+        model_AgentTask:
+            type: object
+            properties:
+                attempts:
+                    type: number
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                leaseOwner:
+                    type: string
+                leaseUntil:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: number
+                node:
+                    $ref: '#/components/schemas/model_Node'
+                nodeId:
+                    type: string
+                payload:
+                    type: object
+                resultJson:
+                    type: object
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_AuditLog:
             type: object
             properties:
@@ -4741,6 +4976,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_NodeAddress'
+                agentTasks:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_AgentTask'
                 cacheConfig:
                     $ref: '#/components/schemas/model_NodeCacheConfig'
                 cluster:
@@ -4852,11 +5091,31 @@ components:
         model_NodeCredential:
             type: object
             properties:
-                communicationKeyEncrypted:
+                bootstrapIdentityEncrypted:
+                    type: string
+                certificateNotAfter:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                certificateSerial:
                     type: string
                 node:
                     $ref: '#/components/schemas/model_Node'
                 nodeId:
+                    type: string
+                previousCertificateSerial:
+                    type: string
+                previousCertificateValidUntil:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                revokedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                rotationCertificatePem:
+                    type: string
+                rotationCsrSha256:
                     type: string
         model_NodeDNSLine:
             type: object
@@ -5001,6 +5260,8 @@ components:
                 cacheJson:
                     type: object
                 ccJson:
+                    type: object
+                compressionJson:
                     type: object
                 createdAt:
                     type: string
@@ -5447,6 +5708,33 @@ components:
                     type: object
                     additionalProperties:
                         type: number
+        policy_CompressionPolicy:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                excluded_extensions:
+                    type: array
+                    items:
+                        type: string
+                excluded_paths:
+                    type: array
+                    items:
+                        type: string
+                extensions:
+                    type: array
+                    items:
+                        type: string
+                maximum_length:
+                    type: number
+                mime_types:
+                    type: array
+                    items:
+                        type: string
+                minimum_length:
+                    type: number
+                recompress:
+                    type: boolean
         policy_RateLimitPolicy:
             type: object
             properties:
@@ -5638,6 +5926,15 @@ components:
             properties:
                 cache:
                     $ref: '#/components/schemas/policy_CachePolicy'
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
+        sites_compressionUpdateResponse:
+            type: object
+            properties:
+                compression:
+                    $ref: '#/components/schemas/policy_CompressionPolicy'
                 publish_error:
                     type: string
                 publish_job:

@@ -4,13 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net"
 	"sync"
 	"time"
 
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
-	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -18,12 +16,12 @@ import (
 
 type Service struct {
 	db          *client.Client
-	cipher      *node.CredentialCipher
+	gateway     *edgecontrol.Gateway
 	concurrency int
 }
 
-func New(db *client.Client, cipher *node.CredentialCipher) *Service {
-	return &Service{db: db, cipher: cipher, concurrency: 8}
+func New(db *client.Client, gateway *edgecontrol.Gateway) *Service {
+	return &Service{db: db, gateway: gateway, concurrency: 8}
 }
 
 func (s *Service) Enqueue(ctx context.Context, siteID string, purgeType model.PurgeType, value *string) (*model.PurgeJob, error) {
@@ -69,7 +67,7 @@ func (s *Service) runOne(ctx context.Context) {
 	s.execute(ctx, &jobs[0])
 }
 
-type target struct{ NodeID, Address, Key string }
+type target struct{ NodeID string }
 type Result struct {
 	NodeID  string `json:"node_id"`
 	Success bool   `json:"success"`
@@ -110,11 +108,9 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) {
 				return
 			}
 
-			err := edgecontrol.New(
-				"http://"+net.JoinHostPort(item.Address, "80"),
-				item.NodeID,
-				item.Key,
-			).PurgeSite(ctx, request)
+			dispatchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			err := s.gateway.Dispatch(dispatchCtx, item.NodeID, edgeprotocol.TaskPurgeSite, request, nil)
 			results[i] = Result{NodeID: item.NodeID, Success: err == nil}
 			if err != nil {
 				results[i].Error = err.Error()
@@ -146,27 +142,14 @@ func (s *Service) targets(ctx context.Context, clusterID string) ([]target, erro
 			continue
 		}
 
-		address, err := s.db.NodeAddress.Query().
-			Where(query.NodeAddress.NodeId.Equals(n.Id)).
-			OrderBy(query.NodeAddress.CreatedAt.Asc()).
-			First(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if address == nil {
-			continue
-		}
-
 		credential, err := s.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
 		if err != nil {
 			return nil, err
 		}
-
-		key, err := s.cipher.Decrypt(credential.CommunicationKeyEncrypted)
-		if err != nil {
-			return nil, err
+		if credential == nil || credential.RevokedAt != nil {
+			continue
 		}
-		result = append(result, target{NodeID: n.Id, Address: address.Address, Key: key})
+		result = append(result, target{NodeID: n.Id})
 	}
 
 	if len(result) == 0 {

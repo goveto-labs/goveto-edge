@@ -24,6 +24,7 @@ type Client struct {
 	db                    *sql.DB
 	executor              querier
 	dialect               string
+	AgentTask             AgentTaskActions
 	AuditLog              AuditLogActions
 	Certificate           CertificateActions
 	Cluster               ClusterActions
@@ -65,6 +66,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.AgentTask = AgentTaskActions{client: c}
 	c.AuditLog = AuditLogActions{client: c}
 	c.Certificate = CertificateActions{client: c}
 	c.Cluster = ClusterActions{client: c}
@@ -266,6 +268,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	}
 
 	txClient := &Client{db: c.db, executor: sqlTx, dialect: c.dialect}
+	txClient.AgentTask = AgentTaskActions{client: txClient}
 	txClient.AuditLog = AuditLogActions{client: txClient}
 	txClient.Certificate = CertificateActions{client: txClient}
 	txClient.Cluster = ClusterActions{client: txClient}
@@ -312,6 +315,992 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 		return err
 	}
 	return sqlTx.Commit()
+}
+
+func quotedAgentTaskTable(c *Client) string { return c.quoteIdentifier("agent_tasks") }
+func quotedAgentTaskColumns(c *Client) string {
+	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAgentTaskField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "kind":
+		return c.quoteIdentifier(field), nil
+	case "payload":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AgentTask field %q", field)
+	}
+}
+
+// buildAgentTaskWhere recursively builds a WHERE clause string and arguments.
+func buildAgentTaskWhere(c *Client, wheres []query.AgentTaskWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AgentTaskWhereClause); ok {
+				sub, subArgs := buildAgentTaskWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AgentTaskWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAgentTaskWhere(c, []query.AgentTaskWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AgentTaskWhereClause); ok {
+				sub, subArgs := buildAgentTaskWhere(c, []query.AgentTaskWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAgentTaskField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AgentTaskActions provides database operations for the AgentTask model.
+type AgentTaskActions struct {
+	client *Client
+}
+
+// AgentTaskCreateBuilder builds a AgentTask create operation incrementally.
+type AgentTaskCreateBuilder struct {
+	action AgentTaskActions
+	sets   []query.AgentTaskSetClause
+}
+
+// Create starts a staged AgentTask create operation.
+func (a AgentTaskActions) Create() AgentTaskCreateBuilder {
+	return AgentTaskCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AgentTaskCreateBuilder) Set(sets ...query.AgentTaskSetClause) AgentTaskCreateBuilder {
+	next := AgentTaskCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AgentTaskSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AgentTaskCreateBuilder) Do(ctx context.Context) (*model.AgentTask, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AgentTaskCreateManyBuilder builds a bulk AgentTask insert operation.
+type AgentTaskCreateManyBuilder struct {
+	action            AgentTaskActions
+	data              []query.AgentTaskCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AgentTask insert operation.
+func (a AgentTaskActions) BulkCreate(data []query.AgentTaskCreateInput) AgentTaskCreateManyBuilder {
+	return AgentTaskCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AgentTaskCreateManyBuilder) OnConflictDoNothing(columns ...string) AgentTaskCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AgentTaskCreateManyBuilder) Returning(columns ...string) AgentTaskCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AgentTaskCreateManyBuilder) BatchSize(n int) AgentTaskCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AgentTaskCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentTaskCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AgentTask.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AgentTask.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AgentTaskCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AgentTask, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AgentTask
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentTaskCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AgentTask
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AgentTaskCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentTaskCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AgentTaskQueryBuilder builds a AgentTask query incrementally.
+type AgentTaskQueryBuilder struct {
+	action AgentTaskActions
+	opts   []query.AgentTaskQueryOption
+}
+
+// Query starts a staged AgentTask query.
+func (a AgentTaskActions) Query() AgentTaskQueryBuilder {
+	return AgentTaskQueryBuilder{action: a}
+}
+
+func (b AgentTaskQueryBuilder) withOptions(opts ...query.AgentTaskQueryOption) AgentTaskQueryBuilder {
+	next := AgentTaskQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AgentTaskQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AgentTaskQueryBuilder) Where(clauses ...query.AgentTaskWhereClause) AgentTaskQueryBuilder {
+	opts := make([]query.AgentTaskQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AgentTaskQueryBuilder) OrderBy(clause query.AgentTaskOrderByClause) AgentTaskQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AgentTaskQueryBuilder) Include(clauses ...query.AgentTaskIncludeClause) AgentTaskQueryBuilder {
+	opts := make([]query.AgentTaskQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AgentTaskQueryBuilder) Take(n int) AgentTaskQueryBuilder {
+	return b.withOptions(query.AgentTaskTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AgentTaskQueryBuilder) Skip(n int) AgentTaskQueryBuilder {
+	return b.withOptions(query.AgentTaskSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AgentTaskQueryBuilder) Do(ctx context.Context) ([]model.AgentTask, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AgentTaskQueryBuilder) First(ctx context.Context) (*model.AgentTask, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AgentTaskQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAgentTaskOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AgentTaskUpdateBuilder builds a AgentTask update operation incrementally.
+type AgentTaskUpdateBuilder struct {
+	action AgentTaskActions
+	wheres []query.AgentTaskWhereClause
+	sets   []query.AgentTaskSetClause
+}
+
+// Update starts a staged AgentTask update operation.
+func (a AgentTaskActions) Update() AgentTaskUpdateBuilder {
+	return AgentTaskUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AgentTaskUpdateBuilder) Where(clauses ...query.AgentTaskWhereClause) AgentTaskUpdateBuilder {
+	next := AgentTaskUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AgentTaskWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AgentTaskSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AgentTaskUpdateBuilder) Set(sets ...query.AgentTaskSetClause) AgentTaskUpdateBuilder {
+	next := AgentTaskUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AgentTaskWhereClause(nil), b.wheres...),
+		sets:   make([]query.AgentTaskSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AgentTaskUpdateBuilder) combinedWhere() (query.AgentTaskWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AgentTaskWhereClause{}, fmt.Errorf("AgentTask.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AgentTask.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AgentTaskUpdateBuilder) Do(ctx context.Context) (*model.AgentTask, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AgentTaskUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AgentTaskDeleteBuilder builds a AgentTask delete operation incrementally.
+type AgentTaskDeleteBuilder struct {
+	action AgentTaskActions
+	wheres []query.AgentTaskWhereClause
+}
+
+// Delete starts a staged AgentTask delete operation.
+func (a AgentTaskActions) Delete() AgentTaskDeleteBuilder {
+	return AgentTaskDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AgentTaskDeleteBuilder) Where(clauses ...query.AgentTaskWhereClause) AgentTaskDeleteBuilder {
+	next := AgentTaskDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AgentTaskWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AgentTaskDeleteBuilder) combinedWhere() (query.AgentTaskWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AgentTaskWhereClause{}, fmt.Errorf("AgentTask.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AgentTask.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AgentTaskDeleteBuilder) Do(ctx context.Context) (*model.AgentTask, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AgentTaskDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AgentTask records.
+func (a AgentTaskActions) FindMany(ctx context.Context, opts ...query.AgentTaskQueryOption) ([]model.AgentTask, error) {
+	cfg := query.ApplyAgentTaskOptions(opts)
+	q := "SELECT " + quotedAgentTaskColumns(a.client) + " FROM " + quotedAgentTaskTable(a.client)
+	argIdx := 0
+	where, args := buildAgentTaskWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAgentTaskField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AgentTask
+	for rows.Next() {
+		var item model.AgentTask
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentTask.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AgentTask record.
+func (a AgentTaskActions) FindFirst(ctx context.Context, opts ...query.AgentTaskQueryOption) (*model.AgentTask, error) {
+	opts = append(opts, query.AgentTaskTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AgentTask record by unique constraint.
+func (a AgentTaskActions) FindUnique(ctx context.Context, where query.AgentTaskWhereClause) (*model.AgentTask, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentTaskWhere(a.client, []query.AgentTaskWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAgentTaskColumns(a.client) + " FROM " + quotedAgentTaskTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AgentTask
+	if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AgentTask.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AgentTask record.
+func (a AgentTaskActions) CreateOne(ctx context.Context, sets ...query.AgentTaskSetClause) (*model.AgentTask, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AgentTask.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAgentTaskField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAgentTaskTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentTaskColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AgentTask
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentTask.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AgentTask records.
+func (a AgentTaskActions) CreateMany(ctx context.Context, data []query.AgentTaskCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AgentTaskActions) buildAgentTaskCreateManySQL(data []query.AgentTaskCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAgentTaskTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AgentTask record matching the where clause.
+func (a AgentTaskActions) UpdateOne(ctx context.Context, where query.AgentTaskWhereClause, sets ...query.AgentTaskSetClause) (*model.AgentTask, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AgentTask.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAgentTaskField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAgentTaskWhere(a.client, []query.AgentTaskWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAgentTaskTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentTaskColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentTask
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AgentTask.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AgentTask records matching the where clauses.
+func (a AgentTaskActions) UpdateMany(ctx context.Context, wheres []query.AgentTaskWhereClause, sets ...query.AgentTaskSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AgentTask.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAgentTaskField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAgentTaskWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAgentTaskTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AgentTask.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AgentTask record.
+func (a AgentTaskActions) UpsertOne(ctx context.Context, where query.AgentTaskWhereClause, create []query.AgentTaskSetClause, update []query.AgentTaskSetClause) (*model.AgentTask, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AgentTask.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAgentTaskField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAgentTaskTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAgentTaskField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAgentTaskField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAgentTaskField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentTaskColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentTask
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentTask.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AgentTask record matching the where clause.
+func (a AgentTaskActions) DeleteOne(ctx context.Context, where query.AgentTaskWhereClause) (*model.AgentTask, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentTaskWhere(a.client, []query.AgentTaskWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAgentTaskTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentTaskColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentTask
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AgentTask.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AgentTask records matching the where clauses.
+func (a AgentTaskActions) DeleteMany(ctx context.Context, wheres ...query.AgentTaskWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentTaskWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAgentTaskTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AgentTask.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AgentTask records matching the where clauses.
+func (a AgentTaskActions) Count(ctx context.Context, wheres ...query.AgentTaskWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentTaskWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAgentTaskTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AgentTask.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AgentTask.
+func (a AgentTaskActions) Aggregate(ctx context.Context, opts ...query.AgentTaskAggregateOption) (*query.AgentTaskAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAgentTaskField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAgentTaskTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AgentTaskAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AgentTask.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AgentTask.
+func (a AgentTaskActions) GroupBy(ctx context.Context, fields []string, opts ...query.AgentTaskAggregateOption) ([]query.AgentTaskGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAgentTaskField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAgentTaskField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAgentTaskTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AgentTask.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AgentTaskGroupByResult
+	for rows.Next() {
+		r := query.AgentTaskGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AgentTask.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
 
 func quotedAuditLogTable(c *Client) string { return c.quoteIdentifier("audit_logs") }
@@ -14956,7 +15945,7 @@ func (a NodeCacheConfigActions) GroupBy(ctx context.Context, fields []string, op
 
 func quotedNodeCredentialTable(c *Client) string { return c.quoteIdentifier("node_credentials") }
 func quotedNodeCredentialColumns(c *Client) string {
-	cols := []string{"node_id", "communication_key_encrypted"}
+	cols := []string{"node_id", "certificate_serial", "certificate_not_after", "bootstrap_identity_encrypted", "previous_certificate_serial", "previous_certificate_valid_until", "rotation_csr_sha256", "rotation_certificate_pem", "revoked_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -14967,7 +15956,21 @@ func quoteNodeCredentialField(c *Client, field string) (string, error) {
 	switch field {
 	case "node_id":
 		return c.quoteIdentifier(field), nil
-	case "communication_key_encrypted":
+	case "certificate_serial":
+		return c.quoteIdentifier(field), nil
+	case "certificate_not_after":
+		return c.quoteIdentifier(field), nil
+	case "bootstrap_identity_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "previous_certificate_serial":
+		return c.quoteIdentifier(field), nil
+	case "previous_certificate_valid_until":
+		return c.quoteIdentifier(field), nil
+	case "rotation_csr_sha256":
+		return c.quoteIdentifier(field), nil
+	case "rotation_certificate_pem":
+		return c.quoteIdentifier(field), nil
+	case "revoked_at":
 		return c.quoteIdentifier(field), nil
 	default:
 		return "", fmt.Errorf("unknown NodeCredential field %q", field)
@@ -15178,14 +16181,14 @@ func (b NodeCredentialCreateManyBuilder) DoReturning(ctx context.Context) ([]mod
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "communication_key_encrypted"})
+		q, args := b.action.buildNodeCredentialCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "certificate_serial", "certificate_not_after", "bootstrap_identity_encrypted", "previous_certificate_serial", "previous_certificate_valid_until", "rotation_csr_sha256", "rotation_certificate_pem", "revoked_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("NodeCredential.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.NodeCredential
-			if err := rows.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+			if err := rows.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("NodeCredential.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -15212,7 +16215,7 @@ func (b NodeCredentialCreateManyBuilder) DoReturningValues(ctx context.Context) 
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"node_id", "communication_key_encrypted"}
+		returningColumns = []string{"node_id", "certificate_serial", "certificate_not_after", "bootstrap_identity_encrypted", "previous_certificate_serial", "previous_certificate_valid_until", "rotation_csr_sha256", "rotation_certificate_pem", "revoked_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -15464,7 +16467,7 @@ func (a NodeCredentialActions) FindMany(ctx context.Context, opts ...query.NodeC
 	var results []model.NodeCredential
 	for rows.Next() {
 		var item model.NodeCredential
-		if err := rows.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+		if err := rows.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 			return nil, fmt.Errorf("NodeCredential.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -15496,7 +16499,7 @@ func (a NodeCredentialActions) FindUnique(ctx context.Context, where query.NodeC
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.NodeCredential
-	if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+	if err := row.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -15527,7 +16530,7 @@ func (a NodeCredentialActions) CreateOne(ctx context.Context, sets ...query.Node
 		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 			return nil, fmt.Errorf("NodeCredential.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -15546,7 +16549,7 @@ func (a NodeCredentialActions) CreateMany(ctx context.Context, data []query.Node
 }
 
 func (a NodeCredentialActions) buildNodeCredentialCreateManySQL(data []query.NodeCredentialCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"node_id", "communication_key_encrypted"}
+	cols := []string{"node_id", "certificate_serial", "certificate_not_after", "bootstrap_identity_encrypted", "previous_certificate_serial", "previous_certificate_valid_until", "rotation_csr_sha256", "rotation_certificate_pem", "revoked_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -15619,7 +16622,7 @@ func (a NodeCredentialActions) UpdateOne(ctx context.Context, where query.NodeCr
 		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -15724,7 +16727,7 @@ func (a NodeCredentialActions) UpsertOne(ctx context.Context, where query.NodeCr
 		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 			return nil, fmt.Errorf("NodeCredential.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -15748,7 +16751,7 @@ func (a NodeCredentialActions) DeleteOne(ctx context.Context, where query.NodeCr
 		q += " RETURNING " + quotedNodeCredentialColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCredential
-		if err := row.Scan(&item.NodeId, &item.CommunicationKeyEncrypted); err != nil {
+		if err := row.Scan(&item.NodeId, &item.CertificateSerial, &item.CertificateNotAfter, &item.BootstrapIdentityEncrypted, &item.PreviousCertificateSerial, &item.PreviousCertificateValidUntil, &item.RotationCsrSha256, &item.RotationCertificatePem, &item.RevokedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

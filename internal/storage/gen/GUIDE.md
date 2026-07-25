@@ -90,6 +90,25 @@ query.PostAuthorIdColumn
 
 ## Models and Fields
 
+### AgentTask
+
+- Client handle: `c.AgentTask`
+- Query namespace: `query.AgentTask`
+- Fields:
+  - `Id` (UUID, id)
+  - `Nodeid` (UUID)
+  - `Kind` (String)
+  - `Payload` (Json)
+  - `Status` ()
+  - `Leaseowner` (String, optional)
+  - `Leaseuntil` (DateTime, optional)
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Resultjson` (Json, optional)
+  - `Error` (String, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### AuditLog
 
 - Client handle: `c.AuditLog`
@@ -306,7 +325,14 @@ query.PostAuthorIdColumn
 - Query namespace: `query.NodeCredential`
 - Fields:
   - `Nodeid` (UUID, id)
-  - `Communicationkeyencrypted` (String)
+  - `Certificateserial` (String, optional, unique)
+  - `Certificatenotafter` (DateTime, optional)
+  - `Bootstrapidentityencrypted` (String, optional)
+  - `Previouscertificateserial` (String, optional)
+  - `Previouscertificatevaliduntil` (DateTime, optional)
+  - `Rotationcsrsha256` (String, optional)
+  - `Rotationcertificatepem` (String, optional)
+  - `Revokedat` (DateTime, optional)
 
 ### NodeDNSLine
 

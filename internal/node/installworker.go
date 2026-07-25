@@ -105,9 +105,7 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 }
 
 func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *InstallPayload) (*InstallPayload, error) {
-	// Continue to accept already-queued legacy payloads during rollout, while
-	// all newly enqueued jobs contain only the node ID.
-	if payload.CommunicationKey != "" && payload.SSH != nil && payload.SSH.User != "" {
+	if payload.IdentityJSON != "" && payload.SSH != nil && payload.SSH.User != "" {
 		return payload, nil
 	}
 	node, err := w.db.Node.FindUnique(ctx, query.Node.Id.Equals(payload.NodeID))
@@ -130,12 +128,12 @@ func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *Inst
 	if err != nil {
 		return nil, err
 	}
-	if communicationCredential == nil {
-		return nil, errors.New("node communication credential is missing")
+	if communicationCredential == nil || communicationCredential.BootstrapIdentityEncrypted == nil {
+		return nil, errors.New("node bootstrap identity is missing")
 	}
-	communicationKey, err := w.cipher.Decrypt(communicationCredential.CommunicationKeyEncrypted)
+	identityJSON, err := w.cipher.Decrypt(*communicationCredential.BootstrapIdentityEncrypted)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt node communication credential: %w", err)
+		return nil, fmt.Errorf("decrypt node bootstrap identity: %w", err)
 	}
 	_, sshInput, err := ResolveSSHInstallInput(ctx, w.db, w.cipher, node.ClusterId, SSHInstallReference{
 		EntryIP:      *node.SshHost,
@@ -146,9 +144,7 @@ func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *Inst
 		return nil, err
 	}
 	return &InstallPayload{
-		NodeID:           node.Id,
-		CommunicationKey: communicationKey,
-		SSH:              &sshInput,
+		NodeID: node.Id, IdentityJSON: identityJSON, SSH: &sshInput,
 	}, nil
 }
 
@@ -182,10 +178,7 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 		return fmt.Errorf("load agent binary for %s: %w", arch, err)
 	}
 
-	identity, _ := json.Marshal(map[string]string{
-		"node_id":           payload.NodeID,
-		"communication_key": payload.CommunicationKey,
-	})
+	identity := []byte(payload.IdentityJSON)
 	unit := `[Unit]
 Description=Goveto Edge Agent
 After=network-online.target

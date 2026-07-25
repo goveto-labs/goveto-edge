@@ -3,7 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,6 +18,8 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/edgecontrol"
+	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
@@ -72,8 +77,14 @@ func main() {
 		slog.Error("initialize node credential encryption", "error", err)
 		os.Exit(1)
 	}
+	authority, err := edgecontrol.NewAuthority(credentialCipher, cfg.AgentGatewayPublicAddress)
+	if err != nil {
+		slog.Error("initialize agent certificate authority", "error", err)
+		os.Exit(1)
+	}
 
 	var analyticsStore *analytics.Store
+	var analyticsIngest *analytics.Ingest
 	if cfg.ClickHouseDSN != "" {
 		clickhouseConn, clickhouseErr := storage.OpenClickHouse(ctx, cfg.ClickHouseDSN)
 		if clickhouseErr != nil {
@@ -92,34 +103,85 @@ func main() {
 		slog.Info("ClickHouse schema is up to date", "statements", statementCount)
 
 		analyticsStore = analytics.NewStore(clickhouseConn)
-		go analytics.NewIngest(orm, credentialCipher, analyticsStore).Run(ctx)
+		analyticsIngest = analytics.NewIngest(orm, credentialCipher, analyticsStore)
 		go analytics.NewDailyRollup(analyticsStore, clickhouseschema.FS).Run(ctx)
 	}
 
-	publishService := publisher.New(orm, credentialCipher)
+	var publishService *publisher.Service
+	var dnsService *dnssync.Service
+	var consumeAgentLogs edgecontrol.LogConsumer
+	if analyticsIngest != nil {
+		consumeAgentLogs = analyticsIngest.Consume
+	}
+	onNodeStatusChange := func(callbackCtx context.Context, clusterID string) {
+		callbackCtx = context.WithoutCancel(callbackCtx)
+		go func() {
+			if dnsService != nil {
+				_, _ = dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID)
+			}
+			if publishService != nil {
+				if err := publishService.EnqueueCluster(callbackCtx, clusterID); err != nil {
+					slog.Warn("republish cluster sites after node status change", "cluster_id", clusterID, "error", err)
+				}
+			}
+		}()
+	}
+	gateway := edgecontrol.NewGateway(
+		db,
+		orm,
+		authority,
+		consumeAgentLogs,
+		onNodeStatusChange,
+	)
+	go gateway.Run(ctx)
+
+	publishService = publisher.New(orm, credentialCipher, gateway)
 	go publishService.Run(ctx)
 
-	purgeService := purge.New(orm, credentialCipher)
+	purgeService := purge.New(orm, gateway)
 	go purgeService.Run(ctx)
 
-	dnsService := dnssync.New(orm, credentialCipher)
+	dnsService = dnssync.New(orm, credentialCipher)
 	go dnsService.Run(ctx)
 
 	installQueue := node.NewInstallQueue(redisClient, 0)
 	go node.NewInstallWorker(orm, installQueue, credentialCipher).Run(ctx)
-	go node.NewLifecycle(
-		orm,
-		credentialCipher,
-		45*time.Second,
-		func(callbackCtx context.Context, clusterID string) {
-			go func() {
-				_, _ = dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID)
-				if err := publishService.EnqueueCluster(callbackCtx, clusterID); err != nil {
-					slog.Warn("republish cluster sites after node status change", "cluster_id", clusterID, "error", err)
-				}
-			}()
-		},
-	).Run(ctx)
+	go node.NewLifecycle(orm, 45*time.Second, onNodeStatusChange).Run(ctx)
+
+	agentListener, err := net.Listen("tcp", cfg.AgentGatewayAddress())
+	if err != nil {
+		slog.Error("listen for edge agents", "error", err)
+		os.Exit(1)
+	}
+	agentServer := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(authority.ServerTLSConfig())),
+		grpc.ForceServerCodec(edgeprotocol.JSONCodec{}),
+		grpc.MaxRecvMsgSize(32<<20),
+		grpc.MaxSendMsgSize(32<<20),
+	)
+	edgeprotocol.RegisterManagementServer(agentServer, gateway)
+	go func() {
+		<-ctx.Done()
+		stopped := make(chan struct{})
+		go func() {
+			agentServer.GracefulStop()
+			close(stopped)
+		}()
+		timer := time.NewTimer(cfg.ShutdownTimeout)
+		defer timer.Stop()
+		select {
+		case <-stopped:
+		case <-timer.C:
+			agentServer.Stop()
+		}
+	}()
+	go func() {
+		slog.Info("agent mTLS gateway listening", "address", cfg.AgentGatewayAddress(), "public_address", cfg.AgentGatewayPublicAddress)
+		if serveErr := agentServer.Serve(agentListener); serveErr != nil && ctx.Err() == nil {
+			slog.Error("serve agent mTLS gateway", "error", serveErr)
+			stop()
+		}
+	}()
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddress(),
@@ -128,6 +190,8 @@ func main() {
 			orm,
 			sessions,
 			credentialCipher,
+			authority,
+			gateway,
 			installQueue,
 			publishService,
 			purgeService,

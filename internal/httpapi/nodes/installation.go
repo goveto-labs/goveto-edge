@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/auth"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -27,13 +29,12 @@ WantedBy=multi-user.target
 `
 
 type installationInfo struct {
-	NodeID           string           `json:"node_id"`
-	Status           model.NodeStatus `json:"status"`
-	InstallError     *string          `json:"install_error,omitempty"`
-	CommunicationKey string           `json:"communication_key"`
-	IdentityJSON     string           `json:"identity_json"`
-	ServiceUnit      string           `json:"service_unit"`
-	Architectures    []string         `json:"architectures"`
+	NodeID        string           `json:"node_id"`
+	Status        model.NodeStatus `json:"status"`
+	InstallError  *string          `json:"install_error,omitempty"`
+	IdentityJSON  string           `json:"identity_json"`
+	ServiceUnit   string           `json:"service_unit"`
+	Architectures []string         `json:"architectures"`
 }
 
 func installationCredential(ctx *echo.Context, db *client.Client, cipher *node.CredentialCipher) (*model.Node, string, error) {
@@ -45,27 +46,32 @@ func installationCredential(ctx *echo.Context, db *client.Client, cipher *node.C
 	if err != nil {
 		return nil, "", err
 	}
-	if credential == nil {
-		return nil, "", echo.NewHTTPError(http.StatusNotFound, "node communication credential not found")
+	if credential == nil || credential.BootstrapIdentityEncrypted == nil {
+		return nil, "", echo.NewHTTPError(http.StatusNotFound, "node bootstrap identity not found")
 	}
-	key, err := cipher.Decrypt(credential.CommunicationKeyEncrypted)
+	identityJSON, err := cipher.Decrypt(*credential.BootstrapIdentityEncrypted)
 	if err != nil {
 		return nil, "", err
 	}
-	return item, key, nil
+	return item, identityJSON, nil
 }
 
 func getInstallation(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		item, key, err := installationCredential(c, db, cipher)
+		item, identityJSON, err := installationCredential(c, db, cipher)
 		if err != nil {
 			return err
 		}
+		if err := auditBootstrapIdentityAccess(c, db, item.Id, "node.bootstrap_identity.view"); err != nil {
+			return err
+		}
 		c.Response().Header().Set("Cache-Control", "no-store")
-		identity, _ := json.MarshalIndent(map[string]string{"node_id": item.Id, "communication_key": key}, "", "  ")
+		var identityValue any
+		_ = json.Unmarshal([]byte(identityJSON), &identityValue)
+		identity, _ := json.MarshalIndent(identityValue, "", "  ")
 		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": installationInfo{
 			NodeID: item.Id, Status: item.Status, InstallError: item.InstallError,
-			CommunicationKey: key, IdentityJSON: string(identity), ServiceUnit: agentServiceUnit,
+			IdentityJSON: string(identity), ServiceUnit: agentServiceUnit,
 			Architectures: []string{"amd64", "arm64"},
 		}})
 	}
@@ -96,17 +102,30 @@ func initializeManualInstallation(
 			return err
 		}
 
-		address, initializeErr := node.InitializeInstalledNode(ctx, db, cipher, item.ClusterId, item.Id)
-		if initializeErr != nil {
-			message := "manual initialization failed: " + initializeErr.Error()
-			if item.Status == model.NodeStatusPENDING || item.Status == model.NodeStatusINSTALL_FAILED {
-				_, _ = db.Node.Update().Where(query.Node.Id.Equals(item.Id)).Set(
-					query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
-					query.Node.InstallError.Set(message),
-					query.Node.HeartbeatAt.SetNull(),
-				).DoMany(ctx)
+		deadline := time.NewTimer(15 * time.Second)
+		defer deadline.Stop()
+		ticker := time.NewTicker(250 * time.Millisecond)
+		defer ticker.Stop()
+		for item.Status != model.NodeStatusONLINE {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-deadline.C:
+				message := "manual initialization failed: agent did not establish the mTLS management channel"
+				if item.Status == model.NodeStatusPENDING || item.Status == model.NodeStatusINSTALL_FAILED {
+					_, _ = db.Node.Update().Where(query.Node.Id.Equals(item.Id)).Set(
+						query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+						query.Node.InstallError.Set(message),
+						query.Node.HeartbeatAt.SetNull(),
+					).DoMany(ctx)
+				}
+				return echo.NewHTTPError(http.StatusBadGateway, message)
+			case <-ticker.C:
+				item, err = nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
+				if err != nil {
+					return err
+				}
 			}
-			return echo.NewHTTPError(http.StatusBadGateway, message)
 		}
 		if err := enqueueDNSIfChanged(ctx, dnsService, item.ClusterId); err != nil {
 			return err
@@ -114,7 +133,7 @@ func initializeManualInstallation(
 		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": map[string]any{
 			"id":      item.Id,
 			"status":  model.NodeStatusONLINE,
-			"message": "node initialized through " + address,
+			"message": "node initialized through the mTLS management channel",
 		}})
 	}
 }
@@ -139,15 +158,31 @@ func downloadAgentBinary(db *client.Client) echo.HandlerFunc {
 
 func downloadIdentity(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		item, key, err := installationCredential(c, db, cipher)
+		item, identityJSON, err := installationCredential(c, db, cipher)
 		if err != nil {
 			return err
 		}
-		data, _ := json.MarshalIndent(map[string]string{"node_id": item.Id, "communication_key": key}, "", "  ")
+		if err := auditBootstrapIdentityAccess(c, db, item.Id, "node.bootstrap_identity.download"); err != nil {
+			return err
+		}
+		var identityValue any
+		_ = json.Unmarshal([]byte(identityJSON), &identityValue)
+		data, _ := json.MarshalIndent(identityValue, "", "  ")
 		c.Response().Header().Set("Cache-Control", "no-store")
 		c.Response().Header().Set("Content-Disposition", `attachment; filename="identity.json"`)
 		return c.Blob(http.StatusOK, "application/json", data)
 	}
+}
+
+func auditBootstrapIdentityAccess(c *echo.Context, db *client.Client, nodeID, action string) error {
+	uid := auth.CurrentUID(c)
+	_, err := db.AuditLog.Create().Set(
+		query.AuditLog.ActorId.Set(uid),
+		query.AuditLog.Actor.Set(uid),
+		query.AuditLog.Action.Set(action),
+		query.AuditLog.Resource.Set("node/"+nodeID+"/bootstrap-identity"),
+	).Do(c.Request().Context())
+	return err
 }
 
 func downloadServiceUnit(db *client.Client) echo.HandlerFunc {

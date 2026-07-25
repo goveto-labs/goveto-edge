@@ -3,8 +3,7 @@ package nodes
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/base64"
+	"encoding/json"
 	"log/slog"
 	"net/http"
 
@@ -14,6 +13,7 @@ import (
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -21,8 +21,8 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
-func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, dnsService *dnssync.Service) {
-	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
+func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, authority *edgecontrol.Authority, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) {
+	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher, authority), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials", listSSHCredentials(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/ssh-credentials", createSSHCredential(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
@@ -32,20 +32,21 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, gateway), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", updateAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", deleteAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", updateDNSLines(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", revokeNodeCredential(db, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher, authority, gateway), authn.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, clusteraccess.RequireOwner(db))
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/binary/:arch", downloadAgentBinary(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", downloadIdentity(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", downloadIdentity(db, cipher), authn.RequireAuth, clusteraccess.RequireOwner(db))
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/service", downloadServiceUnit(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
 }
 
 type testConnectionRequest struct {
@@ -95,6 +96,8 @@ func reinstall(
 	db *client.Client,
 	queue *nodedomain.InstallQueue,
 	cipher *nodedomain.CredentialCipher,
+	authority *edgecontrol.Authority,
+	gateway *edgecontrol.Gateway,
 ) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input reinstallRequest
@@ -129,23 +132,57 @@ func reinstall(
 			return err
 		}
 		if credential == nil {
-			return echo.NewHTTPError(http.StatusConflict, "node communication credential is missing")
+			return echo.NewHTTPError(http.StatusConflict, "node credential is missing")
 		}
-		if input.Force {
-			_ = queue.Delete(ctx, node.Id)
+		bundle, err := authority.IssueNode(node.Id)
+		if err != nil {
+			return err
 		}
-		if _, err := db.Node.Update().
-			Where(query.Node.Id.Equals(node.Id)).
-			Set(
+		identityJSON, err := json.Marshal(bundle)
+		if err != nil {
+			return err
+		}
+		encryptedIdentity, err := cipher.Encrypt(string(identityJSON))
+		if err != nil {
+			return err
+		}
+		if err := db.Tx(ctx, func(tx *client.Client) error {
+			if _, err := tx.NodeCredential.Update().Where(query.NodeCredential.NodeId.Equals(node.Id)).Set(
+				query.NodeCredential.CertificateSerial.Set(bundle.Serial),
+				query.NodeCredential.CertificateNotAfter.Set(bundle.NotAfter),
+				query.NodeCredential.BootstrapIdentityEncrypted.Set(encryptedIdentity),
+				query.NodeCredential.PreviousCertificateSerial.SetNull(),
+				query.NodeCredential.PreviousCertificateValidUntil.SetNull(),
+				query.NodeCredential.RotationCsrSha256.SetNull(),
+				query.NodeCredential.RotationCertificatePem.SetNull(),
+				query.NodeCredential.RevokedAt.SetNull(),
+			).Do(ctx); err != nil {
+				return err
+			}
+			_, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
 				query.Node.Status.Set(model.NodeStatusPENDING),
 				query.Node.InstallError.SetNull(),
 				query.Node.HeartbeatAt.SetNull(),
 				query.Node.SshCredentialId.Set(sshCredential.Id),
 				query.Node.SshHost.Set(input.SSH.EntryIP),
 				query.Node.SshPort.Set(int(input.SSH.Port)),
-			).
-			Do(ctx); err != nil {
+			).Do(ctx)
+			if err != nil {
+				return err
+			}
+			_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
+				error = 'node reinstallation replaced the active credential',
+				lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id)
 			return err
+		}); err != nil {
+			return err
+		}
+		if gateway != nil {
+			gateway.Disconnect(ctx, node.Id)
+		}
+		if input.Force {
+			_ = queue.Delete(ctx, node.Id)
 		}
 		if err := queue.Enqueue(ctx, node.Id, nodedomain.InstallPayload{NodeID: node.Id}); err != nil {
 			message := "unable to queue node reinstallation: " + err.Error()
@@ -175,7 +212,7 @@ func reinstall(
 // @summary Create node
 // @description Create a node and enqueue remote installation with SSH credentials.
 // @Tags nodes
-func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
+func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, authority *edgecontrol.Authority) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input nodedomain.CreateInput
 		if err := c.Bind(&input); err != nil {
@@ -202,12 +239,15 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		}
 
 		nodeID := uuid.NewString()
-		communicationKey, err := newCommunicationKey()
+		bundle, err := authority.IssueNode(nodeID)
 		if err != nil {
 			return err
 		}
-
-		encryptedCommunicationKey, err := cipher.Encrypt(communicationKey)
+		identityJSON, err := json.Marshal(bundle)
+		if err != nil {
+			return err
+		}
+		encryptedIdentity, err := cipher.Encrypt(string(identityJSON))
 		if err != nil {
 			return err
 		}
@@ -234,7 +274,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			if _, err := tx.NodeCredential.Create().
 				Set(
 					query.NodeCredential.NodeId.Set(nodeID),
-					query.NodeCredential.CommunicationKeyEncrypted.Set(encryptedCommunicationKey),
+					query.NodeCredential.CertificateSerial.Set(bundle.Serial),
+					query.NodeCredential.CertificateNotAfter.Set(bundle.NotAfter),
+					query.NodeCredential.BootstrapIdentityEncrypted.Set(encryptedIdentity),
 				).
 				Do(ctx); err != nil {
 				return err
@@ -317,14 +359,6 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		)
 		return types.JSON(c, http.StatusAccepted, types.NewNode(created))
 	}
-}
-
-func newCommunicationKey() (string, error) {
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
 func validateReferences(ctx context.Context, db *client.Client, input nodedomain.CreateInput) error {

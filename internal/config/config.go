@@ -18,19 +18,22 @@ import (
 )
 
 type Config struct {
-	AppEnv                  string
-	HTTPHost                string
-	HTTPPort                int
-	HTTPReadHeaderTimeout   time.Duration
-	ShutdownTimeout         time.Duration
-	DatabaseURL             string
-	RedisURL                string
-	ClickHouseDSN           string
-	NodeCredentialMasterKey string
-	DataDir                 string
-	SessionCookieName       string
-	SessionTTL              time.Duration
-	SessionCookieSecure     bool
+	AppEnv                    string
+	HTTPHost                  string
+	HTTPPort                  int
+	HTTPReadHeaderTimeout     time.Duration
+	AgentGatewayHost          string
+	AgentGatewayPort          int
+	AgentGatewayPublicAddress string
+	ShutdownTimeout           time.Duration
+	DatabaseURL               string
+	RedisURL                  string
+	ClickHouseDSN             string
+	NodeCredentialMasterKey   string
+	DataDir                   string
+	SessionCookieName         string
+	SessionTTL                time.Duration
+	SessionCookieSecure       bool
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -41,6 +44,10 @@ func Load() (Config, error) {
 	}
 
 	port, err := envInt("HTTP_PORT", 8080)
+	if err != nil {
+		return Config{}, err
+	}
+	agentGatewayPort, err := envInt("AGENT_GATEWAY_PORT", 8443)
 	if err != nil {
 		return Config{}, err
 	}
@@ -59,17 +66,20 @@ func Load() (Config, error) {
 		defaultDataDir = "/var/lib/goveto-edge"
 	}
 	cfg := Config{
-		AppEnv:                appEnv,
-		DataDir:               envString("GOVETO_DATA_DIR", defaultDataDir),
-		HTTPHost:              envString("HTTP_HOST", "0.0.0.0"),
-		HTTPPort:              port,
-		HTTPReadHeaderTimeout: readHeaderTimeout,
-		ShutdownTimeout:       shutdownTimeout,
-		DatabaseURL:           os.Getenv("DATABASE_URL"),
-		RedisURL:              os.Getenv("REDIS_URL"),
-		ClickHouseDSN:         os.Getenv("CLICKHOUSE_DSN"),
-		SessionCookieName:     envString("SESSION_COOKIE_NAME", "goveto_session"),
-		SessionCookieSecure:   envBool("SESSION_COOKIE_SECURE", false),
+		AppEnv:                    appEnv,
+		DataDir:                   envString("GOVETO_DATA_DIR", defaultDataDir),
+		HTTPHost:                  envString("HTTP_HOST", "0.0.0.0"),
+		HTTPPort:                  port,
+		HTTPReadHeaderTimeout:     readHeaderTimeout,
+		AgentGatewayHost:          envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
+		AgentGatewayPort:          agentGatewayPort,
+		AgentGatewayPublicAddress: envString("AGENT_GATEWAY_PUBLIC_ADDRESS", fmt.Sprintf("127.0.0.1:%d", agentGatewayPort)),
+		ShutdownTimeout:           shutdownTimeout,
+		DatabaseURL:               os.Getenv("DATABASE_URL"),
+		RedisURL:                  os.Getenv("REDIS_URL"),
+		ClickHouseDSN:             os.Getenv("CLICKHOUSE_DSN"),
+		SessionCookieName:         envString("SESSION_COOKIE_NAME", "goveto_session"),
+		SessionCookieSecure:       envBool("SESSION_COOKIE_SECURE", false),
 	}
 	cfg.SessionTTL, err = envDuration("SESSION_TTL", 24*time.Hour)
 	if err != nil {
@@ -84,7 +94,14 @@ func Load() (Config, error) {
 	if cfg.HTTPPort < 1 || cfg.HTTPPort > 65535 {
 		return Config{}, fmt.Errorf("HTTP_PORT must be between 1 and 65535")
 	}
-	cfg.NodeCredentialMasterKey, err = loadOrCreateMasterKey(cfg.DataDir)
+	if cfg.AgentGatewayPort < 1 || cfg.AgentGatewayPort > 65535 {
+		return Config{}, fmt.Errorf("AGENT_GATEWAY_PORT must be between 1 and 65535")
+	}
+	if configuredMasterKey := strings.TrimSpace(os.Getenv("NODE_CREDENTIAL_MASTER_KEY")); configuredMasterKey != "" {
+		cfg.NodeCredentialMasterKey, err = validateMasterKey(configuredMasterKey, "NODE_CREDENTIAL_MASTER_KEY")
+	} else {
+		cfg.NodeCredentialMasterKey, err = loadOrCreateMasterKey(cfg.DataDir)
+	}
 	if err != nil {
 		return Config{}, err
 	}
@@ -105,6 +122,10 @@ func envBool(key string, fallback bool) bool {
 
 func (c Config) HTTPAddress() string {
 	return fmt.Sprintf("%s:%d", c.HTTPHost, c.HTTPPort)
+}
+
+func (c Config) AgentGatewayAddress() string {
+	return fmt.Sprintf("%s:%d", c.AgentGatewayHost, c.AgentGatewayPort)
 }
 
 func loadOrCreateMasterKey(dataDir string) (string, error) {

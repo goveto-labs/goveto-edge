@@ -43,7 +43,7 @@ func TestInstallPayloadJSONContainsOnlyNodeID(t *testing.T) {
 	if err := json.Unmarshal(raw, &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.NodeID != want.NodeID || got.SSH != nil || got.CommunicationKey != "" {
+	if got.NodeID != want.NodeID || got.SSH != nil || got.IdentityJSON != "" {
 		t.Fatalf("unexpected install payload: %#v", got)
 	}
 	if string(raw) != `{"node_id":"node-1"}` {

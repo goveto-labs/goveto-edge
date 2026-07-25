@@ -1,0 +1,123 @@
+package edgecontrol
+
+import (
+	"context"
+	"encoding/json"
+	"testing"
+	"time"
+)
+
+func TestDisconnectCancelsLocalSessionWithoutDatabase(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	active := &session{cancel: cancel, wake: make(chan struct{}, 1), owner: "test"}
+	gateway.register("node-1", active)
+
+	gateway.Disconnect(context.Background(), "node-1")
+	select {
+	case <-ctx.Done():
+	default:
+		t.Fatal("disconnect did not cancel the local session")
+	}
+}
+
+func TestWakeSignalsLocalSessionWithoutDatabase(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	active := &session{cancel: func() {}, wake: make(chan struct{}, 1), owner: "test"}
+	gateway.register("node-1", active)
+
+	gateway.signal(context.Background(), "wake", "node-1")
+	select {
+	case <-active.wake:
+	default:
+		t.Fatal("wake did not signal the local session")
+	}
+}
+
+func TestRegisterReplacesPreviousSession(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	first := &session{cancel: firstCancel, wake: make(chan struct{}, 1), owner: "first"}
+	gateway.register("node-1", first)
+
+	secondCtx, secondCancel := context.WithCancel(context.Background())
+	defer secondCancel()
+	second := &session{cancel: secondCancel, wake: make(chan struct{}, 1), owner: "second"}
+	gateway.register("node-1", second)
+
+	select {
+	case <-firstCtx.Done():
+	default:
+		t.Fatal("register did not cancel the previous session")
+	}
+	select {
+	case <-secondCtx.Done():
+		t.Fatal("register cancelled the current session")
+	default:
+	}
+
+	gateway.unregister("node-1", first)
+	gateway.mu.Lock()
+	active := gateway.sessions["node-1"]
+	gateway.mu.Unlock()
+	if active != second {
+		t.Fatal("unregister removed the active session using a stale pointer")
+	}
+}
+
+func TestApplyEventIgnoresUnknownKinds(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	active := &session{cancel: func() {}, wake: make(chan struct{}, 1), owner: "test"}
+	gateway.register("node-1", active)
+	gateway.applyEvent(gatewayEvent{Kind: "noop", NodeID: "node-1"})
+	select {
+	case <-active.wake:
+		t.Fatal("unknown event kind should not wake the session")
+	default:
+	}
+}
+
+func TestWakeIsNonBlockingWhenAlreadySignaled(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	active := &session{cancel: func() {}, wake: make(chan struct{}, 1), owner: "test"}
+	gateway.register("node-1", active)
+	gateway.wakeLocal("node-1")
+	gateway.wakeLocal("node-1")
+	select {
+	case <-active.wake:
+	default:
+		t.Fatal("expected one buffered wake signal")
+	}
+	select {
+	case <-active.wake:
+		t.Fatal("wake channel should stay non-blocking with capacity 1")
+	default:
+	}
+}
+
+func TestResetTimerDrainsExpiredChannel(t *testing.T) {
+	timer := time.NewTimer(time.Millisecond)
+	defer timer.Stop()
+	time.Sleep(5 * time.Millisecond)
+	resetTimer(timer, 50*time.Millisecond)
+	select {
+	case <-timer.C:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("reset timer did not fire")
+	}
+}
+
+func TestNullableHelpers(t *testing.T) {
+	if nullableJSON(nil) != nil {
+		t.Fatal("empty json should become nil")
+	}
+	if nullableJSON(json.RawMessage(`{}`)) == nil {
+		t.Fatal("non-empty json should be preserved")
+	}
+	if nullableString("") != nil {
+		t.Fatal("empty string should become nil")
+	}
+	if nullableString("err") != "err" {
+		t.Fatal("non-empty string should be preserved")
+	}
+}

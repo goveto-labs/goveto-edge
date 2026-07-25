@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -25,11 +24,12 @@ import (
 type Service struct {
 	db          *client.Client
 	cipher      *node.CredentialCipher
+	gateway     *edgecontrol.Gateway
 	concurrency int
 }
 
-func New(db *client.Client, cipher *node.CredentialCipher) *Service {
-	return &Service{db: db, cipher: cipher, concurrency: 8}
+func New(db *client.Client, cipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
+	return &Service{db: db, cipher: cipher, gateway: gateway, concurrency: 8}
 }
 
 // EnqueueCluster republishes every site after the cluster's available node set
@@ -191,9 +191,7 @@ func (s *Service) runOne(ctx context.Context) {
 }
 
 type target struct {
-	NodeID           string `json:"node_id"`
-	Address          string `json:"address"`
-	CommunicationKey string `json:"-"`
+	NodeID string `json:"node_id"`
 }
 type targetResult struct {
 	NodeID     string `json:"node_id"`
@@ -226,10 +224,6 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 	if err = json.Unmarshal(job.Targets, &targets); err != nil {
 		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
 	}
-	if err = s.loadCredentials(ctx, targets); err != nil {
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
-	}
-
 	results := s.fanout(ctx, config, targets)
 	succeeded, failed := successfulTargets(results, targets)
 	if len(failed) == 0 {
@@ -369,9 +363,10 @@ func (s *Service) fanout(ctx context.Context, config edgeprotocol.SiteConfig, ta
 				results[index] = targetResult{NodeID: item.NodeID, Error: ctx.Err().Error()}
 				return
 			}
-			endpoint := "http://" + net.JoinHostPort(item.Address, "80")
-			_, err := edgecontrol.New(endpoint, item.NodeID, item.CommunicationKey).
-				PushSiteConfig(ctx, config)
+			dispatchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			var applied edgecontrol.ApplySiteResult
+			err := s.gateway.Dispatch(dispatchCtx, item.NodeID, edgeprotocol.TaskApplySiteConfig, config, &applied)
 			results[index] = targetResult{NodeID: item.NodeID, Success: err == nil}
 			if err != nil {
 				results[index].Error = err.Error()
@@ -540,21 +535,14 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 
 	targets := make([]target, 0, len(nodes))
 	for _, n := range nodes {
-		addresses, addressErr := db.NodeAddress.Query().
-			Where(query.NodeAddress.NodeId.Equals(n.Id)).
-			OrderBy(query.NodeAddress.CreatedAt.Asc()).
-			First(ctx)
-		if addressErr != nil {
-			return config, nil, addressErr
+		credential, credentialErr := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
+		if credentialErr != nil {
+			return config, nil, errors.New("node " + n.Id + " has no management credential")
 		}
-		if addresses == nil {
+		if credential == nil || credential.RevokedAt != nil {
 			continue
 		}
-		_, credentialErr := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(n.Id))
-		if credentialErr != nil {
-			return config, nil, errors.New("node " + n.Id + " has no communication credential")
-		}
-		targets = append(targets, target{NodeID: n.Id, Address: addresses.Address})
+		targets = append(targets, target{NodeID: n.Id})
 	}
 	if len(targets) == 0 {
 		return config, nil, errors.New("cluster has no publishable nodes")
@@ -585,21 +573,6 @@ func normalizeListenerForCertificates(config *edgeprotocol.SiteConfig) {
 	config.Listener.OCSPStaplingEnabled = false
 }
 
-func (s *Service) loadCredentials(ctx context.Context, targets []target) error {
-	for i := range targets {
-		credential, err := s.db.NodeCredential.FindUnique(
-			ctx, query.NodeCredential.NodeId.Equals(targets[i].NodeID),
-		)
-		if err != nil {
-			return fmt.Errorf("node %s has no communication credential: %w", targets[i].NodeID, err)
-		}
-		targets[i].CommunicationKey, err = s.cipher.Decrypt(credential.CommunicationKeyEncrypted)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
 func value(value *string) string {
 	if value == nil {
 		return ""

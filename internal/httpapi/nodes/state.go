@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -76,7 +77,7 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 }
 
 // @summary Enable node
-// @description Re-enable a disabled node and wait for health checks.
+// @description Re-enable a disabled node and wait for its management channel.
 // @Tags nodes
 func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -104,14 +105,14 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "waiting for health check"})
+		return types.JSON(c, http.StatusAccepted, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "waiting for the agent management channel"})
 	}
 }
 
 // @summary Disable node
 // @description Disable a node and remove it from DNS scheduling.
 // @Tags nodes
-func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
+func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		node, err := nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
@@ -119,6 +120,14 @@ func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFun
 			return err
 		}
 		if node.Status == model.NodeStatusDISABLED {
+			if _, err := db.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
+				error = 'node is disabled', lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id); err != nil {
+				return err
+			}
+			if gateway != nil {
+				gateway.Disconnect(ctx, node.Id)
+			}
 			return types.JSON(c, http.StatusOK, nodeStatusResponse{ID: node.Id, Status: node.Status})
 		}
 		if node.Status != model.NodeStatusONLINE && node.Status != model.NodeStatusOFFLINE && node.Status != model.NodeStatusINSTALL_FAILED {
@@ -128,15 +137,49 @@ func disableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFun
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusDISABLED)).Do(ctx); err != nil {
 				return err
 			}
-			return nil
+			_, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
+				error = 'node was disabled', lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id)
+			return err
 		})
 		if err != nil {
 			return err
+		}
+		if gateway != nil {
+			gateway.Disconnect(ctx, node.Id)
 		}
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusDISABLED})
+	}
+}
+
+// @summary Revoke node management credential
+// @description Revoke the active mTLS certificate and disconnect the management channel. Reinstallation is required to admit the node again.
+// @Tags nodes
+func revokeNodeCredential(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		node, err := nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
+		if err != nil {
+			return err
+		}
+		if err := gateway.Revoke(ctx, node.Id); err != nil {
+			return err
+		}
+		if _, err := db.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
+			query.Node.Status.Set(model.NodeStatusOFFLINE),
+			query.Node.HeartbeatAt.SetNull(),
+		).Do(ctx); err != nil {
+			return err
+		}
+		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, nodeStatusResponse{
+			ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "management credential revoked; reinstall the node to reconnect",
+		})
 	}
 }
 

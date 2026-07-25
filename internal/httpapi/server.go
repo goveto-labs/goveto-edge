@@ -10,6 +10,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/edgecontrol"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
@@ -34,6 +35,8 @@ func New(
 	orm *client.Client,
 	sessions *auth.SessionStore,
 	credentialCipher *node.CredentialCipher,
+	authority *edgecontrol.Authority,
+	gateway *edgecontrol.Gateway,
 	installQueue *node.InstallQueue,
 	publishService *publisher.Service,
 	purgeService *purge.Service,
@@ -53,7 +56,7 @@ func New(
 	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm)
 	dnsapi.Register(e, orm, credentialCipher, dnsService)
-	nodes.Register(e, orm, installQueue, credentialCipher, dnsService)
+	nodes.Register(e, orm, installQueue, credentialCipher, authority, gateway, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	var analyticsData *analytics.Store

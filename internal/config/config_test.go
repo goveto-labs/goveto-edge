@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"os"
 	"path/filepath"
@@ -8,11 +9,32 @@ import (
 	"testing"
 )
 
+func TestLoadUsesSharedMasterKeyWithoutLocalSecretFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "not-created")
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", dir)
+	shared := base64.StdEncoding.EncodeToString(make([]byte, 32))
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", shared)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.NodeCredentialMasterKey != shared {
+		t.Fatal("shared master key was not used")
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("shared master key unexpectedly created local data: %v", err)
+	}
+}
+
 func TestLoadFromEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
 	t.Setenv("HTTP_PORT", "9090")
+	t.Setenv("AGENT_GATEWAY_PORT", "9443")
+	t.Setenv("AGENT_GATEWAY_PUBLIC_ADDRESS", "control.example:9443")
 
 	cfg, err := Load()
 	if err != nil {
@@ -20,6 +42,9 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 	if cfg.HTTPAddress() != "0.0.0.0:9090" {
 		t.Fatalf("unexpected HTTP address: %s", cfg.HTTPAddress())
+	}
+	if cfg.AgentGatewayAddress() != "0.0.0.0:9443" || cfg.AgentGatewayPublicAddress != "control.example:9443" {
+		t.Fatalf("unexpected agent gateway config: listen=%s public=%s", cfg.AgentGatewayAddress(), cfg.AgentGatewayPublicAddress)
 	}
 }
 

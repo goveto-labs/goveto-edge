@@ -35,7 +35,6 @@ func TestApplySitePersistenceFailureDoesNotAdvanceVersion(t *testing.T) {
 	}
 	agentPort := freePort(t)
 	manager := NewConfigManager(filepath.Join(parent, "sites.json"), ":"+strconv.Itoa(agentPort))
-	manager.SetAgentHost("550e8400-e29b-41d4-a716-446655440000")
 	config := validHTTPConfig(t)
 	first := manager.ApplySite(config)
 	second := manager.ApplySite(config)
@@ -59,7 +58,6 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sites.json")
 	agentPort := freePort(t)
 	manager := NewConfigManager(path, ":"+strconv.Itoa(agentPort))
-	manager.SetAgentHost("550e8400-e29b-41d4-a716-446655440000")
 	config := validHTTPConfig(t)
 	if err := manager.ApplySite(config); err != nil {
 		t.Fatalf("apply site: %v", err)
@@ -96,7 +94,6 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := NewConfigManager(path, ":"+strconv.Itoa(freePort(t)))
-	restored.SetAgentHost("550e8400-e29b-41d4-a716-446655440000")
 	if err := restored.Restore(); err != nil {
 		t.Fatalf("restore: %v", err)
 	}
@@ -117,7 +114,6 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	originAddress := strings.TrimPrefix(origin.URL, "http://")
 	port := freePort(t)
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
-	manager.SetAgentHost("node-id")
 	config := SiteConfig{
 		SiteID:   "site-http",
 		Version:  1,
@@ -201,14 +197,13 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 		t.Fatalf("unexpected listeners: %#v", listen)
 	}
 	routes := edge["routes"].([]any)
-	if len(routes) < 2 {
-		t.Fatalf("expected agent + site routes, got %d", len(routes))
-	}
-	agentRoute := routes[0].(map[string]any)
-	if agentRoute["@id"] != "goveto_agent_api" {
-		t.Fatalf("agent route missing: %#v", agentRoute)
+	if len(routes) < 1 {
+		t.Fatalf("expected site routes, got %d", len(routes))
 	}
 	raw := string(encoded)
+	if strings.Contains(raw, "goveto_agent") {
+		t.Fatalf("management API leaked onto the user traffic listener: %s", raw)
+	}
 	if !strings.Contains(raw, `"policy":"client_ip_hash"`) {
 		t.Fatalf("ip_hash was not mapped: %s", raw)
 	}

@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/dnssync"
+	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -16,7 +17,7 @@ import (
 // @summary Delete node
 // @description Delete a node and related credentials, addresses and config records.
 // @Tags nodes
-func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *dnssync.Service) echo.HandlerFunc {
+func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		nodeID := c.Param("node_id")
@@ -26,6 +27,9 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, dnsService *d
 		}
 		if node == nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
+		}
+		if err := gateway.Revoke(ctx, nodeID); err != nil {
+			return err
 		}
 		if err := db.Tx(ctx, func(tx *client.Client) error {
 			if _, err := tx.DNSManagedRecord.Update().

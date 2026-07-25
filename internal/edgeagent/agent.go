@@ -27,7 +27,7 @@ func New() *Agent {
 	return &Agent{
 		identityPath: envOr("EDGE_AGENT_IDENTITY_FILE", "/opt/goveto-edge/agent/identity.json"),
 		dataDir:      dataDir,
-		configs:      NewConfigManager(filepath.Join(dataDir, "sites.json"), envOr("EDGE_AGENT_LISTEN", ":80")),
+		configs:      NewConfigManager(filepath.Join(dataDir, "sites.json"), envOr("EDGE_USER_LISTEN", ":80")),
 		nodeConfigs:  NewNodeConfigStore(filepath.Join(dataDir, "node.json")),
 	}
 }
@@ -46,18 +46,29 @@ func (a *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("open log queue: %w", err)
 	}
 	agentlog.SetSink(agentLogSink{queue: a.logs})
-	a.configs.SetAgentHost(identity.NodeID)
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
 		return fmt.Errorf("apply node cache config: %w", err)
 	}
-	auth := newAuthenticator(identity, filepath.Join(a.dataDir, "nonces.json"))
-	setAgentHTTPHandler(newAgentServer(identity, a.configs, a.nodeConfigs, a.logs, auth))
 	if err := a.configs.Restore(); err != nil {
 		return fmt.Errorf("restore site configs: %w", err)
 	}
 	go collectMetrics(ctx, a.logs, a.nodeConfigs)
-	<-ctx.Done()
-	return a.Stop()
+	channelErrors := make(chan error, 1)
+	go func() {
+		channelErrors <- (&channelClient{
+			identityPath: a.identityPath, identity: identity, configs: a.configs,
+			nodeConfigs: a.nodeConfigs, logs: a.logs,
+		}).Run(ctx)
+	}()
+	select {
+	case <-ctx.Done():
+		return a.Stop()
+	case err := <-channelErrors:
+		if stopErr := a.Stop(); stopErr != nil {
+			return errors.Join(err, stopErr)
+		}
+		return err
+	}
 }
 
 func (a *Agent) Stop() error {

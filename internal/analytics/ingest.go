@@ -3,105 +3,34 @@ package analytics
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net"
 	"strings"
-	"sync"
 	"time"
 
-	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
-	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
 type Ingest struct {
-	db      *client.Client
-	cipher  *node.CredentialCipher
-	store   *Store
-	mu      sync.Mutex
-	running map[string]struct{}
+	db    *client.Client
+	store *Store
 }
 
-func NewIngest(db *client.Client, c *node.CredentialCipher, s *Store) *Ingest {
-	return &Ingest{
-		db:      db,
-		cipher:  c,
-		store:   s,
-		running: map[string]struct{}{},
-	}
+func NewIngest(db *client.Client, _ *node.CredentialCipher, s *Store) *Ingest {
+	return &Ingest{db: db, store: s}
 }
 
-func (i *Ingest) Run(ctx context.Context) {
-	t := time.NewTicker(15 * time.Second)
-	defer t.Stop()
-
-	for {
-		i.reconcile(ctx)
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-	}
-}
-
-func (i *Ingest) reconcile(ctx context.Context) {
-	nodes, err := i.db.Node.Query().Where(query.Node.Status.Equals(model.NodeStatusONLINE)).Do(ctx)
+func (i *Ingest) Consume(ctx context.Context, nodeID string, records []edgeprotocol.LogRecord) error {
+	nodeRecord, err := i.db.Node.FindUnique(ctx, query.Node.Id.Equals(nodeID))
 	if err != nil {
-		slog.Error("query analytics nodes", "error", err)
-		return
+		return err
 	}
-
-	for _, n := range nodes {
-		i.mu.Lock()
-		_, ok := i.running[n.Id]
-		if !ok {
-			i.running[n.Id] = struct{}{}
-		}
-		i.mu.Unlock()
-
-		if !ok {
-			go i.pull(ctx, n.Id, n.ClusterId)
-		}
+	if nodeRecord == nil {
+		return nil
 	}
-}
-
-func (i *Ingest) pull(ctx context.Context, nodeID, clusterID string) {
-	defer func() {
-		i.mu.Lock()
-		delete(i.running, nodeID)
-		i.mu.Unlock()
-	}()
-
-	a, err := i.db.NodeAddress.Query().
-		Where(query.NodeAddress.NodeId.Equals(nodeID)).
-		OrderBy(query.NodeAddress.CreatedAt.Asc()).
-		First(ctx)
-	if err != nil || a == nil {
-		return
-	}
-
-	cr, err := i.db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(nodeID))
-	if err != nil {
-		return
-	}
-
-	key, err := i.cipher.Decrypt(cr.CommunicationKeyEncrypted)
-	if err != nil {
-		return
-	}
-
-	client := edgecontrol.New("http://"+net.JoinHostPort(a.Address, "80"), nodeID, key)
-	err = client.PullLogs(ctx, func(ctx context.Context, records []edgeprotocol.LogRecord) error {
-		return i.consume(ctx, clusterID, nodeID, records)
-	})
-	if err != nil && ctx.Err() == nil {
-		slog.Error("pull node analytics", "cluster_id", clusterID, "node_id", nodeID, "error", err)
-	}
+	return i.consume(ctx, nodeRecord.ClusterId, nodeID, records)
 }
 
 func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord) error {

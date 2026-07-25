@@ -53,9 +53,9 @@ func (s *SSHInstallReference) Validate() error {
 }
 
 type InstallPayload struct {
-	NodeID           string           `json:"node_id"`
-	CommunicationKey string           `json:"communication_key,omitempty"`
-	SSH              *SSHInstallInput `json:"ssh,omitempty"`
+	NodeID       string           `json:"node_id"`
+	IdentityJSON string           `json:"-"`
+	SSH          *SSHInstallInput `json:"ssh,omitempty"`
 }
 
 func (i *CreateInput) Validate() error {

@@ -23,17 +23,14 @@ import (
 )
 
 type ConfigManager struct {
-	mu          sync.Mutex
-	sites       map[string]SiteConfig
-	path        string
-	agentListen string
-	agentHost   string
-	nodeConfig  NodeConfig
+	mu            sync.Mutex
+	sites         map[string]SiteConfig
+	path          string
+	defaultListen string
+	nodeConfig    NodeConfig
 }
 
-func (m *ConfigManager) SetAgentHost(host string) { m.mu.Lock(); m.agentHost = host; m.mu.Unlock() }
-
-func NewConfigManager(path, agentListen string) *ConfigManager {
+func NewConfigManager(path, defaultListen string) *ConfigManager {
 	manager := &ConfigManager{
 		sites: map[string]SiteConfig{},
 		nodeConfig: NodeConfig{
@@ -43,7 +40,7 @@ func NewConfigManager(path, agentListen string) *ConfigManager {
 		},
 	}
 	manager.path = path
-	manager.agentListen = agentListen
+	manager.defaultListen = defaultListen
 	return manager
 }
 
@@ -51,7 +48,7 @@ func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	encoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost, config)
+	encoded, err := renderCaddyConfig(m.sites, m.defaultListen, "", config)
 	if err != nil {
 		return err
 	}
@@ -90,7 +87,7 @@ func (m *ConfigManager) Restore() error {
 }
 
 func (m *ConfigManager) load(sites map[string]SiteConfig) error {
-	encoded, err := renderCaddyConfig(sites, m.agentListen, m.agentHost, m.nodeConfig)
+	encoded, err := renderCaddyConfig(sites, m.defaultListen, "", m.nodeConfig)
 	if err != nil {
 		return err
 	}
@@ -110,7 +107,7 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 		return errors.New("site config version is not newer")
 	}
 
-	previousEncoded, err := renderCaddyConfig(m.sites, m.agentListen, m.agentHost, m.nodeConfig)
+	previousEncoded, err := renderCaddyConfig(m.sites, m.defaultListen, "", m.nodeConfig)
 	if err != nil {
 		return fmt.Errorf("render previous site config: %w", err)
 	}
@@ -118,7 +115,7 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	candidate := cloneSites(m.sites)
 	candidate[config.SiteID] = config
 
-	encoded, err := renderCaddyConfig(candidate, m.agentListen, m.agentHost, m.nodeConfig)
+	encoded, err := renderCaddyConfig(candidate, m.defaultListen, "", m.nodeConfig)
 	if err != nil {
 		return fmt.Errorf("render site config: %w", err)
 	}
@@ -226,7 +223,7 @@ func cloneSites(source map[string]SiteConfig) map[string]SiteConfig {
 	return target
 }
 
-func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost string, nodeConfigs ...NodeConfig) ([]byte, error) {
+func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nodeConfigs ...NodeConfig) ([]byte, error) {
 	nodeConfig := NodeConfig{
 		CacheDirectory:      "/opt/goveto-edge/cache",
 		AutoMaxSize:         true,
@@ -242,20 +239,10 @@ func renderCaddyConfig(sites map[string]SiteConfig, agentListen, agentHost strin
 	}
 	sort.Strings(ids)
 
-	routes := make([]any, 0, len(ids)*2+1)
-	routes = append(routes, map[string]any{
-		"@id": "goveto_agent_api",
-		"match": []any{
-			map[string]any{"host": []string{agentHost}},
-		},
-		"handle": []any{
-			map[string]any{"handler": "goveto_agent"},
-		},
-		"terminal": true,
-	})
+	routes := make([]any, 0, len(ids)*2)
 
 	listeners, protocols := map[string]struct{}{}, map[string]struct{}{"h1": {}}
-	listeners[agentListen] = struct{}{}
+	listeners[defaultListen] = struct{}{}
 	policies, certificates := make([]any, 0), make([]any, 0)
 
 	for _, id := range ids {

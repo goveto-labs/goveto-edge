@@ -26,7 +26,6 @@ func TestAgentCompressionEndToEnd(t *testing.T) {
 
 	port := freePort(t)
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(freePort(t)))
-	manager.SetAgentHost("node-id")
 	t.Cleanup(func() { _ = manager.Stop() })
 
 	policy := compressionpolicy.DefaultCompressionPolicy()

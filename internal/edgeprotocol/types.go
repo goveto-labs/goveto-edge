@@ -1,4 +1,4 @@
-// Package edgeprotocol contains dependency-free wire types shared by control and agent.
+// Package edgeprotocol contains wire types shared by the control plane and agent.
 package edgeprotocol
 
 import (

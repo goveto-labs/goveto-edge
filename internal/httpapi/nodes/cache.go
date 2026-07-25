@@ -1,16 +1,16 @@
 package nodes
 
 import (
-	"net"
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
-	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -44,7 +44,7 @@ func getCacheConfig(db *client.Client) echo.HandlerFunc {
 // @summary Update node cache config
 // @description Update node disk cache settings and attempt to sync to the edge agent.
 // @Tags nodes
-func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
+func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureNodeInCluster(c, db); err != nil {
 			return err
@@ -83,27 +83,12 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 		}
 
 		response := cacheUpdateResponse{CacheConfig: types.NewNodeCacheConfig(updated)}
-		address, addressErr := db.NodeAddress.Query().
-			Where(query.NodeAddress.NodeId.Equals(nodeID)).
-			OrderBy(query.NodeAddress.CreatedAt.Asc()).
-			First(ctx)
-		credential, credentialErr := db.NodeCredential.FindUnique(
-			ctx, query.NodeCredential.NodeId.Equals(nodeID),
-		)
-		if addressErr == nil && address != nil && credentialErr == nil {
-			key, decryptErr := cipher.Decrypt(credential.CommunicationKeyEncrypted)
-			if decryptErr == nil {
-				syncErr := edgecontrol.New(
-					"http://"+net.JoinHostPort(address.Address, "80"),
-					nodeID,
-					key,
-				).PushNodeCacheConfig(ctx, input)
-				if syncErr == nil {
-					response.Synced = true
-				} else {
-					response.SyncError = syncErr.Error()
-				}
-			}
+		dispatchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		if syncErr := gateway.Dispatch(dispatchCtx, nodeID, edgeprotocol.TaskNodeCacheConfig, input, nil); syncErr == nil {
+			response.Synced = true
+		} else {
+			response.SyncError = syncErr.Error()
 		}
 		return types.JSON(c, http.StatusOK, response)
 	}
@@ -111,7 +96,10 @@ func updateCacheConfig(db *client.Client, cipher *nodedomain.CredentialCipher) e
 
 func ensureNodeInCluster(c *echo.Context, db *client.Client) error {
 	node, err := db.Node.FindUnique(c.Request().Context(), query.Node.Id.Equals(c.Param("node_id")))
-	if err != nil || node.ClusterId != c.Param("cluster_id") {
+	if err != nil {
+		return err
+	}
+	if node == nil || node.ClusterId != c.Param("cluster_id") {
 		return echo.NewHTTPError(http.StatusNotFound, "node not found")
 	}
 	return nil
