@@ -46,6 +46,7 @@ type ClusterQuery struct {
 	DnsRecords      clusterDnsRecordsRelation
 	DnsSyncJobs     clusterDnsSyncJobsRelation
 	Certificates    clusterCertificatesRelation
+	AcmeAccounts    clusterAcmeAccountsRelation
 	OriginPools     clusterOriginPoolsRelation
 	Sites           clusterSitesRelation
 	SshCredentials  clusterSshCredentialsRelation
@@ -77,6 +78,7 @@ var Cluster = ClusterQuery{
 	DnsRecords:      clusterDnsRecordsRelation{},
 	DnsSyncJobs:     clusterDnsSyncJobsRelation{},
 	Certificates:    clusterCertificatesRelation{},
+	AcmeAccounts:    clusterAcmeAccountsRelation{},
 	OriginPools:     clusterOriginPoolsRelation{},
 	Sites:           clusterSitesRelation{},
 	SshCredentials:  clusterSshCredentialsRelation{},
@@ -637,6 +639,14 @@ func (clusterCertificatesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "certificates"}
 }
 
+// AcmeAccountsRelation provides relation query helpers for acmeAccounts.
+type clusterAcmeAccountsRelation struct{}
+
+// Fetch creates an include clause to fetch related acmeAccounts.
+func (clusterAcmeAccountsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "acmeAccounts"}
+}
+
 // OriginPoolsRelation provides relation query helpers for originPools.
 type clusterOriginPoolsRelation struct{}
 
@@ -710,6 +720,7 @@ type ClusterCreateInput struct {
 	DnsRecords      *DNSManagedRecordCreateNestedInput
 	DnsSyncJobs     *DNSSyncJobCreateNestedInput
 	Certificates    *CertificateCreateNestedInput
+	AcmeAccounts    *ACMEAccountCreateNestedInput
 	OriginPools     *OriginPoolCreateNestedInput
 	Sites           *SiteCreateNestedInput
 	SshCredentials  *SSHCredentialCreateNestedInput

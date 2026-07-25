@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/node"
@@ -490,10 +491,43 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if err != nil {
 			return config, nil, err
 		}
+		if certificate.CertPem == nil || certificate.ExpiresAt == nil || !time.Now().UTC().Before(*certificate.ExpiresAt) {
+			return config, nil, fmt.Errorf("certificate %s is unavailable or expired", certificate.Id)
+		}
+		certificateDomains, err := certmanager.DecodeDomains(certificate.DomainsJson)
+		if err != nil {
+			return config, nil, err
+		}
+		if err = certmanager.CoversDomains(certificateDomains, config.Domains); err != nil {
+			return config, nil, fmt.Errorf("certificate %s: %w", certificate.Id, err)
+		}
+		privateKey, err := certmanager.DecryptPrivateKey(s.cipher, certificate)
+		if err != nil {
+			return config, nil, err
+		}
 		config.Certificates = append(config.Certificates, edgeprotocol.CertificateConfig{
-			CertificatePEM: certificate.CertPem,
-			PrivateKeyPEM:  certificate.PrivateKeyPem,
+			CertificatePEM: *certificate.CertPem,
+			PrivateKeyPEM:  privateKey,
 		})
+	}
+	if len(config.Domains) > 0 {
+		challenges, challengeErr := db.ACMEChallenge.Query().Where(
+			query.ACMEChallenge.ClusterId.Equals(site.ClusterId),
+			query.ACMEChallenge.Type.Equals(model.ACMEChallengeTypeHTTP_01),
+			query.ACMEChallenge.Status.Equals(model.ACMEChallengeStatusPRESENTED),
+			query.ACMEChallenge.Domain.In(config.Domains...),
+			query.ACMEChallenge.ExpiresAt.Gt(time.Now().UTC()),
+		).Do(ctx)
+		if challengeErr != nil {
+			return config, nil, challengeErr
+		}
+		for _, challenge := range challenges {
+			if challenge.KeyAuth != nil {
+				config.ACMEChallenges = append(config.ACMEChallenges, edgeprotocol.ACMEChallengeConfig{
+					Domain: challenge.Domain, Token: challenge.Token, KeyAuth: *challenge.KeyAuth,
+				})
+			}
+		}
 	}
 	normalizeListenerForCertificates(&config)
 

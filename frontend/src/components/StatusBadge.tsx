@@ -14,6 +14,12 @@ const statusMap: Record<string, { className: string; label: string }> = {
     RUNNING: { className: 'bg-warning/15 text-warning', label: 'Running' },
     COMPLETED: { className: 'bg-success/15 text-success', label: 'Completed' },
     FAILED: { className: 'bg-danger/15 text-danger', label: 'Failed' },
+    ACTIVE: { className: 'bg-success/15 text-success', label: 'Active' },
+    DEPLOYING: { className: 'bg-warning/15 text-warning', label: 'Not active yet' },
+    EXPIRING: { className: 'bg-warning/15 text-warning', label: 'Expiring soon' },
+    EXPIRED: { className: 'bg-danger/15 text-danger', label: 'Expired' },
+    RENEWAL_FAILED: { className: 'bg-danger/15 text-danger', label: 'Renewal failed' },
+    DEPLOYMENT_FAILED: { className: 'bg-danger/15 text-danger', label: 'Publish failed' },
     PAID: { className: 'bg-success/15 text-success', label: 'Paid' },
     REFUNDED: { className: 'bg-default text-muted', label: 'Refunded' },
 };

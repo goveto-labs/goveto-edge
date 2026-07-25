@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/auth"
+	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
@@ -168,6 +169,16 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 			}
 			if certificate == nil || certificate.ClusterId != targetCluster {
 				return echo.NewHTTPError(http.StatusBadRequest, "certificate does not belong to cluster")
+			}
+			if certificate.CertPem == nil || certificate.ExpiresAt == nil || !time.Now().UTC().Before(*certificate.ExpiresAt) {
+				return echo.NewHTTPError(http.StatusBadRequest, "certificate is not issued or has expired")
+			}
+			certificateDomains, decodeErr := certmanager.DecodeDomains(certificate.DomainsJson)
+			if decodeErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, decodeErr.Error())
+			}
+			if coverErr := certmanager.CoversDomains(certificateDomains, domains); coverErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, coverErr.Error())
 			}
 		}
 

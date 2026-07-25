@@ -455,10 +455,32 @@ export interface CompressionPolicy {
 export interface Certificate {
     id: string;
     name: string;
-    cert_pem?: string;
-    private_key_pem?: string;
+    source: 'MANUAL' | 'ACME';
+    status:
+        | 'PENDING'
+        | 'ACTIVE'
+        | 'DEPLOYING'
+        | 'EXPIRING'
+        | 'EXPIRED'
+        | 'RENEWAL_FAILED'
+        | 'DEPLOYMENT_FAILED';
     fingerprint?: string;
+    serial_number?: string;
+    domains: string[];
+    not_before?: string;
     expires_at?: string;
+    issuer?: string;
+    key_algorithm?: string;
+    acme_directory_url?: string;
+    acme_email?: string;
+    acme_challenge_type?: 'HTTP_01' | 'DNS_01';
+    auto_renew: boolean;
+    renew_before_days: number;
+    last_issued_at?: string;
+    last_renewal_attempt_at?: string;
+    last_renewal_error?: string;
+    last_published_at?: string;
+    last_publish_error?: string;
     created_at: string;
     updated_at?: string;
 }
@@ -467,6 +489,34 @@ export interface CreateCertificateRequest {
     name: string;
     certificate: string;
     private_key: string;
+}
+
+export interface CreateACMECertificateRequest {
+    name: string;
+    domains: string[];
+    email: string;
+    directory_url?: string;
+    challenge_type: 'HTTP_01' | 'DNS_01';
+    auto_renew: boolean;
+    renew_before_days: number;
+}
+
+export interface CertificateJob {
+    id: string;
+    certificate_id: string;
+    operation: 'ISSUE' | 'RENEW' | 'REISSUE' | 'REPUBLISH';
+    status: string;
+    attempts: number;
+    max_attempts: number;
+    next_attempt_at: string;
+    error?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface CreateACMECertificateResponse {
+    certificate: Certificate;
+    job: CertificateJob;
 }
 
 export interface PublishTask {

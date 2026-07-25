@@ -9,6 +9,41 @@ generator client {
   package  = "db"
 }
 
+enum ACMEChallengeStatus {
+  PENDING
+  PRESENTED
+  CLEANING
+  CLEANED
+  FAILED
+}
+
+enum ACMEChallengeType {
+  HTTP_01
+  DNS_01
+}
+
+enum CertificateOperation {
+  ISSUE
+  RENEW
+  REISSUE
+  REPUBLISH
+}
+
+enum CertificateSource {
+  MANUAL
+  ACME
+}
+
+enum CertificateStatus {
+  PENDING
+  ACTIVE
+  DEPLOYING
+  EXPIRING
+  EXPIRED
+  RENEWAL_FAILED
+  DEPLOYMENT_FAILED
+}
+
 enum ClusterPermission {
   OWNER
   OPERATOR
@@ -37,6 +72,7 @@ enum DNSRecordType {
   A
   AAAA
   CNAME
+  TXT
 }
 
 enum DNSSyncAction {
@@ -102,6 +138,46 @@ enum UserStatus {
   DISABLED
 }
 
+model ACMEAccount {
+  id                  String   @id @default(uuid())
+  clusterId           String   @map("cluster_id")
+  directoryUrl        String   @map("directory_url")
+  email               String
+  privateKeyEncrypted String   @db.Text @map("private_key_encrypted")
+  accountJson         Json     @map("account_json")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
+  cluster             Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, directoryUrl, email])
+  @@index([clusterId])
+  @@map("acme_accounts")
+}
+
+model ACMEChallenge {
+  id            String              @id @default(uuid())
+  certificateId String              @map("certificate_id")
+  clusterId     String              @map("cluster_id")
+  type          ACMEChallengeType
+  status        ACMEChallengeStatus @default(PENDING)
+  domain        String
+  token         String
+  keyAuth       String?             @db.Text @map("key_auth")
+  dnsName       String?             @map("dns_name")
+  dnsValue      String?             @db.Text @map("dns_value")
+  providerRef   String?             @map("provider_ref")
+  lastError     String?             @db.Text @map("last_error")
+  expiresAt     DateTime            @map("expires_at")
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @default(now()) @updatedAt @map("updated_at")
+  certificate   Certificate         @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@unique([certificateId, type, domain, token])
+  @@index([clusterId, status, expiresAt])
+  @@index([token, status])
+  @@map("acme_challenges")
+}
+
 model AgentTask {
   id          UUID      @id @default(uuid())
   nodeId      UUID      @map("node_id")
@@ -141,21 +217,62 @@ model AuditLog {
 }
 
 model Certificate {
-  id            String            @id @default(uuid())
-  clusterId     String            @map("cluster_id")
-  name          String
-  certPem       String            @db.Text @map("cert_pem")
-  privateKeyPem String            @db.Text @map("private_key_pem")
-  fingerprint   String
-  expiresAt     DateTime          @map("expires_at")
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @default(now()) @updatedAt @map("updated_at")
-  cluster       Cluster           @relation(fields: [clusterId], references: [id])
-  sites         SiteCertificate[]
+  id                   String             @id @default(uuid())
+  clusterId            String             @map("cluster_id")
+  name                 String
+  source               CertificateSource  @default(MANUAL)
+  status               CertificateStatus  @default(PENDING)
+  certPem              String?            @db.Text @map("cert_pem")
+  privateKeyPem        String?            @db.Text @map("private_key_pem")
+  privateKeyEncrypted  String?            @db.Text @map("private_key_encrypted")
+  fingerprint          String?
+  serialNumber         String?            @map("serial_number")
+  domainsJson          Json               @default("[]") @map("domains_json")
+  notBefore            DateTime?          @map("not_before")
+  expiresAt            DateTime?          @map("expires_at")
+  issuer               String?
+  keyAlgorithm         String?            @map("key_algorithm")
+  acmeDirectoryUrl     String?            @map("acme_directory_url")
+  acmeEmail            String?            @map("acme_email")
+  acmeChallengeType    ACMEChallengeType? @map("acme_challenge_type")
+  autoRenew            Boolean            @default(false) @map("auto_renew")
+  renewBeforeDays      Int                @default(30) @map("renew_before_days")
+  lastIssuedAt         DateTime?          @map("last_issued_at")
+  lastRenewalAttemptAt DateTime?          @map("last_renewal_attempt_at")
+  lastRenewalError     String?            @db.Text @map("last_renewal_error")
+  lastPublishedAt      DateTime?          @map("last_published_at")
+  lastPublishError     String?            @db.Text @map("last_publish_error")
+  createdAt            DateTime           @default(now()) @map("created_at")
+  updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at")
+  cluster              Cluster            @relation(fields: [clusterId], references: [id])
+  sites                SiteCertificate[]
+  jobs                 CertificateJob[]
+  challenges           ACMEChallenge[]
 
   @@unique([clusterId, name])
   @@index([clusterId, expiresAt])
+  @@index([status, expiresAt])
   @@map("certificates")
+}
+
+model CertificateJob {
+  id            String               @id @default(uuid())
+  certificateId String               @map("certificate_id")
+  operation     CertificateOperation
+  status        JobStatus            @default(PENDING)
+  attempts      Int                  @default(0)
+  maxAttempts   Int                  @default(5) @map("max_attempts")
+  nextAttemptAt DateTime             @default(now()) @map("next_attempt_at")
+  leaseUntil    DateTime?            @map("lease_until")
+  resultJson    Json?                @map("result_json")
+  error         String?              @db.Text
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @default(now()) @updatedAt @map("updated_at")
+  certificate   Certificate          @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextAttemptAt])
+  @@index([certificateId, createdAt])
+  @@map("certificate_jobs")
 }
 
 model Cluster {
@@ -175,6 +292,7 @@ model Cluster {
   dnsRecords      DNSManagedRecord[]
   dnsSyncJobs     DNSSyncJob[]
   certificates    Certificate[]
+  acmeAccounts    ACMEAccount[]
   originPools     OriginPool[]
   sites           Site[]
   sshCredentials  SSHCredential[]

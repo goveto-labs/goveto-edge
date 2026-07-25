@@ -16,6 +16,7 @@ import (
 
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
+	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
@@ -177,6 +178,16 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 			}
 			if certificate == nil || certificate.ClusterId != c.Param("cluster_id") {
 				return echo.NewHTTPError(http.StatusBadRequest, "certificate does not belong to cluster")
+			}
+			if certificate.CertPem == nil || certificate.ExpiresAt == nil || !time.Now().UTC().Before(*certificate.ExpiresAt) {
+				return echo.NewHTTPError(http.StatusBadRequest, "certificate is not issued or has expired")
+			}
+			certificateDomains, decodeErr := certmanager.DecodeDomains(certificate.DomainsJson)
+			if decodeErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, decodeErr.Error())
+			}
+			if coverErr := certmanager.CoversDomains(certificateDomains, domains); coverErr != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, coverErr.Error())
 			}
 		}
 

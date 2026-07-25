@@ -252,6 +252,23 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 		}
 
 		listener := site.Listener
+		for _, challenge := range site.ACMEChallenges {
+			if challenge.Domain == "" || challenge.Token == "" || challenge.KeyAuth == "" {
+				return nil, fmt.Errorf("site %s has invalid ACME HTTP-01 challenge", id)
+			}
+			routes = append(routes, map[string]any{
+				"@id": "site_" + id + "_acme_" + challenge.Token,
+				"match": []any{map[string]any{
+					"host": []string{challenge.Domain},
+					"path": []string{"/.well-known/acme-challenge/" + challenge.Token},
+				}},
+				"handle": []any{map[string]any{
+					"handler": "static_response", "status_code": 200, "body": challenge.KeyAuth,
+					"headers": map[string][]string{"Content-Type": {"text/plain"}},
+				}},
+				"terminal": true,
+			})
+		}
 		if listener.HTTPEnabled {
 			listeners[":"+strconv.Itoa(listener.HTTPPort)] = struct{}{}
 		}

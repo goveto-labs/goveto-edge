@@ -6,6 +6,39 @@ import (
 	"time"
 )
 
+// ACMEAccount represents the ACMEAccount model.
+type ACMEAccount struct {
+	Id                  string          `db:"id" json:"id"`
+	ClusterId           string          `db:"cluster_id" json:"clusterId"`
+	DirectoryUrl        string          `db:"directory_url" json:"directoryUrl"`
+	Email               string          `db:"email" json:"email"`
+	PrivateKeyEncrypted string          `db:"private_key_encrypted" json:"privateKeyEncrypted"`
+	AccountJson         json.RawMessage `db:"account_json" json:"accountJson"`
+	CreatedAt           time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt           time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster             *Cluster        `db:"-" json:"cluster,omitempty"`
+}
+
+// ACMEChallenge represents the ACMEChallenge model.
+type ACMEChallenge struct {
+	Id            string              `db:"id" json:"id"`
+	CertificateId string              `db:"certificate_id" json:"certificateId"`
+	ClusterId     string              `db:"cluster_id" json:"clusterId"`
+	Type          ACMEChallengeType   `db:"type" json:"type"`
+	Status        ACMEChallengeStatus `db:"status" json:"status"`
+	Domain        string              `db:"domain" json:"domain"`
+	Token         string              `db:"token" json:"token"`
+	KeyAuth       *string             `db:"key_auth" json:"keyAuth"`
+	DnsName       *string             `db:"dns_name" json:"dnsName"`
+	DnsValue      *string             `db:"dns_value" json:"dnsValue"`
+	ProviderRef   *string             `db:"provider_ref" json:"providerRef"`
+	LastError     *string             `db:"last_error" json:"lastError"`
+	ExpiresAt     time.Time           `db:"expires_at" json:"expiresAt"`
+	CreatedAt     time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt     time.Time           `db:"updated_at" json:"updatedAt"`
+	Certificate   *Certificate        `db:"-" json:"certificate,omitempty"`
+}
+
 // AgentTask represents the AgentTask model.
 type AgentTask struct {
 	Id          string           `db:"id" json:"id"`
@@ -39,17 +72,54 @@ type AuditLog struct {
 
 // Certificate represents the Certificate model.
 type Certificate struct {
-	Id            string             `db:"id" json:"id"`
-	ClusterId     string             `db:"cluster_id" json:"clusterId"`
-	Name          string             `db:"name" json:"name"`
-	CertPem       string             `db:"cert_pem" json:"certPem"`
-	PrivateKeyPem string             `db:"private_key_pem" json:"privateKeyPem"`
-	Fingerprint   string             `db:"fingerprint" json:"fingerprint"`
-	ExpiresAt     time.Time          `db:"expires_at" json:"expiresAt"`
-	CreatedAt     time.Time          `db:"created_at" json:"createdAt"`
-	UpdatedAt     time.Time          `db:"updated_at" json:"updatedAt"`
-	Cluster       *Cluster           `db:"-" json:"cluster,omitempty"`
-	Sites         []*SiteCertificate `db:"-" json:"sites,omitempty"`
+	Id                   string             `db:"id" json:"id"`
+	ClusterId            string             `db:"cluster_id" json:"clusterId"`
+	Name                 string             `db:"name" json:"name"`
+	Source               CertificateSource  `db:"source" json:"source"`
+	Status               CertificateStatus  `db:"status" json:"status"`
+	CertPem              *string            `db:"cert_pem" json:"certPem"`
+	PrivateKeyPem        *string            `db:"private_key_pem" json:"privateKeyPem"`
+	PrivateKeyEncrypted  *string            `db:"private_key_encrypted" json:"privateKeyEncrypted"`
+	Fingerprint          *string            `db:"fingerprint" json:"fingerprint"`
+	SerialNumber         *string            `db:"serial_number" json:"serialNumber"`
+	DomainsJson          json.RawMessage    `db:"domains_json" json:"domainsJson"`
+	NotBefore            *time.Time         `db:"not_before" json:"notBefore"`
+	ExpiresAt            *time.Time         `db:"expires_at" json:"expiresAt"`
+	Issuer               *string            `db:"issuer" json:"issuer"`
+	KeyAlgorithm         *string            `db:"key_algorithm" json:"keyAlgorithm"`
+	AcmeDirectoryUrl     *string            `db:"acme_directory_url" json:"acmeDirectoryUrl"`
+	AcmeEmail            *string            `db:"acme_email" json:"acmeEmail"`
+	AcmeChallengeType    *ACMEChallengeType `db:"acme_challenge_type" json:"acmeChallengeType"`
+	AutoRenew            bool               `db:"auto_renew" json:"autoRenew"`
+	RenewBeforeDays      int                `db:"renew_before_days" json:"renewBeforeDays"`
+	LastIssuedAt         *time.Time         `db:"last_issued_at" json:"lastIssuedAt"`
+	LastRenewalAttemptAt *time.Time         `db:"last_renewal_attempt_at" json:"lastRenewalAttemptAt"`
+	LastRenewalError     *string            `db:"last_renewal_error" json:"lastRenewalError"`
+	LastPublishedAt      *time.Time         `db:"last_published_at" json:"lastPublishedAt"`
+	LastPublishError     *string            `db:"last_publish_error" json:"lastPublishError"`
+	CreatedAt            time.Time          `db:"created_at" json:"createdAt"`
+	UpdatedAt            time.Time          `db:"updated_at" json:"updatedAt"`
+	Cluster              *Cluster           `db:"-" json:"cluster,omitempty"`
+	Sites                []*SiteCertificate `db:"-" json:"sites,omitempty"`
+	Jobs                 []*CertificateJob  `db:"-" json:"jobs,omitempty"`
+	Challenges           []*ACMEChallenge   `db:"-" json:"challenges,omitempty"`
+}
+
+// CertificateJob represents the CertificateJob model.
+type CertificateJob struct {
+	Id            string               `db:"id" json:"id"`
+	CertificateId string               `db:"certificate_id" json:"certificateId"`
+	Operation     CertificateOperation `db:"operation" json:"operation"`
+	Status        JobStatus            `db:"status" json:"status"`
+	Attempts      int                  `db:"attempts" json:"attempts"`
+	MaxAttempts   int                  `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt time.Time            `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseUntil    *time.Time           `db:"lease_until" json:"leaseUntil"`
+	ResultJson    *json.RawMessage     `db:"result_json" json:"resultJson"`
+	Error         *string              `db:"error" json:"error"`
+	CreatedAt     time.Time            `db:"created_at" json:"createdAt"`
+	UpdatedAt     time.Time            `db:"updated_at" json:"updatedAt"`
+	Certificate   *Certificate         `db:"-" json:"certificate,omitempty"`
 }
 
 // Cluster represents the Cluster model.
@@ -70,6 +140,7 @@ type Cluster struct {
 	DnsRecords      []*DNSManagedRecord `db:"-" json:"dnsRecords,omitempty"`
 	DnsSyncJobs     []*DNSSyncJob       `db:"-" json:"dnsSyncJobs,omitempty"`
 	Certificates    []*Certificate      `db:"-" json:"certificates,omitempty"`
+	AcmeAccounts    []*ACMEAccount      `db:"-" json:"acmeAccounts,omitempty"`
 	OriginPools     []*OriginPool       `db:"-" json:"originPools,omitempty"`
 	Sites           []*Site             `db:"-" json:"sites,omitempty"`
 	SshCredentials  []*SSHCredential    `db:"-" json:"sshCredentials,omitempty"`

@@ -1,6 +1,7 @@
 package types
 
 import (
+	"encoding/json"
 	"time"
 
 	"goveto-edge/internal/storage/gen/model"
@@ -36,16 +37,61 @@ func NewClusterMember(value *model.ClusterMember) ClusterMember {
 }
 
 type Certificate struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Fingerprint string    `json:"fingerprint"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                   string                   `json:"id"`
+	Name                 string                   `json:"name"`
+	Source               model.CertificateSource  `json:"source"`
+	Status               model.CertificateStatus  `json:"status"`
+	Fingerprint          *string                  `json:"fingerprint"`
+	SerialNumber         *string                  `json:"serial_number"`
+	Domains              []string                 `json:"domains"`
+	NotBefore            *time.Time               `json:"not_before"`
+	ExpiresAt            *time.Time               `json:"expires_at"`
+	Issuer               *string                  `json:"issuer"`
+	KeyAlgorithm         *string                  `json:"key_algorithm"`
+	ACMEDirectoryURL     *string                  `json:"acme_directory_url,omitempty"`
+	ACMEEmail            *string                  `json:"acme_email,omitempty"`
+	ACMEChallengeType    *model.ACMEChallengeType `json:"acme_challenge_type,omitempty"`
+	AutoRenew            bool                     `json:"auto_renew"`
+	RenewBeforeDays      int                      `json:"renew_before_days"`
+	LastIssuedAt         *time.Time               `json:"last_issued_at"`
+	LastRenewalAttemptAt *time.Time               `json:"last_renewal_attempt_at"`
+	LastRenewalError     *string                  `json:"last_renewal_error"`
+	LastPublishedAt      *time.Time               `json:"last_published_at"`
+	LastPublishError     *string                  `json:"last_publish_error"`
+	CreatedAt            time.Time                `json:"created_at"`
+	UpdatedAt            time.Time                `json:"updated_at"`
 }
 
 func NewCertificate(value *model.Certificate) Certificate {
-	return Certificate{ID: value.Id, Name: value.Name, Fingerprint: value.Fingerprint, ExpiresAt: value.ExpiresAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	var domains []string
+	_ = json.Unmarshal(value.DomainsJson, &domains)
+	return Certificate{
+		ID: value.Id, Name: value.Name, Source: value.Source, Status: value.Status,
+		Fingerprint: value.Fingerprint, SerialNumber: value.SerialNumber, Domains: domains,
+		NotBefore: value.NotBefore, ExpiresAt: value.ExpiresAt, Issuer: value.Issuer, KeyAlgorithm: value.KeyAlgorithm,
+		ACMEDirectoryURL: value.AcmeDirectoryUrl, ACMEEmail: value.AcmeEmail, ACMEChallengeType: value.AcmeChallengeType,
+		AutoRenew: value.AutoRenew, RenewBeforeDays: value.RenewBeforeDays, LastIssuedAt: value.LastIssuedAt,
+		LastRenewalAttemptAt: value.LastRenewalAttemptAt, LastRenewalError: value.LastRenewalError,
+		LastPublishedAt: value.LastPublishedAt, LastPublishError: value.LastPublishError,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
+}
+
+type CertificateJob struct {
+	ID            string                     `json:"id"`
+	CertificateID string                     `json:"certificate_id"`
+	Operation     model.CertificateOperation `json:"operation"`
+	Status        model.JobStatus            `json:"status"`
+	Attempts      int                        `json:"attempts"`
+	MaxAttempts   int                        `json:"max_attempts"`
+	NextAttemptAt time.Time                  `json:"next_attempt_at"`
+	Error         *string                    `json:"error"`
+	CreatedAt     time.Time                  `json:"created_at"`
+	UpdatedAt     time.Time                  `json:"updated_at"`
+}
+
+func NewCertificateJob(value *model.CertificateJob) CertificateJob {
+	return CertificateJob{ID: value.Id, CertificateID: value.CertificateId, Operation: value.Operation, Status: value.Status, Attempts: value.Attempts, MaxAttempts: value.MaxAttempts, NextAttemptAt: value.NextAttemptAt, Error: value.Error, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
 type DNSRecord struct {

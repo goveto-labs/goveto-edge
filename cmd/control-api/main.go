@@ -16,6 +16,7 @@ import (
 	clickhouseschema "goveto-edge/configs/clickhouse"
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
+	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
@@ -137,6 +138,8 @@ func main() {
 
 	publishService = publisher.New(orm, credentialCipher, gateway)
 	go publishService.Run(ctx)
+	certificateService := certmanager.New(orm, credentialCipher, publishService)
+	go certificateService.Run(ctx)
 
 	purgeService := purge.New(orm, gateway)
 	go purgeService.Run(ctx)
@@ -194,6 +197,7 @@ func main() {
 			gateway,
 			installQueue,
 			publishService,
+			certificateService,
 			purgeService,
 			dnsService,
 			analyticsStore,

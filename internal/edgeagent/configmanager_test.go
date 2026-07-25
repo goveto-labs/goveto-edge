@@ -159,6 +159,24 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	}
 }
 
+func TestRenderCaddyConfigIncludesACMEHTTPChallengeBeforeSiteRoutes(t *testing.T) {
+	config := SiteConfig{
+		SiteID: "site-acme", Version: 1, Domains: []string{"acme.example.com"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: 8080},
+		Origins:  []OriginConfig{{Protocol: "http", Address: "origin:80"}},
+	}
+	config.ACMEChallenges = []ACMEChallengeConfig{{Domain: config.Domains[0], Token: "token-1", KeyAuth: "token-1.thumbprint"}}
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":8080", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	challengePath := "/.well-known/acme-challenge/token-1"
+	if !strings.Contains(text, challengePath) || !strings.Contains(text, "token-1.thumbprint") {
+		t.Fatalf("challenge route missing from %s", text)
+	}
+}
+
 func TestHTTPSOriginRendersTLSTransport(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Origins[0].Protocol = "https"

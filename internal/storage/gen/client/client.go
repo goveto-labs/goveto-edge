@@ -24,9 +24,12 @@ type Client struct {
 	db                    *sql.DB
 	executor              querier
 	dialect               string
+	ACMEAccount           ACMEAccountActions
+	ACMEChallenge         ACMEChallengeActions
 	AgentTask             AgentTaskActions
 	AuditLog              AuditLogActions
 	Certificate           CertificateActions
+	CertificateJob        CertificateJobActions
 	Cluster               ClusterActions
 	ClusterGroup          ClusterGroupActions
 	ClusterMember         ClusterMemberActions
@@ -66,9 +69,12 @@ func New(db *sql.DB, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.ACMEAccount = ACMEAccountActions{client: c}
+	c.ACMEChallenge = ACMEChallengeActions{client: c}
 	c.AgentTask = AgentTaskActions{client: c}
 	c.AuditLog = AuditLogActions{client: c}
 	c.Certificate = CertificateActions{client: c}
+	c.CertificateJob = CertificateJobActions{client: c}
 	c.Cluster = ClusterActions{client: c}
 	c.ClusterGroup = ClusterGroupActions{client: c}
 	c.ClusterMember = ClusterMemberActions{client: c}
@@ -268,9 +274,12 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	}
 
 	txClient := &Client{db: c.db, executor: sqlTx, dialect: c.dialect}
+	txClient.ACMEAccount = ACMEAccountActions{client: txClient}
+	txClient.ACMEChallenge = ACMEChallengeActions{client: txClient}
 	txClient.AgentTask = AgentTaskActions{client: txClient}
 	txClient.AuditLog = AuditLogActions{client: txClient}
 	txClient.Certificate = CertificateActions{client: txClient}
+	txClient.CertificateJob = CertificateJobActions{client: txClient}
 	txClient.Cluster = ClusterActions{client: txClient}
 	txClient.ClusterGroup = ClusterGroupActions{client: txClient}
 	txClient.ClusterMember = ClusterMemberActions{client: txClient}
@@ -315,6 +324,1972 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 		return err
 	}
 	return sqlTx.Commit()
+}
+
+func quotedACMEAccountTable(c *Client) string { return c.quoteIdentifier("acme_accounts") }
+func quotedACMEAccountColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "directory_url", "email", "private_key_encrypted", "account_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteACMEAccountField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "directory_url":
+		return c.quoteIdentifier(field), nil
+	case "email":
+		return c.quoteIdentifier(field), nil
+	case "private_key_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "account_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ACMEAccount field %q", field)
+	}
+}
+
+// buildACMEAccountWhere recursively builds a WHERE clause string and arguments.
+func buildACMEAccountWhere(c *Client, wheres []query.ACMEAccountWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ACMEAccountWhereClause); ok {
+				sub, subArgs := buildACMEAccountWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ACMEAccountWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildACMEAccountWhere(c, []query.ACMEAccountWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ACMEAccountWhereClause); ok {
+				sub, subArgs := buildACMEAccountWhere(c, []query.ACMEAccountWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteACMEAccountField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ACMEAccountActions provides database operations for the ACMEAccount model.
+type ACMEAccountActions struct {
+	client *Client
+}
+
+// ACMEAccountCreateBuilder builds a ACMEAccount create operation incrementally.
+type ACMEAccountCreateBuilder struct {
+	action ACMEAccountActions
+	sets   []query.ACMEAccountSetClause
+}
+
+// Create starts a staged ACMEAccount create operation.
+func (a ACMEAccountActions) Create() ACMEAccountCreateBuilder {
+	return ACMEAccountCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ACMEAccountCreateBuilder) Set(sets ...query.ACMEAccountSetClause) ACMEAccountCreateBuilder {
+	next := ACMEAccountCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ACMEAccountSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ACMEAccountCreateBuilder) Do(ctx context.Context) (*model.ACMEAccount, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ACMEAccountCreateManyBuilder builds a bulk ACMEAccount insert operation.
+type ACMEAccountCreateManyBuilder struct {
+	action            ACMEAccountActions
+	data              []query.ACMEAccountCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ACMEAccount insert operation.
+func (a ACMEAccountActions) BulkCreate(data []query.ACMEAccountCreateInput) ACMEAccountCreateManyBuilder {
+	return ACMEAccountCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ACMEAccountCreateManyBuilder) OnConflictDoNothing(columns ...string) ACMEAccountCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ACMEAccountCreateManyBuilder) Returning(columns ...string) ACMEAccountCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ACMEAccountCreateManyBuilder) BatchSize(n int) ACMEAccountCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ACMEAccountCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEAccountCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ACMEAccount.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ACMEAccount.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ACMEAccountCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ACMEAccount, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ACMEAccount
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEAccountCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "directory_url", "email", "private_key_encrypted", "account_json", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ACMEAccount
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ACMEAccountCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "directory_url", "email", "private_key_encrypted", "account_json", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEAccountCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ACMEAccount.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ACMEAccountQueryBuilder builds a ACMEAccount query incrementally.
+type ACMEAccountQueryBuilder struct {
+	action ACMEAccountActions
+	opts   []query.ACMEAccountQueryOption
+}
+
+// Query starts a staged ACMEAccount query.
+func (a ACMEAccountActions) Query() ACMEAccountQueryBuilder {
+	return ACMEAccountQueryBuilder{action: a}
+}
+
+func (b ACMEAccountQueryBuilder) withOptions(opts ...query.ACMEAccountQueryOption) ACMEAccountQueryBuilder {
+	next := ACMEAccountQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ACMEAccountQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ACMEAccountQueryBuilder) Where(clauses ...query.ACMEAccountWhereClause) ACMEAccountQueryBuilder {
+	opts := make([]query.ACMEAccountQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ACMEAccountQueryBuilder) OrderBy(clause query.ACMEAccountOrderByClause) ACMEAccountQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ACMEAccountQueryBuilder) Include(clauses ...query.ACMEAccountIncludeClause) ACMEAccountQueryBuilder {
+	opts := make([]query.ACMEAccountQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ACMEAccountQueryBuilder) Take(n int) ACMEAccountQueryBuilder {
+	return b.withOptions(query.ACMEAccountTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ACMEAccountQueryBuilder) Skip(n int) ACMEAccountQueryBuilder {
+	return b.withOptions(query.ACMEAccountSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ACMEAccountQueryBuilder) Do(ctx context.Context) ([]model.ACMEAccount, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ACMEAccountQueryBuilder) First(ctx context.Context) (*model.ACMEAccount, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ACMEAccountQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyACMEAccountOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ACMEAccountUpdateBuilder builds a ACMEAccount update operation incrementally.
+type ACMEAccountUpdateBuilder struct {
+	action ACMEAccountActions
+	wheres []query.ACMEAccountWhereClause
+	sets   []query.ACMEAccountSetClause
+}
+
+// Update starts a staged ACMEAccount update operation.
+func (a ACMEAccountActions) Update() ACMEAccountUpdateBuilder {
+	return ACMEAccountUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ACMEAccountUpdateBuilder) Where(clauses ...query.ACMEAccountWhereClause) ACMEAccountUpdateBuilder {
+	next := ACMEAccountUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ACMEAccountWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ACMEAccountSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ACMEAccountUpdateBuilder) Set(sets ...query.ACMEAccountSetClause) ACMEAccountUpdateBuilder {
+	next := ACMEAccountUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ACMEAccountWhereClause(nil), b.wheres...),
+		sets:   make([]query.ACMEAccountSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ACMEAccountUpdateBuilder) combinedWhere() (query.ACMEAccountWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ACMEAccountWhereClause{}, fmt.Errorf("ACMEAccount.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ACMEAccount.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ACMEAccountUpdateBuilder) Do(ctx context.Context) (*model.ACMEAccount, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ACMEAccountUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ACMEAccountDeleteBuilder builds a ACMEAccount delete operation incrementally.
+type ACMEAccountDeleteBuilder struct {
+	action ACMEAccountActions
+	wheres []query.ACMEAccountWhereClause
+}
+
+// Delete starts a staged ACMEAccount delete operation.
+func (a ACMEAccountActions) Delete() ACMEAccountDeleteBuilder {
+	return ACMEAccountDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ACMEAccountDeleteBuilder) Where(clauses ...query.ACMEAccountWhereClause) ACMEAccountDeleteBuilder {
+	next := ACMEAccountDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ACMEAccountWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ACMEAccountDeleteBuilder) combinedWhere() (query.ACMEAccountWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ACMEAccountWhereClause{}, fmt.Errorf("ACMEAccount.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ACMEAccount.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ACMEAccountDeleteBuilder) Do(ctx context.Context) (*model.ACMEAccount, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ACMEAccountDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ACMEAccount records.
+func (a ACMEAccountActions) FindMany(ctx context.Context, opts ...query.ACMEAccountQueryOption) ([]model.ACMEAccount, error) {
+	cfg := query.ApplyACMEAccountOptions(opts)
+	q := "SELECT " + quotedACMEAccountColumns(a.client) + " FROM " + quotedACMEAccountTable(a.client)
+	argIdx := 0
+	where, args := buildACMEAccountWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteACMEAccountField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ACMEAccount
+	for rows.Next() {
+		var item model.ACMEAccount
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEAccount.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ACMEAccount record.
+func (a ACMEAccountActions) FindFirst(ctx context.Context, opts ...query.ACMEAccountQueryOption) (*model.ACMEAccount, error) {
+	opts = append(opts, query.ACMEAccountTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ACMEAccount record by unique constraint.
+func (a ACMEAccountActions) FindUnique(ctx context.Context, where query.ACMEAccountWhereClause) (*model.ACMEAccount, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEAccountWhere(a.client, []query.ACMEAccountWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedACMEAccountColumns(a.client) + " FROM " + quotedACMEAccountTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ACMEAccount
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ACMEAccount.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ACMEAccount record.
+func (a ACMEAccountActions) CreateOne(ctx context.Context, sets ...query.ACMEAccountSetClause) (*model.ACMEAccount, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ACMEAccount.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteACMEAccountField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedACMEAccountTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEAccountColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ACMEAccount
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEAccount.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ACMEAccount records.
+func (a ACMEAccountActions) CreateMany(ctx context.Context, data []query.ACMEAccountCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ACMEAccountActions) buildACMEAccountCreateManySQL(data []query.ACMEAccountCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "directory_url", "email", "private_key_encrypted", "account_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedACMEAccountTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ACMEAccount record matching the where clause.
+func (a ACMEAccountActions) UpdateOne(ctx context.Context, where query.ACMEAccountWhereClause, sets ...query.ACMEAccountSetClause) (*model.ACMEAccount, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ACMEAccount.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteACMEAccountField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildACMEAccountWhere(a.client, []query.ACMEAccountWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedACMEAccountTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEAccountColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEAccount
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ACMEAccount.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ACMEAccount records matching the where clauses.
+func (a ACMEAccountActions) UpdateMany(ctx context.Context, wheres []query.ACMEAccountWhereClause, sets ...query.ACMEAccountSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ACMEAccount.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteACMEAccountField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildACMEAccountWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedACMEAccountTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ACMEAccount.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ACMEAccount record.
+func (a ACMEAccountActions) UpsertOne(ctx context.Context, where query.ACMEAccountWhereClause, create []query.ACMEAccountSetClause, update []query.ACMEAccountSetClause) (*model.ACMEAccount, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ACMEAccount.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteACMEAccountField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedACMEAccountTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteACMEAccountField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteACMEAccountField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteACMEAccountField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEAccountColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEAccount
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEAccount.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ACMEAccount record matching the where clause.
+func (a ACMEAccountActions) DeleteOne(ctx context.Context, where query.ACMEAccountWhereClause) (*model.ACMEAccount, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEAccountWhere(a.client, []query.ACMEAccountWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedACMEAccountTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEAccountColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEAccount
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.DirectoryUrl, &item.Email, &item.PrivateKeyEncrypted, &item.AccountJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ACMEAccount.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ACMEAccount records matching the where clauses.
+func (a ACMEAccountActions) DeleteMany(ctx context.Context, wheres ...query.ACMEAccountWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEAccountWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedACMEAccountTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ACMEAccount.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ACMEAccount records matching the where clauses.
+func (a ACMEAccountActions) Count(ctx context.Context, wheres ...query.ACMEAccountWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEAccountWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedACMEAccountTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ACMEAccount.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ACMEAccount.
+func (a ACMEAccountActions) Aggregate(ctx context.Context, opts ...query.ACMEAccountAggregateOption) (*query.ACMEAccountAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteACMEAccountField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedACMEAccountTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ACMEAccountAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ACMEAccount.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ACMEAccount.
+func (a ACMEAccountActions) GroupBy(ctx context.Context, fields []string, opts ...query.ACMEAccountAggregateOption) ([]query.ACMEAccountGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteACMEAccountField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteACMEAccountField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedACMEAccountTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEAccount.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ACMEAccountGroupByResult
+	for rows.Next() {
+		r := query.ACMEAccountGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ACMEAccount.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedACMEChallengeTable(c *Client) string { return c.quoteIdentifier("acme_challenges") }
+func quotedACMEChallengeColumns(c *Client) string {
+	cols := []string{"id", "certificate_id", "cluster_id", "type", "status", "domain", "token", "key_auth", "dns_name", "dns_value", "provider_ref", "last_error", "expires_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteACMEChallengeField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "certificate_id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "type":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "domain":
+		return c.quoteIdentifier(field), nil
+	case "token":
+		return c.quoteIdentifier(field), nil
+	case "key_auth":
+		return c.quoteIdentifier(field), nil
+	case "dns_name":
+		return c.quoteIdentifier(field), nil
+	case "dns_value":
+		return c.quoteIdentifier(field), nil
+	case "provider_ref":
+		return c.quoteIdentifier(field), nil
+	case "last_error":
+		return c.quoteIdentifier(field), nil
+	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ACMEChallenge field %q", field)
+	}
+}
+
+// buildACMEChallengeWhere recursively builds a WHERE clause string and arguments.
+func buildACMEChallengeWhere(c *Client, wheres []query.ACMEChallengeWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ACMEChallengeWhereClause); ok {
+				sub, subArgs := buildACMEChallengeWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ACMEChallengeWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildACMEChallengeWhere(c, []query.ACMEChallengeWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ACMEChallengeWhereClause); ok {
+				sub, subArgs := buildACMEChallengeWhere(c, []query.ACMEChallengeWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteACMEChallengeField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ACMEChallengeActions provides database operations for the ACMEChallenge model.
+type ACMEChallengeActions struct {
+	client *Client
+}
+
+// ACMEChallengeCreateBuilder builds a ACMEChallenge create operation incrementally.
+type ACMEChallengeCreateBuilder struct {
+	action ACMEChallengeActions
+	sets   []query.ACMEChallengeSetClause
+}
+
+// Create starts a staged ACMEChallenge create operation.
+func (a ACMEChallengeActions) Create() ACMEChallengeCreateBuilder {
+	return ACMEChallengeCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ACMEChallengeCreateBuilder) Set(sets ...query.ACMEChallengeSetClause) ACMEChallengeCreateBuilder {
+	next := ACMEChallengeCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ACMEChallengeSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ACMEChallengeCreateBuilder) Do(ctx context.Context) (*model.ACMEChallenge, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ACMEChallengeCreateManyBuilder builds a bulk ACMEChallenge insert operation.
+type ACMEChallengeCreateManyBuilder struct {
+	action            ACMEChallengeActions
+	data              []query.ACMEChallengeCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ACMEChallenge insert operation.
+func (a ACMEChallengeActions) BulkCreate(data []query.ACMEChallengeCreateInput) ACMEChallengeCreateManyBuilder {
+	return ACMEChallengeCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ACMEChallengeCreateManyBuilder) OnConflictDoNothing(columns ...string) ACMEChallengeCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ACMEChallengeCreateManyBuilder) Returning(columns ...string) ACMEChallengeCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ACMEChallengeCreateManyBuilder) BatchSize(n int) ACMEChallengeCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ACMEChallengeCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEChallengeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ACMEChallenge.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ACMEChallenge.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ACMEChallengeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ACMEChallenge, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ACMEChallenge
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEChallengeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "certificate_id", "cluster_id", "type", "status", "domain", "token", "key_auth", "dns_name", "dns_value", "provider_ref", "last_error", "expires_at", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ACMEChallenge
+			if err := rows.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ACMEChallengeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "certificate_id", "cluster_id", "type", "status", "domain", "token", "key_auth", "dns_name", "dns_value", "provider_ref", "last_error", "expires_at", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildACMEChallengeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ACMEChallenge.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ACMEChallengeQueryBuilder builds a ACMEChallenge query incrementally.
+type ACMEChallengeQueryBuilder struct {
+	action ACMEChallengeActions
+	opts   []query.ACMEChallengeQueryOption
+}
+
+// Query starts a staged ACMEChallenge query.
+func (a ACMEChallengeActions) Query() ACMEChallengeQueryBuilder {
+	return ACMEChallengeQueryBuilder{action: a}
+}
+
+func (b ACMEChallengeQueryBuilder) withOptions(opts ...query.ACMEChallengeQueryOption) ACMEChallengeQueryBuilder {
+	next := ACMEChallengeQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ACMEChallengeQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ACMEChallengeQueryBuilder) Where(clauses ...query.ACMEChallengeWhereClause) ACMEChallengeQueryBuilder {
+	opts := make([]query.ACMEChallengeQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ACMEChallengeQueryBuilder) OrderBy(clause query.ACMEChallengeOrderByClause) ACMEChallengeQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ACMEChallengeQueryBuilder) Include(clauses ...query.ACMEChallengeIncludeClause) ACMEChallengeQueryBuilder {
+	opts := make([]query.ACMEChallengeQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ACMEChallengeQueryBuilder) Take(n int) ACMEChallengeQueryBuilder {
+	return b.withOptions(query.ACMEChallengeTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ACMEChallengeQueryBuilder) Skip(n int) ACMEChallengeQueryBuilder {
+	return b.withOptions(query.ACMEChallengeSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ACMEChallengeQueryBuilder) Do(ctx context.Context) ([]model.ACMEChallenge, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ACMEChallengeQueryBuilder) First(ctx context.Context) (*model.ACMEChallenge, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ACMEChallengeQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyACMEChallengeOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ACMEChallengeUpdateBuilder builds a ACMEChallenge update operation incrementally.
+type ACMEChallengeUpdateBuilder struct {
+	action ACMEChallengeActions
+	wheres []query.ACMEChallengeWhereClause
+	sets   []query.ACMEChallengeSetClause
+}
+
+// Update starts a staged ACMEChallenge update operation.
+func (a ACMEChallengeActions) Update() ACMEChallengeUpdateBuilder {
+	return ACMEChallengeUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ACMEChallengeUpdateBuilder) Where(clauses ...query.ACMEChallengeWhereClause) ACMEChallengeUpdateBuilder {
+	next := ACMEChallengeUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ACMEChallengeWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ACMEChallengeSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ACMEChallengeUpdateBuilder) Set(sets ...query.ACMEChallengeSetClause) ACMEChallengeUpdateBuilder {
+	next := ACMEChallengeUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ACMEChallengeWhereClause(nil), b.wheres...),
+		sets:   make([]query.ACMEChallengeSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ACMEChallengeUpdateBuilder) combinedWhere() (query.ACMEChallengeWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ACMEChallengeWhereClause{}, fmt.Errorf("ACMEChallenge.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ACMEChallenge.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ACMEChallengeUpdateBuilder) Do(ctx context.Context) (*model.ACMEChallenge, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ACMEChallengeUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ACMEChallengeDeleteBuilder builds a ACMEChallenge delete operation incrementally.
+type ACMEChallengeDeleteBuilder struct {
+	action ACMEChallengeActions
+	wheres []query.ACMEChallengeWhereClause
+}
+
+// Delete starts a staged ACMEChallenge delete operation.
+func (a ACMEChallengeActions) Delete() ACMEChallengeDeleteBuilder {
+	return ACMEChallengeDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ACMEChallengeDeleteBuilder) Where(clauses ...query.ACMEChallengeWhereClause) ACMEChallengeDeleteBuilder {
+	next := ACMEChallengeDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ACMEChallengeWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ACMEChallengeDeleteBuilder) combinedWhere() (query.ACMEChallengeWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ACMEChallengeWhereClause{}, fmt.Errorf("ACMEChallenge.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ACMEChallenge.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ACMEChallengeDeleteBuilder) Do(ctx context.Context) (*model.ACMEChallenge, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ACMEChallengeDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ACMEChallenge records.
+func (a ACMEChallengeActions) FindMany(ctx context.Context, opts ...query.ACMEChallengeQueryOption) ([]model.ACMEChallenge, error) {
+	cfg := query.ApplyACMEChallengeOptions(opts)
+	q := "SELECT " + quotedACMEChallengeColumns(a.client) + " FROM " + quotedACMEChallengeTable(a.client)
+	argIdx := 0
+	where, args := buildACMEChallengeWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteACMEChallengeField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ACMEChallenge
+	for rows.Next() {
+		var item model.ACMEChallenge
+		if err := rows.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ACMEChallenge record.
+func (a ACMEChallengeActions) FindFirst(ctx context.Context, opts ...query.ACMEChallengeQueryOption) (*model.ACMEChallenge, error) {
+	opts = append(opts, query.ACMEChallengeTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ACMEChallenge record by unique constraint.
+func (a ACMEChallengeActions) FindUnique(ctx context.Context, where query.ACMEChallengeWhereClause) (*model.ACMEChallenge, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEChallengeWhere(a.client, []query.ACMEChallengeWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedACMEChallengeColumns(a.client) + " FROM " + quotedACMEChallengeTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ACMEChallenge
+	if err := row.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ACMEChallenge.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ACMEChallenge record.
+func (a ACMEChallengeActions) CreateOne(ctx context.Context, sets ...query.ACMEChallengeSetClause) (*model.ACMEChallenge, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ACMEChallenge.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteACMEChallengeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedACMEChallengeTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEChallengeColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ACMEChallenge
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ACMEChallenge records.
+func (a ACMEChallengeActions) CreateMany(ctx context.Context, data []query.ACMEChallengeCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ACMEChallengeActions) buildACMEChallengeCreateManySQL(data []query.ACMEChallengeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "certificate_id", "cluster_id", "type", "status", "domain", "token", "key_auth", "dns_name", "dns_value", "provider_ref", "last_error", "expires_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedACMEChallengeTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ACMEChallenge record matching the where clause.
+func (a ACMEChallengeActions) UpdateOne(ctx context.Context, where query.ACMEChallengeWhereClause, sets ...query.ACMEChallengeSetClause) (*model.ACMEChallenge, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ACMEChallenge.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteACMEChallengeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildACMEChallengeWhere(a.client, []query.ACMEChallengeWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedACMEChallengeTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEChallengeColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEChallenge
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ACMEChallenge.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ACMEChallenge records matching the where clauses.
+func (a ACMEChallengeActions) UpdateMany(ctx context.Context, wheres []query.ACMEChallengeWhereClause, sets ...query.ACMEChallengeSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ACMEChallenge.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteACMEChallengeField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildACMEChallengeWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedACMEChallengeTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ACMEChallenge.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ACMEChallenge record.
+func (a ACMEChallengeActions) UpsertOne(ctx context.Context, where query.ACMEChallengeWhereClause, create []query.ACMEChallengeSetClause, update []query.ACMEChallengeSetClause) (*model.ACMEChallenge, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ACMEChallenge.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteACMEChallengeField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedACMEChallengeTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteACMEChallengeField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteACMEChallengeField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteACMEChallengeField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEChallengeColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEChallenge
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ACMEChallenge record matching the where clause.
+func (a ACMEChallengeActions) DeleteOne(ctx context.Context, where query.ACMEChallengeWhereClause) (*model.ACMEChallenge, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEChallengeWhere(a.client, []query.ACMEChallengeWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedACMEChallengeTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedACMEChallengeColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ACMEChallenge
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.ClusterId, &item.Type, &item.Status, &item.Domain, &item.Token, &item.KeyAuth, &item.DnsName, &item.DnsValue, &item.ProviderRef, &item.LastError, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ACMEChallenge.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ACMEChallenge records matching the where clauses.
+func (a ACMEChallengeActions) DeleteMany(ctx context.Context, wheres ...query.ACMEChallengeWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEChallengeWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedACMEChallengeTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ACMEChallenge.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ACMEChallenge records matching the where clauses.
+func (a ACMEChallengeActions) Count(ctx context.Context, wheres ...query.ACMEChallengeWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildACMEChallengeWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedACMEChallengeTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ACMEChallenge.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ACMEChallenge.
+func (a ACMEChallengeActions) Aggregate(ctx context.Context, opts ...query.ACMEChallengeAggregateOption) (*query.ACMEChallengeAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteACMEChallengeField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedACMEChallengeTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ACMEChallengeAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ACMEChallenge.
+func (a ACMEChallengeActions) GroupBy(ctx context.Context, fields []string, opts ...query.ACMEChallengeAggregateOption) ([]query.ACMEChallengeGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteACMEChallengeField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteACMEChallengeField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedACMEChallengeTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ACMEChallenge.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ACMEChallengeGroupByResult
+	for rows.Next() {
+		r := query.ACMEChallengeGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ACMEChallenge.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
 }
 
 func quotedAgentTaskTable(c *Client) string { return c.quoteIdentifier("agent_tasks") }
@@ -2281,7 +4256,7 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 
 func quotedCertificateTable(c *Client) string { return c.quoteIdentifier("certificates") }
 func quotedCertificateColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -2296,13 +4271,49 @@ func quoteCertificateField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "name":
 		return c.quoteIdentifier(field), nil
+	case "source":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
 	case "cert_pem":
 		return c.quoteIdentifier(field), nil
 	case "private_key_pem":
 		return c.quoteIdentifier(field), nil
+	case "private_key_encrypted":
+		return c.quoteIdentifier(field), nil
 	case "fingerprint":
 		return c.quoteIdentifier(field), nil
+	case "serial_number":
+		return c.quoteIdentifier(field), nil
+	case "domains_json":
+		return c.quoteIdentifier(field), nil
+	case "not_before":
+		return c.quoteIdentifier(field), nil
 	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "issuer":
+		return c.quoteIdentifier(field), nil
+	case "key_algorithm":
+		return c.quoteIdentifier(field), nil
+	case "acme_directory_url":
+		return c.quoteIdentifier(field), nil
+	case "acme_email":
+		return c.quoteIdentifier(field), nil
+	case "acme_challenge_type":
+		return c.quoteIdentifier(field), nil
+	case "auto_renew":
+		return c.quoteIdentifier(field), nil
+	case "renew_before_days":
+		return c.quoteIdentifier(field), nil
+	case "last_issued_at":
+		return c.quoteIdentifier(field), nil
+	case "last_renewal_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "last_renewal_error":
+		return c.quoteIdentifier(field), nil
+	case "last_published_at":
+		return c.quoteIdentifier(field), nil
+	case "last_publish_error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -2517,14 +4528,14 @@ func (b CertificateCreateManyBuilder) DoReturning(ctx context.Context) ([]model.
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"})
+		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Certificate
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -2551,7 +4562,7 @@ func (b CertificateCreateManyBuilder) DoReturningValues(ctx context.Context) ([]
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -2803,7 +4814,7 @@ func (a CertificateActions) FindMany(ctx context.Context, opts ...query.Certific
 	var results []model.Certificate
 	for rows.Next() {
 		var item model.Certificate
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -2835,7 +4846,7 @@ func (a CertificateActions) FindUnique(ctx context.Context, where query.Certific
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Certificate
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -2866,7 +4877,7 @@ func (a CertificateActions) CreateOne(ctx context.Context, sets ...query.Certifi
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -2885,7 +4896,7 @@ func (a CertificateActions) CreateMany(ctx context.Context, data []query.Certifi
 }
 
 func (a CertificateActions) buildCertificateCreateManySQL(data []query.CertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "cert_pem", "private_key_pem", "fingerprint", "expires_at", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -2958,7 +4969,7 @@ func (a CertificateActions) UpdateOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -3063,7 +5074,7 @@ func (a CertificateActions) UpsertOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -3087,7 +5098,7 @@ func (a CertificateActions) DeleteOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.CertPem, &item.PrivateKeyPem, &item.Fingerprint, &item.ExpiresAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -3233,6 +5244,990 @@ func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts .
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("Certificate.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedCertificateJobTable(c *Client) string { return c.quoteIdentifier("certificate_jobs") }
+func quotedCertificateJobColumns(c *Client) string {
+	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteCertificateJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "certificate_id":
+		return c.quoteIdentifier(field), nil
+	case "operation":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown CertificateJob field %q", field)
+	}
+}
+
+// buildCertificateJobWhere recursively builds a WHERE clause string and arguments.
+func buildCertificateJobWhere(c *Client, wheres []query.CertificateJobWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.CertificateJobWhereClause); ok {
+				sub, subArgs := buildCertificateJobWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.CertificateJobWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildCertificateJobWhere(c, []query.CertificateJobWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.CertificateJobWhereClause); ok {
+				sub, subArgs := buildCertificateJobWhere(c, []query.CertificateJobWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteCertificateJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// CertificateJobActions provides database operations for the CertificateJob model.
+type CertificateJobActions struct {
+	client *Client
+}
+
+// CertificateJobCreateBuilder builds a CertificateJob create operation incrementally.
+type CertificateJobCreateBuilder struct {
+	action CertificateJobActions
+	sets   []query.CertificateJobSetClause
+}
+
+// Create starts a staged CertificateJob create operation.
+func (a CertificateJobActions) Create() CertificateJobCreateBuilder {
+	return CertificateJobCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b CertificateJobCreateBuilder) Set(sets ...query.CertificateJobSetClause) CertificateJobCreateBuilder {
+	next := CertificateJobCreateBuilder{
+		action: b.action,
+		sets:   make([]query.CertificateJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b CertificateJobCreateBuilder) Do(ctx context.Context) (*model.CertificateJob, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// CertificateJobCreateManyBuilder builds a bulk CertificateJob insert operation.
+type CertificateJobCreateManyBuilder struct {
+	action            CertificateJobActions
+	data              []query.CertificateJobCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk CertificateJob insert operation.
+func (a CertificateJobActions) BulkCreate(data []query.CertificateJobCreateInput) CertificateJobCreateManyBuilder {
+	return CertificateJobCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b CertificateJobCreateManyBuilder) OnConflictDoNothing(columns ...string) CertificateJobCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b CertificateJobCreateManyBuilder) Returning(columns ...string) CertificateJobCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b CertificateJobCreateManyBuilder) BatchSize(n int) CertificateJobCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b CertificateJobCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("CertificateJob.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("CertificateJob.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b CertificateJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.CertificateJob, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.CertificateJob
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.CertificateJob
+			if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b CertificateJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildCertificateJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// CertificateJobQueryBuilder builds a CertificateJob query incrementally.
+type CertificateJobQueryBuilder struct {
+	action CertificateJobActions
+	opts   []query.CertificateJobQueryOption
+}
+
+// Query starts a staged CertificateJob query.
+func (a CertificateJobActions) Query() CertificateJobQueryBuilder {
+	return CertificateJobQueryBuilder{action: a}
+}
+
+func (b CertificateJobQueryBuilder) withOptions(opts ...query.CertificateJobQueryOption) CertificateJobQueryBuilder {
+	next := CertificateJobQueryBuilder{
+		action: b.action,
+		opts:   make([]query.CertificateJobQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b CertificateJobQueryBuilder) Where(clauses ...query.CertificateJobWhereClause) CertificateJobQueryBuilder {
+	opts := make([]query.CertificateJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b CertificateJobQueryBuilder) OrderBy(clause query.CertificateJobOrderByClause) CertificateJobQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b CertificateJobQueryBuilder) Include(clauses ...query.CertificateJobIncludeClause) CertificateJobQueryBuilder {
+	opts := make([]query.CertificateJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b CertificateJobQueryBuilder) Take(n int) CertificateJobQueryBuilder {
+	return b.withOptions(query.CertificateJobTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b CertificateJobQueryBuilder) Skip(n int) CertificateJobQueryBuilder {
+	return b.withOptions(query.CertificateJobSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b CertificateJobQueryBuilder) Do(ctx context.Context) ([]model.CertificateJob, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b CertificateJobQueryBuilder) First(ctx context.Context) (*model.CertificateJob, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b CertificateJobQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyCertificateJobOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// CertificateJobUpdateBuilder builds a CertificateJob update operation incrementally.
+type CertificateJobUpdateBuilder struct {
+	action CertificateJobActions
+	wheres []query.CertificateJobWhereClause
+	sets   []query.CertificateJobSetClause
+}
+
+// Update starts a staged CertificateJob update operation.
+func (a CertificateJobActions) Update() CertificateJobUpdateBuilder {
+	return CertificateJobUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b CertificateJobUpdateBuilder) Where(clauses ...query.CertificateJobWhereClause) CertificateJobUpdateBuilder {
+	next := CertificateJobUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.CertificateJobWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.CertificateJobSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b CertificateJobUpdateBuilder) Set(sets ...query.CertificateJobSetClause) CertificateJobUpdateBuilder {
+	next := CertificateJobUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.CertificateJobWhereClause(nil), b.wheres...),
+		sets:   make([]query.CertificateJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b CertificateJobUpdateBuilder) combinedWhere() (query.CertificateJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.CertificateJobWhereClause{}, fmt.Errorf("CertificateJob.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.CertificateJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b CertificateJobUpdateBuilder) Do(ctx context.Context) (*model.CertificateJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b CertificateJobUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// CertificateJobDeleteBuilder builds a CertificateJob delete operation incrementally.
+type CertificateJobDeleteBuilder struct {
+	action CertificateJobActions
+	wheres []query.CertificateJobWhereClause
+}
+
+// Delete starts a staged CertificateJob delete operation.
+func (a CertificateJobActions) Delete() CertificateJobDeleteBuilder {
+	return CertificateJobDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b CertificateJobDeleteBuilder) Where(clauses ...query.CertificateJobWhereClause) CertificateJobDeleteBuilder {
+	next := CertificateJobDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.CertificateJobWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b CertificateJobDeleteBuilder) combinedWhere() (query.CertificateJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.CertificateJobWhereClause{}, fmt.Errorf("CertificateJob.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.CertificateJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b CertificateJobDeleteBuilder) Do(ctx context.Context) (*model.CertificateJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b CertificateJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple CertificateJob records.
+func (a CertificateJobActions) FindMany(ctx context.Context, opts ...query.CertificateJobQueryOption) ([]model.CertificateJob, error) {
+	cfg := query.ApplyCertificateJobOptions(opts)
+	q := "SELECT " + quotedCertificateJobColumns(a.client) + " FROM " + quotedCertificateJobTable(a.client)
+	argIdx := 0
+	where, args := buildCertificateJobWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteCertificateJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.CertificateJob
+	for rows.Next() {
+		var item model.CertificateJob
+		if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("CertificateJob.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching CertificateJob record.
+func (a CertificateJobActions) FindFirst(ctx context.Context, opts ...query.CertificateJobQueryOption) (*model.CertificateJob, error) {
+	opts = append(opts, query.CertificateJobTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single CertificateJob record by unique constraint.
+func (a CertificateJobActions) FindUnique(ctx context.Context, where query.CertificateJobWhereClause) (*model.CertificateJob, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateJobWhere(a.client, []query.CertificateJobWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedCertificateJobColumns(a.client) + " FROM " + quotedCertificateJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.CertificateJob
+	if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("CertificateJob.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single CertificateJob record.
+func (a CertificateJobActions) CreateOne(ctx context.Context, sets ...query.CertificateJobSetClause) (*model.CertificateJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("CertificateJob.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteCertificateJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedCertificateJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedCertificateJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.CertificateJob
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("CertificateJob.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple CertificateJob records.
+func (a CertificateJobActions) CreateMany(ctx context.Context, data []query.CertificateJobCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a CertificateJobActions) buildCertificateJobCreateManySQL(data []query.CertificateJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedCertificateJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single CertificateJob record matching the where clause.
+func (a CertificateJobActions) UpdateOne(ctx context.Context, where query.CertificateJobWhereClause, sets ...query.CertificateJobSetClause) (*model.CertificateJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("CertificateJob.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteCertificateJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildCertificateJobWhere(a.client, []query.CertificateJobWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedCertificateJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedCertificateJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.CertificateJob
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("CertificateJob.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple CertificateJob records matching the where clauses.
+func (a CertificateJobActions) UpdateMany(ctx context.Context, wheres []query.CertificateJobWhereClause, sets ...query.CertificateJobSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("CertificateJob.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteCertificateJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildCertificateJobWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedCertificateJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("CertificateJob.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single CertificateJob record.
+func (a CertificateJobActions) UpsertOne(ctx context.Context, where query.CertificateJobWhereClause, create []query.CertificateJobSetClause, update []query.CertificateJobSetClause) (*model.CertificateJob, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("CertificateJob.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteCertificateJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedCertificateJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteCertificateJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteCertificateJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteCertificateJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedCertificateJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.CertificateJob
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("CertificateJob.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single CertificateJob record matching the where clause.
+func (a CertificateJobActions) DeleteOne(ctx context.Context, where query.CertificateJobWhereClause) (*model.CertificateJob, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateJobWhere(a.client, []query.CertificateJobWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedCertificateJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedCertificateJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.CertificateJob
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("CertificateJob.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple CertificateJob records matching the where clauses.
+func (a CertificateJobActions) DeleteMany(ctx context.Context, wheres ...query.CertificateJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateJobWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedCertificateJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("CertificateJob.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of CertificateJob records matching the where clauses.
+func (a CertificateJobActions) Count(ctx context.Context, wheres ...query.CertificateJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildCertificateJobWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedCertificateJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("CertificateJob.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for CertificateJob.
+func (a CertificateJobActions) Aggregate(ctx context.Context, opts ...query.CertificateJobAggregateOption) (*query.CertificateJobAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteCertificateJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedCertificateJobTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.CertificateJobAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("CertificateJob.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on CertificateJob.
+func (a CertificateJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.CertificateJobAggregateOption) ([]query.CertificateJobGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteCertificateJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteCertificateJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedCertificateJobTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("CertificateJob.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.CertificateJobGroupByResult
+	for rows.Next() {
+		r := query.CertificateJobGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("CertificateJob.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

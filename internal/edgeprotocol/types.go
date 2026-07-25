@@ -20,19 +20,20 @@ type NodeHardwareProfile struct {
 }
 
 type SiteConfig struct {
-	SiteID       string              `json:"site_id"`
-	Version      uint64              `json:"version"`
-	Disabled     bool                `json:"disabled,omitempty"`
-	Domains      []string            `json:"domains"`
-	Listener     ListenerConfig      `json:"listener"`
-	Certificates []CertificateConfig `json:"certificates"`
-	Origins      []OriginConfig      `json:"origins"`
-	Scheduler    string              `json:"scheduler"`
-	Cache        map[string]any      `json:"cache,omitempty"`
-	Compression  map[string]any      `json:"compression,omitempty"`
-	WAF          map[string]any      `json:"waf,omitempty"`
-	Access       map[string]any      `json:"access,omitempty"`
-	RateLimit    map[string]any      `json:"rate_limit,omitempty"`
+	SiteID         string                `json:"site_id"`
+	Version        uint64                `json:"version"`
+	Disabled       bool                  `json:"disabled,omitempty"`
+	Domains        []string              `json:"domains"`
+	Listener       ListenerConfig        `json:"listener"`
+	Certificates   []CertificateConfig   `json:"certificates"`
+	ACMEChallenges []ACMEChallengeConfig `json:"acme_challenges,omitempty"`
+	Origins        []OriginConfig        `json:"origins"`
+	Scheduler      string                `json:"scheduler"`
+	Cache          map[string]any        `json:"cache,omitempty"`
+	Compression    map[string]any        `json:"compression,omitempty"`
+	WAF            map[string]any        `json:"waf,omitempty"`
+	Access         map[string]any        `json:"access,omitempty"`
+	RateLimit      map[string]any        `json:"rate_limit,omitempty"`
 }
 type ListenerConfig struct {
 	HTTPEnabled           bool   `json:"http_enabled"`
@@ -52,6 +53,11 @@ type ListenerConfig struct {
 type CertificateConfig struct {
 	CertificatePEM string `json:"certificate"`
 	PrivateKeyPEM  string `json:"private_key"`
+}
+type ACMEChallengeConfig struct {
+	Domain  string `json:"domain"`
+	Token   string `json:"token"`
+	KeyAuth string `json:"key_auth"`
 }
 type OriginConfig struct {
 	Protocol   string `json:"protocol"`

@@ -9,6 +9,7 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
+	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
@@ -39,6 +40,7 @@ func New(
 	gateway *edgecontrol.Gateway,
 	installQueue *node.InstallQueue,
 	publishService *publisher.Service,
+	certificateService *certmanager.Service,
 	purgeService *purge.Service,
 	dnsService *dnssync.Service,
 	analyticsStore ...*analytics.Store,
@@ -54,7 +56,7 @@ func New(
 	initialization.Register(e, orm, settingStore)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
 	clusters.Register(e, orm, sessions)
-	certificates.Register(e, orm)
+	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, credentialCipher, dnsService)
 	nodes.Register(e, orm, installQueue, credentialCipher, authority, gateway, dnsService)
 	publishapi.Register(e, orm, publishService)

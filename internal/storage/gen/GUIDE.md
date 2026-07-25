@@ -90,6 +90,41 @@ query.PostAuthorIdColumn
 
 ## Models and Fields
 
+### ACMEAccount
+
+- Client handle: `c.ACMEAccount`
+- Query namespace: `query.ACMEAccount`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Directoryurl` (String)
+  - `Email` (String)
+  - `Privatekeyencrypted` (String)
+  - `Accountjson` (Json)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### ACMEChallenge
+
+- Client handle: `c.ACMEChallenge`
+- Query namespace: `query.ACMEChallenge`
+- Fields:
+  - `Id` (String, id)
+  - `Certificateid` (String)
+  - `Clusterid` (String)
+  - `Type` ()
+  - `Status` ()
+  - `Domain` (String)
+  - `Token` (String)
+  - `Keyauth` (String, optional)
+  - `Dnsname` (String, optional)
+  - `Dnsvalue` (String, optional)
+  - `Providerref` (String, optional)
+  - `Lasterror` (String, optional)
+  - `Expiresat` (DateTime)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### AgentTask
 
 - Client handle: `c.AgentTask`
@@ -131,10 +166,46 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Clusterid` (String)
   - `Name` (String)
-  - `Certpem` (String)
-  - `Privatekeypem` (String)
-  - `Fingerprint` (String)
-  - `Expiresat` (DateTime)
+  - `Source` ()
+  - `Status` ()
+  - `Certpem` (String, optional)
+  - `Privatekeypem` (String, optional)
+  - `Privatekeyencrypted` (String, optional)
+  - `Fingerprint` (String, optional)
+  - `Serialnumber` (String, optional)
+  - `Domainsjson` (Json)
+  - `Notbefore` (DateTime, optional)
+  - `Expiresat` (DateTime, optional)
+  - `Issuer` (String, optional)
+  - `Keyalgorithm` (String, optional)
+  - `Acmedirectoryurl` (String, optional)
+  - `Acmeemail` (String, optional)
+  - `Acmechallengetype` (, optional)
+  - `Autorenew` (Boolean)
+  - `Renewbeforedays` (Int)
+  - `Lastissuedat` (DateTime, optional)
+  - `Lastrenewalattemptat` (DateTime, optional)
+  - `Lastrenewalerror` (String, optional)
+  - `Lastpublishedat` (DateTime, optional)
+  - `Lastpublisherror` (String, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### CertificateJob
+
+- Client handle: `c.CertificateJob`
+- Query namespace: `query.CertificateJob`
+- Fields:
+  - `Id` (String, id)
+  - `Certificateid` (String)
+  - `Operation` ()
+  - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseuntil` (DateTime, optional)
+  - `Resultjson` (Json, optional)
+  - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

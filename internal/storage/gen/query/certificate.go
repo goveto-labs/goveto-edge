@@ -2,6 +2,8 @@
 package query
 
 import (
+	"encoding/json"
+	"goveto-edge/internal/storage/gen/model"
 	"time"
 )
 
@@ -30,43 +32,101 @@ func ApplyCertificateOptions(opts []CertificateQueryOption) CertificateQueryConf
 
 // CertificateQuery is the namespace for Certificate query operations.
 type CertificateQuery struct {
-	Id            certificateIdField
-	ClusterId     certificateClusterIdField
-	Name          certificateNameField
-	CertPem       certificateCertPemField
-	PrivateKeyPem certificatePrivateKeyPemField
-	Fingerprint   certificateFingerprintField
-	ExpiresAt     certificateExpiresAtField
-	CreatedAt     certificateCreatedAtField
-	UpdatedAt     certificateUpdatedAtField
-	Cluster       certificateClusterRelation
-	Sites         certificateSitesRelation
+	Id                   certificateIdField
+	ClusterId            certificateClusterIdField
+	Name                 certificateNameField
+	Source               certificateSourceField
+	Status               certificateStatusField
+	CertPem              certificateCertPemField
+	PrivateKeyPem        certificatePrivateKeyPemField
+	PrivateKeyEncrypted  certificatePrivateKeyEncryptedField
+	Fingerprint          certificateFingerprintField
+	SerialNumber         certificateSerialNumberField
+	DomainsJson          certificateDomainsJsonField
+	NotBefore            certificateNotBeforeField
+	ExpiresAt            certificateExpiresAtField
+	Issuer               certificateIssuerField
+	KeyAlgorithm         certificateKeyAlgorithmField
+	AcmeDirectoryUrl     certificateAcmeDirectoryUrlField
+	AcmeEmail            certificateAcmeEmailField
+	AcmeChallengeType    certificateAcmeChallengeTypeField
+	AutoRenew            certificateAutoRenewField
+	RenewBeforeDays      certificateRenewBeforeDaysField
+	LastIssuedAt         certificateLastIssuedAtField
+	LastRenewalAttemptAt certificateLastRenewalAttemptAtField
+	LastRenewalError     certificateLastRenewalErrorField
+	LastPublishedAt      certificateLastPublishedAtField
+	LastPublishError     certificateLastPublishErrorField
+	CreatedAt            certificateCreatedAtField
+	UpdatedAt            certificateUpdatedAtField
+	Cluster              certificateClusterRelation
+	Sites                certificateSitesRelation
+	Jobs                 certificateJobsRelation
+	Challenges           certificateChallengesRelation
 }
 
 const CertificateTable = "certificates"
 const CertificateIdColumn = "id"
 const CertificateClusterIdColumn = "cluster_id"
 const CertificateNameColumn = "name"
+const CertificateSourceColumn = "source"
+const CertificateStatusColumn = "status"
 const CertificateCertPemColumn = "cert_pem"
 const CertificatePrivateKeyPemColumn = "private_key_pem"
+const CertificatePrivateKeyEncryptedColumn = "private_key_encrypted"
 const CertificateFingerprintColumn = "fingerprint"
+const CertificateSerialNumberColumn = "serial_number"
+const CertificateDomainsJsonColumn = "domains_json"
+const CertificateNotBeforeColumn = "not_before"
 const CertificateExpiresAtColumn = "expires_at"
+const CertificateIssuerColumn = "issuer"
+const CertificateKeyAlgorithmColumn = "key_algorithm"
+const CertificateAcmeDirectoryUrlColumn = "acme_directory_url"
+const CertificateAcmeEmailColumn = "acme_email"
+const CertificateAcmeChallengeTypeColumn = "acme_challenge_type"
+const CertificateAutoRenewColumn = "auto_renew"
+const CertificateRenewBeforeDaysColumn = "renew_before_days"
+const CertificateLastIssuedAtColumn = "last_issued_at"
+const CertificateLastRenewalAttemptAtColumn = "last_renewal_attempt_at"
+const CertificateLastRenewalErrorColumn = "last_renewal_error"
+const CertificateLastPublishedAtColumn = "last_published_at"
+const CertificateLastPublishErrorColumn = "last_publish_error"
 const CertificateCreatedAtColumn = "created_at"
 const CertificateUpdatedAtColumn = "updated_at"
 
 // CertificateQuery provides query building methods for the Certificate model.
 var Certificate = CertificateQuery{
-	Id:            certificateIdField{},
-	ClusterId:     certificateClusterIdField{},
-	Name:          certificateNameField{},
-	CertPem:       certificateCertPemField{},
-	PrivateKeyPem: certificatePrivateKeyPemField{},
-	Fingerprint:   certificateFingerprintField{},
-	ExpiresAt:     certificateExpiresAtField{},
-	CreatedAt:     certificateCreatedAtField{},
-	UpdatedAt:     certificateUpdatedAtField{},
-	Cluster:       certificateClusterRelation{},
-	Sites:         certificateSitesRelation{},
+	Id:                   certificateIdField{},
+	ClusterId:            certificateClusterIdField{},
+	Name:                 certificateNameField{},
+	Source:               certificateSourceField{},
+	Status:               certificateStatusField{},
+	CertPem:              certificateCertPemField{},
+	PrivateKeyPem:        certificatePrivateKeyPemField{},
+	PrivateKeyEncrypted:  certificatePrivateKeyEncryptedField{},
+	Fingerprint:          certificateFingerprintField{},
+	SerialNumber:         certificateSerialNumberField{},
+	DomainsJson:          certificateDomainsJsonField{},
+	NotBefore:            certificateNotBeforeField{},
+	ExpiresAt:            certificateExpiresAtField{},
+	Issuer:               certificateIssuerField{},
+	KeyAlgorithm:         certificateKeyAlgorithmField{},
+	AcmeDirectoryUrl:     certificateAcmeDirectoryUrlField{},
+	AcmeEmail:            certificateAcmeEmailField{},
+	AcmeChallengeType:    certificateAcmeChallengeTypeField{},
+	AutoRenew:            certificateAutoRenewField{},
+	RenewBeforeDays:      certificateRenewBeforeDaysField{},
+	LastIssuedAt:         certificateLastIssuedAtField{},
+	LastRenewalAttemptAt: certificateLastRenewalAttemptAtField{},
+	LastRenewalError:     certificateLastRenewalErrorField{},
+	LastPublishedAt:      certificateLastPublishedAtField{},
+	LastPublishError:     certificateLastPublishErrorField{},
+	CreatedAt:            certificateCreatedAtField{},
+	UpdatedAt:            certificateUpdatedAtField{},
+	Cluster:              certificateClusterRelation{},
+	Sites:                certificateSitesRelation{},
+	Jobs:                 certificateJobsRelation{},
+	Challenges:           certificateChallengesRelation{},
 }
 
 // CertificateWhereClause represents a WHERE condition for Certificate.
@@ -341,21 +401,113 @@ func (certificateNameField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "name", Direction: "DESC"}
 }
 
+// SourceField provides query operations for the source field.
+type certificateSourceField struct{}
+
+// Equals creates an equality condition.
+func (certificateSourceField) Equals(v model.CertificateSource) CertificateWhereClause {
+	return CertificateWhereClause{Field: "source", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateSourceField) Not(v model.CertificateSource) CertificateWhereClause {
+	return CertificateWhereClause{Field: "source", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateSourceField) In(vals ...model.CertificateSource) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "source", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateSourceField) NotIn(vals ...model.CertificateSource) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "source", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (certificateSourceField) Set(v model.CertificateSource) CertificateSetClause {
+	return CertificateSetClause{Field: "source", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateSourceField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "source", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateSourceField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "source", Direction: "DESC"}
+}
+
+// StatusField provides query operations for the status field.
+type certificateStatusField struct{}
+
+// Equals creates an equality condition.
+func (certificateStatusField) Equals(v model.CertificateStatus) CertificateWhereClause {
+	return CertificateWhereClause{Field: "status", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateStatusField) Not(v model.CertificateStatus) CertificateWhereClause {
+	return CertificateWhereClause{Field: "status", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateStatusField) In(vals ...model.CertificateStatus) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "status", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateStatusField) NotIn(vals ...model.CertificateStatus) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "status", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (certificateStatusField) Set(v model.CertificateStatus) CertificateSetClause {
+	return CertificateSetClause{Field: "status", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateStatusField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "status", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateStatusField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "status", Direction: "DESC"}
+}
+
 // CertPemField provides query operations for the certPem field.
 type certificateCertPemField struct{}
 
 // Equals creates an equality condition.
-func (certificateCertPemField) Equals(v string) CertificateWhereClause {
+func (certificateCertPemField) Equals(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "cert_pem", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificateCertPemField) Not(v string) CertificateWhereClause {
+func (certificateCertPemField) Not(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "cert_pem", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificateCertPemField) In(vals ...string) CertificateWhereClause {
+func (certificateCertPemField) In(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -364,7 +516,7 @@ func (certificateCertPemField) In(vals ...string) CertificateWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (certificateCertPemField) NotIn(vals ...string) CertificateWhereClause {
+func (certificateCertPemField) NotIn(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -387,9 +539,19 @@ func (certificateCertPemField) EndsWith(v string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "cert_pem", Operator: "ENDS_WITH", Value: v}
 }
 
+// IsNull creates an IS NULL condition.
+func (certificateCertPemField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "cert_pem", Operator: "IS NULL", Value: nil}
+}
+
 // Set creates a set operation for create/update.
 func (certificateCertPemField) Set(v string) CertificateSetClause {
 	return CertificateSetClause{Field: "cert_pem", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateCertPemField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "cert_pem", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -406,17 +568,17 @@ func (certificateCertPemField) Desc() CertificateOrderByClause {
 type certificatePrivateKeyPemField struct{}
 
 // Equals creates an equality condition.
-func (certificatePrivateKeyPemField) Equals(v string) CertificateWhereClause {
+func (certificatePrivateKeyPemField) Equals(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "private_key_pem", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificatePrivateKeyPemField) Not(v string) CertificateWhereClause {
+func (certificatePrivateKeyPemField) Not(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "private_key_pem", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificatePrivateKeyPemField) In(vals ...string) CertificateWhereClause {
+func (certificatePrivateKeyPemField) In(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -425,7 +587,7 @@ func (certificatePrivateKeyPemField) In(vals ...string) CertificateWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (certificatePrivateKeyPemField) NotIn(vals ...string) CertificateWhereClause {
+func (certificatePrivateKeyPemField) NotIn(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -448,9 +610,19 @@ func (certificatePrivateKeyPemField) EndsWith(v string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "private_key_pem", Operator: "ENDS_WITH", Value: v}
 }
 
+// IsNull creates an IS NULL condition.
+func (certificatePrivateKeyPemField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_pem", Operator: "IS NULL", Value: nil}
+}
+
 // Set creates a set operation for create/update.
 func (certificatePrivateKeyPemField) Set(v string) CertificateSetClause {
 	return CertificateSetClause{Field: "private_key_pem", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificatePrivateKeyPemField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "private_key_pem", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -463,21 +635,92 @@ func (certificatePrivateKeyPemField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "private_key_pem", Direction: "DESC"}
 }
 
+// PrivateKeyEncryptedField provides query operations for the privateKeyEncrypted field.
+type certificatePrivateKeyEncryptedField struct{}
+
+// Equals creates an equality condition.
+func (certificatePrivateKeyEncryptedField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificatePrivateKeyEncryptedField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificatePrivateKeyEncryptedField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificatePrivateKeyEncryptedField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificatePrivateKeyEncryptedField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificatePrivateKeyEncryptedField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificatePrivateKeyEncryptedField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificatePrivateKeyEncryptedField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificatePrivateKeyEncryptedField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "private_key_encrypted", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificatePrivateKeyEncryptedField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "private_key_encrypted", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificatePrivateKeyEncryptedField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "private_key_encrypted", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificatePrivateKeyEncryptedField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "private_key_encrypted", Direction: "DESC"}
+}
+
 // FingerprintField provides query operations for the fingerprint field.
 type certificateFingerprintField struct{}
 
 // Equals creates an equality condition.
-func (certificateFingerprintField) Equals(v string) CertificateWhereClause {
+func (certificateFingerprintField) Equals(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "fingerprint", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificateFingerprintField) Not(v string) CertificateWhereClause {
+func (certificateFingerprintField) Not(v *string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "fingerprint", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificateFingerprintField) In(vals ...string) CertificateWhereClause {
+func (certificateFingerprintField) In(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -486,7 +729,7 @@ func (certificateFingerprintField) In(vals ...string) CertificateWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (certificateFingerprintField) NotIn(vals ...string) CertificateWhereClause {
+func (certificateFingerprintField) NotIn(vals ...*string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -509,9 +752,19 @@ func (certificateFingerprintField) EndsWith(v string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "fingerprint", Operator: "ENDS_WITH", Value: v}
 }
 
+// IsNull creates an IS NULL condition.
+func (certificateFingerprintField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "fingerprint", Operator: "IS NULL", Value: nil}
+}
+
 // Set creates a set operation for create/update.
 func (certificateFingerprintField) Set(v string) CertificateSetClause {
 	return CertificateSetClause{Field: "fingerprint", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateFingerprintField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "fingerprint", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -524,21 +777,214 @@ func (certificateFingerprintField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "fingerprint", Direction: "DESC"}
 }
 
+// SerialNumberField provides query operations for the serialNumber field.
+type certificateSerialNumberField struct{}
+
+// Equals creates an equality condition.
+func (certificateSerialNumberField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateSerialNumberField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateSerialNumberField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "serial_number", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateSerialNumberField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "serial_number", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateSerialNumberField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateSerialNumberField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateSerialNumberField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateSerialNumberField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "serial_number", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateSerialNumberField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "serial_number", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateSerialNumberField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "serial_number", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateSerialNumberField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "serial_number", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateSerialNumberField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "serial_number", Direction: "DESC"}
+}
+
+// DomainsJsonField provides query operations for the domainsJson field.
+type certificateDomainsJsonField struct{}
+
+// Equals creates an equality condition.
+func (certificateDomainsJsonField) Equals(v json.RawMessage) CertificateWhereClause {
+	return CertificateWhereClause{Field: "domains_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateDomainsJsonField) Not(v json.RawMessage) CertificateWhereClause {
+	return CertificateWhereClause{Field: "domains_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateDomainsJsonField) In(vals ...json.RawMessage) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "domains_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateDomainsJsonField) NotIn(vals ...json.RawMessage) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "domains_json", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (certificateDomainsJsonField) Set(v json.RawMessage) CertificateSetClause {
+	return CertificateSetClause{Field: "domains_json", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateDomainsJsonField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "domains_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateDomainsJsonField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "domains_json", Direction: "DESC"}
+}
+
+// NotBeforeField provides query operations for the notBefore field.
+type certificateNotBeforeField struct{}
+
+// Equals creates an equality condition.
+func (certificateNotBeforeField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateNotBeforeField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateNotBeforeField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "not_before", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateNotBeforeField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "not_before", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateNotBeforeField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateNotBeforeField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateNotBeforeField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateNotBeforeField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateNotBeforeField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "not_before", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateNotBeforeField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "not_before", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateNotBeforeField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "not_before", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateNotBeforeField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "not_before", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateNotBeforeField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "not_before", Direction: "DESC"}
+}
+
 // ExpiresAtField provides query operations for the expiresAt field.
 type certificateExpiresAtField struct{}
 
 // Equals creates an equality condition.
-func (certificateExpiresAtField) Equals(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Equals(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificateExpiresAtField) Not(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Not(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificateExpiresAtField) In(vals ...time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) In(vals ...*time.Time) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -547,7 +993,7 @@ func (certificateExpiresAtField) In(vals ...time.Time) CertificateWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (certificateExpiresAtField) NotIn(vals ...time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -556,28 +1002,38 @@ func (certificateExpiresAtField) NotIn(vals ...time.Time) CertificateWhereClause
 }
 
 // Lt creates a less-than condition.
-func (certificateExpiresAtField) Lt(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Lt(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: "<", Value: v}
 }
 
 // Lte creates a less-than-or-equal condition.
-func (certificateExpiresAtField) Lte(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Lte(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: "<=", Value: v}
 }
 
 // Gt creates a greater-than condition.
-func (certificateExpiresAtField) Gt(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Gt(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: ">", Value: v}
 }
 
 // Gte creates a greater-than-or-equal condition.
-func (certificateExpiresAtField) Gte(v time.Time) CertificateWhereClause {
+func (certificateExpiresAtField) Gte(v *time.Time) CertificateWhereClause {
 	return CertificateWhereClause{Field: "expires_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateExpiresAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "expires_at", Operator: "IS NULL", Value: nil}
 }
 
 // Set creates a set operation for create/update.
 func (certificateExpiresAtField) Set(v time.Time) CertificateSetClause {
 	return CertificateSetClause{Field: "expires_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateExpiresAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "expires_at", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -588,6 +1044,828 @@ func (certificateExpiresAtField) Asc() CertificateOrderByClause {
 // Desc returns a descending order clause for this field.
 func (certificateExpiresAtField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "expires_at", Direction: "DESC"}
+}
+
+// IssuerField provides query operations for the issuer field.
+type certificateIssuerField struct{}
+
+// Equals creates an equality condition.
+func (certificateIssuerField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateIssuerField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateIssuerField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "issuer", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateIssuerField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "issuer", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateIssuerField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateIssuerField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateIssuerField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateIssuerField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "issuer", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateIssuerField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "issuer", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateIssuerField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "issuer", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateIssuerField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "issuer", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateIssuerField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "issuer", Direction: "DESC"}
+}
+
+// KeyAlgorithmField provides query operations for the keyAlgorithm field.
+type certificateKeyAlgorithmField struct{}
+
+// Equals creates an equality condition.
+func (certificateKeyAlgorithmField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateKeyAlgorithmField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateKeyAlgorithmField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateKeyAlgorithmField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateKeyAlgorithmField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateKeyAlgorithmField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateKeyAlgorithmField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateKeyAlgorithmField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "key_algorithm", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateKeyAlgorithmField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "key_algorithm", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateKeyAlgorithmField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "key_algorithm", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateKeyAlgorithmField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "key_algorithm", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateKeyAlgorithmField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "key_algorithm", Direction: "DESC"}
+}
+
+// AcmeDirectoryUrlField provides query operations for the acmeDirectoryUrl field.
+type certificateAcmeDirectoryUrlField struct{}
+
+// Equals creates an equality condition.
+func (certificateAcmeDirectoryUrlField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateAcmeDirectoryUrlField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateAcmeDirectoryUrlField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateAcmeDirectoryUrlField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateAcmeDirectoryUrlField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateAcmeDirectoryUrlField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateAcmeDirectoryUrlField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateAcmeDirectoryUrlField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_directory_url", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateAcmeDirectoryUrlField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "acme_directory_url", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateAcmeDirectoryUrlField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "acme_directory_url", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateAcmeDirectoryUrlField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_directory_url", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateAcmeDirectoryUrlField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_directory_url", Direction: "DESC"}
+}
+
+// AcmeEmailField provides query operations for the acmeEmail field.
+type certificateAcmeEmailField struct{}
+
+// Equals creates an equality condition.
+func (certificateAcmeEmailField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateAcmeEmailField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateAcmeEmailField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_email", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateAcmeEmailField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_email", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateAcmeEmailField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateAcmeEmailField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateAcmeEmailField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateAcmeEmailField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_email", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateAcmeEmailField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "acme_email", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateAcmeEmailField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "acme_email", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateAcmeEmailField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_email", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateAcmeEmailField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_email", Direction: "DESC"}
+}
+
+// AcmeChallengeTypeField provides query operations for the acmeChallengeType field.
+type certificateAcmeChallengeTypeField struct{}
+
+// Equals creates an equality condition.
+func (certificateAcmeChallengeTypeField) Equals(v model.ACMEChallengeType) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateAcmeChallengeTypeField) Not(v model.ACMEChallengeType) CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateAcmeChallengeTypeField) In(vals ...model.ACMEChallengeType) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateAcmeChallengeTypeField) NotIn(vals ...model.ACMEChallengeType) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateAcmeChallengeTypeField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateAcmeChallengeTypeField) Set(v model.ACMEChallengeType) CertificateSetClause {
+	return CertificateSetClause{Field: "acme_challenge_type", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateAcmeChallengeTypeField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "acme_challenge_type", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateAcmeChallengeTypeField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_challenge_type", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateAcmeChallengeTypeField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "acme_challenge_type", Direction: "DESC"}
+}
+
+// AutoRenewField provides query operations for the autoRenew field.
+type certificateAutoRenewField struct{}
+
+// Equals creates an equality condition.
+func (certificateAutoRenewField) Equals(v bool) CertificateWhereClause {
+	return CertificateWhereClause{Field: "auto_renew", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateAutoRenewField) Not(v bool) CertificateWhereClause {
+	return CertificateWhereClause{Field: "auto_renew", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateAutoRenewField) In(vals ...bool) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "auto_renew", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateAutoRenewField) NotIn(vals ...bool) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "auto_renew", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (certificateAutoRenewField) Set(v bool) CertificateSetClause {
+	return CertificateSetClause{Field: "auto_renew", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateAutoRenewField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "auto_renew", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateAutoRenewField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "auto_renew", Direction: "DESC"}
+}
+
+// RenewBeforeDaysField provides query operations for the renewBeforeDays field.
+type certificateRenewBeforeDaysField struct{}
+
+// Equals creates an equality condition.
+func (certificateRenewBeforeDaysField) Equals(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateRenewBeforeDaysField) Not(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateRenewBeforeDaysField) In(vals ...int) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateRenewBeforeDaysField) NotIn(vals ...int) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateRenewBeforeDaysField) Lt(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateRenewBeforeDaysField) Lte(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateRenewBeforeDaysField) Gt(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateRenewBeforeDaysField) Gte(v int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "renew_before_days", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (certificateRenewBeforeDaysField) Set(v int) CertificateSetClause {
+	return CertificateSetClause{Field: "renew_before_days", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateRenewBeforeDaysField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "renew_before_days", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateRenewBeforeDaysField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "renew_before_days", Direction: "DESC"}
+}
+
+// LastIssuedAtField provides query operations for the lastIssuedAt field.
+type certificateLastIssuedAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastIssuedAtField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastIssuedAtField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastIssuedAtField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastIssuedAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateLastIssuedAtField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateLastIssuedAtField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateLastIssuedAtField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateLastIssuedAtField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastIssuedAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_issued_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastIssuedAtField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "last_issued_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastIssuedAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_issued_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastIssuedAtField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_issued_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastIssuedAtField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_issued_at", Direction: "DESC"}
+}
+
+// LastRenewalAttemptAtField provides query operations for the lastRenewalAttemptAt field.
+type certificateLastRenewalAttemptAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastRenewalAttemptAtField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastRenewalAttemptAtField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastRenewalAttemptAtField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastRenewalAttemptAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateLastRenewalAttemptAtField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateLastRenewalAttemptAtField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateLastRenewalAttemptAtField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateLastRenewalAttemptAtField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastRenewalAttemptAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_attempt_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastRenewalAttemptAtField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "last_renewal_attempt_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastRenewalAttemptAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_renewal_attempt_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastRenewalAttemptAtField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_renewal_attempt_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastRenewalAttemptAtField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_renewal_attempt_at", Direction: "DESC"}
+}
+
+// LastRenewalErrorField provides query operations for the lastRenewalError field.
+type certificateLastRenewalErrorField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastRenewalErrorField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastRenewalErrorField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastRenewalErrorField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastRenewalErrorField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateLastRenewalErrorField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateLastRenewalErrorField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateLastRenewalErrorField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastRenewalErrorField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_renewal_error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastRenewalErrorField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "last_renewal_error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastRenewalErrorField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_renewal_error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastRenewalErrorField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_renewal_error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastRenewalErrorField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_renewal_error", Direction: "DESC"}
+}
+
+// LastPublishedAtField provides query operations for the lastPublishedAt field.
+type certificateLastPublishedAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastPublishedAtField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastPublishedAtField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastPublishedAtField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_published_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastPublishedAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_published_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateLastPublishedAtField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateLastPublishedAtField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateLastPublishedAtField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateLastPublishedAtField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastPublishedAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_published_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastPublishedAtField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "last_published_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastPublishedAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_published_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastPublishedAtField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_published_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastPublishedAtField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_published_at", Direction: "DESC"}
+}
+
+// LastPublishErrorField provides query operations for the lastPublishError field.
+type certificateLastPublishErrorField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastPublishErrorField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastPublishErrorField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastPublishErrorField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastPublishErrorField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateLastPublishErrorField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateLastPublishErrorField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateLastPublishErrorField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastPublishErrorField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_publish_error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastPublishErrorField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "last_publish_error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastPublishErrorField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_publish_error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastPublishErrorField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_publish_error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastPublishErrorField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_publish_error", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -738,6 +2016,22 @@ func (certificateSitesRelation) Fetch() CertificateIncludeClause {
 	return CertificateIncludeClause{Relation: "sites"}
 }
 
+// JobsRelation provides relation query helpers for jobs.
+type certificateJobsRelation struct{}
+
+// Fetch creates an include clause to fetch related jobs.
+func (certificateJobsRelation) Fetch() CertificateIncludeClause {
+	return CertificateIncludeClause{Relation: "jobs"}
+}
+
+// ChallengesRelation provides relation query helpers for challenges.
+type certificateChallengesRelation struct{}
+
+// Fetch creates an include clause to fetch related challenges.
+func (certificateChallengesRelation) Fetch() CertificateIncludeClause {
+	return CertificateIncludeClause{Relation: "challenges"}
+}
+
 // CertificateSetClause represents a field set operation for create/update.
 type CertificateSetClause struct {
 	Field string
@@ -771,22 +2065,42 @@ type CertificateGroupByResult struct {
 
 // CertificateCreateInput holds data for creating a Certificate record.
 type CertificateCreateInput struct {
-	Id            string
-	ClusterId     string
-	Name          string
-	CertPem       string
-	PrivateKeyPem string
-	Fingerprint   string
-	ExpiresAt     time.Time
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Cluster       *ClusterCreateNestedInput
-	Sites         *SiteCertificateCreateNestedInput
+	Id                   string
+	ClusterId            string
+	Name                 string
+	Source               model.CertificateSource
+	Status               model.CertificateStatus
+	CertPem              **string
+	PrivateKeyPem        **string
+	PrivateKeyEncrypted  **string
+	Fingerprint          **string
+	SerialNumber         **string
+	DomainsJson          json.RawMessage
+	NotBefore            **time.Time
+	ExpiresAt            **time.Time
+	Issuer               **string
+	KeyAlgorithm         **string
+	AcmeDirectoryUrl     **string
+	AcmeEmail            **string
+	AcmeChallengeType    *model.ACMEChallengeType
+	AutoRenew            bool
+	RenewBeforeDays      int
+	LastIssuedAt         **time.Time
+	LastRenewalAttemptAt **time.Time
+	LastRenewalError     **string
+	LastPublishedAt      **time.Time
+	LastPublishError     **string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Cluster              *ClusterCreateNestedInput
+	Sites                *SiteCertificateCreateNestedInput
+	Jobs                 *CertificateJobCreateNestedInput
+	Challenges           *ACMEChallengeCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d CertificateCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.CertPem, d.PrivateKeyPem, d.Fingerprint, d.ExpiresAt, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Source, d.Status, d.CertPem, d.PrivateKeyPem, d.PrivateKeyEncrypted, d.Fingerprint, d.SerialNumber, d.DomainsJson, d.NotBefore, d.ExpiresAt, d.Issuer, d.KeyAlgorithm, d.AcmeDirectoryUrl, d.AcmeEmail, d.AcmeChallengeType, d.AutoRenew, d.RenewBeforeDays, d.LastIssuedAt, d.LastRenewalAttemptAt, d.LastRenewalError, d.LastPublishedAt, d.LastPublishError, d.CreatedAt, d.UpdatedAt}
 }
 
 // CertificateCreateNestedInput supports nested creates and connects.
