@@ -10,9 +10,11 @@ import (
 
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
+	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -171,15 +173,19 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 			certificateIDs = *input.CertificateIDs
 		}
 		if targetCluster != current.ClusterID {
-			memberships, findErr := db.ClusterMember.Query().Where(
-				query.ClusterMember.ClusterId.Equals(targetCluster),
-				query.ClusterMember.UserId.Equals(auth.CurrentUID(c)),
-			).Do(c.Request().Context())
-			if findErr != nil {
-				return findErr
+			allowed, _, authorizeErr := clusteraccess.Authorize(c.Request().Context(), db, current.ClusterID, auth.CurrentUID(c), rbac.PermissionClusterTransfer)
+			if authorizeErr != nil {
+				return authorizeErr
 			}
-			if len(memberships) == 0 {
-				return echo.NewHTTPError(http.StatusForbidden, "target cluster access denied")
+			if !allowed {
+				return echo.NewHTTPError(http.StatusForbidden, "source cluster transfer permission required")
+			}
+			allowed, _, authorizeErr = clusteraccess.Authorize(c.Request().Context(), db, targetCluster, auth.CurrentUID(c), rbac.PermissionClusterTransfer)
+			if authorizeErr != nil {
+				return authorizeErr
+			}
+			if !allowed {
+				return echo.NewHTTPError(http.StatusForbidden, "target cluster transfer permission required")
 			}
 			if input.CertificateIDs == nil && current.Certificates > 0 {
 				return echo.NewHTTPError(http.StatusBadRequest, "remove site certificates before transferring the site")

@@ -10,6 +10,7 @@ import (
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -23,10 +24,10 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
 	group := e.Group("/api/v1/clusters/:cluster_id", authn.RequireAuth, clusteraccess.Require(db))
 	group.GET("/dns-lines", listDNSLines(db))
 	group.GET("/groups", listGroups(db))
-	group.POST("/groups", createGroup(db))
+	group.POST("/groups", createGroup(db), clusteraccess.RequirePermission(db, rbac.PermissionNodeManage))
 	group.GET("/regions", listRegions(db))
-	group.POST("/regions", createRegion(db))
-	group.POST("/members", addMember(db))
+	group.POST("/regions", createRegion(db), clusteraccess.RequirePermission(db, rbac.PermissionNodeManage))
+	group.POST("/members", addMember(db), clusteraccess.RequirePermission(db, rbac.PermissionMemberManage))
 }
 
 // @summary List DNS lines

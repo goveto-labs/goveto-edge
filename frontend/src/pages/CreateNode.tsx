@@ -30,6 +30,7 @@ import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.ts
 import { SSHCredentialDialog } from '@/components/SSHCredentialDialog.tsx';
 import { SSHCredentialSelect } from '@/components/SSHCredentialSelect.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 type CreationMode = 'single' | 'batch';
 
@@ -95,7 +96,7 @@ export default function CreateNode() {
     const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([]);
     const [credentialDialogOpen, setCredentialDialogOpen] = useState(false);
     const [error, setError] = useState('');
-    const isOwner = clusters.find((item) => item.id === clusterId)?.role === 'OWNER';
+    const isOwner = canManageCluster(clusters.find((item) => item.id === clusterId)?.role);
 
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState('');

@@ -47,7 +47,7 @@ func New(
 ) *echo.Echo {
 	e := echo.New()
 	e.HTTPErrorHandler = types.HTTPErrorHandler
-	e.Use(sessions.Session)
+	e.Use(sessions.Session, sessions.RequireActiveUser(orm))
 
 	settingStore := settings.New(orm)
 	captchaVerifier := captcha.New()

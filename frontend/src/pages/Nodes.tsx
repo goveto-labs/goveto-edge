@@ -13,6 +13,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 function formatPercent(value: number) {
     return `${value.toFixed(1)}%`;
@@ -40,7 +41,10 @@ function formatRate(bytesPerSecond: number) {
 
 export default function Nodes() {
     const navigate = useNavigate();
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
+    const canManage = canManageCluster(
+        clusters.find((clusterItem) => clusterItem.id === clusterId)?.role
+    );
     const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
@@ -166,10 +170,12 @@ export default function Nodes() {
     return (
         <div className='space-y-6'>
             <PageHeader subtitle='Manage edge nodes and their configuration.' title='Nodes'>
-                <Button onPress={() => navigate('/nodes/create')}>
-                    <Plus className='mr-2 h-4 w-4' />
-                    Create node
-                </Button>
+                {canManage && (
+                    <Button onPress={() => navigate('/nodes/create')}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Create node
+                    </Button>
+                )}
             </PageHeader>
 
             {error && (
@@ -182,10 +188,12 @@ export default function Nodes() {
                 aria-label='Nodes'
                 empty={nodes.length === 0}
                 emptyAction={
-                    <Button onPress={() => navigate('/nodes/create')}>
-                        <Plus className='mr-2 h-4 w-4' />
-                        Create node
-                    </Button>
+                    canManage ? (
+                        <Button onPress={() => navigate('/nodes/create')}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Create node
+                        </Button>
+                    ) : undefined
                 }
                 emptyDescription='Create a node to start serving traffic from this cluster.'
                 emptyTitle='No nodes yet'
@@ -243,14 +251,16 @@ export default function Nodes() {
                                         <span className='line-clamp-2 min-w-0'>
                                             {assignedLines.join(', ') || 'Default'}
                                         </span>
-                                        <button
-                                            aria-label={`Edit DNS lines for ${node.name}`}
-                                            className='shrink-0 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
-                                            type='button'
-                                            onClick={() => openDnsLineEditor(node)}
-                                        >
-                                            [EDIT]
-                                        </button>
+                                        {canManage && (
+                                            <button
+                                                aria-label={`Edit DNS lines for ${node.name}`}
+                                                className='shrink-0 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
+                                                type='button'
+                                                onClick={() => openDnsLineEditor(node)}
+                                            >
+                                                [EDIT]
+                                            </button>
+                                        )}
                                     </div>
                                 </td>
                                 <td className='max-w-xs text-sm text-muted'>
@@ -287,14 +297,16 @@ export default function Nodes() {
                                             <Eye className='mr-1.5 h-3.5 w-3.5' />
                                             View
                                         </Button>
-                                        <Button
-                                            size='sm'
-                                            variant='danger'
-                                            onPress={() => void handleDelete(node)}
-                                        >
-                                            <Trash2 className='mr-1.5 h-3.5 w-3.5' />
-                                            Delete
-                                        </Button>
+                                        {canManage && (
+                                            <Button
+                                                size='sm'
+                                                variant='danger'
+                                                onPress={() => void handleDelete(node)}
+                                            >
+                                                <Trash2 className='mr-1.5 h-3.5 w-3.5' />
+                                                Delete
+                                            </Button>
+                                        )}
                                     </div>
                                 </td>
                             </tr>

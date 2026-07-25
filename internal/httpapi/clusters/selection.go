@@ -11,7 +11,9 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
@@ -40,13 +42,35 @@ func registerSelection(e *echo.Echo, db *client.Client, sessions *auth.SessionSt
 }
 
 func available(ctx context.Context, db *client.Client, uid string) ([]clusterChoice, error) {
-	return client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name,
+	user, cached := auth.CurrentUser(ctx, uid)
+	if !cached {
+		var err error
+		user, err = db.User.FindUnique(ctx, query.User.Id.Equals(uid))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if user == nil || user.Status != model.UserStatusACTIVE {
+		return nil, nil
+	}
+	if user.Role == model.UserRoleADMIN {
+		return client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name, 'ADMIN' AS role, c.created_at
+			FROM clusters c ORDER BY c.created_at, c.name`)
+	}
+	items, err := client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name,
 		CASE WHEN c.creator_id = $1 THEN 'OWNER' ELSE cm.permission::text END AS role,
 		c.created_at
 		FROM clusters c
 		LEFT JOIN cluster_members cm ON cm.cluster_id = c.id AND cm.user_id = $1
 		WHERE c.creator_id = $1 OR cm.user_id = $1
 		ORDER BY c.created_at, c.name`, uid)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index].Role = string(rbac.Highest(rbac.Role(items[index].Role), rbac.Role(user.Role)))
+	}
+	return items, nil
 }
 
 // @summary List clusters

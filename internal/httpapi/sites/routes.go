@@ -21,6 +21,7 @@ import (
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -60,19 +61,21 @@ type siteSummary struct {
 }
 
 func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store) {
-	e.GET("/api/v1/clusters/:cluster_id/sites", list(db, analyticsStore), auth.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/sites/:site_id", deleteSite(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/compression", getCompression(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/compression", updateCompression(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security", getSecurity(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/security", updateSecurity(db, publishService), auth.RequireAuth, clusteraccess.Require(db))
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	write := clusteraccess.RequirePermission(db, rbac.PermissionSiteWrite)
+	e.GET("/api/v1/clusters/:cluster_id/sites", list(db, analyticsStore), auth.RequireAuth, read)
+	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, write)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db), auth.RequireAuth, read)
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService), auth.RequireAuth, write)
+	e.DELETE("/api/v1/clusters/:cluster_id/sites/:site_id", deleteSite(db), auth.RequireAuth, clusteraccess.RequirePermission(db, rbac.PermissionSiteDelete))
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, read)
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, write)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/cache", getCache(db), auth.RequireAuth, read)
+	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/cache", updateCache(db, publishService), auth.RequireAuth, write)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/compression", getCompression(db), auth.RequireAuth, read)
+	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/compression", updateCompression(db, publishService), auth.RequireAuth, write)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security", getSecurity(db), auth.RequireAuth, read)
+	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/security", updateSecurity(db, publishService), auth.RequireAuth, write)
 }
 
 // @summary List sites

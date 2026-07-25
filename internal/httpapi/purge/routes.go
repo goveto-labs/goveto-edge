@@ -17,16 +17,19 @@ import (
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/purge"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
 func Register(e *echo.Echo, db *client.Client, service *purge.Service) {
-	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/purge", enqueue(db, service), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/purge", list(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/purge/:job_id", get(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/prewarm", prewarm(db), auth.RequireAuth, clusteraccess.Require(db))
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	operate := clusteraccess.RequirePermission(db, rbac.PermissionCacheOperate)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/purge", enqueue(db, service), auth.RequireAuth, operate)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/purge", list(db), auth.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/purge/:job_id", get(db), auth.RequireAuth, read)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/prewarm", prewarm(db), auth.RequireAuth, operate)
 }
 
 type request struct {

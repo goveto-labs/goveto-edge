@@ -13,12 +13,13 @@ import { SSHCredentialDialog } from '@/components/SSHCredentialDialog.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 export default function SSHCredentials() {
     const navigate = useNavigate();
     const { clusterId, clusters } = useCluster();
     const api = useMemo(() => sshCredentialsApi(clusterId), [clusterId]);
-    const isOwner = clusters.find((cluster) => cluster.id === clusterId)?.role === 'OWNER';
+    const isOwner = canManageCluster(clusters.find((cluster) => cluster.id === clusterId)?.role);
     const [credentials, setCredentials] = useState<SSHCredential[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -30,7 +31,11 @@ export default function SSHCredentials() {
     const [viewing, setViewing] = useState<SSHCredential | null>(null);
 
     const load = useCallback(async () => {
-        if (!clusterId) return;
+        if (!clusterId || !isOwner) {
+            setCredentials([]);
+            setLoading(false);
+            return;
+        }
         try {
             setCredentials(await api.list());
             setError('');
@@ -41,9 +46,9 @@ export default function SSHCredentials() {
         } finally {
             setLoading(false);
         }
-    }, [api, clusterId]);
+    }, [api, clusterId, isOwner]);
 
-    useAutoRefresh(load, Boolean(clusterId));
+    useAutoRefresh(load, Boolean(clusterId && isOwner));
 
     const openNodes = async (credential: SSHCredential) => {
         setViewing(credential);
@@ -107,7 +112,7 @@ export default function SSHCredentials() {
 
             {!isOwner && (
                 <div className='rounded-xl border border-border bg-surface-secondary/40 px-4 py-3 text-sm text-muted'>
-                    You can view and use these credentials. Only the cluster owner can manage them.
+                    Only the cluster owner can view or manage SSH credentials.
                 </div>
             )}
             {error && (

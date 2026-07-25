@@ -5,8 +5,6 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"goveto-edge/internal/auth"
-	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -19,18 +17,10 @@ type addMemberRequest struct {
 }
 
 // @summary Add cluster member
-// @description Add a user as an OPERATOR member; only the cluster owner can call this.
+// @description Add a user as a VIEWER or OPERATOR member; requires member management permission.
 // @Tags clusters
 func addMember(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		_, owner, err := clusteraccess.Check(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentUID(c))
-		if err != nil {
-			return err
-		}
-		if !owner {
-			return echo.NewHTTPError(http.StatusForbidden, "only the cluster owner can add members")
-		}
-
 		var input addMemberRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -38,8 +28,8 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if input.Permission == "" {
 			input.Permission = model.ClusterPermissionOPERATOR
 		}
-		if input.Permission != model.ClusterPermissionOPERATOR {
-			return echo.NewHTTPError(http.StatusBadRequest, "only OPERATOR permission can be assigned")
+		if input.Permission != model.ClusterPermissionOPERATOR && input.Permission != model.ClusterPermissionVIEWER {
+			return echo.NewHTTPError(http.StatusBadRequest, "permission must be VIEWER or OPERATOR")
 		}
 
 		user, err := db.User.FindUnique(

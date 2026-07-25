@@ -14,6 +14,7 @@ import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 function message(error: unknown, fallback: string) {
     return error instanceof ApiError || error instanceof Error ? error.message : fallback;
@@ -24,7 +25,10 @@ function formatDate(value?: string) {
 }
 
 export default function Certificates() {
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
+    const canManage = canManageCluster(
+        clusters.find((clusterItem) => clusterItem.id === clusterId)?.role
+    );
     const api = useMemo(() => certificatesApi(clusterId), [clusterId]);
     const [certs, setCerts] = useState<Certificate[]>([]);
     const [error, setError] = useState('');
@@ -171,14 +175,18 @@ export default function Certificates() {
                 subtitle='Issue, validate, renew, and publish TLS certificates.'
                 title='Certificates'
             >
-                <Button variant='secondary' onPress={openUpload}>
-                    <Upload className='mr-2 h-4 w-4' />
-                    Upload PEM
-                </Button>
-                <Button onPress={openACME}>
-                    <Zap className='mr-2 h-4 w-4' />
-                    Issue with ACME
-                </Button>
+                {canManage && (
+                    <>
+                        <Button variant='secondary' onPress={openUpload}>
+                            <Upload className='mr-2 h-4 w-4' />
+                            Upload PEM
+                        </Button>
+                        <Button onPress={openACME}>
+                            <Zap className='mr-2 h-4 w-4' />
+                            Issue with ACME
+                        </Button>
+                    </>
+                )}
             </PageHeader>
 
             {error && (
@@ -191,10 +199,12 @@ export default function Certificates() {
                 aria-label='Certificates'
                 empty={certs.length === 0}
                 emptyAction={
-                    <Button onPress={openACME}>
-                        <Plus className='mr-2 h-4 w-4' />
-                        Issue certificate
-                    </Button>
+                    canManage ? (
+                        <Button onPress={openACME}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Issue certificate
+                        </Button>
+                    ) : undefined
                 }
                 emptyDescription='Issue with ACME or upload an existing PEM certificate.'
                 emptyTitle='No certificates yet'
@@ -256,58 +266,60 @@ export default function Certificates() {
                                         : 'Manual'}
                                 </td>
                                 <td>
-                                    <div className='flex flex-wrap justify-end gap-2'>
-                                        {cert.source === 'ACME' && (
-                                            <>
+                                    {canManage && (
+                                        <div className='flex flex-wrap justify-end gap-2'>
+                                            {cert.source === 'ACME' && (
+                                                <>
+                                                    <Button
+                                                        isDisabled={busy}
+                                                        size='sm'
+                                                        variant='secondary'
+                                                        onPress={() => void action(cert, 'renew')}
+                                                    >
+                                                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                                                        Renew
+                                                    </Button>
+                                                    <Button
+                                                        isDisabled={busy}
+                                                        size='sm'
+                                                        variant='secondary'
+                                                        onPress={() => void action(cert, 'reissue')}
+                                                    >
+                                                        <RotateCw className='mr-1.5 h-3.5 w-3.5' />
+                                                        Reissue
+                                                    </Button>
+                                                </>
+                                            )}
+                                            {cert.source === 'MANUAL' && (
                                                 <Button
                                                     isDisabled={busy}
                                                     size='sm'
                                                     variant='secondary'
-                                                    onPress={() => void action(cert, 'renew')}
+                                                    onPress={() => openReplace(cert)}
                                                 >
-                                                    <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
-                                                    Renew
+                                                    <Upload className='mr-1.5 h-3.5 w-3.5' />
+                                                    Replace
                                                 </Button>
-                                                <Button
-                                                    isDisabled={busy}
-                                                    size='sm'
-                                                    variant='secondary'
-                                                    onPress={() => void action(cert, 'reissue')}
-                                                >
-                                                    <RotateCw className='mr-1.5 h-3.5 w-3.5' />
-                                                    Reissue
-                                                </Button>
-                                            </>
-                                        )}
-                                        {cert.source === 'MANUAL' && (
+                                            )}
+                                            <Button
+                                                isDisabled={busy || cert.status === 'PENDING'}
+                                                size='sm'
+                                                variant='secondary'
+                                                onPress={() => void action(cert, 'publish')}
+                                            >
+                                                <Send className='mr-1.5 h-3.5 w-3.5' />
+                                                Publish
+                                            </Button>
                                             <Button
                                                 isDisabled={busy}
                                                 size='sm'
-                                                variant='secondary'
-                                                onPress={() => openReplace(cert)}
+                                                variant='danger'
+                                                onPress={() => void action(cert, 'remove')}
                                             >
-                                                <Upload className='mr-1.5 h-3.5 w-3.5' />
-                                                Replace
+                                                <Trash2 className='h-3.5 w-3.5' />
                                             </Button>
-                                        )}
-                                        <Button
-                                            isDisabled={busy || cert.status === 'PENDING'}
-                                            size='sm'
-                                            variant='secondary'
-                                            onPress={() => void action(cert, 'publish')}
-                                        >
-                                            <Send className='mr-1.5 h-3.5 w-3.5' />
-                                            Publish
-                                        </Button>
-                                        <Button
-                                            isDisabled={busy}
-                                            size='sm'
-                                            variant='danger'
-                                            onPress={() => void action(cert, 'remove')}
-                                        >
-                                            <Trash2 className='h-3.5 w-3.5' />
-                                        </Button>
-                                    </div>
+                                        </div>
+                                    )}
                                 </td>
                             </tr>
                         );

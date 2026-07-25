@@ -86,10 +86,12 @@ export interface DNSSyncJob {
     createdAt: string;
 }
 
+export type ClusterRole = 'VIEWER' | 'OPERATOR' | 'OWNER' | 'ADMIN';
+
 export interface ClusterChoice {
     id: string;
     name: string;
-    role: string;
+    role: ClusterRole;
     created_at: string;
 }
 

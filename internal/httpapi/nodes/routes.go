@@ -16,37 +16,41 @@ import (
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
 func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, authority *edgecontrol.Authority, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) {
-	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher, authority), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials", listSSHCredentials(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/ssh-credentials", createSSHCredential(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", updateSSHCredential(db, cipher), authn.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", deleteSSHCredential(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id/nodes", listSSHCredentialNodes(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, gateway), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", updateAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", deleteAddress(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", updateDNSLines(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", revokeNodeCredential(db, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher, authority, gateway), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, clusteraccess.RequireOwner(db))
-	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/binary/:arch", downloadAgentBinary(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", downloadIdentity(db, cipher), authn.RequireAuth, clusteraccess.RequireOwner(db))
-	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/service", downloadServiceUnit(db), authn.RequireAuth, clusteraccess.Require(db))
-	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, gateway, dnsService), authn.RequireAuth, clusteraccess.Require(db))
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	nodeManage := clusteraccess.RequirePermission(db, rbac.PermissionNodeManage)
+	credentialManage := clusteraccess.RequirePermission(db, rbac.PermissionCredentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes", create(db, queue, cipher, authority), authn.RequireAuth, nodeManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/test-connection", testConnection(db, cipher), authn.RequireAuth, credentialManage)
+	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials", listSSHCredentials(db), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/ssh-credentials", createSSHCredential(db, cipher), authn.RequireAuth, credentialManage)
+	e.PUT("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", updateSSHCredential(db, cipher), authn.RequireAuth, credentialManage)
+	e.DELETE("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", deleteSSHCredential(db), authn.RequireAuth, credentialManage)
+	e.GET("/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id/nodes", listSSHCredentialNodes(db), authn.RequireAuth, credentialManage)
+	e.GET("/api/v1/clusters/:cluster_id/nodes", list(db), authn.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id", get(db), authn.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", getCacheConfig(db), authn.RequireAuth, read)
+	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", updateCacheConfig(db, gateway), authn.RequireAuth, nodeManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", addAddress(db, dnsService), authn.RequireAuth, nodeManage)
+	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", updateAddress(db, dnsService), authn.RequireAuth, nodeManage)
+	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", deleteAddress(db, dnsService), authn.RequireAuth, nodeManage)
+	e.PUT("/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", updateDNSLines(db, dnsService), authn.RequireAuth, nodeManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, nodeManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, gateway, dnsService), authn.RequireAuth, nodeManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", revokeNodeCredential(db, gateway, dnsService), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher, authority, gateway), authn.RequireAuth, credentialManage)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, nodeManage)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/binary/:arch", downloadAgentBinary(db), authn.RequireAuth, nodeManage)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", downloadIdentity(db, cipher), authn.RequireAuth, credentialManage)
+	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/service", downloadServiceUnit(db), authn.RequireAuth, nodeManage)
+	e.DELETE("/api/v1/clusters/:cluster_id/nodes/:node_id", deleteNode(db, queue, gateway, dnsService), authn.RequireAuth, clusteraccess.RequirePermission(db, rbac.PermissionNodeDelete))
 }
 
 type testConnectionRequest struct {

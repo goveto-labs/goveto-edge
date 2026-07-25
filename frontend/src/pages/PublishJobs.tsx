@@ -12,9 +12,13 @@ import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canOperateCluster } from '@/utils/rbac.ts';
 
 export default function PublishJobs() {
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
+    const canOperate = canOperateCluster(
+        clusters.find((cluster) => cluster.id === clusterId)?.role
+    );
     const api = useMemo(() => publishApi(clusterId), [clusterId]);
     const [status, setStatus] = useState<PublishStatus | null>(null);
     const [recentTasks, setRecentTasks] = useState<PublishTask[]>([]);
@@ -152,10 +156,12 @@ export default function PublishJobs() {
                         onChange={(e) => setSiteId(e.target.value)}
                     />
                     <div className='flex gap-2'>
-                        <Button isDisabled={publishing} onPress={handlePublish}>
-                            <Plus className='mr-2 h-4 w-4' />
-                            {publishing ? 'Publishing...' : 'Publish'}
-                        </Button>
+                        {canOperate && (
+                            <Button isDisabled={publishing} onPress={handlePublish}>
+                                <Plus className='mr-2 h-4 w-4' />
+                                {publishing ? 'Publishing...' : 'Publish'}
+                            </Button>
+                        )}
                         <Button variant='ghost' onPress={loadSiteJobs}>
                             <RotateCw className='mr-2 h-4 w-4' />
                             Load jobs

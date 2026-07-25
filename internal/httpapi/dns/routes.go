@@ -22,6 +22,7 @@ import (
 	"goveto-edge/internal/dnsprovider"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -64,18 +65,20 @@ func Register(
 	group := e.Group(
 		"/api/v1/clusters/:cluster_id/dns",
 		auth.RequireAuth,
-		clusteraccess.Require(db),
 	)
-	group.GET("", getConfig(db))
-	group.PUT("", updateConfig(db, cipher))
-	group.DELETE("", deleteConfig(db, service))
-	group.POST("/refresh", refreshConfig(db, cipher))
-	group.GET("/records", listRecords(db))
-	group.GET("/jobs", listJobs(db))
-	group.POST("/sync", syncNow(db, service))
-	group.POST("/discovery/domains", discoverDomains(db, cipher))
-	group.POST("/lines", createLine(db))
-	group.DELETE("/lines/:line_id", deleteLine(db))
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	credentials := clusteraccess.RequirePermission(db, rbac.PermissionCredentialManage)
+	nodeManage := clusteraccess.RequirePermission(db, rbac.PermissionNodeManage)
+	group.GET("", getConfig(db), read)
+	group.PUT("", updateConfig(db, cipher), credentials)
+	group.DELETE("", deleteConfig(db, service), credentials)
+	group.POST("/refresh", refreshConfig(db, cipher), credentials)
+	group.GET("/records", listRecords(db), read)
+	group.GET("/jobs", listJobs(db), read)
+	group.POST("/sync", syncNow(db, service), credentials)
+	group.POST("/discovery/domains", discoverDomains(db, cipher), credentials)
+	group.POST("/lines", createLine(db), nodeManage)
+	group.DELETE("/lines/:line_id", deleteLine(db), nodeManage)
 }
 
 // @summary Discover provider domains
@@ -83,9 +86,6 @@ func Register(
 // @Tags dns
 func discoverDomains(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		var input discoveryRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -168,10 +168,6 @@ func updateConfig(
 	cipher *node.CredentialCipher,
 ) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
-
 		var input configRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -421,9 +417,6 @@ func updateConfig(
 // @Tags dns
 func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		if err := service.DeleteConfiguration(c.Request().Context(), c.Param("cluster_id")); err != nil {
 			if errors.Is(err, dnssync.ErrDNSNotConfigured) {
 				return echo.NewHTTPError(http.StatusNotFound, err.Error())
@@ -439,9 +432,6 @@ func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc 
 // @Tags dns
 func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
 		config, err := db.DNSProviderConfig.FindUnique(
@@ -576,9 +566,6 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 // @Tags dns
 func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		job, err := service.EnqueueNodeIPIfChanged(c.Request().Context(), c.Param("cluster_id"))
 		if err != nil {
 			return err
@@ -595,9 +582,6 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 // @Tags dns
 func createLine(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		var input lineRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -675,9 +659,6 @@ func createLine(db *client.Client) echo.HandlerFunc {
 // @Tags dns
 func deleteLine(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireOwner(c, db); err != nil {
-			return err
-		}
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
 		err := db.Tx(ctx, func(tx *client.Client) error {
@@ -881,23 +862,4 @@ func value(input *string) string {
 		return ""
 	}
 	return *input
-}
-
-func requireOwner(c *echo.Context, db *client.Client) error {
-	_, owner, err := clusteraccess.Check(
-		c.Request().Context(),
-		db,
-		c.Param("cluster_id"),
-		auth.CurrentUID(c),
-	)
-	if err != nil {
-		return err
-	}
-	if !owner {
-		return echo.NewHTTPError(
-			http.StatusForbidden,
-			"only the cluster owner can change DNS settings",
-		)
-	}
-	return nil
 }

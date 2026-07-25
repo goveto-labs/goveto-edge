@@ -54,6 +54,7 @@ import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type DetailTab = 'overview' | 'details' | 'logs' | 'installation' | 'settings';
@@ -346,7 +347,7 @@ export default function NodeDetail() {
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState('');
-    const isOwner = clusters.find((item) => item.id === clusterId)?.role === 'OWNER';
+    const isOwner = canManageCluster(clusters.find((item) => item.id === clusterId)?.role);
 
     const applyNode = useCallback((value: Node) => {
         setNode(value);
@@ -367,7 +368,7 @@ export default function NodeDetail() {
                 cluster.dnsLines(),
                 cluster.groups(),
                 cluster.regions(),
-                credentialApi.list(),
+                isOwner ? credentialApi.list() : Promise.resolve([]),
             ]);
             applyNode(nodeData);
             setDnsLines(lineData);
@@ -385,7 +386,7 @@ export default function NodeDetail() {
         } finally {
             setLoading(false);
         }
-    }, [api, applyNode, cluster, clusterId, credentialApi, nodeId]);
+    }, [api, applyNode, cluster, clusterId, credentialApi, isOwner, nodeId]);
 
     const refreshNode = useCallback(async () => {
         if (!nodeId) return;

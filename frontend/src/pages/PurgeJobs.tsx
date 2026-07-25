@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canOperateCluster } from '@/utils/rbac.ts';
 
 const purgeOptions: Array<{
     id: PurgeType;
@@ -64,7 +65,10 @@ export function CacheOperations({
     fixedSite?: FixedSite;
     embedded?: boolean;
 }) {
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
+    const canOperate = canOperateCluster(
+        clusters.find((cluster) => cluster.id === clusterId)?.role
+    );
     const api = useMemo(() => purgeApi(clusterId), [clusterId]);
     const sites = useMemo(() => sitesApi(clusterId), [clusterId]);
     const [searchParams, setSearchParams] = useSearchParams();
@@ -135,7 +139,7 @@ export function CacheOperations({
 
     const handlePurge = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!siteId || (type !== 'ALL' && !value.trim())) return;
+        if (!canOperate || !siteId || (type !== 'ALL' && !value.trim())) return;
         setSubmitting(true);
         setError('');
         setMessage('');
@@ -161,7 +165,7 @@ export function CacheOperations({
     const handlePrewarm = async (event: React.FormEvent) => {
         event.preventDefault();
         const urls = prewarmURLList;
-        if (!siteId || urls.length === 0 || urls.length > 20) return;
+        if (!canOperate || !siteId || urls.length === 0 || urls.length > 20) return;
         setPrewarming(true);
         setError('');
         setMessage('');
@@ -238,171 +242,193 @@ export function CacheOperations({
                 </div>
             )}
 
-            <ContentCard noPadding>
-                <div className='border-b border-border px-5 py-4'>
-                    <h2 className='text-sm font-semibold'>Refresh cached content</h2>
-                    <p className='mt-1 text-xs leading-5 text-muted'>
-                        Choose the smallest scope that contains the content you need to invalidate.
-                    </p>
-                </div>
-                <form onSubmit={handlePurge}>
-                    <div className='space-y-5 p-5'>
-                        <div className='grid gap-3 sm:grid-cols-2'>
-                            {purgeOptions.map((option) => {
-                                const Icon = option.icon;
-                                const selected = type === option.id;
-                                return (
-                                    <button
-                                        aria-pressed={selected}
-                                        className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
-                                            selected
-                                                ? 'border-primary bg-primary/5'
-                                                : 'border-border/70 hover:bg-surface-secondary/50'
-                                        }`}
-                                        key={option.id}
-                                        type='button'
-                                        onClick={() => {
-                                            setType(option.id);
-                                            setValue('');
-                                        }}
-                                    >
-                                        <span
-                                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                                                selected
-                                                    ? 'bg-primary text-primary-foreground'
-                                                    : 'bg-surface-secondary text-muted'
-                                            }`}
-                                        >
-                                            <Icon className='h-4 w-4' />
-                                        </span>
-                                        <span>
-                                            <span className='block text-sm font-medium'>
-                                                {option.label}
-                                            </span>
-                                            <span className='mt-0.5 block text-xs leading-5 text-muted'>
-                                                {option.description}
-                                            </span>
-                                        </span>
-                                    </button>
-                                );
-                            })}
+            {canOperate && (
+                <>
+                    <ContentCard noPadding>
+                        <div className='border-b border-border px-5 py-4'>
+                            <h2 className='text-sm font-semibold'>Refresh cached content</h2>
+                            <p className='mt-1 text-xs leading-5 text-muted'>
+                                Choose the smallest scope that contains the content you need to
+                                invalidate.
+                            </p>
                         </div>
+                        <form onSubmit={handlePurge}>
+                            <div className='space-y-5 p-5'>
+                                <div className='grid gap-3 sm:grid-cols-2'>
+                                    {purgeOptions.map((option) => {
+                                        const Icon = option.icon;
+                                        const selected = type === option.id;
+                                        return (
+                                            <button
+                                                aria-pressed={selected}
+                                                className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
+                                                    selected
+                                                        ? 'border-primary bg-primary/5'
+                                                        : 'border-border/70 hover:bg-surface-secondary/50'
+                                                }`}
+                                                key={option.id}
+                                                type='button'
+                                                onClick={() => {
+                                                    setType(option.id);
+                                                    setValue('');
+                                                }}
+                                            >
+                                                <span
+                                                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                                                        selected
+                                                            ? 'bg-primary text-primary-foreground'
+                                                            : 'bg-surface-secondary text-muted'
+                                                    }`}
+                                                >
+                                                    <Icon className='h-4 w-4' />
+                                                </span>
+                                                <span>
+                                                    <span className='block text-sm font-medium'>
+                                                        {option.label}
+                                                    </span>
+                                                    <span className='mt-0.5 block text-xs leading-5 text-muted'>
+                                                        {option.description}
+                                                    </span>
+                                                </span>
+                                            </button>
+                                        );
+                                    })}
+                                </div>
 
-                        {type === 'ALL' ? (
-                            <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-xs leading-5 text-danger'>
-                                This refreshes the entire site cache. New requests will repopulate
-                                content from the origin.
+                                {type === 'ALL' ? (
+                                    <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-xs leading-5 text-danger'>
+                                        This refreshes the entire site cache. New requests will
+                                        repopulate content from the origin.
+                                    </div>
+                                ) : (
+                                    <div className='flex flex-col gap-1.5'>
+                                        <label
+                                            className='text-sm font-medium'
+                                            htmlFor='purge-value'
+                                        >
+                                            {selectedPurge.inputLabel}
+                                        </label>
+                                        <Input
+                                            id='purge-value'
+                                            placeholder={selectedPurge.placeholder}
+                                            value={value}
+                                            variant='secondary'
+                                            onChange={(event) => setValue(event.target.value)}
+                                        />
+                                    </div>
+                                )}
                             </div>
-                        ) : (
-                            <div className='flex flex-col gap-1.5'>
-                                <label className='text-sm font-medium' htmlFor='purge-value'>
-                                    {selectedPurge.inputLabel}
-                                </label>
-                                <Input
-                                    id='purge-value'
-                                    placeholder={selectedPurge.placeholder}
-                                    value={value}
+                            <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                                <div className='text-xs text-muted'>
+                                    {selectedSite
+                                        ? `Target: ${selectedSite.name}`
+                                        : 'Select a site before refreshing cache.'}
+                                </div>
+                                <Button
+                                    isDisabled={
+                                        submitting || !siteId || (type !== 'ALL' && !value.trim())
+                                    }
+                                    type='submit'
+                                    variant={type === 'ALL' ? 'danger' : 'primary'}
+                                >
+                                    <Eraser className='mr-1.5 h-4 w-4' />
+                                    {submitting
+                                        ? 'Queuing...'
+                                        : type === 'ALL'
+                                          ? 'Refresh entire site'
+                                          : 'Queue refresh'}
+                                </Button>
+                            </div>
+                        </form>
+                    </ContentCard>
+
+                    <ContentCard noPadding>
+                        <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                            <div>
+                                <h2 className='text-sm font-semibold'>Prewarm URLs</h2>
+                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                    Request important pages now so the first visitor receives cached
+                                    content.
+                                </p>
+                            </div>
+                            <Button
+                                isDisabled={!selectedSite?.domains?.[0]}
+                                size='sm'
+                                variant='secondary'
+                                onPress={addHomepage}
+                            >
+                                Add homepage
+                            </Button>
+                        </div>
+                        <form onSubmit={handlePrewarm}>
+                            <div className='space-y-3 p-5'>
+                                <TextArea
+                                    aria-label='URLs to prewarm'
+                                    placeholder={
+                                        'https://example.com/\nhttps://example.com/assets/app.css'
+                                    }
+                                    className={'w-full'}
+                                    rows={6}
+                                    value={prewarmURLs}
                                     variant='secondary'
-                                    onChange={(event) => setValue(event.target.value)}
+                                    onChange={(event) => setPrewarmURLs(event.target.value)}
                                 />
+                                <div className='flex items-center justify-between gap-4 text-xs'>
+                                    <span
+                                        className={prewarmCount > 20 ? 'text-danger' : 'text-muted'}
+                                    >
+                                        {prewarmCount}/20 URLs
+                                    </span>
+                                    <span className='text-muted'>One absolute URL per line.</span>
+                                </div>
+                            </div>
+                            <div className='flex justify-end border-t border-border bg-surface-secondary/20 px-5 py-4'>
+                                <Button
+                                    isDisabled={
+                                        prewarming ||
+                                        !siteId ||
+                                        prewarmCount === 0 ||
+                                        prewarmCount > 20
+                                    }
+                                    type='submit'
+                                >
+                                    <Flame className='mr-1.5 h-4 w-4' />
+                                    {prewarming
+                                        ? 'Prewarming...'
+                                        : `Prewarm ${prewarmCount || ''}`.trim()}
+                                </Button>
+                            </div>
+                        </form>
+                        {prewarmResults.length > 0 && (
+                            <div className='border-t border-border px-5 py-4'>
+                                <div className='mb-3 text-xs font-medium text-muted'>
+                                    Latest result
+                                </div>
+                                <div className='space-y-2'>
+                                    {prewarmResults.map((result) => (
+                                        <div
+                                            className='flex flex-col gap-1 rounded-lg bg-surface-secondary/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-4'
+                                            key={result.url}
+                                        >
+                                            <span className='min-w-0 break-all font-mono'>
+                                                {result.url}
+                                            </span>
+                                            <span
+                                                className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
+                                            >
+                                                {result.success
+                                                    ? `HTTP ${result.status_code}`
+                                                    : result.error ||
+                                                      `HTTP ${result.status_code || 0}`}
+                                            </span>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
-                    </div>
-                    <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                        <div className='text-xs text-muted'>
-                            {selectedSite
-                                ? `Target: ${selectedSite.name}`
-                                : 'Select a site before refreshing cache.'}
-                        </div>
-                        <Button
-                            isDisabled={submitting || !siteId || (type !== 'ALL' && !value.trim())}
-                            type='submit'
-                            variant={type === 'ALL' ? 'danger' : 'primary'}
-                        >
-                            <Eraser className='mr-1.5 h-4 w-4' />
-                            {submitting
-                                ? 'Queuing...'
-                                : type === 'ALL'
-                                  ? 'Refresh entire site'
-                                  : 'Queue refresh'}
-                        </Button>
-                    </div>
-                </form>
-            </ContentCard>
-
-            <ContentCard noPadding>
-                <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                    <div>
-                        <h2 className='text-sm font-semibold'>Prewarm URLs</h2>
-                        <p className='mt-1 text-xs leading-5 text-muted'>
-                            Request important pages now so the first visitor receives cached
-                            content.
-                        </p>
-                    </div>
-                    <Button
-                        isDisabled={!selectedSite?.domains?.[0]}
-                        size='sm'
-                        variant='secondary'
-                        onPress={addHomepage}
-                    >
-                        Add homepage
-                    </Button>
-                </div>
-                <form onSubmit={handlePrewarm}>
-                    <div className='space-y-3 p-5'>
-                        <TextArea
-                            aria-label='URLs to prewarm'
-                            placeholder={'https://example.com/\nhttps://example.com/assets/app.css'}
-                            className={'w-full'}
-                            rows={6}
-                            value={prewarmURLs}
-                            variant='secondary'
-                            onChange={(event) => setPrewarmURLs(event.target.value)}
-                        />
-                        <div className='flex items-center justify-between gap-4 text-xs'>
-                            <span className={prewarmCount > 20 ? 'text-danger' : 'text-muted'}>
-                                {prewarmCount}/20 URLs
-                            </span>
-                            <span className='text-muted'>One absolute URL per line.</span>
-                        </div>
-                    </div>
-                    <div className='flex justify-end border-t border-border bg-surface-secondary/20 px-5 py-4'>
-                        <Button
-                            isDisabled={
-                                prewarming || !siteId || prewarmCount === 0 || prewarmCount > 20
-                            }
-                            type='submit'
-                        >
-                            <Flame className='mr-1.5 h-4 w-4' />
-                            {prewarming ? 'Prewarming...' : `Prewarm ${prewarmCount || ''}`.trim()}
-                        </Button>
-                    </div>
-                </form>
-                {prewarmResults.length > 0 && (
-                    <div className='border-t border-border px-5 py-4'>
-                        <div className='mb-3 text-xs font-medium text-muted'>Latest result</div>
-                        <div className='space-y-2'>
-                            {prewarmResults.map((result) => (
-                                <div
-                                    className='flex flex-col gap-1 rounded-lg bg-surface-secondary/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-4'
-                                    key={result.url}
-                                >
-                                    <span className='min-w-0 break-all font-mono'>
-                                        {result.url}
-                                    </span>
-                                    <span
-                                        className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
-                                    >
-                                        {result.success
-                                            ? `HTTP ${result.status_code}`
-                                            : result.error || `HTTP ${result.status_code || 0}`}
-                                    </span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                )}
-            </ContentCard>
+                    </ContentCard>
+                </>
+            )}
 
             <DataTable
                 aria-label='Cache refresh jobs'

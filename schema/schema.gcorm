@@ -47,6 +47,7 @@ enum CertificateStatus {
 enum ClusterPermission {
   OWNER
   OPERATOR
+  VIEWER
 }
 
 enum ConfigStatus {

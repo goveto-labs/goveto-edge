@@ -14,6 +14,7 @@ import (
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -42,18 +43,20 @@ type updateRequest struct {
 }
 
 func Register(e *echo.Echo, db *client.Client, service *certmanager.Service) {
-	group := e.Group("/api/v1/clusters/:cluster_id/certificates", auth.RequireAuth, clusteraccess.Require(db))
-	group.GET("", list(db))
-	group.GET("/:certificate_id", get(db))
-	group.POST("", upload(db, service))
-	group.POST("/acme", issueACME(db, service))
-	group.PATCH("/:certificate_id", update(db))
-	group.PUT("/:certificate_id/material", replaceMaterial(db, service))
-	group.DELETE("/:certificate_id", remove(db, service))
-	group.POST("/:certificate_id/renew", enqueueOperation(db, service, model.CertificateOperationRENEW))
-	group.POST("/:certificate_id/reissue", enqueueOperation(db, service, model.CertificateOperationREISSUE))
-	group.POST("/:certificate_id/publish", enqueueOperation(db, service, model.CertificateOperationREPUBLISH))
-	group.GET("/:certificate_id/jobs", listJobs(db))
+	group := e.Group("/api/v1/clusters/:cluster_id/certificates", auth.RequireAuth)
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	manage := clusteraccess.RequirePermission(db, rbac.PermissionCertificateManage)
+	group.GET("", list(db), read)
+	group.GET("/:certificate_id", get(db), read)
+	group.POST("", upload(db, service), manage)
+	group.POST("/acme", issueACME(db, service), manage)
+	group.PATCH("/:certificate_id", update(db), manage)
+	group.PUT("/:certificate_id/material", replaceMaterial(db, service), manage)
+	group.DELETE("/:certificate_id", remove(db, service), clusteraccess.RequirePermission(db, rbac.PermissionCertificateDelete))
+	group.POST("/:certificate_id/renew", enqueueOperation(db, service, model.CertificateOperationRENEW), manage)
+	group.POST("/:certificate_id/reissue", enqueueOperation(db, service, model.CertificateOperationREISSUE), manage)
+	group.POST("/:certificate_id/publish", enqueueOperation(db, service, model.CertificateOperationREPUBLISH), manage)
+	group.GET("/:certificate_id/jobs", listJobs(db), read)
 	e.GET("/.well-known/acme-challenge/:token", serveChallenge(service))
 }
 

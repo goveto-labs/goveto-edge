@@ -62,6 +62,7 @@ import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { CacheOperations } from '@/pages/PurgeJobs.tsx';
+import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type DetailTab = 'overview' | 'logs' | 'settings';
@@ -240,7 +241,10 @@ function RankingTable({
 export default function SiteDetail() {
     const navigate = useNavigate();
     const { siteId = '', '*': detailPath = '' } = useParams();
-    const { clusterId, setClusterId } = useCluster();
+    const { clusterId, clusters: availableClusters, ready, setClusterId } = useCluster();
+    const clusterRole = availableClusters.find((cluster) => cluster.id === clusterId)?.role;
+    const canOperate = canOperateCluster(clusterRole);
+    const canManage = canManageCluster(clusterRole);
     const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const publishing = useMemo(() => publishApi(clusterId), [clusterId]);
@@ -248,14 +252,17 @@ export default function SiteDetail() {
     const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
     const parts = detailPath.split('/').filter(Boolean);
     const requestedTab = parts[0] || 'overview';
-    const tab: DetailTab = tabs.some((item) => item.id === requestedTab)
-        ? (requestedTab as DetailTab)
-        : 'overview';
+    const tab: DetailTab =
+        tabs.some((item) => item.id === requestedTab) &&
+        (requestedTab !== 'settings' || !ready || canOperate)
+            ? (requestedTab as DetailTab)
+            : 'overview';
     const requestedSettings = parts[1] || 'basic';
     const settingsPage: SettingsPage = settingsPages.some((item) => item.id === requestedSettings)
         ? (requestedSettings as SettingsPage)
         : 'basic';
     const canonicalDetailPath = tab === 'settings' ? `settings/${settingsPage}` : tab;
+    const visibleTabs = !ready || canOperate ? tabs : tabs.filter((item) => item.id !== 'settings');
     const previousDetailPathRef = useRef(detailPath);
 
     const [site, setSite] = useState<SiteDetails | null>(null);
@@ -639,10 +646,12 @@ export default function SiteDetail() {
                 subtitle={site?.domains.join(', ') || 'Site delivery and traffic management.'}
                 title={site?.name || 'Site details'}
             >
-                <Button isDisabled={publishingSite} onPress={() => void publish()}>
-                    <Rocket className='mr-2 h-4 w-4' />
-                    {publishingSite ? 'Publishing...' : 'Publish'}
-                </Button>
+                {canOperate && (
+                    <Button isDisabled={publishingSite} onPress={() => void publish()}>
+                        <Rocket className='mr-2 h-4 w-4' />
+                        {publishingSite ? 'Publishing...' : 'Publish'}
+                    </Button>
+                )}
             </PageHeader>
             {error && <FormError message={error} />}
             {message && (
@@ -650,7 +659,7 @@ export default function SiteDetail() {
                     {message}
                 </div>
             )}
-            {loading ? (
+            {loading || !ready ? (
                 <ContentCard className='p-10 text-center text-sm text-muted'>
                     Loading site...
                 </ContentCard>
@@ -658,7 +667,7 @@ export default function SiteDetail() {
                 site && (
                     <>
                         <div className='flex w-fit items-center gap-1 overflow-x-auto rounded-xl bg-surface p-1'>
-                            {tabs.map((item) => {
+                            {visibleTabs.map((item) => {
                                 const Icon = item.icon;
                                 return (
                                     <button
@@ -979,6 +988,7 @@ export default function SiteDetail() {
                                                             <select
                                                                 className='w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
                                                                 disabled={
+                                                                    !canManage ||
                                                                     site.certificate_count > 0
                                                                 }
                                                                 id='site-cluster'
@@ -1020,26 +1030,28 @@ export default function SiteDetail() {
                                                         </div>
                                                     </div>
                                                 </ContentCard>
-                                                <ContentCard noPadding>
-                                                    <div className='border-b border-danger/20 px-5 py-4'>
-                                                        <h2 className='text-sm font-semibold text-danger'>
-                                                            Delete site
-                                                        </h2>
-                                                        <p className='mt-1 text-xs text-muted'>
-                                                            Permanently removes configuration and
-                                                            publish history.
-                                                        </p>
-                                                    </div>
-                                                    <div className='flex justify-end p-5'>
-                                                        <Button
-                                                            variant='danger'
-                                                            onPress={() => void deleteSite()}
-                                                        >
-                                                            <Trash2 className='mr-1.5 h-4 w-4' />
-                                                            Delete site
-                                                        </Button>
-                                                    </div>
-                                                </ContentCard>
+                                                {canManage && (
+                                                    <ContentCard noPadding>
+                                                        <div className='border-b border-danger/20 px-5 py-4'>
+                                                            <h2 className='text-sm font-semibold text-danger'>
+                                                                Delete site
+                                                            </h2>
+                                                            <p className='mt-1 text-xs text-muted'>
+                                                                Permanently removes configuration
+                                                                and publish history.
+                                                            </p>
+                                                        </div>
+                                                        <div className='flex justify-end p-5'>
+                                                            <Button
+                                                                variant='danger'
+                                                                onPress={() => void deleteSite()}
+                                                            >
+                                                                <Trash2 className='mr-1.5 h-4 w-4' />
+                                                                Delete site
+                                                            </Button>
+                                                        </div>
+                                                    </ContentCard>
+                                                )}
                                             </div>
                                         )}
                                         {settingsPage === 'domains' && (

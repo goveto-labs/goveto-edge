@@ -13,16 +13,28 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
+
+	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
+	"goveto-edge/internal/storage/gen/query"
 )
 
 const currentUIDKey = "auth.current_uid"
 const currentSessionTokenKey = "auth.current_session_token"
 
+type currentUserContextKey struct{}
+
 type SessionStore struct {
-	redis      *redis.Client
+	redis      redisStore
 	cookieName string
 	ttl        time.Duration
 	secure     bool
+}
+
+type redisStore interface {
+	Get(ctx context.Context, key string) *redis.StringCmd
+	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
+	Del(ctx context.Context, keys ...string) *redis.IntCmd
 }
 
 func NewSessionStore(client *redis.Client, cookieName string, ttl time.Duration, secure bool) *SessionStore {
@@ -53,6 +65,18 @@ func (s *SessionStore) SetCookie(c *echo.Context, token string) {
 	})
 }
 
+func (s *SessionStore) clearCookie(c *echo.Context) {
+	c.SetCookie(&http.Cookie{
+		Name:     s.cookieName,
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(1, 0),
+		HttpOnly: true,
+		Secure:   s.secure,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 // Session loads a valid UID into the Echo context when a session exists.
 func (s *SessionStore) Session(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -68,6 +92,51 @@ func (s *SessionStore) Session(next echo.HandlerFunc) echo.HandlerFunc {
 		}
 		return next(c)
 	}
+}
+
+// RequireActiveUser invalidates sessions as soon as their user is disabled or
+// deleted. It is intentionally evaluated on every authenticated request.
+func (s *SessionStore) RequireActiveUser(db *client.Client) echo.MiddlewareFunc {
+	return s.requireActiveUser(func(ctx context.Context, uid string) (*model.User, error) {
+		return db.User.FindUnique(ctx, query.User.Id.Equals(uid))
+	})
+}
+
+type activeUserLoader func(context.Context, string) (*model.User, error)
+
+func (s *SessionStore) requireActiveUser(load activeUserLoader) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			uid := CurrentUID(c)
+			if uid == "" {
+				return next(c)
+			}
+			user, err := load(c.Request().Context(), uid)
+			if err != nil {
+				return err
+			}
+			if user != nil && user.Status == model.UserStatusACTIVE {
+				ctx := context.WithValue(c.Request().Context(), currentUserContextKey{}, user)
+				c.SetRequest(c.Request().WithContext(ctx))
+				return next(c)
+			}
+			if err := s.invalidate(c); err != nil {
+				return echo.NewHTTPError(http.StatusServiceUnavailable, "session storage unavailable")
+			}
+			return next(c)
+		}
+	}
+}
+
+func (s *SessionStore) invalidate(c *echo.Context) error {
+	token, _ := c.Get(currentSessionTokenKey).(string)
+	c.Set(currentUIDKey, "")
+	c.Set(currentSessionTokenKey, "")
+	s.clearCookie(c)
+	if token == "" {
+		return nil
+	}
+	return s.redis.Del(c.Request().Context(), sessionKey(token), selectedClusterKey(token)).Err()
 }
 
 func (s *SessionStore) SelectedCluster(ctx context.Context, c *echo.Context) (string, error) {
@@ -103,6 +172,13 @@ func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 func CurrentUID(c *echo.Context) string {
 	uid, _ := c.Get(currentUIDKey).(string)
 	return uid
+}
+
+// CurrentUser returns the active user loaded by RequireActiveUser. The uid
+// check prevents callers from reusing a cached principal for another subject.
+func CurrentUser(ctx context.Context, uid string) (*model.User, bool) {
+	user, ok := ctx.Value(currentUserContextKey{}).(*model.User)
+	return user, ok && user != nil && user.Id == uid
 }
 
 func sessionKey(token string) string {

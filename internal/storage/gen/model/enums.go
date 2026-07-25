@@ -107,6 +107,7 @@ type ClusterPermission string
 const (
 	ClusterPermissionOWNER    ClusterPermission = "OWNER"
 	ClusterPermissionOPERATOR ClusterPermission = "OPERATOR"
+	ClusterPermissionVIEWER   ClusterPermission = "VIEWER"
 )
 
 // ValidClusterPermissionValues returns all valid values for the ClusterPermission enum.
@@ -114,6 +115,7 @@ func ValidClusterPermissionValues() []ClusterPermission {
 	return []ClusterPermission{
 		ClusterPermissionOWNER,
 		ClusterPermissionOPERATOR,
+		ClusterPermissionVIEWER,
 	}
 }
 

@@ -15,17 +15,20 @@ import (
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
 func Register(e *echo.Echo, db *client.Client, service *publisher.Service) {
-	e.GET("/api/v1/clusters/:cluster_id/publish/status", clusterStatus(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/publish/events", clusterEvents(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/publish", enqueue(db, service), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/publish/:job_id", getJob(db), auth.RequireAuth, clusteraccess.Require(db))
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/publish", listJobs(db), auth.RequireAuth, clusteraccess.Require(db))
+	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
+	publish := clusteraccess.RequirePermission(db, rbac.PermissionPublish)
+	e.GET("/api/v1/clusters/:cluster_id/publish/status", clusterStatus(db), auth.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/publish/events", clusterEvents(db), auth.RequireAuth, read)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/publish", enqueue(db, service), auth.RequireAuth, publish)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/publish/:job_id", getJob(db), auth.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/publish", listJobs(db), auth.RequireAuth, read)
 }
 
 type clusterPublishCounts struct {

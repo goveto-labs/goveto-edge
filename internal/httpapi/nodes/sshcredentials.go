@@ -10,8 +10,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
-	"goveto-edge/internal/auth"
-	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -66,9 +64,6 @@ func listSSHCredentials(db *client.Client) echo.HandlerFunc {
 
 func createSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireClusterOwner(c, db); err != nil {
-			return err
-		}
 		var input sshCredentialWriteRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -108,9 +103,6 @@ func createSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher)
 
 func updateSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireClusterOwner(c, db); err != nil {
-			return err
-		}
 		var input sshCredentialWriteRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -174,9 +166,6 @@ func updateSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher)
 
 func deleteSSHCredential(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := requireClusterOwner(c, db); err != nil {
-			return err
-		}
 		ctx := c.Request().Context()
 		item, err := findClusterSSHCredential(ctx, db, c.Param("cluster_id"), c.Param("credential_id"))
 		if err != nil {
@@ -236,22 +225,6 @@ func querySSHCredentialNodes(
 		nodes = make([]sshCredentialNodeResponse, 0)
 	}
 	return nodes, nil
-}
-
-func requireClusterOwner(c *echo.Context, db *client.Client) error {
-	_, owner, err := clusteraccess.Check(
-		c.Request().Context(),
-		db,
-		c.Param("cluster_id"),
-		auth.CurrentUID(c),
-	)
-	if err != nil {
-		return err
-	}
-	if !owner {
-		return echo.NewHTTPError(http.StatusForbidden, "only the cluster owner can manage SSH credentials")
-	}
-	return nil
 }
 
 func validateSSHCredentialWrite(input *sshCredentialWriteRequest) error {

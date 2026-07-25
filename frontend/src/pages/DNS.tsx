@@ -16,6 +16,7 @@ import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 function errorMessage(error: unknown, fallback: string) {
     return error instanceof ApiError || error instanceof Error ? error.message : fallback;
@@ -52,7 +53,7 @@ export default function DNS() {
     const [error, setError] = useState('');
 
     const isOwner = useMemo(
-        () => clusters.find((cluster) => cluster.id === clusterId)?.role === 'OWNER',
+        () => canManageCluster(clusters.find((cluster) => cluster.id === clusterId)?.role),
         [clusterId, clusters]
     );
     const ready = Boolean(clusterId) && loadedClusterId === clusterId;

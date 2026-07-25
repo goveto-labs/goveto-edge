@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { canOperateCluster } from '@/utils/rbac.ts';
 
 function formatBandwidth(bitsPerSecond: number) {
     if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return '0 bps';
@@ -22,7 +23,10 @@ function formatBandwidth(bitsPerSecond: number) {
 
 export default function Sites() {
     const navigate = useNavigate();
-    const { clusterId } = useCluster();
+    const { clusterId, clusters } = useCluster();
+    const canOperate = canOperateCluster(
+        clusters.find((clusterItem) => clusterItem.id === clusterId)?.role
+    );
     const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const [sites, setSites] = useState<SiteSummary[]>([]);
     const [loading, setLoading] = useState(false);
@@ -60,10 +64,12 @@ export default function Sites() {
     return (
         <div className='space-y-6'>
             <PageHeader subtitle='Manage domains, origins, and delivery policies.' title='Sites'>
-                <Button onPress={() => navigate('/sites/create')}>
-                    <Plus className='mr-2 h-4 w-4' />
-                    Create site
-                </Button>
+                {canOperate && (
+                    <Button onPress={() => navigate('/sites/create')}>
+                        <Plus className='mr-2 h-4 w-4' />
+                        Create site
+                    </Button>
+                )}
             </PageHeader>
 
             {error && (
@@ -76,10 +82,12 @@ export default function Sites() {
                 aria-label='Sites'
                 empty={sites.length === 0}
                 emptyAction={
-                    <Button onPress={() => navigate('/sites/create')}>
-                        <Plus className='mr-2 h-4 w-4' />
-                        Create site
-                    </Button>
+                    canOperate ? (
+                        <Button onPress={() => navigate('/sites/create')}>
+                            <Plus className='mr-2 h-4 w-4' />
+                            Create site
+                        </Button>
+                    ) : undefined
                 }
                 emptyDescription='Create a site to route domains to origin servers.'
                 emptyTitle='No sites yet'
