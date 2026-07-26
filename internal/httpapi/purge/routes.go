@@ -2,6 +2,7 @@ package purge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
@@ -193,9 +195,16 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 			input.Value = &value
 		}
 
-		job, err := service.Enqueue(c.Request().Context(), site.Id, input.Type, input.Value)
+		job, err := service.EnqueueIdempotent(c.Request().Context(), site.Id, input.Type, input.Value, strings.TrimSpace(c.Request().Header.Get("Idempotency-Key")))
 		if err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			switch {
+			case errors.Is(err, purge.ErrInvalidRequest), errors.Is(err, jobqueue.ErrInvalidIdempotencyKey):
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			case errors.Is(err, jobqueue.ErrIdempotencyConflict):
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			default:
+				return err
+			}
 		}
 		response := types.NewPurgeJob(job)
 		audit.SetChange(c, input, response)

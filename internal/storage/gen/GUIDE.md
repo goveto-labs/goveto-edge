@@ -1,6 +1,55 @@
 # Guide for Generated GCO Client
 
 This document is generated automatically by `gco generate`.
+
+## About GCORM
+
+GCORM is a schema-first ORM toolkit for Go. Define models in `.gcorm` files (Prisma-like syntax), run the `gco` CLI, and use the generated type-safe `client`, `query`, and `model` packages in your application.
+
+It covers code generation, query builders, migration planning, and database tooling.
+
+For full documentation, advanced guides, and the latest reference, visit the
+[GCORM Wiki](https://github.com/arsfy/gcorm/wiki).
+
+## gco CLI Basics
+
+The GCORM CLI is `gco`:
+
+```sh
+gco <command> [flags]
+```
+
+Common workflow:
+
+```sh
+# Initialize a schema (default: schema/schema.gcorm)
+gco init
+
+# Validate and format schema files
+gco validate
+gco fmt
+
+# Generate Go client code (also writes this GUIDE.md)
+gco generate
+gco generate --schema schema
+gco generate --dry-run
+
+# Push schema changes to the database (dev)
+gco db push
+
+# Create / inspect migrations
+gco migrate diff --name init
+gco migrate init-sql --output init.sql
+```
+
+Useful flags (accepted by many commands):
+
+- `--schema <path>` — schema directory or file
+- `--config <path>` — `gco.config.yaml` / `gco.config.yml`
+
+Other commands: `gco version`, `gco upgrade`, `gco help`.
+See the [CLI Reference](https://github.com/arsfy/gcorm/wiki/CLI-Reference) on the wiki for the full list.
+
 ## Imports
 
 ```go
@@ -137,9 +186,15 @@ query.PostAuthorIdColumn
   - `Status` ()
   - `Leaseowner` (String, optional)
   - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
   - `Attempts` (Int)
   - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
   - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
   - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
@@ -209,8 +264,14 @@ query.PostAuthorIdColumn
   - `Attempts` (Int)
   - `Maxattempts` (Int)
   - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
   - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
   - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
   - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
@@ -337,8 +398,15 @@ query.PostAuthorIdColumn
   - `Attempts` (Int)
   - `Maxattempts` (Int)
   - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
   - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
   - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
+  - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -351,6 +419,47 @@ query.PostAuthorIdColumn
   - `Valuejson` (Json)
   - `Description` (String, optional)
   - `Updatedat` (DateTime)
+
+### InstallJob
+
+- Client handle: `c.InstallJob`
+- Query namespace: `query.InstallJob`
+- Fields:
+  - `Id` (String, id)
+  - `Nodeid` (UUID)
+  - `Payload` (Json)
+  - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
+  - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
+  - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
+  - `Error` (String, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### JobExecution
+
+- Client handle: `c.JobExecution`
+- Query namespace: `query.JobExecution`
+- Fields:
+  - `Id` (String, id)
+  - `Jobtype` (String)
+  - `Jobid` (String)
+  - `Attempt` (Int)
+  - `Workerid` (String)
+  - `Status` ()
+  - `Startedat` (DateTime)
+  - `Heartbeatat` (DateTime)
+  - `Finishedat` (DateTime, optional)
+  - `Resultjson` (Json, optional)
+  - `Error` (String, optional)
 
 ### Node
 
@@ -515,7 +624,18 @@ query.PostAuthorIdColumn
   - `Version` (BigInt)
   - `Targets` (Json)
   - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
+  - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
   - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
+  - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -529,7 +649,18 @@ query.PostAuthorIdColumn
   - `Type` ()
   - `Value` (String, optional)
   - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
+  - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
   - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
+  - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

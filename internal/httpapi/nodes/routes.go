@@ -177,20 +177,23 @@ func reinstall(
 				return err
 			}
 			_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
-				error = 'node reinstallation replaced the active credential',
-				lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				cancel_requested_at=NOW(), error='node reinstallation replaced the active credential',
+				lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id)
-			return err
+			if err != nil {
+				return err
+			}
+			if input.Force {
+				return queue.DeleteTx(ctx, tx, node.Id)
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
 		if gateway != nil {
 			gateway.Disconnect(ctx, node.Id)
 		}
-		if input.Force {
-			_ = queue.Delete(ctx, node.Id)
-		}
-		if err := queue.Enqueue(ctx, node.Id, nodedomain.InstallPayload{NodeID: node.Id}); err != nil {
+		if err := queue.Enqueue(ctx, node.Id); err != nil {
 			message := "unable to queue node reinstallation: " + err.Error()
 			_, _ = db.Node.Update().
 				Where(query.Node.Id.Equals(node.Id)).
@@ -334,7 +337,7 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			return err
 		}
 
-		if err := queue.Enqueue(ctx, nodeID, nodedomain.InstallPayload{NodeID: nodeID}); err != nil {
+		if err := queue.Enqueue(ctx, nodeID); err != nil {
 			message := "unable to queue node installation: " + err.Error()
 			_, _ = db.Node.Update().
 				Where(query.Node.Id.Equals(nodeID)).

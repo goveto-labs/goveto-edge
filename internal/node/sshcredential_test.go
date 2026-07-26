@@ -1,11 +1,36 @@
 package node
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"testing"
 
 	"goveto-edge/internal/storage/gen/model"
 )
+
+type testInstallCause struct{ err error }
+
+func (e *testInstallCause) Error() string { return "install cause" }
+func (e *testInstallCause) Unwrap() error { return e.err }
+
+func TestPermanentInstallErrorExposesClassificationAndCause(t *testing.T) {
+	cause := &testInstallCause{err: context.Canceled}
+	err := permanentInstallError(cause)
+	if !errors.Is(err, errPermanentInstallConfiguration) {
+		t.Fatalf("permanent classification is not visible: %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("underlying cancellation is not visible: %v", err)
+	}
+	var target *testInstallCause
+	if !errors.As(err, &target) || target != cause {
+		t.Fatalf("underlying typed cause is not visible: %v", err)
+	}
+	if permanentInstallError(nil) != nil {
+		t.Fatal("nil cause should produce a nil error")
+	}
+}
 
 func TestSSHCredentialSecretRoundTrip(t *testing.T) {
 	cipher, err := NewCredentialCipher(

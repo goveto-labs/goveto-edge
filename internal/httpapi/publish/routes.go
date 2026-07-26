@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -15,6 +17,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
@@ -64,7 +67,7 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	counts, err := client.Raw[clusterPublishCounts](ctx, db, `SELECT
 			COUNT(*) FILTER (WHERE pj.status = 'PENDING') AS pending,
 			COUNT(*) FILTER (WHERE pj.status = 'RUNNING') AS running,
-			COUNT(*) FILTER (WHERE pj.status = 'FAILED') AS failed
+			COUNT(*) FILTER (WHERE pj.status IN ('FAILED', 'DEAD_LETTER')) AS failed
 			FROM publish_jobs pj JOIN sites s ON s.id = pj.site_id WHERE s.cluster_id = $1`, clusterID)
 	if err != nil {
 		return clusterPublishStatus{}, err
@@ -76,7 +79,9 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	}
 
 	jobs, err := client.Raw[model.PublishJob](ctx, db, `SELECT pj.id, pj.site_id, pj.version, pj.targets,
-			pj.status, pj.result_json, pj.created_at, pj.updated_at
+			pj.status, pj.attempts, pj.max_attempts, pj.next_attempt_at, pj.lease_owner,
+			pj.lease_until, pj.heartbeat_at, pj.cancel_requested_at, pj.error,
+			pj.result_json, pj.created_at, pj.updated_at
 			FROM publish_jobs pj JOIN sites s ON s.id = pj.site_id
 			WHERE s.cluster_id = $1 ORDER BY pj.created_at DESC LIMIT 50`, clusterID)
 	if err != nil {
@@ -184,8 +189,15 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusNotFound, "site not found")
 		}
 
-		job, err := service.Enqueue(c.Request().Context(), site.Id)
+		idempotencyKey := strings.TrimSpace(c.Request().Header.Get("Idempotency-Key"))
+		if err = jobqueue.ValidateIdempotencyKey(idempotencyKey); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		job, err := service.EnqueueIdempotent(c.Request().Context(), site.Id, idempotencyKey)
 		if err != nil {
+			if errors.Is(err, jobqueue.ErrIdempotencyConflict) {
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			}
 			return err
 		}
 		response := types.NewPublishJob(job)

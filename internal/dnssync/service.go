@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"goveto-edge/internal/dnsprovider"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -20,7 +21,6 @@ import (
 )
 
 const (
-	jobLease     = 2 * time.Minute
 	jobRetention = 30 * 24 * time.Hour
 )
 
@@ -30,10 +30,11 @@ type Service struct {
 	db         *client.Client
 	cipher     *node.CredentialCipher
 	httpClient *http.Client
+	jobs       *jobqueue.Manager
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher) *Service {
-	return &Service{db: db, cipher: cipher, httpClient: &http.Client{Timeout: 20 * time.Second}}
+	return &Service{db: db, cipher: cipher, httpClient: &http.Client{Timeout: 20 * time.Second}, jobs: jobqueue.New(db)}
 }
 
 // LockClusterTx serializes configuration changes and reconciliation for a cluster.
@@ -112,18 +113,13 @@ func (s *Service) CancelActiveTx(ctx context.Context, db *client.Client, cluster
 		return err
 	}
 	payload, _ := json.Marshal(map[string]string{"error": reason})
-	_, err := db.DNSSyncJob.Update().
-		Where(
-			query.DNSSyncJob.ClusterId.Equals(clusterID),
-			query.DNSSyncJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
-		).
-		Set(
-			query.DNSSyncJob.Status.Set(model.JobStatusCANCELLED),
-			query.DNSSyncJob.LeaseUntil.SetNull(),
-			query.DNSSyncJob.ResultJson.Set(payload),
-			query.DNSSyncJob.UpdatedAt.Set(time.Now()),
-		).
-		DoMany(ctx)
+	_, err := db.RawExec(ctx, `WITH cancelled AS (
+		UPDATE dns_sync_jobs SET status='CANCELLED', cancel_requested_at=NOW(), error=$2,
+			result_json=$3, lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+			WHERE cluster_id=$1 AND status IN ('PENDING','RUNNING') RETURNING id, attempts
+	) UPDATE job_executions e SET status='CANCELLED', finished_at=NOW(), heartbeat_at=NOW(),
+		error=COALESCE(e.error,$2) FROM cancelled c WHERE e.job_type=$4 AND e.job_id=c.id
+		AND e.attempt=c.attempts AND e.status='RUNNING'`, clusterID, reason, payload, string(jobqueue.DNS))
 	return err
 }
 
@@ -347,7 +343,7 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) enqueuePeriodic(ctx context.Context) {
 	_, _ = s.db.RawExec(
 		ctx,
-		"DELETE FROM dns_sync_jobs WHERE status IN ('SUCCEEDED', 'FAILED', 'CANCELLED') AND updated_at < NOW() - ($1 * INTERVAL '1 second')",
+		"DELETE FROM dns_sync_jobs WHERE status IN ('SUCCEEDED', 'FAILED', 'DEAD_LETTER', 'CANCELLED') AND updated_at < NOW() - ($1 * INTERVAL '1 second')",
 		int64(jobRetention/time.Second),
 	)
 	configs, err := s.db.DNSProviderConfig.Query().
@@ -362,95 +358,37 @@ func (s *Service) enqueuePeriodic(ctx context.Context) {
 }
 
 func (s *Service) runOne(ctx context.Context) {
-	var claimed *model.DNSSyncJob
-	defer func() {
-		if recovered := recover(); recovered != nil {
-			panicErr := fmt.Errorf("DNS sync worker panic: %v", recovered)
-			slog.Error("DNS sync worker panic", "error", panicErr)
-			if claimed != nil {
-				s.finishDetached(ctx, claimed, panicErr)
+	_, err := s.jobs.RunOne(ctx, jobqueue.DNS, 0, func(runCtx context.Context, lease jobqueue.Lease) jobqueue.Outcome {
+		job, loadErr := s.db.DNSSyncJob.FindUnique(runCtx, query.DNSSyncJob.Id.Equals(lease.ID))
+		if loadErr != nil || job == nil {
+			if loadErr == nil {
+				loadErr = errors.New("DNS sync job not found")
+			}
+			return jobqueue.Outcome{Err: loadErr, Retryable: true}
+		}
+		unlock, locked, lockErr := s.tryClusterLock(runCtx, job.ClusterId)
+		if lockErr != nil {
+			return jobqueue.Outcome{Err: lockErr, Retryable: true}
+		}
+		if !locked {
+			return jobqueue.Outcome{
+				Err:          errors.New("DNS cluster lock is busy"),
+				RequeueAfter: 2 * time.Second,
 			}
 		}
-	}()
-
-	s.failExpiredJobs(ctx)
-	jobs, err := client.Raw[model.DNSSyncJob](
-		ctx,
-		s.db,
-		`UPDATE dns_sync_jobs
-		 SET status='RUNNING',
-		     attempts=attempts+1,
-		     lease_until=NOW() + ($1 * INTERVAL '1 second'),
-		     updated_at=NOW()
-		 WHERE id=(
-			SELECT id
-			FROM dns_sync_jobs
-			WHERE (status='PENDING' AND next_attempt_at<=NOW())
-			   OR (status='RUNNING' AND lease_until<=NOW() AND attempts<max_attempts)
-			ORDER BY next_attempt_at, created_at
-			FOR UPDATE SKIP LOCKED
-			LIMIT 1
-		 )
-		 RETURNING id, cluster_id, site_id, action, status, attempts, max_attempts,
-		           next_attempt_at, lease_until, result_json, created_at, updated_at`,
-		int64(jobLease/time.Second),
-	)
-	if err != nil || len(jobs) == 0 {
-		return
-	}
-	job := &jobs[0]
-	claimed = job
-
-	unlock, locked, err := s.tryClusterLock(ctx, job.ClusterId)
-	if err != nil {
-		s.finishDetached(ctx, job, err)
-		return
-	}
-	if !locked {
-		s.requeueContended(ctx, job)
-		return
-	}
-	defer unlock()
-
-	if err = s.renewLease(ctx, job.Id); err == nil {
+		defer unlock()
+		var executionErr error
 		switch job.Action {
 		case model.DNSSyncActionDELETE_CLUSTER:
-			err = s.deleteAll(ctx, job.Id, job.ClusterId)
+			executionErr = s.deleteAll(runCtx, job.ClusterId)
 		default:
-			err = s.reconcile(ctx, job.Id, job.ClusterId)
+			executionErr = s.reconcile(runCtx, job.ClusterId)
 		}
+		return jobqueue.Outcome{Result: map[string]any{"cluster_id": job.ClusterId, "action": job.Action}, Err: executionErr, Retryable: executionErr != nil}
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("DNS job worker", "error", err)
 	}
-	s.finishDetached(ctx, job, err)
-}
-
-func (s *Service) failExpiredJobs(ctx context.Context) {
-	_, _ = s.db.RawExec(
-		ctx,
-		`UPDATE dns_sync_jobs
-		 SET status='FAILED',
-		     lease_until=NULL,
-		     result_json=jsonb_build_object('error', 'worker lease expired after maximum attempts'),
-		     updated_at=NOW()
-		 WHERE status='RUNNING'
-		   AND lease_until<=NOW()
-		   AND attempts>=max_attempts`,
-	)
-}
-
-func (s *Service) requeueContended(ctx context.Context, job *model.DNSSyncJob) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	_, _ = s.db.RawExec(
-		cleanupCtx,
-		`UPDATE dns_sync_jobs
-		 SET status='PENDING',
-		     attempts=GREATEST(attempts-1, 0),
-		     next_attempt_at=NOW() + INTERVAL '2 seconds',
-		     lease_until=NULL,
-		     updated_at=NOW()
-		 WHERE id=$1 AND status='RUNNING'`,
-		job.Id,
-	)
 }
 
 func (s *Service) tryClusterLock(
@@ -484,67 +422,6 @@ func (s *Service) tryClusterLock(
 		).Scan(&released)
 		_ = conn.Close()
 	}, true, nil
-}
-
-func (s *Service) renewLease(ctx context.Context, jobID string) error {
-	now := time.Now()
-	updated, err := s.db.DNSSyncJob.Update().
-		Where(
-			query.DNSSyncJob.Id.Equals(jobID),
-			query.DNSSyncJob.Status.Equals(model.JobStatusRUNNING),
-		).
-		Set(
-			query.DNSSyncJob.LeaseUntil.Set(now.Add(jobLease)),
-			query.DNSSyncJob.UpdatedAt.Set(now),
-		).
-		DoMany(ctx)
-	if err != nil {
-		return err
-	}
-	if updated == 0 {
-		return errors.New("DNS sync job lease was lost")
-	}
-	return nil
-}
-
-func (s *Service) finishDetached(
-	ctx context.Context,
-	job *model.DNSSyncJob,
-	executionErr error,
-) {
-	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	s.finish(cleanupCtx, job, executionErr)
-}
-
-func (s *Service) finish(ctx context.Context, job *model.DNSSyncJob, executionErr error) {
-	status := model.JobStatusSUCCEEDED
-	result := map[string]any{"error": ""}
-	sets := []query.DNSSyncJobSetClause{query.DNSSyncJob.LeaseUntil.SetNull()}
-	if executionErr != nil {
-		result["error"] = executionErr.Error()
-		if job.Attempts < job.MaxAttempts {
-			status = model.JobStatusPENDING
-			delay := time.Duration(1<<min(job.Attempts, 8)) * time.Second
-			sets = append(sets, query.DNSSyncJob.NextAttemptAt.Set(time.Now().Add(delay)))
-		} else {
-			status = model.JobStatusFAILED
-		}
-	}
-	payload, _ := json.Marshal(result)
-	sets = append(
-		sets,
-		query.DNSSyncJob.Status.Set(status),
-		query.DNSSyncJob.ResultJson.Set(payload),
-		query.DNSSyncJob.UpdatedAt.Set(time.Now()),
-	)
-	_, _ = s.db.DNSSyncJob.Update().
-		Where(
-			query.DNSSyncJob.Id.Equals(job.Id),
-			query.DNSSyncJob.Status.Equals(model.JobStatusRUNNING),
-		).
-		Set(sets...).
-		Do(ctx)
 }
 
 type desiredRecord struct {
@@ -691,7 +568,7 @@ func nodeRecordKey(record dnsprovider.Record) string {
 	}, "\x00")
 }
 
-func (s *Service) reconcile(ctx context.Context, jobID, clusterID string) error {
+func (s *Service) reconcile(ctx context.Context, clusterID string) error {
 	cluster, err := s.db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
 	if err != nil {
 		return err
@@ -729,11 +606,11 @@ func (s *Service) reconcile(ctx context.Context, jobID, clusterID string) error 
 	if err != nil {
 		return err
 	}
-	desired, err := s.desired(ctx, jobID, cluster, config, provider.SupportsLines())
+	desired, err := s.desired(ctx, cluster, config, provider.SupportsLines())
 	if err != nil {
 		return err
 	}
-	if err := s.apply(ctx, jobID, clusterID, provider, desired); err != nil {
+	if err := s.apply(ctx, clusterID, provider, desired); err != nil {
 		return err
 	}
 	nodeRecords := make([]dnsprovider.Record, 0)
@@ -745,7 +622,7 @@ func (s *Service) reconcile(ctx context.Context, jobID, clusterID string) error 
 	return syncRemoteNodeRecords(ctx, provider, *cluster.PrimaryHostname, nodeRecords)
 }
 
-func (s *Service) deleteAll(ctx context.Context, jobID, clusterID string) error {
+func (s *Service) deleteAll(ctx context.Context, clusterID string) error {
 	config, err := s.db.DNSProviderConfig.FindUnique(
 		ctx,
 		query.DNSProviderConfig.ClusterId.Equals(clusterID),
@@ -782,9 +659,6 @@ func (s *Service) deleteAll(ctx context.Context, jobID, clusterID string) error 
 	var errs []error
 	for index := range records {
 		item := &records[index]
-		if err := s.renewLease(ctx, jobID); err != nil {
-			return err
-		}
 		record := dnsprovider.Record{
 			ID:       value(item.ProviderRecordId),
 			Hostname: item.Hostname,
@@ -821,7 +695,6 @@ func (s *Service) deleteAll(ctx context.Context, jobID, clusterID string) error 
 
 func (s *Service) desired(
 	ctx context.Context,
-	jobID string,
 	cluster *model.Cluster,
 	config *model.DNSProviderConfig,
 	supportsLines bool,
@@ -837,9 +710,6 @@ func (s *Service) desired(
 		return nil, err
 	}
 	for _, currentNode := range nodes {
-		if err := s.renewLease(ctx, jobID); err != nil {
-			return nil, err
-		}
 		addresses, err := s.db.NodeAddress.Query().
 			Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
 			OrderBy(query.NodeAddress.CreatedAt.Asc()).
@@ -913,7 +783,7 @@ func (s *Service) desired(
 
 func (s *Service) apply(
 	ctx context.Context,
-	jobID, clusterID string,
+	clusterID string,
 	provider dnsprovider.Provider,
 	desired []desiredRecord,
 ) error {
@@ -969,9 +839,6 @@ func (s *Service) apply(
 			byKey[k] = current
 		}
 		retained[current.Id] = struct{}{}
-		if err := s.renewLease(ctx, jobID); err != nil {
-			return err
-		}
 
 		item.ID = value(current.ProviderRecordId)
 		externalID, syncErr := provider.Upsert(ctx, item.Record)
@@ -1042,9 +909,6 @@ func (s *Service) apply(
 				}
 				continue
 			}
-		}
-		if err := s.renewLease(ctx, jobID); err != nil {
-			return err
 		}
 		record := dnsprovider.Record{
 			ID:       value(item.ProviderRecordId),

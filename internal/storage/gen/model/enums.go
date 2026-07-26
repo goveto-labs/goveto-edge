@@ -221,11 +221,12 @@ func ValidDNSSyncActionValues() []DNSSyncAction {
 type JobStatus string
 
 const (
-	JobStatusPENDING   JobStatus = "PENDING"
-	JobStatusRUNNING   JobStatus = "RUNNING"
-	JobStatusSUCCEEDED JobStatus = "SUCCEEDED"
-	JobStatusFAILED    JobStatus = "FAILED"
-	JobStatusCANCELLED JobStatus = "CANCELLED"
+	JobStatusPENDING     JobStatus = "PENDING"
+	JobStatusRUNNING     JobStatus = "RUNNING"
+	JobStatusSUCCEEDED   JobStatus = "SUCCEEDED"
+	JobStatusFAILED      JobStatus = "FAILED"
+	JobStatusDEAD_LETTER JobStatus = "DEAD_LETTER"
+	JobStatusCANCELLED   JobStatus = "CANCELLED"
 )
 
 // ValidJobStatusValues returns all valid values for the JobStatus enum.
@@ -235,6 +236,7 @@ func ValidJobStatusValues() []JobStatus {
 		JobStatusRUNNING,
 		JobStatusSUCCEEDED,
 		JobStatusFAILED,
+		JobStatusDEAD_LETTER,
 		JobStatusCANCELLED,
 	}
 }

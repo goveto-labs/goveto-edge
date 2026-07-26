@@ -13,6 +13,7 @@ import CreateSite from '@/pages/CreateSite.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
 import DNS from '@/pages/DNS.tsx';
 import Init from '@/pages/Init.tsx';
+import Jobs from '@/pages/Jobs.tsx';
 import Login from '@/pages/Login.tsx';
 import NodeDetail from '@/pages/NodeDetail.tsx';
 import Nodes from '@/pages/Nodes.tsx';
@@ -46,7 +47,10 @@ export default function App() {
                                     <Route element={<Nodes />} path='/nodes' />
                                     <Route element={<CreateNode />} path='/nodes/create' />
                                     <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
-                                    <Route element={<SSHCredentials />} path='/nodes/ssh-credentials' />
+                                    <Route
+                                        element={<SSHCredentials />}
+                                        path='/nodes/ssh-credentials'
+                                    />
                                     <Route element={<Sites />} path='/sites' />
                                     <Route element={<CreateSite />} path='/sites/create' />
                                     <Route element={<SitesAccessLogs />} path='/sites/logs' />
@@ -56,6 +60,7 @@ export default function App() {
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
                                     <Route element={<PublishJobs />} path='/publish' />
+                                    <Route element={<Jobs />} path='/jobs' />
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />
                                 </Route>

@@ -156,7 +156,8 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 		}
 		if node.Status == model.NodeStatusDISABLED {
 			if _, err := db.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
-				error = 'node is disabled', lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				cancel_requested_at=NOW(), error='node is disabled', lease_owner=NULL,
+				lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id); err != nil {
 				return err
 			}
@@ -176,7 +177,8 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 				return err
 			}
 			_, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
-				error = 'node was disabled', lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+				cancel_requested_at=NOW(), error='node was disabled', lease_owner=NULL,
+				lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id)
 			return err
 		})

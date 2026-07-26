@@ -32,15 +32,26 @@ func ApplyPurgeJobOptions(opts []PurgeJobQueryOption) PurgeJobQueryConfig {
 
 // PurgeJobQuery is the namespace for PurgeJob query operations.
 type PurgeJobQuery struct {
-	Id         purgeJobIdField
-	SiteId     purgeJobSiteIdField
-	Type       purgeJobTypeField
-	Value      purgeJobValueField
-	Status     purgeJobStatusField
-	ResultJson purgeJobResultJsonField
-	CreatedAt  purgeJobCreatedAtField
-	UpdatedAt  purgeJobUpdatedAtField
-	Site       purgeJobSiteRelation
+	Id                purgeJobIdField
+	SiteId            purgeJobSiteIdField
+	Type              purgeJobTypeField
+	Value             purgeJobValueField
+	Status            purgeJobStatusField
+	Attempts          purgeJobAttemptsField
+	MaxAttempts       purgeJobMaxAttemptsField
+	NextAttemptAt     purgeJobNextAttemptAtField
+	LeaseOwner        purgeJobLeaseOwnerField
+	LeaseUntil        purgeJobLeaseUntilField
+	HeartbeatAt       purgeJobHeartbeatAtField
+	IdempotencyKey    purgeJobIdempotencyKeyField
+	CancelRequestedAt purgeJobCancelRequestedAtField
+	TimeoutAt         purgeJobTimeoutAtField
+	ResultJson        purgeJobResultJsonField
+	CompensationJson  purgeJobCompensationJsonField
+	Error             purgeJobErrorField
+	CreatedAt         purgeJobCreatedAtField
+	UpdatedAt         purgeJobUpdatedAtField
+	Site              purgeJobSiteRelation
 }
 
 const PurgeJobTable = "purge_jobs"
@@ -49,21 +60,43 @@ const PurgeJobSiteIdColumn = "site_id"
 const PurgeJobTypeColumn = "type"
 const PurgeJobValueColumn = "value"
 const PurgeJobStatusColumn = "status"
+const PurgeJobAttemptsColumn = "attempts"
+const PurgeJobMaxAttemptsColumn = "max_attempts"
+const PurgeJobNextAttemptAtColumn = "next_attempt_at"
+const PurgeJobLeaseOwnerColumn = "lease_owner"
+const PurgeJobLeaseUntilColumn = "lease_until"
+const PurgeJobHeartbeatAtColumn = "heartbeat_at"
+const PurgeJobIdempotencyKeyColumn = "idempotency_key"
+const PurgeJobCancelRequestedAtColumn = "cancel_requested_at"
+const PurgeJobTimeoutAtColumn = "timeout_at"
 const PurgeJobResultJsonColumn = "result_json"
+const PurgeJobCompensationJsonColumn = "compensation_json"
+const PurgeJobErrorColumn = "error"
 const PurgeJobCreatedAtColumn = "created_at"
 const PurgeJobUpdatedAtColumn = "updated_at"
 
 // PurgeJobQuery provides query building methods for the PurgeJob model.
 var PurgeJob = PurgeJobQuery{
-	Id:         purgeJobIdField{},
-	SiteId:     purgeJobSiteIdField{},
-	Type:       purgeJobTypeField{},
-	Value:      purgeJobValueField{},
-	Status:     purgeJobStatusField{},
-	ResultJson: purgeJobResultJsonField{},
-	CreatedAt:  purgeJobCreatedAtField{},
-	UpdatedAt:  purgeJobUpdatedAtField{},
-	Site:       purgeJobSiteRelation{},
+	Id:                purgeJobIdField{},
+	SiteId:            purgeJobSiteIdField{},
+	Type:              purgeJobTypeField{},
+	Value:             purgeJobValueField{},
+	Status:            purgeJobStatusField{},
+	Attempts:          purgeJobAttemptsField{},
+	MaxAttempts:       purgeJobMaxAttemptsField{},
+	NextAttemptAt:     purgeJobNextAttemptAtField{},
+	LeaseOwner:        purgeJobLeaseOwnerField{},
+	LeaseUntil:        purgeJobLeaseUntilField{},
+	HeartbeatAt:       purgeJobHeartbeatAtField{},
+	IdempotencyKey:    purgeJobIdempotencyKeyField{},
+	CancelRequestedAt: purgeJobCancelRequestedAtField{},
+	TimeoutAt:         purgeJobTimeoutAtField{},
+	ResultJson:        purgeJobResultJsonField{},
+	CompensationJson:  purgeJobCompensationJsonField{},
+	Error:             purgeJobErrorField{},
+	CreatedAt:         purgeJobCreatedAtField{},
+	UpdatedAt:         purgeJobUpdatedAtField{},
+	Site:              purgeJobSiteRelation{},
 }
 
 // PurgeJobWhereClause represents a WHERE condition for PurgeJob.
@@ -440,6 +473,650 @@ func (purgeJobStatusField) Desc() PurgeJobOrderByClause {
 	return PurgeJobOrderByClause{Field: "status", Direction: "DESC"}
 }
 
+// AttemptsField provides query operations for the attempts field.
+type purgeJobAttemptsField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobAttemptsField) Equals(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobAttemptsField) Not(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobAttemptsField) In(vals ...int) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "attempts", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobAttemptsField) NotIn(vals ...int) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "attempts", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobAttemptsField) Lt(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobAttemptsField) Lte(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobAttemptsField) Gt(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobAttemptsField) Gte(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "attempts", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobAttemptsField) Set(v int) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "attempts", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobAttemptsField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "attempts", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobAttemptsField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "attempts", Direction: "DESC"}
+}
+
+// MaxAttemptsField provides query operations for the maxAttempts field.
+type purgeJobMaxAttemptsField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobMaxAttemptsField) Equals(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobMaxAttemptsField) Not(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobMaxAttemptsField) In(vals ...int) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobMaxAttemptsField) NotIn(vals ...int) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobMaxAttemptsField) Lt(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobMaxAttemptsField) Lte(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobMaxAttemptsField) Gt(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobMaxAttemptsField) Gte(v int) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "max_attempts", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobMaxAttemptsField) Set(v int) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "max_attempts", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobMaxAttemptsField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "max_attempts", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobMaxAttemptsField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "max_attempts", Direction: "DESC"}
+}
+
+// NextAttemptAtField provides query operations for the nextAttemptAt field.
+type purgeJobNextAttemptAtField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobNextAttemptAtField) Equals(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobNextAttemptAtField) Not(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobNextAttemptAtField) In(vals ...time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobNextAttemptAtField) NotIn(vals ...time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobNextAttemptAtField) Lt(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobNextAttemptAtField) Lte(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobNextAttemptAtField) Gt(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobNextAttemptAtField) Gte(v time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "next_attempt_at", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobNextAttemptAtField) Set(v time.Time) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "next_attempt_at", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobNextAttemptAtField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "next_attempt_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobNextAttemptAtField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "next_attempt_at", Direction: "DESC"}
+}
+
+// LeaseOwnerField provides query operations for the leaseOwner field.
+type purgeJobLeaseOwnerField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobLeaseOwnerField) Equals(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobLeaseOwnerField) Not(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobLeaseOwnerField) In(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobLeaseOwnerField) NotIn(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (purgeJobLeaseOwnerField) Contains(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (purgeJobLeaseOwnerField) StartsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (purgeJobLeaseOwnerField) EndsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobLeaseOwnerField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_owner", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobLeaseOwnerField) Set(v string) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "lease_owner", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobLeaseOwnerField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "lease_owner", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobLeaseOwnerField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "lease_owner", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobLeaseOwnerField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "lease_owner", Direction: "DESC"}
+}
+
+// LeaseUntilField provides query operations for the leaseUntil field.
+type purgeJobLeaseUntilField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobLeaseUntilField) Equals(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobLeaseUntilField) Not(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobLeaseUntilField) In(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobLeaseUntilField) NotIn(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobLeaseUntilField) Lt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobLeaseUntilField) Lte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobLeaseUntilField) Gt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobLeaseUntilField) Gte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobLeaseUntilField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "lease_until", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobLeaseUntilField) Set(v time.Time) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "lease_until", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobLeaseUntilField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "lease_until", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobLeaseUntilField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "lease_until", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobLeaseUntilField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "lease_until", Direction: "DESC"}
+}
+
+// HeartbeatAtField provides query operations for the heartbeatAt field.
+type purgeJobHeartbeatAtField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobHeartbeatAtField) Equals(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobHeartbeatAtField) Not(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobHeartbeatAtField) In(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobHeartbeatAtField) NotIn(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobHeartbeatAtField) Lt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobHeartbeatAtField) Lte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobHeartbeatAtField) Gt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobHeartbeatAtField) Gte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobHeartbeatAtField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "heartbeat_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobHeartbeatAtField) Set(v time.Time) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "heartbeat_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobHeartbeatAtField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "heartbeat_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobHeartbeatAtField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "heartbeat_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobHeartbeatAtField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "heartbeat_at", Direction: "DESC"}
+}
+
+// IdempotencyKeyField provides query operations for the idempotencyKey field.
+type purgeJobIdempotencyKeyField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobIdempotencyKeyField) Equals(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobIdempotencyKeyField) Not(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobIdempotencyKeyField) In(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobIdempotencyKeyField) NotIn(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (purgeJobIdempotencyKeyField) Contains(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (purgeJobIdempotencyKeyField) StartsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (purgeJobIdempotencyKeyField) EndsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobIdempotencyKeyField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "idempotency_key", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobIdempotencyKeyField) Set(v string) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "idempotency_key", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobIdempotencyKeyField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "idempotency_key", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobIdempotencyKeyField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "idempotency_key", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobIdempotencyKeyField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "idempotency_key", Direction: "DESC"}
+}
+
+// CancelRequestedAtField provides query operations for the cancelRequestedAt field.
+type purgeJobCancelRequestedAtField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobCancelRequestedAtField) Equals(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobCancelRequestedAtField) Not(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobCancelRequestedAtField) In(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobCancelRequestedAtField) NotIn(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobCancelRequestedAtField) Lt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobCancelRequestedAtField) Lte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobCancelRequestedAtField) Gt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobCancelRequestedAtField) Gte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobCancelRequestedAtField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "cancel_requested_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobCancelRequestedAtField) Set(v time.Time) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "cancel_requested_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobCancelRequestedAtField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "cancel_requested_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobCancelRequestedAtField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "cancel_requested_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobCancelRequestedAtField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "cancel_requested_at", Direction: "DESC"}
+}
+
+// TimeoutAtField provides query operations for the timeoutAt field.
+type purgeJobTimeoutAtField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobTimeoutAtField) Equals(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobTimeoutAtField) Not(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobTimeoutAtField) In(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobTimeoutAtField) NotIn(vals ...*time.Time) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (purgeJobTimeoutAtField) Lt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (purgeJobTimeoutAtField) Lte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (purgeJobTimeoutAtField) Gt(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (purgeJobTimeoutAtField) Gte(v *time.Time) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobTimeoutAtField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "timeout_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobTimeoutAtField) Set(v time.Time) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "timeout_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobTimeoutAtField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "timeout_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobTimeoutAtField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "timeout_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobTimeoutAtField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "timeout_at", Direction: "DESC"}
+}
+
 // ResultJsonField provides query operations for the resultJson field.
 type purgeJobResultJsonField struct{}
 
@@ -494,6 +1171,133 @@ func (purgeJobResultJsonField) Asc() PurgeJobOrderByClause {
 // Desc returns a descending order clause for this field.
 func (purgeJobResultJsonField) Desc() PurgeJobOrderByClause {
 	return PurgeJobOrderByClause{Field: "result_json", Direction: "DESC"}
+}
+
+// CompensationJsonField provides query operations for the compensationJson field.
+type purgeJobCompensationJsonField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobCompensationJsonField) Equals(v *json.RawMessage) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "compensation_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobCompensationJsonField) Not(v *json.RawMessage) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "compensation_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobCompensationJsonField) In(vals ...*json.RawMessage) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "compensation_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobCompensationJsonField) NotIn(vals ...*json.RawMessage) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "compensation_json", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobCompensationJsonField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "compensation_json", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobCompensationJsonField) Set(v json.RawMessage) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "compensation_json", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobCompensationJsonField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "compensation_json", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobCompensationJsonField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "compensation_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobCompensationJsonField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "compensation_json", Direction: "DESC"}
+}
+
+// ErrorField provides query operations for the error field.
+type purgeJobErrorField struct{}
+
+// Equals creates an equality condition.
+func (purgeJobErrorField) Equals(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (purgeJobErrorField) Not(v *string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (purgeJobErrorField) In(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (purgeJobErrorField) NotIn(vals ...*string) PurgeJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PurgeJobWhereClause{Field: "error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (purgeJobErrorField) Contains(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (purgeJobErrorField) StartsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (purgeJobErrorField) EndsWith(v string) PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (purgeJobErrorField) IsNull() PurgeJobWhereClause {
+	return PurgeJobWhereClause{Field: "error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (purgeJobErrorField) Set(v string) PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (purgeJobErrorField) SetNull() PurgeJobSetClause {
+	return PurgeJobSetClause{Field: "error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (purgeJobErrorField) Asc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (purgeJobErrorField) Desc() PurgeJobOrderByClause {
+	return PurgeJobOrderByClause{Field: "error", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -669,20 +1473,31 @@ type PurgeJobGroupByResult struct {
 
 // PurgeJobCreateInput holds data for creating a PurgeJob record.
 type PurgeJobCreateInput struct {
-	Id         string
-	SiteId     string
-	Type       model.PurgeType
-	Value      **string
-	Status     model.JobStatus
-	ResultJson **json.RawMessage
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Site       *SiteCreateNestedInput
+	Id                string
+	SiteId            string
+	Type              model.PurgeType
+	Value             **string
+	Status            model.JobStatus
+	Attempts          int
+	MaxAttempts       int
+	NextAttemptAt     time.Time
+	LeaseOwner        **string
+	LeaseUntil        **time.Time
+	HeartbeatAt       **time.Time
+	IdempotencyKey    **string
+	CancelRequestedAt **time.Time
+	TimeoutAt         **time.Time
+	ResultJson        **json.RawMessage
+	CompensationJson  **json.RawMessage
+	Error             **string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Site              *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d PurgeJobCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.SiteId, d.Type, d.Value, d.Status, d.ResultJson, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.SiteId, d.Type, d.Value, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseOwner, d.LeaseUntil, d.HeartbeatAt, d.IdempotencyKey, d.CancelRequestedAt, d.TimeoutAt, d.ResultJson, d.CompensationJson, d.Error, d.CreatedAt, d.UpdatedAt}
 }
 
 // PurgeJobCreateNestedInput supports nested creates and connects.
@@ -693,5 +1508,6 @@ type PurgeJobCreateNestedInput struct {
 
 // PurgeJobWhereUniqueInput identifies a unique PurgeJob record.
 type PurgeJobWhereUniqueInput struct {
-	Id *string
+	Id             *string
+	IdempotencyKey **string
 }

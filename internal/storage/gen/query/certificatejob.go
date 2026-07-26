@@ -32,19 +32,25 @@ func ApplyCertificateJobOptions(opts []CertificateJobQueryOption) CertificateJob
 
 // CertificateJobQuery is the namespace for CertificateJob query operations.
 type CertificateJobQuery struct {
-	Id            certificateJobIdField
-	CertificateId certificateJobCertificateIdField
-	Operation     certificateJobOperationField
-	Status        certificateJobStatusField
-	Attempts      certificateJobAttemptsField
-	MaxAttempts   certificateJobMaxAttemptsField
-	NextAttemptAt certificateJobNextAttemptAtField
-	LeaseUntil    certificateJobLeaseUntilField
-	ResultJson    certificateJobResultJsonField
-	Error         certificateJobErrorField
-	CreatedAt     certificateJobCreatedAtField
-	UpdatedAt     certificateJobUpdatedAtField
-	Certificate   certificateJobCertificateRelation
+	Id                certificateJobIdField
+	CertificateId     certificateJobCertificateIdField
+	Operation         certificateJobOperationField
+	Status            certificateJobStatusField
+	Attempts          certificateJobAttemptsField
+	MaxAttempts       certificateJobMaxAttemptsField
+	NextAttemptAt     certificateJobNextAttemptAtField
+	LeaseOwner        certificateJobLeaseOwnerField
+	LeaseUntil        certificateJobLeaseUntilField
+	HeartbeatAt       certificateJobHeartbeatAtField
+	IdempotencyKey    certificateJobIdempotencyKeyField
+	CancelRequestedAt certificateJobCancelRequestedAtField
+	TimeoutAt         certificateJobTimeoutAtField
+	ResultJson        certificateJobResultJsonField
+	CompensationJson  certificateJobCompensationJsonField
+	Error             certificateJobErrorField
+	CreatedAt         certificateJobCreatedAtField
+	UpdatedAt         certificateJobUpdatedAtField
+	Certificate       certificateJobCertificateRelation
 }
 
 const CertificateJobTable = "certificate_jobs"
@@ -55,27 +61,39 @@ const CertificateJobStatusColumn = "status"
 const CertificateJobAttemptsColumn = "attempts"
 const CertificateJobMaxAttemptsColumn = "max_attempts"
 const CertificateJobNextAttemptAtColumn = "next_attempt_at"
+const CertificateJobLeaseOwnerColumn = "lease_owner"
 const CertificateJobLeaseUntilColumn = "lease_until"
+const CertificateJobHeartbeatAtColumn = "heartbeat_at"
+const CertificateJobIdempotencyKeyColumn = "idempotency_key"
+const CertificateJobCancelRequestedAtColumn = "cancel_requested_at"
+const CertificateJobTimeoutAtColumn = "timeout_at"
 const CertificateJobResultJsonColumn = "result_json"
+const CertificateJobCompensationJsonColumn = "compensation_json"
 const CertificateJobErrorColumn = "error"
 const CertificateJobCreatedAtColumn = "created_at"
 const CertificateJobUpdatedAtColumn = "updated_at"
 
 // CertificateJobQuery provides query building methods for the CertificateJob model.
 var CertificateJob = CertificateJobQuery{
-	Id:            certificateJobIdField{},
-	CertificateId: certificateJobCertificateIdField{},
-	Operation:     certificateJobOperationField{},
-	Status:        certificateJobStatusField{},
-	Attempts:      certificateJobAttemptsField{},
-	MaxAttempts:   certificateJobMaxAttemptsField{},
-	NextAttemptAt: certificateJobNextAttemptAtField{},
-	LeaseUntil:    certificateJobLeaseUntilField{},
-	ResultJson:    certificateJobResultJsonField{},
-	Error:         certificateJobErrorField{},
-	CreatedAt:     certificateJobCreatedAtField{},
-	UpdatedAt:     certificateJobUpdatedAtField{},
-	Certificate:   certificateJobCertificateRelation{},
+	Id:                certificateJobIdField{},
+	CertificateId:     certificateJobCertificateIdField{},
+	Operation:         certificateJobOperationField{},
+	Status:            certificateJobStatusField{},
+	Attempts:          certificateJobAttemptsField{},
+	MaxAttempts:       certificateJobMaxAttemptsField{},
+	NextAttemptAt:     certificateJobNextAttemptAtField{},
+	LeaseOwner:        certificateJobLeaseOwnerField{},
+	LeaseUntil:        certificateJobLeaseUntilField{},
+	HeartbeatAt:       certificateJobHeartbeatAtField{},
+	IdempotencyKey:    certificateJobIdempotencyKeyField{},
+	CancelRequestedAt: certificateJobCancelRequestedAtField{},
+	TimeoutAt:         certificateJobTimeoutAtField{},
+	ResultJson:        certificateJobResultJsonField{},
+	CompensationJson:  certificateJobCompensationJsonField{},
+	Error:             certificateJobErrorField{},
+	CreatedAt:         certificateJobCreatedAtField{},
+	UpdatedAt:         certificateJobUpdatedAtField{},
+	Certificate:       certificateJobCertificateRelation{},
 }
 
 // CertificateJobWhereClause represents a WHERE condition for CertificateJob.
@@ -579,6 +597,77 @@ func (certificateJobNextAttemptAtField) Desc() CertificateJobOrderByClause {
 	return CertificateJobOrderByClause{Field: "next_attempt_at", Direction: "DESC"}
 }
 
+// LeaseOwnerField provides query operations for the leaseOwner field.
+type certificateJobLeaseOwnerField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobLeaseOwnerField) Equals(v *string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobLeaseOwnerField) Not(v *string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobLeaseOwnerField) In(vals ...*string) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobLeaseOwnerField) NotIn(vals ...*string) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateJobLeaseOwnerField) Contains(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateJobLeaseOwnerField) StartsWith(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateJobLeaseOwnerField) EndsWith(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobLeaseOwnerField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "lease_owner", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobLeaseOwnerField) Set(v string) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "lease_owner", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobLeaseOwnerField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "lease_owner", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobLeaseOwnerField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "lease_owner", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobLeaseOwnerField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "lease_owner", Direction: "DESC"}
+}
+
 // LeaseUntilField provides query operations for the leaseUntil field.
 type certificateJobLeaseUntilField struct{}
 
@@ -655,6 +744,305 @@ func (certificateJobLeaseUntilField) Desc() CertificateJobOrderByClause {
 	return CertificateJobOrderByClause{Field: "lease_until", Direction: "DESC"}
 }
 
+// HeartbeatAtField provides query operations for the heartbeatAt field.
+type certificateJobHeartbeatAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobHeartbeatAtField) Equals(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobHeartbeatAtField) Not(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobHeartbeatAtField) In(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobHeartbeatAtField) NotIn(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateJobHeartbeatAtField) Lt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateJobHeartbeatAtField) Lte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateJobHeartbeatAtField) Gt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateJobHeartbeatAtField) Gte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobHeartbeatAtField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "heartbeat_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobHeartbeatAtField) Set(v time.Time) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "heartbeat_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobHeartbeatAtField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "heartbeat_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobHeartbeatAtField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "heartbeat_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobHeartbeatAtField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "heartbeat_at", Direction: "DESC"}
+}
+
+// IdempotencyKeyField provides query operations for the idempotencyKey field.
+type certificateJobIdempotencyKeyField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobIdempotencyKeyField) Equals(v *string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobIdempotencyKeyField) Not(v *string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobIdempotencyKeyField) In(vals ...*string) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobIdempotencyKeyField) NotIn(vals ...*string) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateJobIdempotencyKeyField) Contains(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateJobIdempotencyKeyField) StartsWith(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateJobIdempotencyKeyField) EndsWith(v string) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobIdempotencyKeyField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "idempotency_key", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobIdempotencyKeyField) Set(v string) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "idempotency_key", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobIdempotencyKeyField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "idempotency_key", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobIdempotencyKeyField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "idempotency_key", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobIdempotencyKeyField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "idempotency_key", Direction: "DESC"}
+}
+
+// CancelRequestedAtField provides query operations for the cancelRequestedAt field.
+type certificateJobCancelRequestedAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobCancelRequestedAtField) Equals(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobCancelRequestedAtField) Not(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobCancelRequestedAtField) In(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobCancelRequestedAtField) NotIn(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateJobCancelRequestedAtField) Lt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateJobCancelRequestedAtField) Lte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateJobCancelRequestedAtField) Gt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateJobCancelRequestedAtField) Gte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobCancelRequestedAtField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "cancel_requested_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobCancelRequestedAtField) Set(v time.Time) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "cancel_requested_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobCancelRequestedAtField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "cancel_requested_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobCancelRequestedAtField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "cancel_requested_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobCancelRequestedAtField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "cancel_requested_at", Direction: "DESC"}
+}
+
+// TimeoutAtField provides query operations for the timeoutAt field.
+type certificateJobTimeoutAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobTimeoutAtField) Equals(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobTimeoutAtField) Not(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobTimeoutAtField) In(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobTimeoutAtField) NotIn(vals ...*time.Time) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateJobTimeoutAtField) Lt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateJobTimeoutAtField) Lte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateJobTimeoutAtField) Gt(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateJobTimeoutAtField) Gte(v *time.Time) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobTimeoutAtField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "timeout_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobTimeoutAtField) Set(v time.Time) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "timeout_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobTimeoutAtField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "timeout_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobTimeoutAtField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "timeout_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobTimeoutAtField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "timeout_at", Direction: "DESC"}
+}
+
 // ResultJsonField provides query operations for the resultJson field.
 type certificateJobResultJsonField struct{}
 
@@ -709,6 +1097,62 @@ func (certificateJobResultJsonField) Asc() CertificateJobOrderByClause {
 // Desc returns a descending order clause for this field.
 func (certificateJobResultJsonField) Desc() CertificateJobOrderByClause {
 	return CertificateJobOrderByClause{Field: "result_json", Direction: "DESC"}
+}
+
+// CompensationJsonField provides query operations for the compensationJson field.
+type certificateJobCompensationJsonField struct{}
+
+// Equals creates an equality condition.
+func (certificateJobCompensationJsonField) Equals(v *json.RawMessage) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "compensation_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateJobCompensationJsonField) Not(v *json.RawMessage) CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "compensation_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateJobCompensationJsonField) In(vals ...*json.RawMessage) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "compensation_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateJobCompensationJsonField) NotIn(vals ...*json.RawMessage) CertificateJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateJobWhereClause{Field: "compensation_json", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateJobCompensationJsonField) IsNull() CertificateJobWhereClause {
+	return CertificateJobWhereClause{Field: "compensation_json", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateJobCompensationJsonField) Set(v json.RawMessage) CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "compensation_json", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateJobCompensationJsonField) SetNull() CertificateJobSetClause {
+	return CertificateJobSetClause{Field: "compensation_json", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateJobCompensationJsonField) Asc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "compensation_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateJobCompensationJsonField) Desc() CertificateJobOrderByClause {
+	return CertificateJobOrderByClause{Field: "compensation_json", Direction: "DESC"}
 }
 
 // ErrorField provides query operations for the error field.
@@ -955,24 +1399,30 @@ type CertificateJobGroupByResult struct {
 
 // CertificateJobCreateInput holds data for creating a CertificateJob record.
 type CertificateJobCreateInput struct {
-	Id            string
-	CertificateId string
-	Operation     model.CertificateOperation
-	Status        model.JobStatus
-	Attempts      int
-	MaxAttempts   int
-	NextAttemptAt time.Time
-	LeaseUntil    **time.Time
-	ResultJson    **json.RawMessage
-	Error         **string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Certificate   *CertificateCreateNestedInput
+	Id                string
+	CertificateId     string
+	Operation         model.CertificateOperation
+	Status            model.JobStatus
+	Attempts          int
+	MaxAttempts       int
+	NextAttemptAt     time.Time
+	LeaseOwner        **string
+	LeaseUntil        **time.Time
+	HeartbeatAt       **time.Time
+	IdempotencyKey    **string
+	CancelRequestedAt **time.Time
+	TimeoutAt         **time.Time
+	ResultJson        **json.RawMessage
+	CompensationJson  **json.RawMessage
+	Error             **string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Certificate       *CertificateCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d CertificateJobCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.CertificateId, d.Operation, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseUntil, d.ResultJson, d.Error, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.CertificateId, d.Operation, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseOwner, d.LeaseUntil, d.HeartbeatAt, d.IdempotencyKey, d.CancelRequestedAt, d.TimeoutAt, d.ResultJson, d.CompensationJson, d.Error, d.CreatedAt, d.UpdatedAt}
 }
 
 // CertificateJobCreateNestedInput supports nested creates and connects.
@@ -983,5 +1433,6 @@ type CertificateJobCreateNestedInput struct {
 
 // CertificateJobWhereUniqueInput identifies a unique CertificateJob record.
 type CertificateJobWhereUniqueInput struct {
-	Id *string
+	Id             *string
+	IdempotencyKey **string
 }

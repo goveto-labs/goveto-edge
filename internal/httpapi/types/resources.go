@@ -245,28 +245,50 @@ func NewSiteListener(value *model.SiteListenerConfig) SiteListener {
 }
 
 type PublishJob struct {
-	ID        string          `json:"id"`
-	SiteID    string          `json:"site_id"`
-	Version   int64           `json:"version"`
-	Status    model.JobStatus `json:"status"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID             string          `json:"id"`
+	SiteID         string          `json:"site_id"`
+	Version        int64           `json:"version"`
+	Status         model.JobStatus `json:"status"`
+	Attempts       int             `json:"attempts"`
+	MaxAttempts    int             `json:"max_attempts"`
+	NextAttemptAt  time.Time       `json:"next_attempt_at"`
+	LeaseOwner     *string         `json:"lease_owner,omitempty"`
+	LeaseUntil     *time.Time      `json:"lease_until,omitempty"`
+	HeartbeatAt    *time.Time      `json:"heartbeat_at,omitempty"`
+	CancellationAt *time.Time      `json:"cancel_requested_at,omitempty"`
+	Error          *string         `json:"error,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 func NewPublishJob(value *model.PublishJob) PublishJob {
-	return PublishJob{ID: value.Id, SiteID: value.SiteId, Version: value.Version, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	return PublishJob{ID: value.Id, SiteID: value.SiteId, Version: value.Version, Status: value.Status,
+		Attempts: value.Attempts, MaxAttempts: value.MaxAttempts, NextAttemptAt: value.NextAttemptAt,
+		LeaseOwner: value.LeaseOwner, LeaseUntil: value.LeaseUntil, HeartbeatAt: value.HeartbeatAt,
+		CancellationAt: value.CancelRequestedAt, Error: value.Error, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
 type PurgeJob struct {
-	ID        string          `json:"id"`
-	SiteID    string          `json:"site_id"`
-	Type      model.PurgeType `json:"type"`
-	Value     *string         `json:"value"`
-	Status    model.JobStatus `json:"status"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID             string          `json:"id"`
+	SiteID         string          `json:"site_id"`
+	Type           model.PurgeType `json:"type"`
+	Value          *string         `json:"value"`
+	Status         model.JobStatus `json:"status"`
+	Attempts       int             `json:"attempts"`
+	MaxAttempts    int             `json:"max_attempts"`
+	NextAttemptAt  time.Time       `json:"next_attempt_at"`
+	LeaseOwner     *string         `json:"lease_owner,omitempty"`
+	LeaseUntil     *time.Time      `json:"lease_until,omitempty"`
+	HeartbeatAt    *time.Time      `json:"heartbeat_at,omitempty"`
+	CancellationAt *time.Time      `json:"cancel_requested_at,omitempty"`
+	Error          *string         `json:"error,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
 }
 
 func NewPurgeJob(value *model.PurgeJob) PurgeJob {
-	return PurgeJob{ID: value.Id, SiteID: value.SiteId, Type: value.Type, Value: value.Value, Status: value.Status, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	return PurgeJob{ID: value.Id, SiteID: value.SiteId, Type: value.Type, Value: value.Value, Status: value.Status,
+		Attempts: value.Attempts, MaxAttempts: value.MaxAttempts, NextAttemptAt: value.NextAttemptAt,
+		LeaseOwner: value.LeaseOwner, LeaseUntil: value.LeaseUntil, HeartbeatAt: value.HeartbeatAt,
+		CancellationAt: value.CancelRequestedAt, Error: value.Error, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }

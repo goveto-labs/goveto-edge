@@ -40,6 +40,8 @@ type Client struct {
 	DNSProviderConfig     DNSProviderConfigActions
 	DNSSyncJob            DNSSyncJobActions
 	DynamicSetting        DynamicSettingActions
+	InstallJob            InstallJobActions
+	JobExecution          JobExecutionActions
 	Node                  NodeActions
 	NodeAddress           NodeAddressActions
 	NodeCacheConfig       NodeCacheConfigActions
@@ -85,6 +87,8 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.DNSProviderConfig = DNSProviderConfigActions{client: c}
 	c.DNSSyncJob = DNSSyncJobActions{client: c}
 	c.DynamicSetting = DynamicSettingActions{client: c}
+	c.InstallJob = InstallJobActions{client: c}
+	c.JobExecution = JobExecutionActions{client: c}
 	c.Node = NodeActions{client: c}
 	c.NodeAddress = NodeAddressActions{client: c}
 	c.NodeCacheConfig = NodeCacheConfigActions{client: c}
@@ -290,6 +294,8 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.DNSProviderConfig = DNSProviderConfigActions{client: txClient}
 	txClient.DNSSyncJob = DNSSyncJobActions{client: txClient}
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
+	txClient.InstallJob = InstallJobActions{client: txClient}
+	txClient.JobExecution = JobExecutionActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
 	txClient.NodeAddress = NodeAddressActions{client: txClient}
 	txClient.NodeCacheConfig = NodeCacheConfigActions{client: txClient}
@@ -2294,7 +2300,7 @@ func (a ACMEChallengeActions) GroupBy(ctx context.Context, fields []string, opts
 
 func quotedAgentTaskTable(c *Client) string { return c.quoteIdentifier("agent_tasks") }
 func quotedAgentTaskColumns(c *Client) string {
-	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "heartbeat_at", "attempts", "max_attempts", "next_attempt_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -2317,11 +2323,23 @@ func quoteAgentTaskField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "lease_until":
 		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
 	case "attempts":
 		return c.quoteIdentifier(field), nil
 	case "max_attempts":
 		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
 	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
 		return c.quoteIdentifier(field), nil
 	case "error":
 		return c.quoteIdentifier(field), nil
@@ -2538,14 +2556,14 @@ func (b AgentTaskCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Ag
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildAgentTaskCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"})
+		q, args := b.action.buildAgentTaskCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "heartbeat_at", "attempts", "max_attempts", "next_attempt_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.AgentTask
-			if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("AgentTask.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -2572,7 +2590,7 @@ func (b AgentTaskCreateManyBuilder) DoReturningValues(ctx context.Context) ([]ma
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+		returningColumns = []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "heartbeat_at", "attempts", "max_attempts", "next_attempt_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -2824,7 +2842,7 @@ func (a AgentTaskActions) FindMany(ctx context.Context, opts ...query.AgentTaskQ
 	var results []model.AgentTask
 	for rows.Next() {
 		var item model.AgentTask
-		if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("AgentTask.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -2856,7 +2874,7 @@ func (a AgentTaskActions) FindUnique(ctx context.Context, where query.AgentTaskW
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.AgentTask
-	if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -2887,7 +2905,7 @@ func (a AgentTaskActions) CreateOne(ctx context.Context, sets ...query.AgentTask
 		q += " RETURNING " + quotedAgentTaskColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.AgentTask
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("AgentTask.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -2906,7 +2924,7 @@ func (a AgentTaskActions) CreateMany(ctx context.Context, data []query.AgentTask
 }
 
 func (a AgentTaskActions) buildAgentTaskCreateManySQL(data []query.AgentTaskCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "attempts", "max_attempts", "result_json", "error", "created_at", "updated_at"}
+	cols := []string{"id", "node_id", "kind", "payload", "status", "lease_owner", "lease_until", "heartbeat_at", "attempts", "max_attempts", "next_attempt_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -2979,7 +2997,7 @@ func (a AgentTaskActions) UpdateOne(ctx context.Context, where query.AgentTaskWh
 		q += " RETURNING " + quotedAgentTaskColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AgentTask
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -3084,7 +3102,7 @@ func (a AgentTaskActions) UpsertOne(ctx context.Context, where query.AgentTaskWh
 		q += " RETURNING " + quotedAgentTaskColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AgentTask
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("AgentTask.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -3108,7 +3126,7 @@ func (a AgentTaskActions) DeleteOne(ctx context.Context, where query.AgentTaskWh
 		q += " RETURNING " + quotedAgentTaskColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AgentTask
-		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.Attempts, &item.MaxAttempts, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Kind, &item.Payload, &item.Status, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -5282,7 +5300,7 @@ func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts .
 
 func quotedCertificateJobTable(c *Client) string { return c.quoteIdentifier("certificate_jobs") }
 func quotedCertificateJobColumns(c *Client) string {
-	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -5305,9 +5323,21 @@ func quoteCertificateJobField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "next_attempt_at":
 		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
 	case "lease_until":
 		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
 	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
 		return c.quoteIdentifier(field), nil
 	case "error":
 		return c.quoteIdentifier(field), nil
@@ -5524,14 +5554,14 @@ func (b CertificateJobCreateManyBuilder) DoReturning(ctx context.Context) ([]mod
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildCertificateJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"})
+		q, args := b.action.buildCertificateJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.CertificateJob
-			if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("CertificateJob.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -5558,7 +5588,7 @@ func (b CertificateJobCreateManyBuilder) DoReturningValues(ctx context.Context) 
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+		returningColumns = []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -5810,7 +5840,7 @@ func (a CertificateJobActions) FindMany(ctx context.Context, opts ...query.Certi
 	var results []model.CertificateJob
 	for rows.Next() {
 		var item model.CertificateJob
-		if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("CertificateJob.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -5842,7 +5872,7 @@ func (a CertificateJobActions) FindUnique(ctx context.Context, where query.Certi
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.CertificateJob
-	if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -5873,7 +5903,7 @@ func (a CertificateJobActions) CreateOne(ctx context.Context, sets ...query.Cert
 		q += " RETURNING " + quotedCertificateJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.CertificateJob
-		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("CertificateJob.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -5892,7 +5922,7 @@ func (a CertificateJobActions) CreateMany(ctx context.Context, data []query.Cert
 }
 
 func (a CertificateJobActions) buildCertificateJobCreateManySQL(data []query.CertificateJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "error", "created_at", "updated_at"}
+	cols := []string{"id", "certificate_id", "operation", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -5965,7 +5995,7 @@ func (a CertificateJobActions) UpdateOne(ctx context.Context, where query.Certif
 		q += " RETURNING " + quotedCertificateJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.CertificateJob
-		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -6070,7 +6100,7 @@ func (a CertificateJobActions) UpsertOne(ctx context.Context, where query.Certif
 		q += " RETURNING " + quotedCertificateJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.CertificateJob
-		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("CertificateJob.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -6094,7 +6124,7 @@ func (a CertificateJobActions) DeleteOne(ctx context.Context, where query.Certif
 		q += " RETURNING " + quotedCertificateJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.CertificateJob
-		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.CertificateId, &item.Operation, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -14068,7 +14098,7 @@ func (a DNSProviderConfigActions) GroupBy(ctx context.Context, fields []string, 
 
 func quotedDNSSyncJobTable(c *Client) string { return c.quoteIdentifier("dns_sync_jobs") }
 func quotedDNSSyncJobColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -14093,9 +14123,23 @@ func quoteDNSSyncJobField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "next_attempt_at":
 		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
 	case "lease_until":
 		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
 	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -14310,14 +14354,14 @@ func (b DNSSyncJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.D
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildDNSSyncJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"})
+		q, args := b.action.buildDNSSyncJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.DNSSyncJob
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("DNSSyncJob.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -14344,7 +14388,7 @@ func (b DNSSyncJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]m
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -14596,7 +14640,7 @@ func (a DNSSyncJobActions) FindMany(ctx context.Context, opts ...query.DNSSyncJo
 	var results []model.DNSSyncJob
 	for rows.Next() {
 		var item model.DNSSyncJob
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSSyncJob.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -14628,7 +14672,7 @@ func (a DNSSyncJobActions) FindUnique(ctx context.Context, where query.DNSSyncJo
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.DNSSyncJob
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -14659,7 +14703,7 @@ func (a DNSSyncJobActions) CreateOne(ctx context.Context, sets ...query.DNSSyncJ
 		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSSyncJob
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSSyncJob.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -14678,7 +14722,7 @@ func (a DNSSyncJobActions) CreateMany(ctx context.Context, data []query.DNSSyncJ
 }
 
 func (a DNSSyncJobActions) buildDNSSyncJobCreateManySQL(data []query.DNSSyncJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_until", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "site_id", "action", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -14751,7 +14795,7 @@ func (a DNSSyncJobActions) UpdateOne(ctx context.Context, where query.DNSSyncJob
 		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -14856,7 +14900,7 @@ func (a DNSSyncJobActions) UpsertOne(ctx context.Context, where query.DNSSyncJob
 		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSSyncJob.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -14880,7 +14924,7 @@ func (a DNSSyncJobActions) DeleteOne(ctx context.Context, where query.DNSSyncJob
 		q += " RETURNING " + quotedDNSSyncJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSSyncJob
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseUntil, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.SiteId, &item.Action, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -15994,6 +16038,1984 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("DynamicSetting.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedInstallJobTable(c *Client) string { return c.quoteIdentifier("install_jobs") }
+func quotedInstallJobColumns(c *Client) string {
+	cols := []string{"id", "node_id", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteInstallJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "payload":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown InstallJob field %q", field)
+	}
+}
+
+// buildInstallJobWhere recursively builds a WHERE clause string and arguments.
+func buildInstallJobWhere(c *Client, wheres []query.InstallJobWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.InstallJobWhereClause); ok {
+				sub, subArgs := buildInstallJobWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.InstallJobWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildInstallJobWhere(c, []query.InstallJobWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.InstallJobWhereClause); ok {
+				sub, subArgs := buildInstallJobWhere(c, []query.InstallJobWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteInstallJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// InstallJobActions provides database operations for the InstallJob model.
+type InstallJobActions struct {
+	client *Client
+}
+
+// InstallJobCreateBuilder builds a InstallJob create operation incrementally.
+type InstallJobCreateBuilder struct {
+	action InstallJobActions
+	sets   []query.InstallJobSetClause
+}
+
+// Create starts a staged InstallJob create operation.
+func (a InstallJobActions) Create() InstallJobCreateBuilder {
+	return InstallJobCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b InstallJobCreateBuilder) Set(sets ...query.InstallJobSetClause) InstallJobCreateBuilder {
+	next := InstallJobCreateBuilder{
+		action: b.action,
+		sets:   make([]query.InstallJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b InstallJobCreateBuilder) Do(ctx context.Context) (*model.InstallJob, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// InstallJobCreateManyBuilder builds a bulk InstallJob insert operation.
+type InstallJobCreateManyBuilder struct {
+	action            InstallJobActions
+	data              []query.InstallJobCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk InstallJob insert operation.
+func (a InstallJobActions) BulkCreate(data []query.InstallJobCreateInput) InstallJobCreateManyBuilder {
+	return InstallJobCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b InstallJobCreateManyBuilder) OnConflictDoNothing(columns ...string) InstallJobCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b InstallJobCreateManyBuilder) Returning(columns ...string) InstallJobCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b InstallJobCreateManyBuilder) BatchSize(n int) InstallJobCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b InstallJobCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildInstallJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("InstallJob.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("InstallJob.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b InstallJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.InstallJob, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.InstallJob
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildInstallJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.InstallJob
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b InstallJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "node_id", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildInstallJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("InstallJob.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// InstallJobQueryBuilder builds a InstallJob query incrementally.
+type InstallJobQueryBuilder struct {
+	action InstallJobActions
+	opts   []query.InstallJobQueryOption
+}
+
+// Query starts a staged InstallJob query.
+func (a InstallJobActions) Query() InstallJobQueryBuilder {
+	return InstallJobQueryBuilder{action: a}
+}
+
+func (b InstallJobQueryBuilder) withOptions(opts ...query.InstallJobQueryOption) InstallJobQueryBuilder {
+	next := InstallJobQueryBuilder{
+		action: b.action,
+		opts:   make([]query.InstallJobQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b InstallJobQueryBuilder) Where(clauses ...query.InstallJobWhereClause) InstallJobQueryBuilder {
+	opts := make([]query.InstallJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b InstallJobQueryBuilder) OrderBy(clause query.InstallJobOrderByClause) InstallJobQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b InstallJobQueryBuilder) Include(clauses ...query.InstallJobIncludeClause) InstallJobQueryBuilder {
+	opts := make([]query.InstallJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b InstallJobQueryBuilder) Take(n int) InstallJobQueryBuilder {
+	return b.withOptions(query.InstallJobTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b InstallJobQueryBuilder) Skip(n int) InstallJobQueryBuilder {
+	return b.withOptions(query.InstallJobSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b InstallJobQueryBuilder) Do(ctx context.Context) ([]model.InstallJob, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b InstallJobQueryBuilder) First(ctx context.Context) (*model.InstallJob, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b InstallJobQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyInstallJobOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// InstallJobUpdateBuilder builds a InstallJob update operation incrementally.
+type InstallJobUpdateBuilder struct {
+	action InstallJobActions
+	wheres []query.InstallJobWhereClause
+	sets   []query.InstallJobSetClause
+}
+
+// Update starts a staged InstallJob update operation.
+func (a InstallJobActions) Update() InstallJobUpdateBuilder {
+	return InstallJobUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b InstallJobUpdateBuilder) Where(clauses ...query.InstallJobWhereClause) InstallJobUpdateBuilder {
+	next := InstallJobUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.InstallJobWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.InstallJobSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b InstallJobUpdateBuilder) Set(sets ...query.InstallJobSetClause) InstallJobUpdateBuilder {
+	next := InstallJobUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.InstallJobWhereClause(nil), b.wheres...),
+		sets:   make([]query.InstallJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b InstallJobUpdateBuilder) combinedWhere() (query.InstallJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.InstallJobWhereClause{}, fmt.Errorf("InstallJob.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.InstallJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b InstallJobUpdateBuilder) Do(ctx context.Context) (*model.InstallJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b InstallJobUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// InstallJobDeleteBuilder builds a InstallJob delete operation incrementally.
+type InstallJobDeleteBuilder struct {
+	action InstallJobActions
+	wheres []query.InstallJobWhereClause
+}
+
+// Delete starts a staged InstallJob delete operation.
+func (a InstallJobActions) Delete() InstallJobDeleteBuilder {
+	return InstallJobDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b InstallJobDeleteBuilder) Where(clauses ...query.InstallJobWhereClause) InstallJobDeleteBuilder {
+	next := InstallJobDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.InstallJobWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b InstallJobDeleteBuilder) combinedWhere() (query.InstallJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.InstallJobWhereClause{}, fmt.Errorf("InstallJob.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.InstallJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b InstallJobDeleteBuilder) Do(ctx context.Context) (*model.InstallJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b InstallJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple InstallJob records.
+func (a InstallJobActions) FindMany(ctx context.Context, opts ...query.InstallJobQueryOption) ([]model.InstallJob, error) {
+	cfg := query.ApplyInstallJobOptions(opts)
+	q := "SELECT " + quotedInstallJobColumns(a.client) + " FROM " + quotedInstallJobTable(a.client)
+	argIdx := 0
+	where, args := buildInstallJobWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteInstallJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.InstallJob
+	for rows.Next() {
+		var item model.InstallJob
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("InstallJob.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching InstallJob record.
+func (a InstallJobActions) FindFirst(ctx context.Context, opts ...query.InstallJobQueryOption) (*model.InstallJob, error) {
+	opts = append(opts, query.InstallJobTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single InstallJob record by unique constraint.
+func (a InstallJobActions) FindUnique(ctx context.Context, where query.InstallJobWhereClause) (*model.InstallJob, error) {
+	argIdx := 0
+	whereSQL, args := buildInstallJobWhere(a.client, []query.InstallJobWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedInstallJobColumns(a.client) + " FROM " + quotedInstallJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.InstallJob
+	if err := row.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("InstallJob.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single InstallJob record.
+func (a InstallJobActions) CreateOne(ctx context.Context, sets ...query.InstallJobSetClause) (*model.InstallJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("InstallJob.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteInstallJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedInstallJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedInstallJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.InstallJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("InstallJob.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple InstallJob records.
+func (a InstallJobActions) CreateMany(ctx context.Context, data []query.InstallJobCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a InstallJobActions) buildInstallJobCreateManySQL(data []query.InstallJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "node_id", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedInstallJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single InstallJob record matching the where clause.
+func (a InstallJobActions) UpdateOne(ctx context.Context, where query.InstallJobWhereClause, sets ...query.InstallJobSetClause) (*model.InstallJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("InstallJob.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteInstallJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildInstallJobWhere(a.client, []query.InstallJobWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedInstallJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedInstallJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.InstallJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("InstallJob.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple InstallJob records matching the where clauses.
+func (a InstallJobActions) UpdateMany(ctx context.Context, wheres []query.InstallJobWhereClause, sets ...query.InstallJobSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("InstallJob.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteInstallJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildInstallJobWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedInstallJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("InstallJob.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single InstallJob record.
+func (a InstallJobActions) UpsertOne(ctx context.Context, where query.InstallJobWhereClause, create []query.InstallJobSetClause, update []query.InstallJobSetClause) (*model.InstallJob, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("InstallJob.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteInstallJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedInstallJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteInstallJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteInstallJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteInstallJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedInstallJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.InstallJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("InstallJob.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single InstallJob record matching the where clause.
+func (a InstallJobActions) DeleteOne(ctx context.Context, where query.InstallJobWhereClause) (*model.InstallJob, error) {
+	argIdx := 0
+	whereSQL, args := buildInstallJobWhere(a.client, []query.InstallJobWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedInstallJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedInstallJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.InstallJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("InstallJob.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple InstallJob records matching the where clauses.
+func (a InstallJobActions) DeleteMany(ctx context.Context, wheres ...query.InstallJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildInstallJobWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedInstallJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("InstallJob.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of InstallJob records matching the where clauses.
+func (a InstallJobActions) Count(ctx context.Context, wheres ...query.InstallJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildInstallJobWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedInstallJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("InstallJob.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for InstallJob.
+func (a InstallJobActions) Aggregate(ctx context.Context, opts ...query.InstallJobAggregateOption) (*query.InstallJobAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteInstallJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedInstallJobTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.InstallJobAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("InstallJob.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on InstallJob.
+func (a InstallJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.InstallJobAggregateOption) ([]query.InstallJobGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteInstallJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteInstallJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedInstallJobTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("InstallJob.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.InstallJobGroupByResult
+	for rows.Next() {
+		r := query.InstallJobGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("InstallJob.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedJobExecutionTable(c *Client) string { return c.quoteIdentifier("job_executions") }
+func quotedJobExecutionColumns(c *Client) string {
+	cols := []string{"id", "job_type", "job_id", "attempt", "worker_id", "status", "started_at", "heartbeat_at", "finished_at", "result_json", "error"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteJobExecutionField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "job_type":
+		return c.quoteIdentifier(field), nil
+	case "job_id":
+		return c.quoteIdentifier(field), nil
+	case "attempt":
+		return c.quoteIdentifier(field), nil
+	case "worker_id":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "started_at":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "finished_at":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown JobExecution field %q", field)
+	}
+}
+
+// buildJobExecutionWhere recursively builds a WHERE clause string and arguments.
+func buildJobExecutionWhere(c *Client, wheres []query.JobExecutionWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.JobExecutionWhereClause); ok {
+				sub, subArgs := buildJobExecutionWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.JobExecutionWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildJobExecutionWhere(c, []query.JobExecutionWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.JobExecutionWhereClause); ok {
+				sub, subArgs := buildJobExecutionWhere(c, []query.JobExecutionWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteJobExecutionField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// JobExecutionActions provides database operations for the JobExecution model.
+type JobExecutionActions struct {
+	client *Client
+}
+
+// JobExecutionCreateBuilder builds a JobExecution create operation incrementally.
+type JobExecutionCreateBuilder struct {
+	action JobExecutionActions
+	sets   []query.JobExecutionSetClause
+}
+
+// Create starts a staged JobExecution create operation.
+func (a JobExecutionActions) Create() JobExecutionCreateBuilder {
+	return JobExecutionCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b JobExecutionCreateBuilder) Set(sets ...query.JobExecutionSetClause) JobExecutionCreateBuilder {
+	next := JobExecutionCreateBuilder{
+		action: b.action,
+		sets:   make([]query.JobExecutionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b JobExecutionCreateBuilder) Do(ctx context.Context) (*model.JobExecution, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// JobExecutionCreateManyBuilder builds a bulk JobExecution insert operation.
+type JobExecutionCreateManyBuilder struct {
+	action            JobExecutionActions
+	data              []query.JobExecutionCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk JobExecution insert operation.
+func (a JobExecutionActions) BulkCreate(data []query.JobExecutionCreateInput) JobExecutionCreateManyBuilder {
+	return JobExecutionCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b JobExecutionCreateManyBuilder) OnConflictDoNothing(columns ...string) JobExecutionCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b JobExecutionCreateManyBuilder) Returning(columns ...string) JobExecutionCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b JobExecutionCreateManyBuilder) BatchSize(n int) JobExecutionCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b JobExecutionCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildJobExecutionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("JobExecution.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("JobExecution.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b JobExecutionCreateManyBuilder) DoReturning(ctx context.Context) ([]model.JobExecution, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.JobExecution
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildJobExecutionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "job_type", "job_id", "attempt", "worker_id", "status", "started_at", "heartbeat_at", "finished_at", "result_json", "error"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.JobExecution
+			if err := rows.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b JobExecutionCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "job_type", "job_id", "attempt", "worker_id", "status", "started_at", "heartbeat_at", "finished_at", "result_json", "error"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildJobExecutionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("JobExecution.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// JobExecutionQueryBuilder builds a JobExecution query incrementally.
+type JobExecutionQueryBuilder struct {
+	action JobExecutionActions
+	opts   []query.JobExecutionQueryOption
+}
+
+// Query starts a staged JobExecution query.
+func (a JobExecutionActions) Query() JobExecutionQueryBuilder {
+	return JobExecutionQueryBuilder{action: a}
+}
+
+func (b JobExecutionQueryBuilder) withOptions(opts ...query.JobExecutionQueryOption) JobExecutionQueryBuilder {
+	next := JobExecutionQueryBuilder{
+		action: b.action,
+		opts:   make([]query.JobExecutionQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b JobExecutionQueryBuilder) Where(clauses ...query.JobExecutionWhereClause) JobExecutionQueryBuilder {
+	opts := make([]query.JobExecutionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b JobExecutionQueryBuilder) OrderBy(clause query.JobExecutionOrderByClause) JobExecutionQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b JobExecutionQueryBuilder) Include(clauses ...query.JobExecutionIncludeClause) JobExecutionQueryBuilder {
+	opts := make([]query.JobExecutionQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b JobExecutionQueryBuilder) Take(n int) JobExecutionQueryBuilder {
+	return b.withOptions(query.JobExecutionTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b JobExecutionQueryBuilder) Skip(n int) JobExecutionQueryBuilder {
+	return b.withOptions(query.JobExecutionSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b JobExecutionQueryBuilder) Do(ctx context.Context) ([]model.JobExecution, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b JobExecutionQueryBuilder) First(ctx context.Context) (*model.JobExecution, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b JobExecutionQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyJobExecutionOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// JobExecutionUpdateBuilder builds a JobExecution update operation incrementally.
+type JobExecutionUpdateBuilder struct {
+	action JobExecutionActions
+	wheres []query.JobExecutionWhereClause
+	sets   []query.JobExecutionSetClause
+}
+
+// Update starts a staged JobExecution update operation.
+func (a JobExecutionActions) Update() JobExecutionUpdateBuilder {
+	return JobExecutionUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b JobExecutionUpdateBuilder) Where(clauses ...query.JobExecutionWhereClause) JobExecutionUpdateBuilder {
+	next := JobExecutionUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.JobExecutionWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.JobExecutionSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b JobExecutionUpdateBuilder) Set(sets ...query.JobExecutionSetClause) JobExecutionUpdateBuilder {
+	next := JobExecutionUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.JobExecutionWhereClause(nil), b.wheres...),
+		sets:   make([]query.JobExecutionSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b JobExecutionUpdateBuilder) combinedWhere() (query.JobExecutionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.JobExecutionWhereClause{}, fmt.Errorf("JobExecution.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.JobExecution.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b JobExecutionUpdateBuilder) Do(ctx context.Context) (*model.JobExecution, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b JobExecutionUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// JobExecutionDeleteBuilder builds a JobExecution delete operation incrementally.
+type JobExecutionDeleteBuilder struct {
+	action JobExecutionActions
+	wheres []query.JobExecutionWhereClause
+}
+
+// Delete starts a staged JobExecution delete operation.
+func (a JobExecutionActions) Delete() JobExecutionDeleteBuilder {
+	return JobExecutionDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b JobExecutionDeleteBuilder) Where(clauses ...query.JobExecutionWhereClause) JobExecutionDeleteBuilder {
+	next := JobExecutionDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.JobExecutionWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b JobExecutionDeleteBuilder) combinedWhere() (query.JobExecutionWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.JobExecutionWhereClause{}, fmt.Errorf("JobExecution.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.JobExecution.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b JobExecutionDeleteBuilder) Do(ctx context.Context) (*model.JobExecution, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b JobExecutionDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple JobExecution records.
+func (a JobExecutionActions) FindMany(ctx context.Context, opts ...query.JobExecutionQueryOption) ([]model.JobExecution, error) {
+	cfg := query.ApplyJobExecutionOptions(opts)
+	q := "SELECT " + quotedJobExecutionColumns(a.client) + " FROM " + quotedJobExecutionTable(a.client)
+	argIdx := 0
+	where, args := buildJobExecutionWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteJobExecutionField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.JobExecution
+	for rows.Next() {
+		var item model.JobExecution
+		if err := rows.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+			return nil, fmt.Errorf("JobExecution.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching JobExecution record.
+func (a JobExecutionActions) FindFirst(ctx context.Context, opts ...query.JobExecutionQueryOption) (*model.JobExecution, error) {
+	opts = append(opts, query.JobExecutionTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single JobExecution record by unique constraint.
+func (a JobExecutionActions) FindUnique(ctx context.Context, where query.JobExecutionWhereClause) (*model.JobExecution, error) {
+	argIdx := 0
+	whereSQL, args := buildJobExecutionWhere(a.client, []query.JobExecutionWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedJobExecutionColumns(a.client) + " FROM " + quotedJobExecutionTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.JobExecution
+	if err := row.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("JobExecution.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single JobExecution record.
+func (a JobExecutionActions) CreateOne(ctx context.Context, sets ...query.JobExecutionSetClause) (*model.JobExecution, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("JobExecution.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteJobExecutionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedJobExecutionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedJobExecutionColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.JobExecution
+		if err := row.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+			return nil, fmt.Errorf("JobExecution.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple JobExecution records.
+func (a JobExecutionActions) CreateMany(ctx context.Context, data []query.JobExecutionCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a JobExecutionActions) buildJobExecutionCreateManySQL(data []query.JobExecutionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "job_type", "job_id", "attempt", "worker_id", "status", "started_at", "heartbeat_at", "finished_at", "result_json", "error"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedJobExecutionTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single JobExecution record matching the where clause.
+func (a JobExecutionActions) UpdateOne(ctx context.Context, where query.JobExecutionWhereClause, sets ...query.JobExecutionSetClause) (*model.JobExecution, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("JobExecution.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteJobExecutionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildJobExecutionWhere(a.client, []query.JobExecutionWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedJobExecutionTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedJobExecutionColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.JobExecution
+		if err := row.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("JobExecution.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple JobExecution records matching the where clauses.
+func (a JobExecutionActions) UpdateMany(ctx context.Context, wheres []query.JobExecutionWhereClause, sets ...query.JobExecutionSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("JobExecution.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteJobExecutionField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildJobExecutionWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedJobExecutionTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("JobExecution.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single JobExecution record.
+func (a JobExecutionActions) UpsertOne(ctx context.Context, where query.JobExecutionWhereClause, create []query.JobExecutionSetClause, update []query.JobExecutionSetClause) (*model.JobExecution, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("JobExecution.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteJobExecutionField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedJobExecutionTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteJobExecutionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteJobExecutionField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteJobExecutionField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedJobExecutionColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.JobExecution
+		if err := row.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+			return nil, fmt.Errorf("JobExecution.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single JobExecution record matching the where clause.
+func (a JobExecutionActions) DeleteOne(ctx context.Context, where query.JobExecutionWhereClause) (*model.JobExecution, error) {
+	argIdx := 0
+	whereSQL, args := buildJobExecutionWhere(a.client, []query.JobExecutionWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedJobExecutionTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedJobExecutionColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.JobExecution
+		if err := row.Scan(&item.Id, &item.JobType, &item.JobId, &item.Attempt, &item.WorkerId, &item.Status, &item.StartedAt, &item.HeartbeatAt, &item.FinishedAt, &item.ResultJson, &item.Error); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("JobExecution.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple JobExecution records matching the where clauses.
+func (a JobExecutionActions) DeleteMany(ctx context.Context, wheres ...query.JobExecutionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildJobExecutionWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedJobExecutionTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("JobExecution.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of JobExecution records matching the where clauses.
+func (a JobExecutionActions) Count(ctx context.Context, wheres ...query.JobExecutionWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildJobExecutionWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedJobExecutionTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("JobExecution.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for JobExecution.
+func (a JobExecutionActions) Aggregate(ctx context.Context, opts ...query.JobExecutionAggregateOption) (*query.JobExecutionAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteJobExecutionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedJobExecutionTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.JobExecutionAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("JobExecution.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on JobExecution.
+func (a JobExecutionActions) GroupBy(ctx context.Context, fields []string, opts ...query.JobExecutionAggregateOption) ([]query.JobExecutionGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteJobExecutionField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteJobExecutionField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedJobExecutionTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("JobExecution.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.JobExecutionGroupByResult
+	for rows.Next() {
+		r := query.JobExecutionGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("JobExecution.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -27710,7 +29732,7 @@ func (a PolicyActions) GroupBy(ctx context.Context, fields []string, opts ...que
 
 func quotedPublishJobTable(c *Client) string { return c.quoteIdentifier("publish_jobs") }
 func quotedPublishJobColumns(c *Client) string {
-	cols := []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "site_id", "version", "targets", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -27729,7 +29751,29 @@ func quotePublishJobField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "status":
 		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
 	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -27944,14 +29988,14 @@ func (b PublishJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.P
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildPublishJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"})
+		q, args := b.action.buildPublishJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "version", "targets", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("PublishJob.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.PublishJob
-			if err := rows.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("PublishJob.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -27978,7 +30022,7 @@ func (b PublishJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]m
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"}
+		returningColumns = []string{"id", "site_id", "version", "targets", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -28230,7 +30274,7 @@ func (a PublishJobActions) FindMany(ctx context.Context, opts ...query.PublishJo
 	var results []model.PublishJob
 	for rows.Next() {
 		var item model.PublishJob
-		if err := rows.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PublishJob.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -28262,7 +30306,7 @@ func (a PublishJobActions) FindUnique(ctx context.Context, where query.PublishJo
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.PublishJob
-	if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -28293,7 +30337,7 @@ func (a PublishJobActions) CreateOne(ctx context.Context, sets ...query.PublishJ
 		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.PublishJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PublishJob.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -28312,7 +30356,7 @@ func (a PublishJobActions) CreateMany(ctx context.Context, data []query.PublishJ
 }
 
 func (a PublishJobActions) buildPublishJobCreateManySQL(data []query.PublishJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "site_id", "version", "targets", "status", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "site_id", "version", "targets", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -28385,7 +30429,7 @@ func (a PublishJobActions) UpdateOne(ctx context.Context, where query.PublishJob
 		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -28490,7 +30534,7 @@ func (a PublishJobActions) UpsertOne(ctx context.Context, where query.PublishJob
 		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PublishJob.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -28514,7 +30558,7 @@ func (a PublishJobActions) DeleteOne(ctx context.Context, where query.PublishJob
 		q += " RETURNING " + quotedPublishJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PublishJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Version, &item.Targets, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -28686,7 +30730,7 @@ func (a PublishJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 
 func quotedPurgeJobTable(c *Client) string { return c.quoteIdentifier("purge_jobs") }
 func quotedPurgeJobColumns(c *Client) string {
-	cols := []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "site_id", "type", "value", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -28705,7 +30749,29 @@ func quotePurgeJobField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "status":
 		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
 	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -28920,14 +30986,14 @@ func (b PurgeJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Pur
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildPurgeJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"})
+		q, args := b.action.buildPurgeJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "site_id", "type", "value", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("PurgeJob.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.PurgeJob
-			if err := rows.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("PurgeJob.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -28954,7 +31020,7 @@ func (b PurgeJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"}
+		returningColumns = []string{"id", "site_id", "type", "value", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -29206,7 +31272,7 @@ func (a PurgeJobActions) FindMany(ctx context.Context, opts ...query.PurgeJobQue
 	var results []model.PurgeJob
 	for rows.Next() {
 		var item model.PurgeJob
-		if err := rows.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PurgeJob.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -29238,7 +31304,7 @@ func (a PurgeJobActions) FindUnique(ctx context.Context, where query.PurgeJobWhe
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.PurgeJob
-	if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -29269,7 +31335,7 @@ func (a PurgeJobActions) CreateOne(ctx context.Context, sets ...query.PurgeJobSe
 		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.PurgeJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PurgeJob.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -29288,7 +31354,7 @@ func (a PurgeJobActions) CreateMany(ctx context.Context, data []query.PurgeJobCr
 }
 
 func (a PurgeJobActions) buildPurgeJobCreateManySQL(data []query.PurgeJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "site_id", "type", "value", "status", "result_json", "created_at", "updated_at"}
+	cols := []string{"id", "site_id", "type", "value", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -29361,7 +31427,7 @@ func (a PurgeJobActions) UpdateOne(ctx context.Context, where query.PurgeJobWher
 		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -29466,7 +31532,7 @@ func (a PurgeJobActions) UpsertOne(ctx context.Context, where query.PurgeJobWher
 		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("PurgeJob.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -29490,7 +31556,7 @@ func (a PurgeJobActions) DeleteOne(ctx context.Context, where query.PurgeJobWher
 		q += " RETURNING " + quotedPurgeJobColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.PurgeJob
-		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.ResultJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.SiteId, &item.Type, &item.Value, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

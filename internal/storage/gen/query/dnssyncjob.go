@@ -32,20 +32,27 @@ func ApplyDNSSyncJobOptions(opts []DNSSyncJobQueryOption) DNSSyncJobQueryConfig 
 
 // DNSSyncJobQuery is the namespace for DNSSyncJob query operations.
 type DNSSyncJobQuery struct {
-	Id            dNSSyncJobIdField
-	ClusterId     dNSSyncJobClusterIdField
-	SiteId        dNSSyncJobSiteIdField
-	Action        dNSSyncJobActionField
-	Status        dNSSyncJobStatusField
-	Attempts      dNSSyncJobAttemptsField
-	MaxAttempts   dNSSyncJobMaxAttemptsField
-	NextAttemptAt dNSSyncJobNextAttemptAtField
-	LeaseUntil    dNSSyncJobLeaseUntilField
-	ResultJson    dNSSyncJobResultJsonField
-	CreatedAt     dNSSyncJobCreatedAtField
-	UpdatedAt     dNSSyncJobUpdatedAtField
-	Cluster       dNSSyncJobClusterRelation
-	Site          dNSSyncJobSiteRelation
+	Id                dNSSyncJobIdField
+	ClusterId         dNSSyncJobClusterIdField
+	SiteId            dNSSyncJobSiteIdField
+	Action            dNSSyncJobActionField
+	Status            dNSSyncJobStatusField
+	Attempts          dNSSyncJobAttemptsField
+	MaxAttempts       dNSSyncJobMaxAttemptsField
+	NextAttemptAt     dNSSyncJobNextAttemptAtField
+	LeaseOwner        dNSSyncJobLeaseOwnerField
+	LeaseUntil        dNSSyncJobLeaseUntilField
+	HeartbeatAt       dNSSyncJobHeartbeatAtField
+	IdempotencyKey    dNSSyncJobIdempotencyKeyField
+	CancelRequestedAt dNSSyncJobCancelRequestedAtField
+	TimeoutAt         dNSSyncJobTimeoutAtField
+	ResultJson        dNSSyncJobResultJsonField
+	CompensationJson  dNSSyncJobCompensationJsonField
+	Error             dNSSyncJobErrorField
+	CreatedAt         dNSSyncJobCreatedAtField
+	UpdatedAt         dNSSyncJobUpdatedAtField
+	Cluster           dNSSyncJobClusterRelation
+	Site              dNSSyncJobSiteRelation
 }
 
 const DNSSyncJobTable = "dns_sync_jobs"
@@ -57,27 +64,41 @@ const DNSSyncJobStatusColumn = "status"
 const DNSSyncJobAttemptsColumn = "attempts"
 const DNSSyncJobMaxAttemptsColumn = "max_attempts"
 const DNSSyncJobNextAttemptAtColumn = "next_attempt_at"
+const DNSSyncJobLeaseOwnerColumn = "lease_owner"
 const DNSSyncJobLeaseUntilColumn = "lease_until"
+const DNSSyncJobHeartbeatAtColumn = "heartbeat_at"
+const DNSSyncJobIdempotencyKeyColumn = "idempotency_key"
+const DNSSyncJobCancelRequestedAtColumn = "cancel_requested_at"
+const DNSSyncJobTimeoutAtColumn = "timeout_at"
 const DNSSyncJobResultJsonColumn = "result_json"
+const DNSSyncJobCompensationJsonColumn = "compensation_json"
+const DNSSyncJobErrorColumn = "error"
 const DNSSyncJobCreatedAtColumn = "created_at"
 const DNSSyncJobUpdatedAtColumn = "updated_at"
 
 // DNSSyncJobQuery provides query building methods for the DNSSyncJob model.
 var DNSSyncJob = DNSSyncJobQuery{
-	Id:            dNSSyncJobIdField{},
-	ClusterId:     dNSSyncJobClusterIdField{},
-	SiteId:        dNSSyncJobSiteIdField{},
-	Action:        dNSSyncJobActionField{},
-	Status:        dNSSyncJobStatusField{},
-	Attempts:      dNSSyncJobAttemptsField{},
-	MaxAttempts:   dNSSyncJobMaxAttemptsField{},
-	NextAttemptAt: dNSSyncJobNextAttemptAtField{},
-	LeaseUntil:    dNSSyncJobLeaseUntilField{},
-	ResultJson:    dNSSyncJobResultJsonField{},
-	CreatedAt:     dNSSyncJobCreatedAtField{},
-	UpdatedAt:     dNSSyncJobUpdatedAtField{},
-	Cluster:       dNSSyncJobClusterRelation{},
-	Site:          dNSSyncJobSiteRelation{},
+	Id:                dNSSyncJobIdField{},
+	ClusterId:         dNSSyncJobClusterIdField{},
+	SiteId:            dNSSyncJobSiteIdField{},
+	Action:            dNSSyncJobActionField{},
+	Status:            dNSSyncJobStatusField{},
+	Attempts:          dNSSyncJobAttemptsField{},
+	MaxAttempts:       dNSSyncJobMaxAttemptsField{},
+	NextAttemptAt:     dNSSyncJobNextAttemptAtField{},
+	LeaseOwner:        dNSSyncJobLeaseOwnerField{},
+	LeaseUntil:        dNSSyncJobLeaseUntilField{},
+	HeartbeatAt:       dNSSyncJobHeartbeatAtField{},
+	IdempotencyKey:    dNSSyncJobIdempotencyKeyField{},
+	CancelRequestedAt: dNSSyncJobCancelRequestedAtField{},
+	TimeoutAt:         dNSSyncJobTimeoutAtField{},
+	ResultJson:        dNSSyncJobResultJsonField{},
+	CompensationJson:  dNSSyncJobCompensationJsonField{},
+	Error:             dNSSyncJobErrorField{},
+	CreatedAt:         dNSSyncJobCreatedAtField{},
+	UpdatedAt:         dNSSyncJobUpdatedAtField{},
+	Cluster:           dNSSyncJobClusterRelation{},
+	Site:              dNSSyncJobSiteRelation{},
 }
 
 // DNSSyncJobWhereClause represents a WHERE condition for DNSSyncJob.
@@ -652,6 +673,77 @@ func (dNSSyncJobNextAttemptAtField) Desc() DNSSyncJobOrderByClause {
 	return DNSSyncJobOrderByClause{Field: "next_attempt_at", Direction: "DESC"}
 }
 
+// LeaseOwnerField provides query operations for the leaseOwner field.
+type dNSSyncJobLeaseOwnerField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobLeaseOwnerField) Equals(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobLeaseOwnerField) Not(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobLeaseOwnerField) In(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobLeaseOwnerField) NotIn(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (dNSSyncJobLeaseOwnerField) Contains(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (dNSSyncJobLeaseOwnerField) StartsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (dNSSyncJobLeaseOwnerField) EndsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobLeaseOwnerField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "lease_owner", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobLeaseOwnerField) Set(v string) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "lease_owner", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobLeaseOwnerField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "lease_owner", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobLeaseOwnerField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "lease_owner", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobLeaseOwnerField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "lease_owner", Direction: "DESC"}
+}
+
 // LeaseUntilField provides query operations for the leaseUntil field.
 type dNSSyncJobLeaseUntilField struct{}
 
@@ -728,6 +820,305 @@ func (dNSSyncJobLeaseUntilField) Desc() DNSSyncJobOrderByClause {
 	return DNSSyncJobOrderByClause{Field: "lease_until", Direction: "DESC"}
 }
 
+// HeartbeatAtField provides query operations for the heartbeatAt field.
+type dNSSyncJobHeartbeatAtField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobHeartbeatAtField) Equals(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobHeartbeatAtField) Not(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobHeartbeatAtField) In(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobHeartbeatAtField) NotIn(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (dNSSyncJobHeartbeatAtField) Lt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (dNSSyncJobHeartbeatAtField) Lte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (dNSSyncJobHeartbeatAtField) Gt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (dNSSyncJobHeartbeatAtField) Gte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobHeartbeatAtField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "heartbeat_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobHeartbeatAtField) Set(v time.Time) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "heartbeat_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobHeartbeatAtField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "heartbeat_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobHeartbeatAtField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "heartbeat_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobHeartbeatAtField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "heartbeat_at", Direction: "DESC"}
+}
+
+// IdempotencyKeyField provides query operations for the idempotencyKey field.
+type dNSSyncJobIdempotencyKeyField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobIdempotencyKeyField) Equals(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobIdempotencyKeyField) Not(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobIdempotencyKeyField) In(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobIdempotencyKeyField) NotIn(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (dNSSyncJobIdempotencyKeyField) Contains(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (dNSSyncJobIdempotencyKeyField) StartsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (dNSSyncJobIdempotencyKeyField) EndsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobIdempotencyKeyField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "idempotency_key", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobIdempotencyKeyField) Set(v string) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "idempotency_key", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobIdempotencyKeyField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "idempotency_key", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobIdempotencyKeyField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "idempotency_key", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobIdempotencyKeyField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "idempotency_key", Direction: "DESC"}
+}
+
+// CancelRequestedAtField provides query operations for the cancelRequestedAt field.
+type dNSSyncJobCancelRequestedAtField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobCancelRequestedAtField) Equals(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobCancelRequestedAtField) Not(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobCancelRequestedAtField) In(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobCancelRequestedAtField) NotIn(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (dNSSyncJobCancelRequestedAtField) Lt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (dNSSyncJobCancelRequestedAtField) Lte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (dNSSyncJobCancelRequestedAtField) Gt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (dNSSyncJobCancelRequestedAtField) Gte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobCancelRequestedAtField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "cancel_requested_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobCancelRequestedAtField) Set(v time.Time) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "cancel_requested_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobCancelRequestedAtField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "cancel_requested_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobCancelRequestedAtField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "cancel_requested_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobCancelRequestedAtField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "cancel_requested_at", Direction: "DESC"}
+}
+
+// TimeoutAtField provides query operations for the timeoutAt field.
+type dNSSyncJobTimeoutAtField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobTimeoutAtField) Equals(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobTimeoutAtField) Not(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobTimeoutAtField) In(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobTimeoutAtField) NotIn(vals ...*time.Time) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (dNSSyncJobTimeoutAtField) Lt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (dNSSyncJobTimeoutAtField) Lte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (dNSSyncJobTimeoutAtField) Gt(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (dNSSyncJobTimeoutAtField) Gte(v *time.Time) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobTimeoutAtField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "timeout_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobTimeoutAtField) Set(v time.Time) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "timeout_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobTimeoutAtField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "timeout_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobTimeoutAtField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "timeout_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobTimeoutAtField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "timeout_at", Direction: "DESC"}
+}
+
 // ResultJsonField provides query operations for the resultJson field.
 type dNSSyncJobResultJsonField struct{}
 
@@ -782,6 +1173,133 @@ func (dNSSyncJobResultJsonField) Asc() DNSSyncJobOrderByClause {
 // Desc returns a descending order clause for this field.
 func (dNSSyncJobResultJsonField) Desc() DNSSyncJobOrderByClause {
 	return DNSSyncJobOrderByClause{Field: "result_json", Direction: "DESC"}
+}
+
+// CompensationJsonField provides query operations for the compensationJson field.
+type dNSSyncJobCompensationJsonField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobCompensationJsonField) Equals(v *json.RawMessage) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "compensation_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobCompensationJsonField) Not(v *json.RawMessage) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "compensation_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobCompensationJsonField) In(vals ...*json.RawMessage) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "compensation_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobCompensationJsonField) NotIn(vals ...*json.RawMessage) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "compensation_json", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobCompensationJsonField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "compensation_json", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobCompensationJsonField) Set(v json.RawMessage) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "compensation_json", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobCompensationJsonField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "compensation_json", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobCompensationJsonField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "compensation_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobCompensationJsonField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "compensation_json", Direction: "DESC"}
+}
+
+// ErrorField provides query operations for the error field.
+type dNSSyncJobErrorField struct{}
+
+// Equals creates an equality condition.
+func (dNSSyncJobErrorField) Equals(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSSyncJobErrorField) Not(v *string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSSyncJobErrorField) In(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSSyncJobErrorField) NotIn(vals ...*string) DNSSyncJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSSyncJobWhereClause{Field: "error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (dNSSyncJobErrorField) Contains(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (dNSSyncJobErrorField) StartsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (dNSSyncJobErrorField) EndsWith(v string) DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (dNSSyncJobErrorField) IsNull() DNSSyncJobWhereClause {
+	return DNSSyncJobWhereClause{Field: "error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (dNSSyncJobErrorField) Set(v string) DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (dNSSyncJobErrorField) SetNull() DNSSyncJobSetClause {
+	return DNSSyncJobSetClause{Field: "error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSSyncJobErrorField) Asc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSSyncJobErrorField) Desc() DNSSyncJobOrderByClause {
+	return DNSSyncJobOrderByClause{Field: "error", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -965,25 +1483,32 @@ type DNSSyncJobGroupByResult struct {
 
 // DNSSyncJobCreateInput holds data for creating a DNSSyncJob record.
 type DNSSyncJobCreateInput struct {
-	Id            string
-	ClusterId     string
-	SiteId        **string
-	Action        model.DNSSyncAction
-	Status        model.JobStatus
-	Attempts      int
-	MaxAttempts   int
-	NextAttemptAt time.Time
-	LeaseUntil    **time.Time
-	ResultJson    **json.RawMessage
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	Cluster       *ClusterCreateNestedInput
-	Site          *SiteCreateNestedInput
+	Id                string
+	ClusterId         string
+	SiteId            **string
+	Action            model.DNSSyncAction
+	Status            model.JobStatus
+	Attempts          int
+	MaxAttempts       int
+	NextAttemptAt     time.Time
+	LeaseOwner        **string
+	LeaseUntil        **time.Time
+	HeartbeatAt       **time.Time
+	IdempotencyKey    **string
+	CancelRequestedAt **time.Time
+	TimeoutAt         **time.Time
+	ResultJson        **json.RawMessage
+	CompensationJson  **json.RawMessage
+	Error             **string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Cluster           *ClusterCreateNestedInput
+	Site              *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d DNSSyncJobCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.SiteId, d.Action, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseUntil, d.ResultJson, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.SiteId, d.Action, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseOwner, d.LeaseUntil, d.HeartbeatAt, d.IdempotencyKey, d.CancelRequestedAt, d.TimeoutAt, d.ResultJson, d.CompensationJson, d.Error, d.CreatedAt, d.UpdatedAt}
 }
 
 // DNSSyncJobCreateNestedInput supports nested creates and connects.
@@ -994,5 +1519,6 @@ type DNSSyncJobCreateNestedInput struct {
 
 // DNSSyncJobWhereUniqueInput identifies a unique DNSSyncJob record.
 type DNSSyncJobWhereUniqueInput struct {
-	Id *string
+	Id             *string
+	IdempotencyKey **string
 }

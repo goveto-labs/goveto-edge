@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -27,10 +28,26 @@ type InstallWorker struct {
 	cipher *CredentialCipher
 }
 
+const installExecutionTimeout = 8 * time.Minute
+
+const reconcileTerminalInstallJobsSQL = `WITH latest AS (
+	SELECT DISTINCT ON (node_id) node_id, status, error FROM install_jobs
+	ORDER BY node_id, updated_at DESC, id DESC
+) UPDATE nodes n SET
+	status=CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END,
+	install_error=CASE WHEN j.status='CANCELLED' THEN NULL
+		ELSE COALESCE(j.error, 'installation job ended without completing') END,
+	updated_at=NOW()
+	FROM latest j WHERE n.id=j.node_id AND n.status='INSTALLING'
+	AND j.status IN ('FAILED','DEAD_LETTER','CANCELLED')
+	AND NOT EXISTS (SELECT 1 FROM install_jobs active WHERE active.node_id=n.id
+	AND active.status IN ('PENDING','RUNNING'))`
+
 func NewInstallWorker(db *client.Client, queue *InstallQueue, cipher *CredentialCipher) *InstallWorker {
 	return &InstallWorker{db: db, queue: queue, cipher: cipher}
 }
 func (w *InstallWorker) Run(ctx context.Context) {
+	go w.reconcileTerminalJobs(ctx)
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -43,16 +60,26 @@ func (w *InstallWorker) Run(ctx context.Context) {
 	}
 }
 func (w *InstallWorker) runOne(ctx context.Context) {
-	payload, err := w.queue.Claim(ctx)
-	if err != nil || payload == nil {
-		return
+	_, err := w.queue.RunOne(ctx, func(runCtx context.Context, lease jobqueue.Lease) jobqueue.Outcome {
+		job, loadErr := w.db.InstallJob.FindUnique(runCtx, query.InstallJob.Id.Equals(lease.ID))
+		if loadErr != nil || job == nil {
+			if loadErr == nil {
+				loadErr = errors.New("installation job not found")
+			}
+			return jobqueue.Outcome{Err: loadErr, Retryable: true}
+		}
+		return w.executeJob(runCtx, lease, job.NodeId)
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("installation job worker", "error", err)
 	}
-	nodeID := payload.NodeID
+}
 
+func (w *InstallWorker) executeJob(ctx context.Context, lease jobqueue.Lease, nodeID string) jobqueue.Outcome {
 	claimed, err := w.db.Node.Update().
 		Where(
 			query.Node.Id.Equals(nodeID),
-			query.Node.Status.Equals(model.NodeStatusPENDING),
+			query.Node.Status.In(model.NodeStatusPENDING, model.NodeStatusINSTALLING, model.NodeStatusINSTALL_FAILED),
 		).
 		Set(
 			query.Node.Status.Set(model.NodeStatusINSTALLING),
@@ -60,8 +87,9 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 		).
 		DoMany(ctx)
 	if err == nil && claimed == 0 {
-		return
+		return jobqueue.Outcome{Err: errors.New("node is no longer installable")}
 	}
+	payload := &InstallPayload{NodeID: nodeID}
 	if err == nil {
 		payload, err = w.resolveInstallPayload(ctx, payload)
 	}
@@ -76,16 +104,24 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 		err = w.install(ctx, *payload)
 	}
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return jobqueue.Outcome{Result: map[string]any{"node_id": nodeID}, Err: err, Retryable: true}
+		}
 		message := installErrorMessage(err)
 		slog.Error("node installation failed", "node_id", nodeID, "error", message)
+		retryable := !errors.Is(err, errPermanentInstallConfiguration)
+		status := model.NodeStatusINSTALLING
+		if !retryable || lease.Attempt >= lease.MaxAttempts || errors.Is(err, context.DeadlineExceeded) {
+			status = model.NodeStatusINSTALL_FAILED
+		}
 		_, _ = w.db.Node.Update().
 			Where(query.Node.Id.Equals(nodeID)).
 			Set(
-				query.Node.Status.Set(model.NodeStatusINSTALL_FAILED),
+				query.Node.Status.Set(status),
 				query.Node.InstallError.Set(message),
 			).
 			DoMany(ctx)
-		return
+		return jobqueue.Outcome{Result: map[string]any{"node_id": nodeID}, Err: err, Retryable: retryable}
 	}
 	if _, updateErr := w.db.Node.Update().
 		Where(query.Node.Id.Equals(nodeID)).
@@ -99,9 +135,26 @@ func (w *InstallWorker) runOne(ctx context.Context) {
 			"node_id", nodeID,
 			"error", updateErr,
 		)
-		return
+		return jobqueue.Outcome{Result: map[string]any{"node_id": nodeID, "installed": true}, Err: updateErr, Retryable: true}
 	}
 	slog.Info("node installation commands completed", "node_id", nodeID)
+	return jobqueue.Outcome{Result: map[string]any{"node_id": nodeID, "installed": true}}
+}
+
+func (w *InstallWorker) reconcileTerminalJobs(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		_, err := w.db.RawExec(ctx, reconcileTerminalInstallJobsSQL)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("reconcile terminal installation jobs", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *InstallPayload) (*InstallPayload, error) {
@@ -113,13 +166,13 @@ func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *Inst
 		return nil, err
 	}
 	if node == nil {
-		return nil, fmt.Errorf("node %s was not found", payload.NodeID)
+		return nil, permanentInstallError(fmt.Errorf("node %s was not found", payload.NodeID))
 	}
 	if node.SshCredentialId == nil || node.SshHost == nil || node.SshPort == nil {
-		return nil, errors.New("node SSH installation configuration is missing")
+		return nil, permanentInstallError(errors.New("node SSH installation configuration is missing"))
 	}
 	if *node.SshPort < 1 || *node.SshPort > 65535 {
-		return nil, errors.New("node SSH port is invalid")
+		return nil, permanentInstallError(errors.New("node SSH port is invalid"))
 	}
 	communicationCredential, err := w.db.NodeCredential.FindUnique(
 		ctx,
@@ -129,11 +182,11 @@ func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *Inst
 		return nil, err
 	}
 	if communicationCredential == nil || communicationCredential.BootstrapIdentityEncrypted == nil {
-		return nil, errors.New("node bootstrap identity is missing")
+		return nil, permanentInstallError(errors.New("node bootstrap identity is missing"))
 	}
 	identityJSON, err := w.cipher.Decrypt(*communicationCredential.BootstrapIdentityEncrypted)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt node bootstrap identity: %w", err)
+		return nil, permanentInstallError(fmt.Errorf("decrypt node bootstrap identity: %w", err))
 	}
 	_, sshInput, err := ResolveSSHInstallInput(ctx, w.db, w.cipher, node.ClusterId, SSHInstallReference{
 		EntryIP:      *node.SshHost,
@@ -150,13 +203,13 @@ func (w *InstallWorker) resolveInstallPayload(ctx context.Context, payload *Inst
 
 func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) error {
 	if payload.SSH == nil {
-		return errors.New("SSH installation input is missing")
+		return permanentInstallError(errors.New("SSH installation input is missing"))
 	}
 	logger := slog.With(
 		"node_id", payload.NodeID,
 		"ssh_target", net.JoinHostPort(payload.SSH.EntryIP, fmt.Sprint(payload.SSH.Port)),
 	)
-	installCtx, cancel := context.WithTimeout(ctx, 8*time.Minute)
+	installCtx, cancel := context.WithTimeout(ctx, installExecutionTimeout)
 	defer cancel()
 	logger.Info("connecting to node over SSH")
 	connection, err := connectSSH(installCtx, *payload.SSH)
@@ -175,7 +228,7 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 
 	binary, err := staticassets.AgentBinary(arch)
 	if err != nil {
-		return fmt.Errorf("load agent binary for %s: %w", arch, err)
+		return permanentInstallError(fmt.Errorf("load agent binary for %s: %w", arch, err))
 	}
 
 	identity := []byte(payload.IdentityJSON)
@@ -360,7 +413,7 @@ func connectSSH(ctx context.Context, input SSHInstallInput) (*ssh.Client, error)
 			signer, err = ssh.ParsePrivateKey(key)
 		}
 		if err != nil {
-			return nil, fmt.Errorf("parse SSH private key: %w", err)
+			return nil, permanentInstallError(fmt.Errorf("parse SSH private key: %w", err))
 		}
 		auth = append(auth, ssh.PublicKeys(signer))
 	}
@@ -446,7 +499,7 @@ func normalizeArchitecture(output string) (string, error) {
 	case "aarch64", "arm64":
 		return "arm64", nil
 	default:
-		return "", fmt.Errorf("unsupported remote architecture %q", value)
+		return "", permanentInstallError(fmt.Errorf("unsupported remote architecture %q", value))
 	}
 }
 

@@ -16,6 +16,15 @@ import (
 	"goveto-edge/internal/storage/gen/model"
 )
 
+func TestCertificateRetryDelayUsesMinuteScale(t *testing.T) {
+	if got := certificateRetryDelay(1); got != 2*time.Minute {
+		t.Fatalf("first retry delay = %s", got)
+	}
+	if got := certificateRetryDelay(4); got != 16*time.Minute {
+		t.Fatalf("fourth retry delay = %s", got)
+	}
+}
+
 func TestValidateMaterialAndWildcardCoverage(t *testing.T) {
 	now := time.Now().UTC()
 	certificatePEM, privateKeyPEM := testCertificate(t, now, []string{"example.com", "*.example.com"}, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})

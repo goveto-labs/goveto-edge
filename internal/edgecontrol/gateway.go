@@ -26,14 +26,22 @@ import (
 )
 
 const (
-	heartbeatInterval = 10 * time.Second
-	heartbeatTimeout  = 45 * time.Second
-	taskLease         = 45 * time.Second
-	maxInflightTasks  = 16
-	rotateBefore      = 7 * 24 * time.Hour
-	completedTaskTTL  = 7 * 24 * time.Hour
-	gatewayEventTopic = "goveto_edge_gateway_events"
+	heartbeatInterval      = 10 * time.Second
+	heartbeatTimeout       = 45 * time.Second
+	taskLease              = 45 * time.Second
+	taskSweepInterval      = 30 * time.Second
+	agentTaskTimeout       = 15 * time.Minute
+	maxInflightTasks       = 16
+	rotateBefore           = 7 * 24 * time.Hour
+	completedTaskTTL       = 7 * 24 * time.Hour
+	dispatchCleanupTimeout = 5 * time.Second
+	gatewayEventTopic      = "goveto_edge_gateway_events"
 )
+
+const cancelAbandonedTaskSQL = `UPDATE agent_tasks SET status='CANCELLED',
+	cancel_requested_at=NOW(), error=COALESCE(error, 'dispatch caller stopped waiting'),
+	lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+	WHERE id=$1 AND status IN ('PENDING','RUNNING')`
 
 var errInvalidCredentialCSR = errors.New("invalid credential CSR")
 
@@ -84,16 +92,27 @@ func NewGateway(
 
 func (g *Gateway) Run(ctx context.Context) {
 	go g.listenForEvents(ctx)
+	g.runTaskSweep(ctx)
 	g.cleanupTasks(ctx)
-	ticker := time.NewTicker(time.Hour)
-	defer ticker.Stop()
+	sweepTicker := time.NewTicker(taskSweepInterval)
+	cleanupTicker := time.NewTicker(time.Hour)
+	defer sweepTicker.Stop()
+	defer cleanupTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-sweepTicker.C:
+			g.runTaskSweep(ctx)
+		case <-cleanupTicker.C:
 			g.cleanupTasks(ctx)
 		}
+	}
+}
+
+func (g *Gateway) runTaskSweep(ctx context.Context) {
+	if err := g.convergeTasks(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("converge agent tasks", "error", err)
 	}
 }
 
@@ -265,7 +284,8 @@ func receiveLoop(stream edgeprotocol.ManagementConnectServer, target chan<- rece
 
 func (g *Gateway) renewLeases(ctx context.Context, owner string) {
 	if _, err := g.db.RawExec(ctx, `UPDATE agent_tasks SET lease_until = NOW() + ($2 * INTERVAL '1 second'),
-		updated_at = NOW() WHERE lease_owner = $1 AND status = 'RUNNING'
+		heartbeat_at = NOW(), updated_at = NOW() WHERE lease_owner = $1 AND status = 'RUNNING'
+		AND cancel_requested_at IS NULL AND (timeout_at IS NULL OR timeout_at > NOW())
 		AND EXISTS (SELECT 1 FROM nodes n JOIN node_credentials c ON c.node_id = n.id
 			WHERE n.id = agent_tasks.node_id AND n.status = 'ONLINE' AND c.revoked_at IS NULL)`,
 		owner, taskLease.Seconds()); err != nil {
@@ -392,10 +412,11 @@ func (g *Gateway) reconcileCacheConfig(ctx context.Context, nodeID string, curre
 			return err
 		}
 		inserted, err = tx.RawExec(ctx, `INSERT INTO agent_tasks
-			(id, node_id, kind, payload, status, created_at, updated_at)
-			SELECT $1, $2, $3, $4, 'PENDING', NOW(), NOW()
+			(id, node_id, kind, payload, status, timeout_at, created_at, updated_at)
+			SELECT $1, $2, $3, $4, 'PENDING', NOW()+($5*INTERVAL '1 second'), NOW(), NOW()
 			WHERE NOT EXISTS (SELECT 1 FROM agent_tasks WHERE node_id = $2 AND kind = $3
-			AND status IN ('PENDING', 'RUNNING'))`, uuid.NewString(), nodeID, edgeprotocol.TaskNodeCacheConfig, payload)
+			AND status IN ('PENDING', 'RUNNING'))`, uuid.NewString(), nodeID,
+			edgeprotocol.TaskNodeCacheConfig, payload, agentTaskTimeout.Seconds())
 		return err
 	})
 	if err == nil && inserted == 1 {
@@ -425,8 +446,10 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 			return errors.New("node is disabled, revoked, or unavailable")
 		}
 		_, err = tx.RawExec(ctx, `INSERT INTO agent_tasks
-			(id, node_id, kind, payload, status, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, 'PENDING', NOW(), NOW())`, taskID, nodeID, kind, encoded)
+			(id, node_id, kind, payload, status, idempotency_key, timeout_at, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, 'PENDING', $1,
+				NOW()+($5*INTERVAL '1 second'), NOW(), NOW())`,
+			taskID, nodeID, kind, encoded, agentTaskTimeout.Seconds())
 		return err
 	})
 	if err != nil {
@@ -443,6 +466,9 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 		}
 		rows, queryErr := client.Raw[state](ctx, g.db, `SELECT status, result_json, error FROM agent_tasks WHERE id = $1`, taskID)
 		if queryErr != nil {
+			if ctx.Err() != nil {
+				return g.cancelAbandonedTask(ctx, taskID)
+			}
 			return queryErr
 		}
 		if len(rows) == 1 {
@@ -452,7 +478,7 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 					return json.Unmarshal(rows[0].Result, result)
 				}
 				return nil
-			case "FAILED", "CANCELLED":
+			case "FAILED", "DEAD_LETTER", "CANCELLED":
 				if rows[0].Error != nil {
 					return errors.New(*rows[0].Error)
 				}
@@ -461,12 +487,21 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 		}
 		select {
 		case <-ctx.Done():
-			_, _ = g.db.RawExec(context.Background(), `UPDATE agent_tasks SET status = 'CANCELLED',
-				error = $2, updated_at = NOW() WHERE id = $1 AND status IN ('PENDING', 'RUNNING')`, taskID, ctx.Err().Error())
-			return ctx.Err()
+			return g.cancelAbandonedTask(ctx, taskID)
 		case <-ticker.C:
 		}
 	}
+}
+
+func (g *Gateway) cancelAbandonedTask(ctx context.Context, taskID string) error {
+	waitErr := ctx.Err()
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dispatchCleanupTimeout)
+	defer cancel()
+	_, cleanupErr := g.db.RawExec(cleanupCtx, cancelAbandonedTaskSQL, taskID)
+	if cleanupErr != nil {
+		return errors.Join(waitErr, fmt.Errorf("cancel abandoned agent task: %w", cleanupErr))
+	}
+	return waitErr
 }
 
 func (g *Gateway) claimTasks(ctx context.Context, nodeID, owner string, limit int) ([]edgeprotocol.AgentTask, error) {
@@ -475,18 +510,18 @@ func (g *Gateway) claimTasks(ctx context.Context, nodeID, owner string, limit in
 		Kind    string          `db:"kind"`
 		Payload json.RawMessage `db:"payload"`
 	}
-	if err := g.failExhaustedTasks(ctx, nodeID); err != nil {
-		return nil, err
-	}
 	rows, err := client.Raw[claimedTask](ctx, g.db, `WITH picked AS (
 		SELECT t.id FROM agent_tasks t JOIN nodes n ON n.id = t.node_id
 		JOIN node_credentials c ON c.node_id = n.id
 		WHERE t.node_id = $1 AND n.status = 'ONLINE' AND c.revoked_at IS NULL
-		AND t.attempts < t.max_attempts AND (
-			t.status = 'PENDING' OR (t.status = 'RUNNING' AND t.lease_until < NOW()))
+		AND t.attempts < t.max_attempts AND t.cancel_requested_at IS NULL
+		AND (t.timeout_at IS NULL OR t.timeout_at > NOW()) AND (
+			(t.status = 'PENDING' AND t.next_attempt_at <= NOW()) OR
+			(t.status = 'RUNNING' AND (t.lease_until IS NULL OR t.lease_until < NOW())))
 		ORDER BY t.created_at FOR UPDATE OF t SKIP LOCKED LIMIT $2)
 		UPDATE agent_tasks t SET status = 'RUNNING', lease_owner = $3,
-		lease_until = NOW() + ($4 * INTERVAL '1 second'), attempts = attempts + 1, updated_at = NOW()
+		lease_until = NOW() + ($4 * INTERVAL '1 second'), heartbeat_at=NOW(),
+		attempts = attempts + 1, updated_at = NOW()
 		FROM picked WHERE t.id = picked.id RETURNING t.id, t.kind, t.payload`,
 		nodeID, limit, owner, taskLease.Seconds())
 	if err != nil {
@@ -504,8 +539,8 @@ func (g *Gateway) completeTask(ctx context.Context, nodeID, owner string, result
 	if !result.Success {
 		statusValue = "FAILED"
 	}
-	affected, err := g.db.RawExec(ctx, `UPDATE agent_tasks SET status = $4, result_json = $5, error = $6,
-		lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+	affected, err := g.db.RawExec(ctx, `UPDATE agent_tasks SET status=$4,
+		result_json=$5, error=$6, lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 		WHERE id = $1 AND node_id = $2 AND lease_owner = $3 AND status = 'RUNNING'
 		AND EXISTS (SELECT 1 FROM nodes n JOIN node_credentials c ON c.node_id = n.id
 			WHERE n.id = $2 AND n.status = 'ONLINE' AND c.revoked_at IS NULL)`,
@@ -514,18 +549,57 @@ func (g *Gateway) completeTask(ctx context.Context, nodeID, owner string, result
 		return err
 	}
 	if affected != 1 {
+		type taskState struct {
+			Status string `db:"status"`
+		}
+		rows, queryErr := client.Raw[taskState](ctx, g.db,
+			"SELECT status FROM agent_tasks WHERE id=$1 AND node_id=$2", result.TaskID, nodeID)
+		if queryErr == nil && len(rows) == 1 {
+			switch rows[0].Status {
+			case "SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELLED":
+				// The task already converged while this result was in flight.
+				return nil
+			}
+		}
 		return fmt.Errorf("agent task %s lease is stale or owned by another session", result.TaskID)
 	}
 	return nil
 }
 
-func (g *Gateway) failExhaustedTasks(ctx context.Context, nodeID string) error {
-	_, err := g.db.RawExec(ctx, `UPDATE agent_tasks SET status = 'FAILED',
-		error = 'maximum agent task delivery attempts exceeded', lease_owner = NULL,
-		lease_until = NULL, updated_at = NOW()
-		WHERE node_id = $1 AND attempts >= max_attempts AND (
-			status = 'PENDING' OR (status = 'RUNNING' AND lease_until < NOW()))`, nodeID)
-	return err
+func (g *Gateway) convergeTasks(ctx context.Context) error {
+	type lockRow struct {
+		Locked bool `db:"locked"`
+	}
+	return g.db.Tx(ctx, func(tx *client.Client) error {
+		locks, err := client.Raw[lockRow](ctx, tx,
+			"SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked", "agent-task-sweep")
+		if err != nil || len(locks) != 1 || !locks[0].Locked {
+			return err
+		}
+		if _, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status='CANCELLED',
+			error=COALESCE(error, 'agent task cancellation requested'), lease_owner=NULL,
+			lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+			WHERE cancel_requested_at IS NOT NULL
+			AND (status='PENDING' OR (status='RUNNING' AND
+			(lease_until IS NULL OR lease_until<=NOW())))`); err != nil {
+			return err
+		}
+		if _, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status='DEAD_LETTER',
+			error=COALESCE(error, 'agent task execution deadline expired'), lease_owner=NULL,
+			lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+			WHERE timeout_at<=NOW()
+			AND (status='PENDING' OR (status='RUNNING' AND
+			(lease_until IS NULL OR lease_until<=NOW())))`); err != nil {
+			return err
+		}
+		_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status='DEAD_LETTER',
+			error=COALESCE(error, 'maximum agent task delivery attempts exceeded'), lease_owner=NULL,
+			lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+			WHERE attempts>=max_attempts AND (
+			status='PENDING' OR (status='RUNNING' AND
+			(lease_until IS NULL OR lease_until<=NOW())))`)
+		return err
+	})
 }
 
 func (g *Gateway) rotateCredential(
@@ -600,7 +674,8 @@ func (g *Gateway) Revoke(ctx context.Context, nodeID string) error {
 			return errors.New("node credential is not registered")
 		}
 		_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
-			error = 'node credential was revoked', lease_owner = NULL, lease_until = NULL, updated_at = NOW()
+			cancel_requested_at=NOW(), error='node credential was revoked', lease_owner=NULL,
+			lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 			WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, nodeID)
 		return err
 	}); err != nil {
@@ -624,7 +699,9 @@ func (g *Gateway) disconnectLocal(nodeID string) {
 
 func (g *Gateway) releaseLeases(ctx context.Context, nodeID, owner string) {
 	_, _ = g.db.RawExec(ctx, `UPDATE agent_tasks SET status = 'PENDING', lease_owner = NULL,
-		lease_until = NULL, updated_at = NOW() WHERE node_id = $1 AND lease_owner = $2 AND status = 'RUNNING'`, nodeID, owner)
+		lease_until = NULL, heartbeat_at=NULL, next_attempt_at=NOW(), updated_at = NOW()
+		WHERE node_id = $1 AND lease_owner = $2 AND status = 'RUNNING'
+		AND cancel_requested_at IS NULL`, nodeID, owner)
 }
 
 func (g *Gateway) register(nodeID string, current *session) {
@@ -735,7 +812,7 @@ func (g *Gateway) listenForEventsOnce(ctx context.Context) error {
 
 func (g *Gateway) cleanupTasks(ctx context.Context) {
 	affected, err := g.db.RawExec(ctx, `DELETE FROM agent_tasks
-		WHERE status IN ('SUCCEEDED', 'FAILED', 'CANCELLED')
+		WHERE status IN ('SUCCEEDED', 'FAILED', 'DEAD_LETTER', 'CANCELLED')
 		AND updated_at < NOW() - ($1 * INTERVAL '1 second')`, completedTaskTTL.Seconds())
 	if err != nil {
 		slog.Warn("cleanup completed agent tasks", "error", err)

@@ -41,20 +41,26 @@ type ACMEChallenge struct {
 
 // AgentTask represents the AgentTask model.
 type AgentTask struct {
-	Id          string           `db:"id" json:"id"`
-	NodeId      string           `db:"node_id" json:"nodeId"`
-	Kind        string           `db:"kind" json:"kind"`
-	Payload     json.RawMessage  `db:"payload" json:"payload"`
-	Status      JobStatus        `db:"status" json:"status"`
-	LeaseOwner  *string          `db:"lease_owner" json:"leaseOwner"`
-	LeaseUntil  *time.Time       `db:"lease_until" json:"leaseUntil"`
-	Attempts    int              `db:"attempts" json:"attempts"`
-	MaxAttempts int              `db:"max_attempts" json:"maxAttempts"`
-	ResultJson  *json.RawMessage `db:"result_json" json:"resultJson"`
-	Error       *string          `db:"error" json:"error"`
-	CreatedAt   time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt   time.Time        `db:"updated_at" json:"updatedAt"`
-	Node        *Node            `db:"-" json:"node,omitempty"`
+	Id                string           `db:"id" json:"id"`
+	NodeId            string           `db:"node_id" json:"nodeId"`
+	Kind              string           `db:"kind" json:"kind"`
+	Payload           json.RawMessage  `db:"payload" json:"payload"`
+	Status            JobStatus        `db:"status" json:"status"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Node              *Node            `db:"-" json:"node,omitempty"`
 }
 
 // AuditLog represents the AuditLog model.
@@ -113,19 +119,25 @@ type Certificate struct {
 
 // CertificateJob represents the CertificateJob model.
 type CertificateJob struct {
-	Id            string               `db:"id" json:"id"`
-	CertificateId string               `db:"certificate_id" json:"certificateId"`
-	Operation     CertificateOperation `db:"operation" json:"operation"`
-	Status        JobStatus            `db:"status" json:"status"`
-	Attempts      int                  `db:"attempts" json:"attempts"`
-	MaxAttempts   int                  `db:"max_attempts" json:"maxAttempts"`
-	NextAttemptAt time.Time            `db:"next_attempt_at" json:"nextAttemptAt"`
-	LeaseUntil    *time.Time           `db:"lease_until" json:"leaseUntil"`
-	ResultJson    *json.RawMessage     `db:"result_json" json:"resultJson"`
-	Error         *string              `db:"error" json:"error"`
-	CreatedAt     time.Time            `db:"created_at" json:"createdAt"`
-	UpdatedAt     time.Time            `db:"updated_at" json:"updatedAt"`
-	Certificate   *Certificate         `db:"-" json:"certificate,omitempty"`
+	Id                string               `db:"id" json:"id"`
+	CertificateId     string               `db:"certificate_id" json:"certificateId"`
+	Operation         CertificateOperation `db:"operation" json:"operation"`
+	Status            JobStatus            `db:"status" json:"status"`
+	Attempts          int                  `db:"attempts" json:"attempts"`
+	MaxAttempts       int                  `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time            `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string              `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time           `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time           `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string              `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time           `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time           `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage     `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage     `db:"compensation_json" json:"compensationJson"`
+	Error             *string              `db:"error" json:"error"`
+	CreatedAt         time.Time            `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time            `db:"updated_at" json:"updatedAt"`
+	Certificate       *Certificate         `db:"-" json:"certificate,omitempty"`
 }
 
 // Cluster represents the Cluster model.
@@ -254,20 +266,27 @@ type DNSProviderConfig struct {
 
 // DNSSyncJob represents the DNSSyncJob model.
 type DNSSyncJob struct {
-	Id            string           `db:"id" json:"id"`
-	ClusterId     string           `db:"cluster_id" json:"clusterId"`
-	SiteId        *string          `db:"site_id" json:"siteId"`
-	Action        DNSSyncAction    `db:"action" json:"action"`
-	Status        JobStatus        `db:"status" json:"status"`
-	Attempts      int              `db:"attempts" json:"attempts"`
-	MaxAttempts   int              `db:"max_attempts" json:"maxAttempts"`
-	NextAttemptAt time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
-	LeaseUntil    *time.Time       `db:"lease_until" json:"leaseUntil"`
-	ResultJson    *json.RawMessage `db:"result_json" json:"resultJson"`
-	CreatedAt     time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt     time.Time        `db:"updated_at" json:"updatedAt"`
-	Cluster       *Cluster         `db:"-" json:"cluster,omitempty"`
-	Site          *Site            `db:"-" json:"site,omitempty"`
+	Id                string           `db:"id" json:"id"`
+	ClusterId         string           `db:"cluster_id" json:"clusterId"`
+	SiteId            *string          `db:"site_id" json:"siteId"`
+	Action            DNSSyncAction    `db:"action" json:"action"`
+	Status            JobStatus        `db:"status" json:"status"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster           *Cluster         `db:"-" json:"cluster,omitempty"`
+	Site              *Site            `db:"-" json:"site,omitempty"`
 }
 
 // DynamicSetting represents the DynamicSetting model.
@@ -276,6 +295,44 @@ type DynamicSetting struct {
 	ValueJson   json.RawMessage `db:"value_json" json:"valueJson"`
 	Description *string         `db:"description" json:"description"`
 	UpdatedAt   time.Time       `db:"updated_at" json:"updatedAt"`
+}
+
+// InstallJob represents the InstallJob model.
+type InstallJob struct {
+	Id                string           `db:"id" json:"id"`
+	NodeId            string           `db:"node_id" json:"nodeId"`
+	Payload           json.RawMessage  `db:"payload" json:"payload"`
+	Status            JobStatus        `db:"status" json:"status"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Node              *Node            `db:"-" json:"node,omitempty"`
+}
+
+// JobExecution represents the JobExecution model.
+type JobExecution struct {
+	Id          string           `db:"id" json:"id"`
+	JobType     string           `db:"job_type" json:"jobType"`
+	JobId       string           `db:"job_id" json:"jobId"`
+	Attempt     int              `db:"attempt" json:"attempt"`
+	WorkerId    string           `db:"worker_id" json:"workerId"`
+	Status      JobStatus        `db:"status" json:"status"`
+	StartedAt   time.Time        `db:"started_at" json:"startedAt"`
+	HeartbeatAt time.Time        `db:"heartbeat_at" json:"heartbeatAt"`
+	FinishedAt  *time.Time       `db:"finished_at" json:"finishedAt"`
+	ResultJson  *json.RawMessage `db:"result_json" json:"resultJson"`
+	Error       *string          `db:"error" json:"error"`
 }
 
 // Node represents the Node model.
@@ -306,6 +363,7 @@ type Node struct {
 	HardwareProfile    *NodeHardwareProfile     `db:"-" json:"hardwareProfile,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
 	AgentTasks         []*AgentTask             `db:"-" json:"agentTasks,omitempty"`
+	InstallJobs        []*InstallJob            `db:"-" json:"installJobs,omitempty"`
 	SshCredential      *SSHCredential           `db:"-" json:"sshCredential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }
@@ -440,28 +498,50 @@ type Policy struct {
 
 // PublishJob represents the PublishJob model.
 type PublishJob struct {
-	Id         string           `db:"id" json:"id"`
-	SiteId     string           `db:"site_id" json:"siteId"`
-	Version    int64            `db:"version" json:"version"`
-	Targets    json.RawMessage  `db:"targets" json:"targets"`
-	Status     JobStatus        `db:"status" json:"status"`
-	ResultJson *json.RawMessage `db:"result_json" json:"resultJson"`
-	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt  time.Time        `db:"updated_at" json:"updatedAt"`
-	Site       *Site            `db:"-" json:"site,omitempty"`
+	Id                string           `db:"id" json:"id"`
+	SiteId            string           `db:"site_id" json:"siteId"`
+	Version           int64            `db:"version" json:"version"`
+	Targets           json.RawMessage  `db:"targets" json:"targets"`
+	Status            JobStatus        `db:"status" json:"status"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Site              *Site            `db:"-" json:"site,omitempty"`
 }
 
 // PurgeJob represents the PurgeJob model.
 type PurgeJob struct {
-	Id         string           `db:"id" json:"id"`
-	SiteId     string           `db:"site_id" json:"siteId"`
-	Type       PurgeType        `db:"type" json:"type"`
-	Value      *string          `db:"value" json:"value"`
-	Status     JobStatus        `db:"status" json:"status"`
-	ResultJson *json.RawMessage `db:"result_json" json:"resultJson"`
-	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt  time.Time        `db:"updated_at" json:"updatedAt"`
-	Site       *Site            `db:"-" json:"site,omitempty"`
+	Id                string           `db:"id" json:"id"`
+	SiteId            string           `db:"site_id" json:"siteId"`
+	Type              PurgeType        `db:"type" json:"type"`
+	Value             *string          `db:"value" json:"value"`
+	Status            JobStatus        `db:"status" json:"status"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Site              *Site            `db:"-" json:"site,omitempty"`
 }
 
 // SSHCredential represents the SSHCredential model.

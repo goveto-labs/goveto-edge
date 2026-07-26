@@ -12,6 +12,22 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+var errPermanentInstallConfiguration = errors.New("permanent installation configuration error")
+
+type permanentInstallConfigError struct{ err error }
+
+func (e permanentInstallConfigError) Error() string { return e.err.Error() }
+func (e permanentInstallConfigError) Unwrap() []error {
+	return []error{errPermanentInstallConfiguration, e.err}
+}
+
+func permanentInstallError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return permanentInstallConfigError{err: err}
+}
+
 type SSHCredentialSecret struct {
 	Password      string `json:"password,omitempty"`
 	PrivateKeyPEM string `json:"private_key,omitempty"`
@@ -88,7 +104,7 @@ func ResolveSSHInstallInput(
 	reference SSHInstallReference,
 ) (*model.SSHCredential, SSHInstallInput, error) {
 	if err := reference.Validate(); err != nil {
-		return nil, SSHInstallInput{}, err
+		return nil, SSHInstallInput{}, permanentInstallError(err)
 	}
 	credential, err := db.SSHCredential.FindUnique(
 		ctx,
@@ -98,11 +114,11 @@ func ResolveSSHInstallInput(
 		return nil, SSHInstallInput{}, err
 	}
 	if credential == nil || credential.ClusterId != clusterID {
-		return nil, SSHInstallInput{}, errors.New("SSH credential not found")
+		return nil, SSHInstallInput{}, permanentInstallError(errors.New("SSH credential not found"))
 	}
 	secret, err := DecryptSSHCredentialSecret(cipher, credential)
 	if err != nil {
-		return nil, SSHInstallInput{}, fmt.Errorf("decrypt SSH credential: %w", err)
+		return nil, SSHInstallInput{}, permanentInstallError(fmt.Errorf("decrypt SSH credential: %w", err))
 	}
 	input := SSHInstallInput{
 		EntryIP:       reference.EntryIP,
@@ -113,7 +129,7 @@ func ResolveSSHInstallInput(
 		Passphrase:    secret.Passphrase,
 	}
 	if err := input.Validate(); err != nil {
-		return nil, SSHInstallInput{}, err
+		return nil, SSHInstallInput{}, permanentInstallError(err)
 	}
 	return credential, input, nil
 }

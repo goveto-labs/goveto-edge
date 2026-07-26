@@ -32,20 +32,26 @@ func ApplyAgentTaskOptions(opts []AgentTaskQueryOption) AgentTaskQueryConfig {
 
 // AgentTaskQuery is the namespace for AgentTask query operations.
 type AgentTaskQuery struct {
-	Id          agentTaskIdField
-	NodeId      agentTaskNodeIdField
-	Kind        agentTaskKindField
-	Payload     agentTaskPayloadField
-	Status      agentTaskStatusField
-	LeaseOwner  agentTaskLeaseOwnerField
-	LeaseUntil  agentTaskLeaseUntilField
-	Attempts    agentTaskAttemptsField
-	MaxAttempts agentTaskMaxAttemptsField
-	ResultJson  agentTaskResultJsonField
-	Error       agentTaskErrorField
-	CreatedAt   agentTaskCreatedAtField
-	UpdatedAt   agentTaskUpdatedAtField
-	Node        agentTaskNodeRelation
+	Id                agentTaskIdField
+	NodeId            agentTaskNodeIdField
+	Kind              agentTaskKindField
+	Payload           agentTaskPayloadField
+	Status            agentTaskStatusField
+	LeaseOwner        agentTaskLeaseOwnerField
+	LeaseUntil        agentTaskLeaseUntilField
+	HeartbeatAt       agentTaskHeartbeatAtField
+	Attempts          agentTaskAttemptsField
+	MaxAttempts       agentTaskMaxAttemptsField
+	NextAttemptAt     agentTaskNextAttemptAtField
+	IdempotencyKey    agentTaskIdempotencyKeyField
+	CancelRequestedAt agentTaskCancelRequestedAtField
+	TimeoutAt         agentTaskTimeoutAtField
+	ResultJson        agentTaskResultJsonField
+	CompensationJson  agentTaskCompensationJsonField
+	Error             agentTaskErrorField
+	CreatedAt         agentTaskCreatedAtField
+	UpdatedAt         agentTaskUpdatedAtField
+	Node              agentTaskNodeRelation
 }
 
 const AgentTaskTable = "agent_tasks"
@@ -56,29 +62,41 @@ const AgentTaskPayloadColumn = "payload"
 const AgentTaskStatusColumn = "status"
 const AgentTaskLeaseOwnerColumn = "lease_owner"
 const AgentTaskLeaseUntilColumn = "lease_until"
+const AgentTaskHeartbeatAtColumn = "heartbeat_at"
 const AgentTaskAttemptsColumn = "attempts"
 const AgentTaskMaxAttemptsColumn = "max_attempts"
+const AgentTaskNextAttemptAtColumn = "next_attempt_at"
+const AgentTaskIdempotencyKeyColumn = "idempotency_key"
+const AgentTaskCancelRequestedAtColumn = "cancel_requested_at"
+const AgentTaskTimeoutAtColumn = "timeout_at"
 const AgentTaskResultJsonColumn = "result_json"
+const AgentTaskCompensationJsonColumn = "compensation_json"
 const AgentTaskErrorColumn = "error"
 const AgentTaskCreatedAtColumn = "created_at"
 const AgentTaskUpdatedAtColumn = "updated_at"
 
 // AgentTaskQuery provides query building methods for the AgentTask model.
 var AgentTask = AgentTaskQuery{
-	Id:          agentTaskIdField{},
-	NodeId:      agentTaskNodeIdField{},
-	Kind:        agentTaskKindField{},
-	Payload:     agentTaskPayloadField{},
-	Status:      agentTaskStatusField{},
-	LeaseOwner:  agentTaskLeaseOwnerField{},
-	LeaseUntil:  agentTaskLeaseUntilField{},
-	Attempts:    agentTaskAttemptsField{},
-	MaxAttempts: agentTaskMaxAttemptsField{},
-	ResultJson:  agentTaskResultJsonField{},
-	Error:       agentTaskErrorField{},
-	CreatedAt:   agentTaskCreatedAtField{},
-	UpdatedAt:   agentTaskUpdatedAtField{},
-	Node:        agentTaskNodeRelation{},
+	Id:                agentTaskIdField{},
+	NodeId:            agentTaskNodeIdField{},
+	Kind:              agentTaskKindField{},
+	Payload:           agentTaskPayloadField{},
+	Status:            agentTaskStatusField{},
+	LeaseOwner:        agentTaskLeaseOwnerField{},
+	LeaseUntil:        agentTaskLeaseUntilField{},
+	HeartbeatAt:       agentTaskHeartbeatAtField{},
+	Attempts:          agentTaskAttemptsField{},
+	MaxAttempts:       agentTaskMaxAttemptsField{},
+	NextAttemptAt:     agentTaskNextAttemptAtField{},
+	IdempotencyKey:    agentTaskIdempotencyKeyField{},
+	CancelRequestedAt: agentTaskCancelRequestedAtField{},
+	TimeoutAt:         agentTaskTimeoutAtField{},
+	ResultJson:        agentTaskResultJsonField{},
+	CompensationJson:  agentTaskCompensationJsonField{},
+	Error:             agentTaskErrorField{},
+	CreatedAt:         agentTaskCreatedAtField{},
+	UpdatedAt:         agentTaskUpdatedAtField{},
+	Node:              agentTaskNodeRelation{},
 }
 
 // AgentTaskWhereClause represents a WHERE condition for AgentTask.
@@ -562,6 +580,82 @@ func (agentTaskLeaseUntilField) Desc() AgentTaskOrderByClause {
 	return AgentTaskOrderByClause{Field: "lease_until", Direction: "DESC"}
 }
 
+// HeartbeatAtField provides query operations for the heartbeatAt field.
+type agentTaskHeartbeatAtField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskHeartbeatAtField) Equals(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskHeartbeatAtField) Not(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskHeartbeatAtField) In(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskHeartbeatAtField) NotIn(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (agentTaskHeartbeatAtField) Lt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (agentTaskHeartbeatAtField) Lte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (agentTaskHeartbeatAtField) Gt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (agentTaskHeartbeatAtField) Gte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (agentTaskHeartbeatAtField) IsNull() AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "heartbeat_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskHeartbeatAtField) Set(v time.Time) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "heartbeat_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (agentTaskHeartbeatAtField) SetNull() AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "heartbeat_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskHeartbeatAtField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "heartbeat_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskHeartbeatAtField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "heartbeat_at", Direction: "DESC"}
+}
+
 // AttemptsField provides query operations for the attempts field.
 type agentTaskAttemptsField struct{}
 
@@ -694,6 +788,295 @@ func (agentTaskMaxAttemptsField) Desc() AgentTaskOrderByClause {
 	return AgentTaskOrderByClause{Field: "max_attempts", Direction: "DESC"}
 }
 
+// NextAttemptAtField provides query operations for the nextAttemptAt field.
+type agentTaskNextAttemptAtField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskNextAttemptAtField) Equals(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskNextAttemptAtField) Not(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskNextAttemptAtField) In(vals ...time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskNextAttemptAtField) NotIn(vals ...time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (agentTaskNextAttemptAtField) Lt(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (agentTaskNextAttemptAtField) Lte(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (agentTaskNextAttemptAtField) Gt(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (agentTaskNextAttemptAtField) Gte(v time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "next_attempt_at", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskNextAttemptAtField) Set(v time.Time) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "next_attempt_at", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskNextAttemptAtField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "next_attempt_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskNextAttemptAtField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "next_attempt_at", Direction: "DESC"}
+}
+
+// IdempotencyKeyField provides query operations for the idempotencyKey field.
+type agentTaskIdempotencyKeyField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskIdempotencyKeyField) Equals(v *string) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskIdempotencyKeyField) Not(v *string) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskIdempotencyKeyField) In(vals ...*string) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskIdempotencyKeyField) NotIn(vals ...*string) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (agentTaskIdempotencyKeyField) Contains(v string) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (agentTaskIdempotencyKeyField) StartsWith(v string) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (agentTaskIdempotencyKeyField) EndsWith(v string) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (agentTaskIdempotencyKeyField) IsNull() AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "idempotency_key", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskIdempotencyKeyField) Set(v string) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "idempotency_key", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (agentTaskIdempotencyKeyField) SetNull() AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "idempotency_key", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskIdempotencyKeyField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "idempotency_key", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskIdempotencyKeyField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "idempotency_key", Direction: "DESC"}
+}
+
+// CancelRequestedAtField provides query operations for the cancelRequestedAt field.
+type agentTaskCancelRequestedAtField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskCancelRequestedAtField) Equals(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskCancelRequestedAtField) Not(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskCancelRequestedAtField) In(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskCancelRequestedAtField) NotIn(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (agentTaskCancelRequestedAtField) Lt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (agentTaskCancelRequestedAtField) Lte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (agentTaskCancelRequestedAtField) Gt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (agentTaskCancelRequestedAtField) Gte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (agentTaskCancelRequestedAtField) IsNull() AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "cancel_requested_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskCancelRequestedAtField) Set(v time.Time) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "cancel_requested_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (agentTaskCancelRequestedAtField) SetNull() AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "cancel_requested_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskCancelRequestedAtField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "cancel_requested_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskCancelRequestedAtField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "cancel_requested_at", Direction: "DESC"}
+}
+
+// TimeoutAtField provides query operations for the timeoutAt field.
+type agentTaskTimeoutAtField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskTimeoutAtField) Equals(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskTimeoutAtField) Not(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskTimeoutAtField) In(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskTimeoutAtField) NotIn(vals ...*time.Time) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (agentTaskTimeoutAtField) Lt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (agentTaskTimeoutAtField) Lte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (agentTaskTimeoutAtField) Gt(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (agentTaskTimeoutAtField) Gte(v *time.Time) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (agentTaskTimeoutAtField) IsNull() AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "timeout_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskTimeoutAtField) Set(v time.Time) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "timeout_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (agentTaskTimeoutAtField) SetNull() AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "timeout_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskTimeoutAtField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "timeout_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskTimeoutAtField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "timeout_at", Direction: "DESC"}
+}
+
 // ResultJsonField provides query operations for the resultJson field.
 type agentTaskResultJsonField struct{}
 
@@ -748,6 +1131,62 @@ func (agentTaskResultJsonField) Asc() AgentTaskOrderByClause {
 // Desc returns a descending order clause for this field.
 func (agentTaskResultJsonField) Desc() AgentTaskOrderByClause {
 	return AgentTaskOrderByClause{Field: "result_json", Direction: "DESC"}
+}
+
+// CompensationJsonField provides query operations for the compensationJson field.
+type agentTaskCompensationJsonField struct{}
+
+// Equals creates an equality condition.
+func (agentTaskCompensationJsonField) Equals(v *json.RawMessage) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "compensation_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (agentTaskCompensationJsonField) Not(v *json.RawMessage) AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "compensation_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (agentTaskCompensationJsonField) In(vals ...*json.RawMessage) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "compensation_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (agentTaskCompensationJsonField) NotIn(vals ...*json.RawMessage) AgentTaskWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AgentTaskWhereClause{Field: "compensation_json", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (agentTaskCompensationJsonField) IsNull() AgentTaskWhereClause {
+	return AgentTaskWhereClause{Field: "compensation_json", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (agentTaskCompensationJsonField) Set(v json.RawMessage) AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "compensation_json", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (agentTaskCompensationJsonField) SetNull() AgentTaskSetClause {
+	return AgentTaskSetClause{Field: "compensation_json", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (agentTaskCompensationJsonField) Asc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "compensation_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (agentTaskCompensationJsonField) Desc() AgentTaskOrderByClause {
+	return AgentTaskOrderByClause{Field: "compensation_json", Direction: "DESC"}
 }
 
 // ErrorField provides query operations for the error field.
@@ -994,25 +1433,31 @@ type AgentTaskGroupByResult struct {
 
 // AgentTaskCreateInput holds data for creating a AgentTask record.
 type AgentTaskCreateInput struct {
-	Id          string
-	NodeId      string
-	Kind        string
-	Payload     json.RawMessage
-	Status      model.JobStatus
-	LeaseOwner  **string
-	LeaseUntil  **time.Time
-	Attempts    int
-	MaxAttempts int
-	ResultJson  **json.RawMessage
-	Error       **string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Node        *NodeCreateNestedInput
+	Id                string
+	NodeId            string
+	Kind              string
+	Payload           json.RawMessage
+	Status            model.JobStatus
+	LeaseOwner        **string
+	LeaseUntil        **time.Time
+	HeartbeatAt       **time.Time
+	Attempts          int
+	MaxAttempts       int
+	NextAttemptAt     time.Time
+	IdempotencyKey    **string
+	CancelRequestedAt **time.Time
+	TimeoutAt         **time.Time
+	ResultJson        **json.RawMessage
+	CompensationJson  **json.RawMessage
+	Error             **string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Node              *NodeCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d AgentTaskCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.NodeId, d.Kind, d.Payload, d.Status, d.LeaseOwner, d.LeaseUntil, d.Attempts, d.MaxAttempts, d.ResultJson, d.Error, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.NodeId, d.Kind, d.Payload, d.Status, d.LeaseOwner, d.LeaseUntil, d.HeartbeatAt, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.IdempotencyKey, d.CancelRequestedAt, d.TimeoutAt, d.ResultJson, d.CompensationJson, d.Error, d.CreatedAt, d.UpdatedAt}
 }
 
 // AgentTaskCreateNestedInput supports nested creates and connects.
@@ -1023,5 +1468,6 @@ type AgentTaskCreateNestedInput struct {
 
 // AgentTaskWhereUniqueInput identifies a unique AgentTask record.
 type AgentTaskWhereUniqueInput struct {
-	Id *string
+	Id             *string
+	IdempotencyKey **string
 }

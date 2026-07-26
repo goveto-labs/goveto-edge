@@ -10,6 +10,7 @@ import {
     HelpCircle,
     KeyRound,
     LayoutDashboard,
+    ListTodo,
     LogOut,
     Rocket,
     Server,
@@ -49,6 +50,7 @@ export const nav: NavItemConfig[] = [
     },
     { path: '/dns', label: 'DNS', icon: Cloud },
     { path: '/publish', label: 'Publish Jobs', icon: Rocket },
+    { path: '/jobs', label: 'Jobs', icon: ListTodo },
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 

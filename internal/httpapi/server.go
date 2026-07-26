@@ -20,6 +20,7 @@ import (
 	dnsapi "goveto-edge/internal/httpapi/dns"
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/initialization"
+	jobsapi "goveto-edge/internal/httpapi/jobs"
 	"goveto-edge/internal/httpapi/nodes"
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
@@ -63,6 +64,7 @@ func New(
 	nodes.Register(e, orm, installQueue, credentialCipher, authority, gateway, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
+	jobsapi.Register(e, orm, publishService)
 	var analyticsData *analytics.Store
 	if len(analyticsStore) > 0 {
 		analyticsData = analyticsStore[0]

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -27,11 +29,12 @@ type Service struct {
 	db          *client.Client
 	cipher      *node.CredentialCipher
 	gateway     *edgecontrol.Gateway
+	jobs        *jobqueue.Manager
 	concurrency int
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
-	return &Service{db: db, cipher: cipher, gateway: gateway, concurrency: 8}
+	return &Service{db: db, cipher: cipher, gateway: gateway, jobs: jobqueue.New(db), concurrency: 8}
 }
 
 // EnqueueCluster republishes every site after the cluster's available node set
@@ -53,8 +56,31 @@ func (s *Service) EnqueueCluster(ctx context.Context, clusterID string) error {
 }
 
 func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob, error) {
+	return s.EnqueueIdempotent(ctx, siteID, "")
+}
+
+func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey string) (*model.PublishJob, error) {
+	if err := jobqueue.ValidateIdempotencyKey(idempotencyKey); err != nil {
+		return nil, err
+	}
 	var job *model.PublishJob
 	err := s.db.Tx(ctx, func(tx *client.Client) error {
+		if idempotencyKey != "" {
+			if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", "publish:"+idempotencyKey); err != nil {
+				return err
+			}
+			existing, err := tx.PublishJob.Query().Where(query.PublishJob.IdempotencyKey.Equals(&idempotencyKey)).First(ctx)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				if existing.SiteId != siteID {
+					return fmt.Errorf("%w: key is already used by another publish request", jobqueue.ErrIdempotencyConflict)
+				}
+				job = existing
+				return nil
+			}
+		}
 		// Serialize version allocation and the active-job check per site.
 		if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", siteID); err != nil {
 			return err
@@ -122,12 +148,16 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 				return err
 			}
 
+			sets := []query.PublishJobSetClause{query.PublishJob.Targets.Set(targetJSON)}
+			if idempotencyKey != "" && pending.IdempotencyKey == nil {
+				sets = append(sets, query.PublishJob.IdempotencyKey.Set(idempotencyKey))
+			}
 			job, err = tx.PublishJob.Update().
 				Where(
 					query.PublishJob.Id.Equals(pending.Id),
 					query.PublishJob.Status.Equals(model.JobStatusPENDING),
 				).
-				Set(query.PublishJob.Targets.Set(targetJSON)).
+				Set(sets...).
 				Do(ctx)
 			return err
 		}
@@ -144,14 +174,16 @@ func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob
 			return err
 		}
 
-		job, err = tx.PublishJob.Create().
-			Set(
-				query.PublishJob.SiteId.Set(siteID),
-				query.PublishJob.Version.Set(version),
-				query.PublishJob.Targets.Set(targetJSON),
-				query.PublishJob.Status.Set(model.JobStatusPENDING),
-			).
-			Do(ctx)
+		sets := []query.PublishJobSetClause{
+			query.PublishJob.SiteId.Set(siteID),
+			query.PublishJob.Version.Set(version),
+			query.PublishJob.Targets.Set(targetJSON),
+			query.PublishJob.Status.Set(model.JobStatusPENDING),
+		}
+		if idempotencyKey != "" {
+			sets = append(sets, query.PublishJob.IdempotencyKey.Set(idempotencyKey))
+		}
+		job, err = tx.PublishJob.Create().Set(sets...).Do(ctx)
 		return err
 	})
 	return job, err
@@ -182,14 +214,19 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) runOne(ctx context.Context) {
-	jobs, err := client.Raw[model.PublishJob](ctx, s.db, `UPDATE publish_jobs SET status = 'RUNNING', updated_at = NOW()
-		WHERE id = (SELECT id FROM publish_jobs WHERE status = 'PENDING' ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
-		RETURNING id, site_id, version, targets, status, result_json, created_at, updated_at`)
-	if err != nil || len(jobs) == 0 {
-		return
+	_, err := s.jobs.RunOne(ctx, jobqueue.Publish, 15*time.Minute, func(runCtx context.Context, lease jobqueue.Lease) jobqueue.Outcome {
+		job, loadErr := s.db.PublishJob.FindUnique(runCtx, query.PublishJob.Id.Equals(lease.ID))
+		if loadErr != nil || job == nil {
+			if loadErr == nil {
+				loadErr = errors.New("publish job not found")
+			}
+			return jobqueue.Outcome{Err: loadErr, Retryable: true}
+		}
+		return s.execute(runCtx, job)
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("publish job worker", "error", err)
 	}
-	job := &jobs[0]
-	_ = s.execute(ctx, job)
 }
 
 type target struct {
@@ -202,10 +239,14 @@ type targetResult struct {
 	Error      string `json:"error,omitempty"`
 }
 
-func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
+func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.Outcome {
 	site, err := s.db.Site.FindUnique(ctx, query.Site.Id.Equals(job.SiteId))
 	if err != nil {
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
+		return publishOutcome(model.JobStatusFAILED, nil, err, true)
+	}
+	if site == nil {
+		err = errors.New("publish site not found")
+		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
 
 	version, err := s.db.ConfigVersion.Query().
@@ -215,16 +256,20 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 		).
 		First(ctx)
 	if err != nil {
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
+		return publishOutcome(model.JobStatusFAILED, nil, err, true)
+	}
+	if version == nil {
+		err = errors.New("publish config version not found")
+		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
 
 	var config edgeprotocol.SiteConfig
 	var targets []target
 	if err = json.Unmarshal(version.ConfigJson, &config); err != nil {
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
+		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
 	if err = json.Unmarshal(job.Targets, &targets); err != nil {
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, nil, err)
+		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
 	results := s.fanout(ctx, config, targets)
 	succeeded, failed := successfulTargets(results, targets)
@@ -233,7 +278,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 			Where(query.Site.Id.Equals(site.Id)).
 			Set(query.Site.Version.Set(job.Version)).
 			Do(ctx); err != nil {
-			return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+			return publishOutcome(model.JobStatusFAILED, results, err, true)
 		}
 
 		if _, err = s.db.ConfigVersion.Update().
@@ -243,17 +288,34 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 			).
 			Set(query.ConfigVersion.Status.Set(model.ConfigStatusPUBLISHED)).
 			DoMany(ctx); err != nil {
-			return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+			return publishOutcome(model.JobStatusFAILED, results, err, true)
 		}
 
 		for _, item := range succeeded {
 			if err = s.setNodeVersion(
 				ctx, item.NodeID, site.Id, job.Version, model.ConfigStatusPUBLISHED,
 			); err != nil {
-				return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+				return publishOutcome(model.JobStatusFAILED, results, err, true)
 			}
 		}
-		return s.finish(ctx, job.Id, model.JobStatusSUCCEEDED, results, nil)
+		return publishOutcome(model.JobStatusSUCCEEDED, results, nil, false)
+	}
+	if len(succeeded) == 0 {
+		if _, err = s.db.ConfigVersion.Update().
+			Where(
+				query.ConfigVersion.SiteId.Equals(site.Id),
+				query.ConfigVersion.Version.Equals(job.Version),
+			).
+			Set(query.ConfigVersion.Status.Set(model.ConfigStatusFAILED)).
+			DoMany(ctx); err != nil {
+			return publishOutcome(model.JobStatusFAILED, results, err, true)
+		}
+		return publishOutcome(
+			model.JobStatusFAILED,
+			results,
+			errors.New("all nodes rejected the configuration"),
+			false,
+		)
 	}
 
 	rollbackVersion := job.Version + 1
@@ -297,7 +359,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 		Set(query.ConfigVersion.Status.Set(model.ConfigStatusFAILED)).
 		DoMany(ctx); err != nil {
 		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+		return publishOutcome(model.JobStatusFAILED, results, err, true)
 	}
 
 	rollbackStatus := model.ConfigStatusFAILED
@@ -315,7 +377,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 		).
 		Do(ctx); err != nil {
 		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-		return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+		return publishOutcome(model.JobStatusFAILED, results, err, true)
 	}
 
 	if rollbackComplete {
@@ -324,7 +386,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 			Set(query.Site.Version.Set(rollbackVersion)).
 			Do(ctx); err != nil {
 			s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
-			return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
+			return publishOutcome(model.JobStatusFAILED, results, err, true)
 		}
 	}
 
@@ -346,7 +408,9 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 		rollbackErr = publishErr
 	}
 	s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, rollbackErr)
-	return s.finish(ctx, job.Id, model.JobStatusFAILED, results, publishErr)
+	// An agent rejection is a business failure. Retrying the same immutable
+	// version would repeat side effects and collide with the rollback version.
+	return publishOutcome(model.JobStatusFAILED, results, publishErr, false)
 }
 
 func (s *Service) recordRollback(
@@ -421,19 +485,22 @@ func successfulTargets(results []targetResult, targets []target) ([]target, []ta
 	return success, failed
 }
 
-func (s *Service) finish(ctx context.Context, jobID string, status model.JobStatus, results any, executionErr error) error {
-	payload, _ := json.Marshal(map[string]any{"results": results, "error": errorString(executionErr)})
-	_, err := s.db.PublishJob.Update().
-		Where(query.PublishJob.Id.Equals(jobID)).
-		Set(
-			query.PublishJob.Status.Set(status),
-			query.PublishJob.ResultJson.Set(payload),
-		).
-		Do(ctx)
-	if err != nil {
-		return err
+func publishOutcome(status model.JobStatus, results any, executionErr error, retryable bool) jobqueue.Outcome {
+	result := map[string]any{"results": results, "error": errorString(executionErr)}
+	var compensation any
+	if targetResults, ok := results.([]targetResult); ok {
+		for _, item := range targetResults {
+			if item.RolledBack {
+				retryable = false
+				compensation = map[string]any{"rollback_results": targetResults}
+				break
+			}
+		}
 	}
-	return executionErr
+	if status == model.JobStatusSUCCEEDED {
+		retryable = false
+	}
+	return jobqueue.Outcome{Result: result, Compensation: compensation, Err: executionErr, Retryable: retryable}
 }
 func errorString(err error) string {
 	if err == nil {

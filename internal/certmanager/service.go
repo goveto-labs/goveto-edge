@@ -12,7 +12,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +21,7 @@ import (
 
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnsprovider"
+	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -38,14 +38,16 @@ type Service struct {
 	db        *client.Client
 	cipher    *node.CredentialCipher
 	publisher Publisher
+	jobs      *jobqueue.Manager
 	httpState sync.Map
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher, publisher Publisher) *Service {
-	return &Service{db: db, cipher: cipher, publisher: publisher}
+	return &Service{db: db, cipher: cipher, publisher: publisher, jobs: jobqueue.New(db)}
 }
 
 func (s *Service) Run(ctx context.Context) {
+	go s.reconcileTerminalJobs(ctx)
 	jobTicker := time.NewTicker(2 * time.Second)
 	lifecycleTicker := time.NewTicker(time.Hour)
 	defer jobTicker.Stop()
@@ -60,6 +62,37 @@ func (s *Service) Run(ctx context.Context) {
 			s.runOne(ctx)
 		case <-lifecycleTicker.C:
 			s.reconcileLifecycle(ctx)
+		}
+	}
+}
+
+func (s *Service) reconcileTerminalJobs(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		_, err := s.db.RawExec(ctx, `WITH latest AS (
+			SELECT DISTINCT ON (certificate_id) certificate_id, status, error FROM certificate_jobs
+			ORDER BY certificate_id, updated_at DESC
+		) UPDATE certificates c SET status=CASE WHEN j.status='CANCELLED' THEN
+			CASE WHEN c.expires_at IS NULL THEN 'PENDING'
+				WHEN c.expires_at<=NOW() THEN 'EXPIRED'
+				WHEN c.expires_at<=NOW()+(c.renew_before_days*INTERVAL '1 day') THEN 'EXPIRING'
+				ELSE c.status END
+			ELSE 'RENEWAL_FAILED' END,
+			last_renewal_error=CASE WHEN j.status='CANCELLED' THEN NULL
+				ELSE COALESCE(j.error, 'certificate lifecycle job ended without completing') END,
+			updated_at=NOW() FROM latest j WHERE c.id=j.certificate_id
+			AND j.status IN ('FAILED','DEAD_LETTER','CANCELLED')
+			AND c.status IN ('PENDING','DEPLOYING') AND NOT EXISTS (
+				SELECT 1 FROM certificate_jobs active WHERE active.certificate_id=c.id
+				AND active.status IN ('PENDING','RUNNING'))`)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("reconcile terminal certificate jobs", "error", err)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
 		}
 	}
 }
@@ -113,21 +146,31 @@ func (s *Service) Enqueue(ctx context.Context, certificateID string, operation m
 }
 
 func (s *Service) enqueue(ctx context.Context, certificateID string, operation model.CertificateOperation) (*model.CertificateJob, bool, error) {
-	active, err := s.db.CertificateJob.Query().Where(
-		query.CertificateJob.CertificateId.Equals(certificateID),
-		query.CertificateJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
-	).OrderBy(query.CertificateJob.CreatedAt.Desc()).First(ctx)
-	if err != nil {
-		return nil, false, err
-	}
-	if active != nil {
-		return active, false, nil
-	}
-	job, err := s.db.CertificateJob.Create().Set(
-		query.CertificateJob.CertificateId.Set(certificateID),
-		query.CertificateJob.Operation.Set(operation),
-	).Do(ctx)
-	return job, err == nil, err
+	var job *model.CertificateJob
+	created := false
+	err := s.db.Tx(ctx, func(tx *client.Client) error {
+		if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", "certificate-job:"+certificateID); err != nil {
+			return err
+		}
+		active, err := tx.CertificateJob.Query().Where(
+			query.CertificateJob.CertificateId.Equals(certificateID),
+			query.CertificateJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
+		).OrderBy(query.CertificateJob.CreatedAt.Desc()).First(ctx)
+		if err != nil {
+			return err
+		}
+		if active != nil {
+			job = active
+			return nil
+		}
+		job, err = tx.CertificateJob.Create().Set(
+			query.CertificateJob.CertificateId.Set(certificateID),
+			query.CertificateJob.Operation.Set(operation),
+		).Do(ctx)
+		created = err == nil
+		return err
+	})
+	return job, created, err
 }
 
 func (s *Service) Delete(ctx context.Context, certificateID string) error {
@@ -185,28 +228,30 @@ func (s *Service) HTTPChallenge(ctx context.Context, token string) (string, bool
 }
 
 func (s *Service) runOne(ctx context.Context) {
-	jobs, err := client.Raw[model.CertificateJob](ctx, s.db, `UPDATE certificate_jobs SET status = 'RUNNING',
-		attempts = attempts + 1, lease_until = NOW() + INTERVAL '1 hour', updated_at = NOW()
-		WHERE id = (SELECT id FROM certificate_jobs
-			WHERE (status = 'PENDING' OR (status = 'RUNNING' AND lease_until < NOW()))
-			AND next_attempt_at <= NOW() ORDER BY created_at FOR UPDATE SKIP LOCKED LIMIT 1)
-		RETURNING id, certificate_id, operation, status, attempts, max_attempts, next_attempt_at,
-			lease_until, result_json, error, created_at, updated_at`)
-	if err != nil || len(jobs) == 0 {
-		return
+	_, err := s.jobs.RunOne(ctx, jobqueue.Certificate, time.Hour, func(runCtx context.Context, lease jobqueue.Lease) jobqueue.Outcome {
+		job, loadErr := s.db.CertificateJob.FindUnique(runCtx, query.CertificateJob.Id.Equals(lease.ID))
+		if loadErr != nil || job == nil {
+			if loadErr == nil {
+				loadErr = errors.New("certificate job not found")
+			}
+			return jobqueue.Outcome{Err: loadErr, Retryable: true}
+		}
+		executionErr := s.execute(runCtx, job)
+		if executionErr != nil {
+			slog.Warn("certificate lifecycle job", "job_id", job.Id, "certificate_id", job.CertificateId, "error", executionErr)
+		}
+		return jobqueue.Outcome{
+			Result: map[string]any{"completed_at": time.Now().UTC()}, Err: executionErr,
+			Retryable: executionErr != nil, RetryAfter: certificateRetryDelay(lease.Attempt),
+		}
+	})
+	if err != nil && !errors.Is(err, context.Canceled) {
+		slog.Warn("certificate job worker", "error", err)
 	}
-	job := &jobs[0]
-	if err = s.execute(ctx, job); err != nil {
-		slog.Warn("certificate lifecycle job", "job_id", job.Id, "certificate_id", job.CertificateId, "error", err)
-		s.failJob(ctx, job, err)
-		return
-	}
-	result, _ := json.Marshal(map[string]any{"completed_at": time.Now().UTC()})
-	_, _ = s.db.CertificateJob.Update().Where(query.CertificateJob.Id.Equals(job.Id)).Set(
-		query.CertificateJob.Status.Set(model.JobStatusSUCCEEDED),
-		query.CertificateJob.LeaseUntil.SetNull(), query.CertificateJob.Error.SetNull(),
-		query.CertificateJob.ResultJson.Set(result),
-	).Do(ctx)
+}
+
+func certificateRetryDelay(attempt int) time.Duration {
+	return time.Duration(1<<min(attempt, 5)) * time.Minute
 }
 
 func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error {
@@ -431,7 +476,7 @@ func (s *Service) waitPublishJobs(ctx context.Context, ids []string, timeout tim
 			switch job.Status {
 			case model.JobStatusSUCCEEDED:
 				delete(remaining, id)
-			case model.JobStatusFAILED, model.JobStatusCANCELLED:
+			case model.JobStatusFAILED, model.JobStatusDEAD_LETTER, model.JobStatusCANCELLED:
 				return fmt.Errorf("publish job %s ended with %s", id, job.Status)
 			}
 		}
@@ -442,24 +487,6 @@ func (s *Service) waitPublishJobs(ctx context.Context, ids []string, timeout tim
 		}
 	}
 	return nil
-}
-
-func (s *Service) failJob(ctx context.Context, job *model.CertificateJob, executionErr error) {
-	status := model.JobStatusPENDING
-	next := time.Now().UTC().Add(time.Duration(math.Pow(2, float64(job.Attempts))) * time.Minute)
-	if job.Attempts >= job.MaxAttempts {
-		status = model.JobStatusFAILED
-	}
-	_, _ = s.db.CertificateJob.Update().Where(query.CertificateJob.Id.Equals(job.Id)).Set(
-		query.CertificateJob.Status.Set(status), query.CertificateJob.NextAttemptAt.Set(next),
-		query.CertificateJob.LeaseUntil.SetNull(), query.CertificateJob.Error.Set(executionErr.Error()),
-	).Do(ctx)
-	if status == model.JobStatusFAILED {
-		_, _ = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(job.CertificateId)).Set(
-			query.Certificate.Status.Set(model.CertificateStatusRENEWAL_FAILED),
-			query.Certificate.LastRenewalError.Set(executionErr.Error()),
-		).Do(ctx)
-	}
 }
 
 func (s *Service) reconcileLifecycle(ctx context.Context) {

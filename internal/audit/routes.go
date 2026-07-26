@@ -57,4 +57,6 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/publish", "site.publish", "site", "site_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/purge", "cache.purge", "site", "site_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/prewarm", "cache.prewarm", "site", "site_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/jobs/:kind/:job_id/cancel", "job.cancel", "job", "job_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/jobs/:kind/:job_id/replay", "job.replay", "job", "job_id"},
 }

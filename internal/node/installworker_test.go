@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -13,6 +14,24 @@ func TestInstallRejectsMissingSSHInput(t *testing.T) {
 	err := worker.install(context.Background(), InstallPayload{NodeID: "node-1"})
 	if err == nil || err.Error() != "SSH installation input is missing" {
 		t.Fatalf("install() error = %v", err)
+	}
+}
+
+func TestInstallJobTimeoutCoversExecutionLimit(t *testing.T) {
+	if installJobTimeout <= installExecutionTimeout {
+		t.Fatalf("job timeout %s does not cover install limit %s and preparation", installJobTimeout, installExecutionTimeout)
+	}
+}
+
+func TestReconcileTerminalJobsIsDeterministicAndCancellationIsNotFailure(t *testing.T) {
+	for _, fragment := range []string{
+		"ORDER BY node_id, updated_at DESC, id DESC",
+		"CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END",
+		"CASE WHEN j.status='CANCELLED' THEN NULL",
+	} {
+		if !strings.Contains(reconcileTerminalInstallJobsSQL, fragment) {
+			t.Fatalf("reconcile SQL missing %q: %s", fragment, reconcileTerminalInstallJobsSQL)
+		}
 	}
 }
 
@@ -31,6 +50,8 @@ func TestNormalizeArchitecture(t *testing.T) {
 	}
 	if _, err := normalizeArchitecture("riscv64"); err == nil {
 		t.Fatal("expected unsupported architecture error")
+	} else if !errors.Is(err, errPermanentInstallConfiguration) {
+		t.Fatalf("unsupported architecture should be permanent: %v", err)
 	}
 }
 

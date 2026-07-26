@@ -8,6 +8,7 @@ export { ApiError, apiClient, buildQuery } from './client.ts';
 export { clusterApi, clustersApi } from './clusters.ts';
 export { dnsApi } from './dns.ts';
 export { initializationApi } from './initialization.ts';
+export { jobsApi } from './jobs.ts';
 export { nodesApi } from './nodes.ts';
 export { publishApi } from './publish.ts';
 export { purgeApi } from './purge.ts';

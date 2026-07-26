@@ -3,6 +3,7 @@ package edgecontrol
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -119,5 +120,17 @@ func TestNullableHelpers(t *testing.T) {
 	}
 	if nullableString("err") != "err" {
 		t.Fatal("non-empty string should be preserved")
+	}
+}
+
+func TestAbandonedDispatchCancellationCoversPendingAndRunningTasks(t *testing.T) {
+	for _, fragment := range []string{
+		"status='CANCELLED'",
+		"cancel_requested_at=NOW()",
+		"status IN ('PENDING','RUNNING')",
+	} {
+		if !strings.Contains(cancelAbandonedTaskSQL, fragment) {
+			t.Fatalf("dispatch cleanup SQL missing %q: %s", fragment, cancelAbandonedTaskSQL)
+		}
 	}
 }

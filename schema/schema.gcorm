@@ -89,6 +89,7 @@ enum JobStatus {
   RUNNING
   SUCCEEDED
   FAILED
+  DEAD_LETTER
   CANCELLED
 }
 
@@ -180,22 +181,29 @@ model ACMEChallenge {
 }
 
 model AgentTask {
-  id          UUID      @id @default(uuid())
-  nodeId      UUID      @map("node_id")
-  kind        String
-  payload     Json
-  status      JobStatus @default(PENDING)
-  leaseOwner  String?   @map("lease_owner")
-  leaseUntil  DateTime? @map("lease_until")
-  attempts    Int       @default(0)
-  maxAttempts Int       @default(8) @map("max_attempts")
-  resultJson  Json?     @map("result_json")
-  error       String?   @db.Text
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at")
-  node        Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  id                UUID      @id @default(uuid())
+  nodeId            UUID      @map("node_id")
+  kind              String
+  payload           Json
+  status            JobStatus @default(PENDING)
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(8) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  node              Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
 
   @@index([nodeId, status, createdAt])
+  @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
   @@map("agent_tasks")
 }
@@ -264,19 +272,25 @@ model Certificate {
 }
 
 model CertificateJob {
-  id            String               @id @default(uuid())
-  certificateId String               @map("certificate_id")
-  operation     CertificateOperation
-  status        JobStatus            @default(PENDING)
-  attempts      Int                  @default(0)
-  maxAttempts   Int                  @default(5) @map("max_attempts")
-  nextAttemptAt DateTime             @default(now()) @map("next_attempt_at")
-  leaseUntil    DateTime?            @map("lease_until")
-  resultJson    Json?                @map("result_json")
-  error         String?              @db.Text
-  createdAt     DateTime             @default(now()) @map("created_at")
-  updatedAt     DateTime             @default(now()) @updatedAt @map("updated_at")
-  certificate   Certificate          @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+  id                String               @id @default(uuid())
+  certificateId     String               @map("certificate_id")
+  operation         CertificateOperation
+  status            JobStatus            @default(PENDING)
+  attempts          Int                  @default(0)
+  maxAttempts       Int                  @default(5) @map("max_attempts")
+  nextAttemptAt     DateTime             @default(now()) @map("next_attempt_at")
+  leaseOwner        String?              @map("lease_owner")
+  leaseUntil        DateTime?            @map("lease_until")
+  heartbeatAt       DateTime?            @map("heartbeat_at")
+  idempotencyKey    String?              @unique @map("idempotency_key")
+  cancelRequestedAt DateTime?            @map("cancel_requested_at")
+  timeoutAt         DateTime?            @map("timeout_at")
+  resultJson        Json?                @map("result_json")
+  compensationJson  Json?                @map("compensation_json")
+  error             String?              @db.Text
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @default(now()) @updatedAt @map("updated_at")
+  certificate       Certificate          @relation(fields: [certificateId], references: [id], onDelete: Cascade)
 
   @@index([status, nextAttemptAt])
   @@index([certificateId, createdAt])
@@ -435,20 +449,27 @@ model DNSProviderConfig {
 }
 
 model DNSSyncJob {
-  id            String        @id @default(uuid())
-  clusterId     String        @map("cluster_id")
-  siteId        String?       @map("site_id")
-  action        DNSSyncAction
-  status        JobStatus     @default(PENDING)
-  attempts      Int           @default(0)
-  maxAttempts   Int           @default(8) @map("max_attempts")
-  nextAttemptAt DateTime      @default(now()) @map("next_attempt_at")
-  leaseUntil    DateTime?     @map("lease_until")
-  resultJson    Json?         @map("result_json")
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @default(now()) @updatedAt @map("updated_at")
-  cluster       Cluster       @relation(fields: [clusterId], references: [id])
-  site          Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  id                String        @id @default(uuid())
+  clusterId         String        @map("cluster_id")
+  siteId            String?       @map("site_id")
+  action            DNSSyncAction
+  status            JobStatus     @default(PENDING)
+  attempts          Int           @default(0)
+  maxAttempts       Int           @default(8) @map("max_attempts")
+  nextAttemptAt     DateTime      @default(now()) @map("next_attempt_at")
+  leaseOwner        String?       @map("lease_owner")
+  leaseUntil        DateTime?     @map("lease_until")
+  heartbeatAt       DateTime?     @map("heartbeat_at")
+  idempotencyKey    String?       @unique @map("idempotency_key")
+  cancelRequestedAt DateTime?     @map("cancel_requested_at")
+  timeoutAt         DateTime?     @map("timeout_at")
+  resultJson        Json?         @map("result_json")
+  compensationJson  Json?         @map("compensation_json")
+  error             String?       @db.Text
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
+  cluster           Cluster       @relation(fields: [clusterId], references: [id])
+  site              Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
   @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
@@ -465,6 +486,51 @@ model DynamicSetting {
   updatedAt   DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("dynamic_settings")
+}
+
+model InstallJob {
+  id                String    @id @default(uuid())
+  nodeId            UUID      @map("node_id")
+  payload           Json
+  status            JobStatus @default(PENDING)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  node              Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+  @@map("install_jobs")
+}
+
+model JobExecution {
+  id          String    @id @default(uuid())
+  jobType     String    @map("job_type")
+  jobId       String    @map("job_id")
+  attempt     Int
+  workerId    String    @map("worker_id")
+  status      JobStatus @default(RUNNING)
+  startedAt   DateTime  @default(now()) @map("started_at")
+  heartbeatAt DateTime  @default(now()) @map("heartbeat_at")
+  finishedAt  DateTime? @map("finished_at")
+  resultJson  Json?     @map("result_json")
+  error       String?   @db.Text
+
+  @@index([jobType, jobId, startedAt])
+  @@index([workerId, status])
+  @@map("job_executions")
 }
 
 model Node {
@@ -494,6 +560,7 @@ model Node {
   hardwareProfile    NodeHardwareProfile?
   credential         NodeCredential?
   agentTasks         AgentTask[]
+  installJobs        InstallJob[]
   sshCredential      SSHCredential?          @relation(fields: [sshCredentialId], references: [id])
   siteConfigVersions NodeSiteConfigVersion[]
 
@@ -657,33 +724,59 @@ model Policy {
 }
 
 model PublishJob {
-  id         String    @id @default(uuid())
-  siteId     String    @map("site_id")
-  version    BigInt
-  targets    Json
-  status     JobStatus @default(PENDING)
-  resultJson Json?     @map("result_json")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
-  site       Site      @relation(fields: [siteId], references: [id])
+  id                String    @id @default(uuid())
+  siteId            String    @map("site_id")
+  version           BigInt
+  targets           Json
+  status            JobStatus @default(PENDING)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(3) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  site              Site      @relation(fields: [siteId], references: [id])
 
   @@index([siteId, version])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
   @@index([status, createdAt])
   @@map("publish_jobs")
 }
 
 model PurgeJob {
-  id         String    @id @default(uuid())
-  siteId     String    @map("site_id")
-  type       PurgeType
-  value      String?
-  status     JobStatus @default(PENDING)
-  resultJson Json?     @map("result_json")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  updatedAt  DateTime  @default(now()) @updatedAt @map("updated_at")
-  site       Site      @relation(fields: [siteId], references: [id])
+  id                String    @id @default(uuid())
+  siteId            String    @map("site_id")
+  type              PurgeType
+  value             String?
+  status            JobStatus @default(PENDING)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  site              Site      @relation(fields: [siteId], references: [id])
 
   @@index([siteId, status])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
   @@index([status, createdAt])
   @@map("purge_jobs")
 }

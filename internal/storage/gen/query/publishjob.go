@@ -32,15 +32,26 @@ func ApplyPublishJobOptions(opts []PublishJobQueryOption) PublishJobQueryConfig 
 
 // PublishJobQuery is the namespace for PublishJob query operations.
 type PublishJobQuery struct {
-	Id         publishJobIdField
-	SiteId     publishJobSiteIdField
-	Version    publishJobVersionField
-	Targets    publishJobTargetsField
-	Status     publishJobStatusField
-	ResultJson publishJobResultJsonField
-	CreatedAt  publishJobCreatedAtField
-	UpdatedAt  publishJobUpdatedAtField
-	Site       publishJobSiteRelation
+	Id                publishJobIdField
+	SiteId            publishJobSiteIdField
+	Version           publishJobVersionField
+	Targets           publishJobTargetsField
+	Status            publishJobStatusField
+	Attempts          publishJobAttemptsField
+	MaxAttempts       publishJobMaxAttemptsField
+	NextAttemptAt     publishJobNextAttemptAtField
+	LeaseOwner        publishJobLeaseOwnerField
+	LeaseUntil        publishJobLeaseUntilField
+	HeartbeatAt       publishJobHeartbeatAtField
+	IdempotencyKey    publishJobIdempotencyKeyField
+	CancelRequestedAt publishJobCancelRequestedAtField
+	TimeoutAt         publishJobTimeoutAtField
+	ResultJson        publishJobResultJsonField
+	CompensationJson  publishJobCompensationJsonField
+	Error             publishJobErrorField
+	CreatedAt         publishJobCreatedAtField
+	UpdatedAt         publishJobUpdatedAtField
+	Site              publishJobSiteRelation
 }
 
 const PublishJobTable = "publish_jobs"
@@ -49,21 +60,43 @@ const PublishJobSiteIdColumn = "site_id"
 const PublishJobVersionColumn = "version"
 const PublishJobTargetsColumn = "targets"
 const PublishJobStatusColumn = "status"
+const PublishJobAttemptsColumn = "attempts"
+const PublishJobMaxAttemptsColumn = "max_attempts"
+const PublishJobNextAttemptAtColumn = "next_attempt_at"
+const PublishJobLeaseOwnerColumn = "lease_owner"
+const PublishJobLeaseUntilColumn = "lease_until"
+const PublishJobHeartbeatAtColumn = "heartbeat_at"
+const PublishJobIdempotencyKeyColumn = "idempotency_key"
+const PublishJobCancelRequestedAtColumn = "cancel_requested_at"
+const PublishJobTimeoutAtColumn = "timeout_at"
 const PublishJobResultJsonColumn = "result_json"
+const PublishJobCompensationJsonColumn = "compensation_json"
+const PublishJobErrorColumn = "error"
 const PublishJobCreatedAtColumn = "created_at"
 const PublishJobUpdatedAtColumn = "updated_at"
 
 // PublishJobQuery provides query building methods for the PublishJob model.
 var PublishJob = PublishJobQuery{
-	Id:         publishJobIdField{},
-	SiteId:     publishJobSiteIdField{},
-	Version:    publishJobVersionField{},
-	Targets:    publishJobTargetsField{},
-	Status:     publishJobStatusField{},
-	ResultJson: publishJobResultJsonField{},
-	CreatedAt:  publishJobCreatedAtField{},
-	UpdatedAt:  publishJobUpdatedAtField{},
-	Site:       publishJobSiteRelation{},
+	Id:                publishJobIdField{},
+	SiteId:            publishJobSiteIdField{},
+	Version:           publishJobVersionField{},
+	Targets:           publishJobTargetsField{},
+	Status:            publishJobStatusField{},
+	Attempts:          publishJobAttemptsField{},
+	MaxAttempts:       publishJobMaxAttemptsField{},
+	NextAttemptAt:     publishJobNextAttemptAtField{},
+	LeaseOwner:        publishJobLeaseOwnerField{},
+	LeaseUntil:        publishJobLeaseUntilField{},
+	HeartbeatAt:       publishJobHeartbeatAtField{},
+	IdempotencyKey:    publishJobIdempotencyKeyField{},
+	CancelRequestedAt: publishJobCancelRequestedAtField{},
+	TimeoutAt:         publishJobTimeoutAtField{},
+	ResultJson:        publishJobResultJsonField{},
+	CompensationJson:  publishJobCompensationJsonField{},
+	Error:             publishJobErrorField{},
+	CreatedAt:         publishJobCreatedAtField{},
+	UpdatedAt:         publishJobUpdatedAtField{},
+	Site:              publishJobSiteRelation{},
 }
 
 // PublishJobWhereClause represents a WHERE condition for PublishJob.
@@ -435,6 +468,650 @@ func (publishJobStatusField) Desc() PublishJobOrderByClause {
 	return PublishJobOrderByClause{Field: "status", Direction: "DESC"}
 }
 
+// AttemptsField provides query operations for the attempts field.
+type publishJobAttemptsField struct{}
+
+// Equals creates an equality condition.
+func (publishJobAttemptsField) Equals(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobAttemptsField) Not(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobAttemptsField) In(vals ...int) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "attempts", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobAttemptsField) NotIn(vals ...int) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "attempts", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobAttemptsField) Lt(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobAttemptsField) Lte(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobAttemptsField) Gt(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobAttemptsField) Gte(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "attempts", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobAttemptsField) Set(v int) PublishJobSetClause {
+	return PublishJobSetClause{Field: "attempts", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobAttemptsField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "attempts", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobAttemptsField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "attempts", Direction: "DESC"}
+}
+
+// MaxAttemptsField provides query operations for the maxAttempts field.
+type publishJobMaxAttemptsField struct{}
+
+// Equals creates an equality condition.
+func (publishJobMaxAttemptsField) Equals(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobMaxAttemptsField) Not(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobMaxAttemptsField) In(vals ...int) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobMaxAttemptsField) NotIn(vals ...int) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobMaxAttemptsField) Lt(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobMaxAttemptsField) Lte(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobMaxAttemptsField) Gt(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobMaxAttemptsField) Gte(v int) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "max_attempts", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobMaxAttemptsField) Set(v int) PublishJobSetClause {
+	return PublishJobSetClause{Field: "max_attempts", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobMaxAttemptsField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "max_attempts", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobMaxAttemptsField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "max_attempts", Direction: "DESC"}
+}
+
+// NextAttemptAtField provides query operations for the nextAttemptAt field.
+type publishJobNextAttemptAtField struct{}
+
+// Equals creates an equality condition.
+func (publishJobNextAttemptAtField) Equals(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobNextAttemptAtField) Not(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobNextAttemptAtField) In(vals ...time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobNextAttemptAtField) NotIn(vals ...time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobNextAttemptAtField) Lt(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobNextAttemptAtField) Lte(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobNextAttemptAtField) Gt(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobNextAttemptAtField) Gte(v time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "next_attempt_at", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobNextAttemptAtField) Set(v time.Time) PublishJobSetClause {
+	return PublishJobSetClause{Field: "next_attempt_at", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobNextAttemptAtField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "next_attempt_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobNextAttemptAtField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "next_attempt_at", Direction: "DESC"}
+}
+
+// LeaseOwnerField provides query operations for the leaseOwner field.
+type publishJobLeaseOwnerField struct{}
+
+// Equals creates an equality condition.
+func (publishJobLeaseOwnerField) Equals(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobLeaseOwnerField) Not(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobLeaseOwnerField) In(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobLeaseOwnerField) NotIn(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (publishJobLeaseOwnerField) Contains(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (publishJobLeaseOwnerField) StartsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (publishJobLeaseOwnerField) EndsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobLeaseOwnerField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_owner", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobLeaseOwnerField) Set(v string) PublishJobSetClause {
+	return PublishJobSetClause{Field: "lease_owner", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobLeaseOwnerField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "lease_owner", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobLeaseOwnerField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "lease_owner", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobLeaseOwnerField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "lease_owner", Direction: "DESC"}
+}
+
+// LeaseUntilField provides query operations for the leaseUntil field.
+type publishJobLeaseUntilField struct{}
+
+// Equals creates an equality condition.
+func (publishJobLeaseUntilField) Equals(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobLeaseUntilField) Not(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobLeaseUntilField) In(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "lease_until", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobLeaseUntilField) NotIn(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "lease_until", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobLeaseUntilField) Lt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobLeaseUntilField) Lte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobLeaseUntilField) Gt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobLeaseUntilField) Gte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobLeaseUntilField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "lease_until", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobLeaseUntilField) Set(v time.Time) PublishJobSetClause {
+	return PublishJobSetClause{Field: "lease_until", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobLeaseUntilField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "lease_until", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobLeaseUntilField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "lease_until", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobLeaseUntilField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "lease_until", Direction: "DESC"}
+}
+
+// HeartbeatAtField provides query operations for the heartbeatAt field.
+type publishJobHeartbeatAtField struct{}
+
+// Equals creates an equality condition.
+func (publishJobHeartbeatAtField) Equals(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobHeartbeatAtField) Not(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobHeartbeatAtField) In(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobHeartbeatAtField) NotIn(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobHeartbeatAtField) Lt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobHeartbeatAtField) Lte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobHeartbeatAtField) Gt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobHeartbeatAtField) Gte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobHeartbeatAtField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "heartbeat_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobHeartbeatAtField) Set(v time.Time) PublishJobSetClause {
+	return PublishJobSetClause{Field: "heartbeat_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobHeartbeatAtField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "heartbeat_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobHeartbeatAtField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "heartbeat_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobHeartbeatAtField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "heartbeat_at", Direction: "DESC"}
+}
+
+// IdempotencyKeyField provides query operations for the idempotencyKey field.
+type publishJobIdempotencyKeyField struct{}
+
+// Equals creates an equality condition.
+func (publishJobIdempotencyKeyField) Equals(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobIdempotencyKeyField) Not(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobIdempotencyKeyField) In(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobIdempotencyKeyField) NotIn(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (publishJobIdempotencyKeyField) Contains(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (publishJobIdempotencyKeyField) StartsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (publishJobIdempotencyKeyField) EndsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobIdempotencyKeyField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "idempotency_key", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobIdempotencyKeyField) Set(v string) PublishJobSetClause {
+	return PublishJobSetClause{Field: "idempotency_key", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobIdempotencyKeyField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "idempotency_key", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobIdempotencyKeyField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "idempotency_key", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobIdempotencyKeyField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "idempotency_key", Direction: "DESC"}
+}
+
+// CancelRequestedAtField provides query operations for the cancelRequestedAt field.
+type publishJobCancelRequestedAtField struct{}
+
+// Equals creates an equality condition.
+func (publishJobCancelRequestedAtField) Equals(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobCancelRequestedAtField) Not(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobCancelRequestedAtField) In(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobCancelRequestedAtField) NotIn(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobCancelRequestedAtField) Lt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobCancelRequestedAtField) Lte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobCancelRequestedAtField) Gt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobCancelRequestedAtField) Gte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobCancelRequestedAtField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "cancel_requested_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobCancelRequestedAtField) Set(v time.Time) PublishJobSetClause {
+	return PublishJobSetClause{Field: "cancel_requested_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobCancelRequestedAtField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "cancel_requested_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobCancelRequestedAtField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "cancel_requested_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobCancelRequestedAtField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "cancel_requested_at", Direction: "DESC"}
+}
+
+// TimeoutAtField provides query operations for the timeoutAt field.
+type publishJobTimeoutAtField struct{}
+
+// Equals creates an equality condition.
+func (publishJobTimeoutAtField) Equals(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobTimeoutAtField) Not(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobTimeoutAtField) In(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobTimeoutAtField) NotIn(vals ...*time.Time) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (publishJobTimeoutAtField) Lt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (publishJobTimeoutAtField) Lte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (publishJobTimeoutAtField) Gt(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (publishJobTimeoutAtField) Gte(v *time.Time) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobTimeoutAtField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "timeout_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobTimeoutAtField) Set(v time.Time) PublishJobSetClause {
+	return PublishJobSetClause{Field: "timeout_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobTimeoutAtField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "timeout_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobTimeoutAtField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "timeout_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobTimeoutAtField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "timeout_at", Direction: "DESC"}
+}
+
 // ResultJsonField provides query operations for the resultJson field.
 type publishJobResultJsonField struct{}
 
@@ -489,6 +1166,133 @@ func (publishJobResultJsonField) Asc() PublishJobOrderByClause {
 // Desc returns a descending order clause for this field.
 func (publishJobResultJsonField) Desc() PublishJobOrderByClause {
 	return PublishJobOrderByClause{Field: "result_json", Direction: "DESC"}
+}
+
+// CompensationJsonField provides query operations for the compensationJson field.
+type publishJobCompensationJsonField struct{}
+
+// Equals creates an equality condition.
+func (publishJobCompensationJsonField) Equals(v *json.RawMessage) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "compensation_json", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobCompensationJsonField) Not(v *json.RawMessage) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "compensation_json", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobCompensationJsonField) In(vals ...*json.RawMessage) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "compensation_json", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobCompensationJsonField) NotIn(vals ...*json.RawMessage) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "compensation_json", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobCompensationJsonField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "compensation_json", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobCompensationJsonField) Set(v json.RawMessage) PublishJobSetClause {
+	return PublishJobSetClause{Field: "compensation_json", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobCompensationJsonField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "compensation_json", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobCompensationJsonField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "compensation_json", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobCompensationJsonField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "compensation_json", Direction: "DESC"}
+}
+
+// ErrorField provides query operations for the error field.
+type publishJobErrorField struct{}
+
+// Equals creates an equality condition.
+func (publishJobErrorField) Equals(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (publishJobErrorField) Not(v *string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (publishJobErrorField) In(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (publishJobErrorField) NotIn(vals ...*string) PublishJobWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return PublishJobWhereClause{Field: "error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (publishJobErrorField) Contains(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (publishJobErrorField) StartsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (publishJobErrorField) EndsWith(v string) PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (publishJobErrorField) IsNull() PublishJobWhereClause {
+	return PublishJobWhereClause{Field: "error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (publishJobErrorField) Set(v string) PublishJobSetClause {
+	return PublishJobSetClause{Field: "error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (publishJobErrorField) SetNull() PublishJobSetClause {
+	return PublishJobSetClause{Field: "error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (publishJobErrorField) Asc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (publishJobErrorField) Desc() PublishJobOrderByClause {
+	return PublishJobOrderByClause{Field: "error", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -664,20 +1468,31 @@ type PublishJobGroupByResult struct {
 
 // PublishJobCreateInput holds data for creating a PublishJob record.
 type PublishJobCreateInput struct {
-	Id         string
-	SiteId     string
-	Version    int64
-	Targets    json.RawMessage
-	Status     model.JobStatus
-	ResultJson **json.RawMessage
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	Site       *SiteCreateNestedInput
+	Id                string
+	SiteId            string
+	Version           int64
+	Targets           json.RawMessage
+	Status            model.JobStatus
+	Attempts          int
+	MaxAttempts       int
+	NextAttemptAt     time.Time
+	LeaseOwner        **string
+	LeaseUntil        **time.Time
+	HeartbeatAt       **time.Time
+	IdempotencyKey    **string
+	CancelRequestedAt **time.Time
+	TimeoutAt         **time.Time
+	ResultJson        **json.RawMessage
+	CompensationJson  **json.RawMessage
+	Error             **string
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Site              *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d PublishJobCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.SiteId, d.Version, d.Targets, d.Status, d.ResultJson, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.SiteId, d.Version, d.Targets, d.Status, d.Attempts, d.MaxAttempts, d.NextAttemptAt, d.LeaseOwner, d.LeaseUntil, d.HeartbeatAt, d.IdempotencyKey, d.CancelRequestedAt, d.TimeoutAt, d.ResultJson, d.CompensationJson, d.Error, d.CreatedAt, d.UpdatedAt}
 }
 
 // PublishJobCreateNestedInput supports nested creates and connects.
@@ -688,5 +1503,6 @@ type PublishJobCreateNestedInput struct {
 
 // PublishJobWhereUniqueInput identifies a unique PublishJob record.
 type PublishJobWhereUniqueInput struct {
-	Id *string
+	Id             *string
+	IdempotencyKey **string
 }

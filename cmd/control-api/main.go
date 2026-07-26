@@ -147,7 +147,7 @@ func main() {
 	dnsService = dnssync.New(orm, credentialCipher)
 	go dnsService.Run(ctx)
 
-	installQueue := node.NewInstallQueue(redisClient, 0)
+	installQueue := node.NewInstallQueue(orm)
 	go node.NewInstallWorker(orm, installQueue, credentialCipher).Run(ctx)
 	go node.NewLifecycle(orm, 45*time.Second, onNodeStatusChange).Run(ctx)
 

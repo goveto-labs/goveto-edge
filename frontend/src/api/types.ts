@@ -546,9 +546,50 @@ export interface PublishJob {
     site_id: string;
     version?: number;
     status: string;
+    attempts?: number;
+    max_attempts?: number;
+    next_attempt_at?: string;
+    lease_owner?: string;
+    lease_until?: string;
+    heartbeat_at?: string;
+    cancel_requested_at?: string;
+    error?: string;
     created_at: string;
     updated_at?: string;
-    publish_error?: string;
+}
+
+export type ManagedJobKind = 'PUBLISH' | 'PURGE' | 'INSTALL' | 'DNS' | 'CERTIFICATE';
+
+export interface ManagedJob {
+    id: string;
+    kind: ManagedJobKind;
+    resource_id: string;
+    status: string;
+    attempts: number;
+    max_attempts: number;
+    next_attempt_at: string;
+    lease_owner?: string;
+    lease_until?: string;
+    heartbeat_at?: string;
+    cancel_requested_at?: string;
+    timeout_at?: string;
+    result_json?: unknown;
+    compensation_json?: unknown;
+    error?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface JobExecution {
+    id: string;
+    attempt: number;
+    worker_id: string;
+    status: string;
+    started_at: string;
+    heartbeat_at: string;
+    finished_at?: string;
+    result_json?: unknown;
+    error?: string;
 }
 
 export type PurgeType = 'URL' | 'PREFIX' | 'TAG' | 'ALL';
@@ -559,6 +600,14 @@ export interface PurgeJob {
     type: PurgeType;
     value?: string;
     status: string;
+    attempts?: number;
+    max_attempts?: number;
+    next_attempt_at?: string;
+    lease_owner?: string;
+    lease_until?: string;
+    heartbeat_at?: string;
+    cancel_requested_at?: string;
+    error?: string;
     created_at: string;
     updated_at?: string;
 }

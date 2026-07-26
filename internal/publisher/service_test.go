@@ -1,6 +1,7 @@
 package publisher
 
 import (
+	"errors"
 	"testing"
 
 	"goveto-edge/internal/edgeprotocol"
@@ -48,6 +49,14 @@ func TestAllSucceeded(t *testing.T) {
 				t.Fatalf("allSucceeded() = %v, want %v", got, test.want)
 			}
 		})
+	}
+}
+
+func TestPublishOutcomeDoesNotRetryAfterRollback(t *testing.T) {
+	result := []targetResult{{NodeID: "node-1", Success: true, RolledBack: true}}
+	outcome := publishOutcome(model.JobStatusFAILED, result, errors.New("publish rejected"), true)
+	if outcome.Retryable || outcome.Compensation == nil || outcome.Err == nil {
+		t.Fatalf("rollback outcome = %#v", outcome)
 	}
 }
 
