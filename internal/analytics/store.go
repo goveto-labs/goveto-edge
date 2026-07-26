@@ -47,7 +47,12 @@ func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
 		referer,
 		user_agent,
 		country,
-		region
+		region,
+		waf_action,
+		waf_rule_id,
+		waf_source,
+		waf_match,
+		waf_tags
 	)`)
 	if err != nil {
 		return err
@@ -82,6 +87,11 @@ func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
 			e.UserAgent,
 			e.Country,
 			e.Region,
+			e.WAFAction,
+			e.WAFRuleID,
+			e.WAFSource,
+			e.WAFMatch,
+			e.WAFTags,
 		); err != nil {
 			return err
 		}

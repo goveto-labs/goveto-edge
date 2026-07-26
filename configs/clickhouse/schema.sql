@@ -32,13 +32,24 @@ CREATE TABLE IF NOT EXISTS goveto.web_request_logs
     referer String,
     user_agent String,
     country LowCardinality(String),
-    region LowCardinality(String)
+    region LowCardinality(String),
+    waf_action LowCardinality(String),
+    waf_rule_id String,
+    waf_source LowCardinality(String),
+    waf_match LowCardinality(String),
+    waf_tags String
 )
 ENGINE = MergeTree
 PARTITION BY toDate(event_time)
 ORDER BY (cluster_id, site_id, event_time, node_id)
 TTL event_time + INTERVAL 7 DAY DELETE
 SETTINGS index_granularity = 8192;
+
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_action LowCardinality(String);
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_rule_id String;
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_source LowCardinality(String);
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_match LowCardinality(String);
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_tags String;
 
 -- Reusable cluster/node/site usage cube. UUID zero can be used by later
 -- rollups when a dimension is intentionally collapsed.

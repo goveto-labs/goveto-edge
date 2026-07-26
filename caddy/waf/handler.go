@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"hash/fnv"
 	"html/template"
 	"io"
-	"net"
 	"net/http"
 	"net/netip"
 	"regexp"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/google/uuid"
 
 	"goveto-edge/internal/policy"
 )
@@ -25,12 +26,17 @@ type Handler struct {
 	SiteID          string                 `json:"site_id"`
 	ChallengeSecret string                 `json:"challenge_secret,omitempty"`
 	WAF             policy.WAFPolicy       `json:"waf"`
+	Access          policy.AccessPolicy    `json:"access"`
 	RateLimit       policy.RateLimitPolicy `json:"rate_limit"`
 
-	groups       []compiledGroup
-	rateRules    []compiledRateRule
-	inspectBody  bool
-	challengeKey []byte
+	groups         []compiledGroup
+	exceptions     []compiledException
+	rateRules      []compiledRateRule
+	inspectBody    bool
+	challengeKey   []byte
+	access         compiledAccess
+	distributed    distributedStore
+	distributedErr error
 }
 
 type compiledGroup struct {
@@ -42,6 +48,11 @@ type compiledRateRule struct {
 	policy.RateLimitRule
 	conditions compiledConditions
 	limiter    *counterStore
+}
+
+type compiledException struct {
+	ids        map[string]bool
+	conditions compiledConditions
 }
 
 type compiledConditions struct {
@@ -74,6 +85,8 @@ type wafDecision struct {
 	redirectURL    string
 	redirectStatus int
 	tag            string
+	source         string
+	match          string
 }
 
 //go:embed templates/*.html templates/*.js
@@ -99,6 +112,14 @@ func (h *Handler) Provision(_ caddy.Context) error {
 	if err := h.RateLimit.NormalizeAndValidate(); err != nil {
 		return fmt.Errorf("invalid rate-limit policy: %w", err)
 	}
+	if err := h.Access.NormalizeAndValidate(); err != nil {
+		return fmt.Errorf("invalid access policy: %w", err)
+	}
+	compiledAccessPolicy, err := compileAccess(h.Access)
+	if err != nil {
+		return fmt.Errorf("compile access policy: %w", err)
+	}
+	h.access = compiledAccessPolicy
 	if h.hasCaptchaGroup() {
 		key, err := decodeChallengeSecret(h.ChallengeSecret)
 		if err != nil {
@@ -118,6 +139,18 @@ func (h *Handler) Provision(_ caddy.Context) error {
 		}
 		h.inspectBody = h.inspectBody || inspectBody
 		h.groups = append(h.groups, compiledGroup{WAFRuleGroup: group, rules: rules})
+	}
+	h.exceptions = make([]compiledException, 0, len(h.WAF.Exceptions))
+	for _, exception := range h.WAF.Exceptions {
+		if !exception.Enabled {
+			continue
+		}
+		conditions, body, err := compileConditions(exception.Conditions)
+		if err != nil {
+			return err
+		}
+		h.inspectBody = h.inspectBody || body
+		h.exceptions = append(h.exceptions, compiledException{ids: stringSet(exception.RuleIDs), conditions: conditions})
 	}
 	if h.WAF.Enabled && len(h.WAF.Presets) > 0 {
 		h.inspectBody = true
@@ -139,11 +172,24 @@ func (h *Handler) Provision(_ caddy.Context) error {
 			limiter:       limiterFor(h.SiteID, rule.ID),
 		})
 	}
+	if h.RateLimit.Backend == "REDIS" || (h.Access.Enabled && h.Access.TemporaryBlocks) || h.hasCaptchaGroup() {
+		h.distributed, h.distributedErr = configuredRedisStore()
+	}
+	return nil
+}
+
+func (h *Handler) Cleanup() error {
+	if h.access.geo != nil {
+		return h.access.geo.Close()
+	}
 	return nil
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
-	data := requestData{request: r, ip: clientIP(r)}
+	requestID := normalizedRequestID(r.Header.Get("X-Request-ID"))
+	r.Header.Set("X-Request-ID", requestID)
+	w.Header().Set("X-Request-ID", requestID)
+	data := requestData{request: r, ip: h.access.clientIP(r)}
 	if h.inspectBody && r.Body != nil && h.WAF.MaxBodyBytes > 0 {
 		body, err := io.ReadAll(io.LimitReader(r.Body, h.WAF.MaxBodyBytes))
 		if err != nil {
@@ -153,22 +199,47 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 		data.body = string(body)
 	}
 
-	if h.WAF.Enabled {
+	if h.Access.Enabled {
+		if h.Access.TemporaryBlocks {
+			blocked, retryAfter, err := h.temporaryBlocked(r, data.ip)
+			if err != nil && h.Access.TemporaryBlockFailure == "CLOSED" {
+				setSecurityEvent(w.Header(), "ERROR", "access:temporary-block-backend", "access", "backend_unavailable")
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return nil
+			}
+			if blocked {
+				setSecurityEvent(w.Header(), "BLOCK", "access:temporary-block", "access", "temporary_block")
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()+0.5))))
+				http.Error(w, http.StatusText(h.Access.StatusCode), h.Access.StatusCode)
+				return nil
+			}
+		}
+		if decision := h.access.match(r, data.ip); decision != nil {
+			action := "BLOCK"
+			if h.Access.Mode == "MONITOR" {
+				action = "MONITOR"
+			}
+			setSecurityEvent(w.Header(), action, decision.ruleID, "access", decision.reason)
+			if action == "BLOCK" {
+				http.Error(w, http.StatusText(h.Access.StatusCode), h.Access.StatusCode)
+				return nil
+			}
+		}
+	}
+
+	if h.WAF.Enabled && inRollout(h.WAF.RolloutPercentage, h.SiteID+":waf", data) {
 		if decision := h.matchWAF(data); decision != nil {
 			if decision.action == policy.WAFActionAllow {
 				return next.ServeHTTP(w, r)
 			}
 			if decision.action == policy.WAFActionMonitor || h.WAF.Mode == policy.WAFModeMonitor {
-				w.Header().Set("X-Goveto-WAF", "MONITOR")
-				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+				setSecurityEvent(w.Header(), "MONITOR", decision.id, decision.source, decision.match)
 			} else if decision.action == policy.WAFActionTag {
 				appendTag(r.Header, "X-Goveto-WAF-Tags", decision.tag)
-				w.Header().Set("X-Goveto-WAF", "TAG")
-				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+				setSecurityEvent(w.Header(), "TAG", decision.id, decision.source, decision.match)
 				w.Header().Set("X-Goveto-WAF-Tag", decision.tag)
 			} else if decision.action == policy.WAFActionCaptcha && h.hasClearance(r, decision.id, data.ip) {
-				w.Header().Set("X-Goveto-WAF", "CAPTCHA-PASS")
-				w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+				setSecurityEvent(w.Header(), "CAPTCHA-PASS", decision.id, decision.source, decision.match)
 			} else {
 				return h.executeDecision(w, r, data.ip, *decision)
 			}
@@ -183,13 +254,17 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 				continue
 			}
 			key := rateKey(rule.RateLimitRule, data)
-			allowed, retryAfter := rule.limiter.allow(key, now, rule.RateLimitRule)
+			allowed, retryAfter, limiterErr := h.allowRate(r, rule, key, now)
+			if limiterErr != nil {
+				setSecurityEvent(w.Header(), "ERROR", rule.ID, "rate_limit", "backend_unavailable")
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return nil
+			}
 			if allowed {
 				continue
 			}
 			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()+0.5))))
-			w.Header().Set("X-Goveto-WAF", "RATE_LIMIT")
-			w.Header().Set("X-Goveto-WAF-Rule", rule.ID)
+			setSecurityEvent(w.Header(), "RATE_LIMIT", rule.ID, "rate_limit", rule.Key)
 			http.Error(w, http.StatusText(rule.StatusCode), rule.StatusCode)
 			return nil
 		}
@@ -200,23 +275,26 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 
 func (h Handler) matchWAF(data requestData) *wafDecision {
 	for _, group := range h.groups {
-		if group.Action != policy.WAFActionAllow || !group.match(data) {
+		if group.Action != policy.WAFActionAllow || !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) || !group.match(data) {
 			continue
 		}
 		return decisionForGroup(group)
 	}
 	for _, preset := range h.WAF.Presets {
-		if matchPreset(preset, data) {
+		ruleID := "preset:" + preset
+		if !h.excepted(ruleID, data) && matchPreset(preset, data) {
 			return &wafDecision{
-				id:       "preset:" + preset,
+				id:       ruleID,
 				action:   policy.WAFActionShowPage,
 				status:   h.WAF.BlockStatus,
 				response: h.WAF.BlockResponse,
+				source:   h.WAF.Engine + ":" + h.WAF.RuleSetVersion,
+				match:    preset,
 			}
 		}
 	}
 	for _, group := range h.groups {
-		if group.Action != policy.WAFActionAllow && group.match(data) {
+		if group.Action != policy.WAFActionAllow && inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) && !h.excepted(group.ID, data) && group.match(data) {
 			return decisionForGroup(group)
 		}
 	}
@@ -232,13 +310,15 @@ func decisionForGroup(group compiledGroup) *wafDecision {
 		redirectURL:    group.RedirectURL,
 		redirectStatus: group.RedirectStatus,
 		tag:            group.Tag,
+		source:         "custom",
+		match:          "conditions",
 	}
 }
 
 func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip string, decision wafDecision) error {
 	w.Header().Set("Cache-Control", "private, no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("X-Goveto-WAF-Rule", decision.id)
+	setSecurityEvent(w.Header(), decision.action, decision.id, decision.source, decision.match)
 	switch decision.action {
 	case policy.WAFActionShowPage:
 		w.Header().Set("X-Goveto-WAF", "BLOCK")
@@ -271,6 +351,80 @@ func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip stri
 		_, _ = io.WriteString(w, page)
 	}
 	return nil
+}
+
+func (h Handler) excepted(ruleID string, data requestData) bool {
+	for _, exception := range h.exceptions {
+		if (exception.ids[ruleID] || exception.ids["*"]) && exception.conditions.match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+func inRollout(percentage int, salt string, data requestData) bool {
+	if percentage >= 100 {
+		return true
+	}
+	hash := fnv.New32a()
+	_, _ = hash.Write([]byte(salt))
+	_, _ = hash.Write([]byte{0})
+	_, _ = hash.Write([]byte(data.ip))
+	return int(hash.Sum32()%100) < percentage
+}
+
+func setSecurityEvent(header http.Header, action, ruleID, source, match string) {
+	header.Set("X-Goveto-WAF", action)
+	header.Set("X-Goveto-WAF-Rule", ruleID)
+	header.Set("X-Goveto-WAF-Source", source)
+	header.Set("X-Goveto-WAF-Match", match)
+}
+
+func normalizedRequestID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 128 {
+		return uuid.NewString()
+	}
+	for _, character := range value {
+		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') &&
+			!(character >= '0' && character <= '9') && !strings.ContainsRune("._:-", character) {
+			return uuid.NewString()
+		}
+	}
+	return value
+}
+
+func (h Handler) temporaryBlocked(r *http.Request, ip string) (bool, time.Duration, error) {
+	if h.distributedErr != nil {
+		return false, 0, h.distributedErr
+	}
+	if h.distributed == nil {
+		return false, 0, fmt.Errorf("temporary block backend is unavailable")
+	}
+	return h.distributed.Blocked(r.Context(), h.SiteID, ip)
+}
+
+func (h Handler) allowRate(r *http.Request, rule *compiledRateRule, key string, now time.Time) (bool, time.Duration, error) {
+	if h.RateLimit.Backend != "REDIS" {
+		allowed, retry := rule.limiter.allow(key, now, rule.RateLimitRule)
+		return allowed, retry, nil
+	}
+	if h.distributedErr == nil && h.distributed != nil {
+		allowed, retry, err := h.distributed.Allow(r.Context(), h.SiteID, rule.ID, key, rule.RateLimitRule)
+		if err == nil {
+			return allowed, retry, nil
+		}
+		h.distributedErr = err
+	}
+	switch h.RateLimit.FailureMode {
+	case "OPEN":
+		return true, 0, nil
+	case "LOCAL":
+		allowed, retry := rule.limiter.allow(key, now, rule.RateLimitRule)
+		return allowed, retry, nil
+	default:
+		return false, 0, fmt.Errorf("Redis rate-limit backend is unavailable: %w", h.distributedErr)
+	}
 }
 
 func writeWAFResponse(w http.ResponseWriter, status int, ruleID string, response policy.WAFResponse) {
@@ -466,6 +620,8 @@ func rateKey(rule policy.RateLimitRule, data requestData) string {
 		return data.ip
 	case "CLIENT_IP_PATH":
 		return data.ip + "\x00" + data.request.URL.Path
+	case "PATH":
+		return data.request.URL.Path
 	case "HEADER":
 		if value := data.request.Header.Get(rule.KeyName); value != "" {
 			return value
@@ -481,14 +637,6 @@ func rateKey(rule policy.RateLimitRule, data requestData) string {
 		return "global"
 	}
 	return ""
-}
-
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
-	}
-	return strings.Trim(r.RemoteAddr, "[]")
 }
 
 func combine(operator string, values []bool) bool {
@@ -595,4 +743,5 @@ func (s *counterStore) allow(key string, now time.Time, rule policy.RateLimitRul
 }
 
 var _ caddy.Provisioner = (*Handler)(nil)
+var _ caddy.CleanerUpper = (*Handler)(nil)
 var _ caddyhttp.MiddlewareHandler = (*Handler)(nil)

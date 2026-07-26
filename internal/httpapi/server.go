@@ -85,7 +85,7 @@ func New(
 	if len(analyticsStore) > 0 {
 		analyticsData = analyticsStore[0]
 	}
-	sites.Register(e, orm, publishService, analyticsData)
+	sites.Register(e, orm, publishService, analyticsData, redisClient)
 
 	if analyticsData != nil {
 		analyticsapi.Register(e, orm, analyticsData)

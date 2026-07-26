@@ -35,6 +35,11 @@ type WebRequestLog struct {
 	UserAgent           string
 	Country             string
 	Region              string
+	WAFAction           string
+	WAFRuleID           string
+	WAFSource           string
+	WAFMatch            string
+	WAFTags             string
 }
 
 func (e WebRequestLog) IngressBytes() uint64 {

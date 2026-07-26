@@ -509,13 +509,17 @@ func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
 	}}}
 	config.WAF = toMap(t, waf)
 	config.RateLimit = toMap(t, rateLimit)
+	access := cachepolicy.DefaultAccessPolicy()
+	access.Enabled = true
+	access.IPBlocklist = []string{"192.0.2.0/24"}
+	config.Access = toMap(t, access)
 
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"SQL_INJECTION"`, `"window_seconds":10`} {
+	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"SQL_INJECTION"`, `"window_seconds":10`, `"ip_blocklist":["192.0.2.0/24"]`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing security policy %s: %s", expected, text)
 		}

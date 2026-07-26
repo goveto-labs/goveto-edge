@@ -596,6 +596,57 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/analytics_NodeRequestLog'
+    /api/v1/clusters/{cluster_id}/analytics/waf:
+        get:
+            operationId: wafStats
+            summary: WAF rule statistics
+            description: Aggregate WAF, access-control, and rate-limit events for false-positive analysis.
+            tags:
+                - analytics
+            security:
+                - cookie_session: []
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  required: true
+                  schema:
+                    type: string
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: to
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: limit
+                  in: query
+                  schema:
+                    type: integer
+                    minimum: 1
+                    maximum: 500
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum: [ok]
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/analytics_WAFRuleStat'
     /api/v1/clusters/{cluster_id}/analytics/summary:
         get:
             operationId: summary
@@ -3713,7 +3764,7 @@ paths:
         get:
             operationId: getSecurity
             summary: Get site security policy
-            description: Get the WAF and CC rate-limit policy for a site.
+            description: Get WAF, access-control, and rate-limit policy for a site.
             tags:
                 - sites
             security:
@@ -3748,47 +3799,16 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            access:
+                                                $ref: '#/components/schemas/policy_AccessPolicy'
                                             rate_limit:
-                                                type: object
-                                                properties:
-                                                    enabled:
-                                                        type: boolean
-                                                    rules:
-                                                        type: array
-                                                        items:
-                                                            $ref: '#/components/schemas/policy_RateLimitRule'
+                                                $ref: '#/components/schemas/policy_RateLimitPolicy'
                                             waf:
-                                                type: object
-                                                properties:
-                                                    block_response:
-                                                        type: object
-                                                        properties:
-                                                            type:
-                                                                type: string
-                                                                enum:
-                                                                    - DEFAULT
-                                                    block_status:
-                                                        type: number
-                                                    enabled:
-                                                        type: boolean
-                                                    groups:
-                                                        type: array
-                                                        items:
-                                                            $ref: '#/components/schemas/policy_WAFRuleGroup'
-                                                    max_body_bytes:
-                                                        type: number
-                                                    mode:
-                                                        type: string
-                                                        enum:
-                                                            - BLOCK
-                                                    presets:
-                                                        type: array
-                                                        items:
-                                                            type: string
+                                                $ref: '#/components/schemas/policy_WAFPolicy'
         put:
             operationId: updateSecurity
             summary: Update site security policy
-            description: Update WAF and CC rate-limit rules and enqueue a site publish.
+            description: Update WAF, access-control, and rate-limit rules and enqueue a site publish.
             tags:
                 - sites
             security:
@@ -3815,10 +3835,8 @@ paths:
                         schema:
                             type: object
                             properties:
-                                publish_error:
-                                    type: string
-                                publish_job:
-                                    $ref: '#/components/schemas/types_PublishJob'
+                                access:
+                                    $ref: '#/components/schemas/policy_AccessPolicy'
                                 rate_limit:
                                     $ref: '#/components/schemas/policy_RateLimitPolicy'
                                 waf:
@@ -3838,10 +3856,83 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            access:
+                                                $ref: '#/components/schemas/policy_AccessPolicy'
                                             rate_limit:
                                                 $ref: '#/components/schemas/policy_RateLimitPolicy'
                                             waf:
                                                 $ref: '#/components/schemas/policy_WAFPolicy'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/security/blocks:
+        get:
+            operationId: listTemporaryBlocks
+            summary: List temporary IP blocks
+            tags: [sites]
+            security:
+                - cookie_session: []
+            parameters:
+                - $ref: '#/components/parameters/cluster_id'
+                - $ref: '#/components/parameters/site_id'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum: [ok]
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/sites_TemporaryBlock'
+        post:
+            operationId: createTemporaryBlock
+            summary: Create a temporary IP block
+            tags: [sites]
+            security:
+                - cookie_session: []
+            parameters:
+                - $ref: '#/components/parameters/cluster_id'
+                - $ref: '#/components/parameters/site_id'
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/sites_BlockMutation'
+            responses:
+                "201":
+                    description: Created
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum: [ok]
+                                    data:
+                                        $ref: '#/components/schemas/sites_TemporaryBlock'
+        delete:
+            operationId: deleteTemporaryBlock
+            summary: Remove a temporary IP block
+            tags: [sites]
+            security:
+                - cookie_session: []
+            parameters:
+                - $ref: '#/components/parameters/cluster_id'
+                - $ref: '#/components/parameters/site_id'
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/sites_BlockMutation'
+            responses:
+                "204":
+                    description: Removed
     /api/v1/clusters/{cluster_id}/ssh-credentials:
         get:
             operationId: listSSHCredentials
@@ -4362,6 +4453,34 @@ components:
                     type: number
                 upstream_address:
                     type: string
+                waf_action:
+                    type: string
+                waf_match:
+                    type: string
+                waf_rule_id:
+                    type: string
+                waf_source:
+                    type: string
+                waf_tags:
+                    type: string
+        analytics_WAFRuleStat:
+            type: object
+            properties:
+                action:
+                    type: string
+                last_seen:
+                    type: string
+                    format: date-time
+                match:
+                    type: string
+                requests:
+                    type: integer
+                rule_id:
+                    type: string
+                source:
+                    type: string
+                unique_ips:
+                    type: integer
         analytics_NodeRuntimePoint:
             type: object
             properties:
@@ -5635,6 +5754,57 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 username:
                     type: string
+        policy_AccessPolicy:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                mode:
+                    type: string
+                    enum: [BLOCK, MONITOR]
+                status_code:
+                    type: integer
+                    minimum: 400
+                    maximum: 599
+                trusted_proxies:
+                    type: array
+                    items: { type: string }
+                ip_allowlist:
+                    type: array
+                    items: { type: string }
+                ip_blocklist:
+                    type: array
+                    items: { type: string }
+                allowed_countries:
+                    type: array
+                    items: { type: string }
+                blocked_countries:
+                    type: array
+                    items: { type: string }
+                allowed_regions:
+                    type: array
+                    items: { type: string }
+                blocked_regions:
+                    type: array
+                    items: { type: string }
+                allowed_methods:
+                    type: array
+                    items: { type: string }
+                blocked_methods:
+                    type: array
+                    items: { type: string }
+                allowed_referer_hosts:
+                    type: array
+                    items: { type: string }
+                allow_empty_referer:
+                    type: boolean
+                geoip_database:
+                    type: string
+                temporary_blocks:
+                    type: boolean
+                temporary_block_failure:
+                    type: string
+                    enum: [OPEN, CLOSED]
         policy_CacheConditionGroup:
             type: object
             properties:
@@ -5740,6 +5910,12 @@ components:
             properties:
                 enabled:
                     type: boolean
+                backend:
+                    type: string
+                    enum: [LOCAL, REDIS]
+                failure_mode:
+                    type: string
+                    enum: [OPEN, CLOSED, LOCAL]
                 rules:
                     type: array
                     items:
@@ -5796,10 +5972,25 @@ components:
                     type: number
                 enabled:
                     type: boolean
+                engine:
+                    type: string
+                    enum: [GOVETO_COMPAT]
+                rule_set_version:
+                    type: string
+                auto_update:
+                    type: boolean
+                rollout_percentage:
+                    type: integer
+                    minimum: 1
+                    maximum: 100
                 groups:
                     type: array
                     items:
                         $ref: '#/components/schemas/policy_WAFRuleGroup'
+                exceptions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFException'
                 max_body_bytes:
                     type: number
                 mode:
@@ -5827,6 +6018,19 @@ components:
                     type: array
                     items:
                         type: string
+        policy_WAFException:
+            type: object
+            properties:
+                id:
+                    type: string
+                enabled:
+                    type: boolean
+                rule_ids:
+                    type: array
+                    items:
+                        type: string
+                conditions:
+                    $ref: '#/components/schemas/policy_RequestConditions'
         policy_WAFResponse:
             type: object
             properties:
@@ -5847,6 +6051,10 @@ components:
                     type: string
                 operator:
                     type: string
+                rollout_percentage:
+                    type: integer
+                    minimum: 1
+                    maximum: 100
                 redirect_status:
                     type: number
                 redirect_url:
@@ -5921,6 +6129,42 @@ components:
                     type: string
                 site_key:
                     type: string
+        sites_BlockMutation:
+            type: object
+            required: [scope, address]
+            properties:
+                scope:
+                    type: string
+                    enum: [SITE, GLOBAL]
+                address:
+                    type: string
+                duration_seconds:
+                    type: integer
+                    minimum: 1
+                    maximum: 86400
+                reason:
+                    type: string
+                    maxLength: 512
+        sites_TemporaryBlock:
+            type: object
+            properties:
+                scope:
+                    type: string
+                    enum: [SITE, GLOBAL]
+                site_id:
+                    type: string
+                address:
+                    type: string
+                reason:
+                    type: string
+                created_by:
+                    type: string
+                created_at:
+                    type: string
+                    format: date-time
+                expires_at:
+                    type: string
+                    format: date-time
         sites_cacheUpdateResponse:
             type: object
             properties:
@@ -5979,6 +6223,8 @@ components:
                     type: string
                 publish_job:
                     $ref: '#/components/schemas/types_PublishJob'
+                access:
+                    $ref: '#/components/schemas/policy_AccessPolicy'
                 rate_limit:
                     $ref: '#/components/schemas/policy_RateLimitPolicy'
                 waf:
@@ -6349,6 +6595,19 @@ components:
                     type: boolean
                 tls_min_version:
                     $ref: '#/components/schemas/model_TLSMinVersion'
+    parameters:
+        cluster_id:
+            name: cluster_id
+            in: path
+            required: true
+            schema:
+                type: string
+        site_id:
+            name: site_id
+            in: path
+            required: true
+            schema:
+                type: string
     securitySchemes:
         cookie_session:
             type: apiKey

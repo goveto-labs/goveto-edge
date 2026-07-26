@@ -64,6 +64,7 @@ type challengeClaim struct {
 	ScryptR      int    `json:"scrypt_r,omitempty"`
 	ScryptP      int    `json:"scrypt_p,omitempty"`
 	Environment  string `json:"environment,omitempty"`
+	Stateful     bool   `json:"stateful,omitempty"`
 }
 
 type challengeSolution struct {
@@ -143,16 +144,26 @@ func (h Handler) challengeToken(groupID string, r *http.Request, ip string) (str
 	}
 	issuedAt := now.Unix()
 	expiresAt := now.Add(challengeTTL).Unix()
-	token, err := h.signClaim(challengeClaim{
+	claim := challengeClaim{
 		Version: powVersion, Kind: "challenge", SiteID: h.SiteID, GroupID: groupID,
 		Binding: requestBinding(h.challengeKey, r, ip), IssuedAt: issuedAt, ExpiresAt: expiresAt,
 		Algorithm: powAlgorithm, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
 		Salt:   base64.RawURLEncoding.EncodeToString(salt),
 		Target: target, KeySignature: derivedKeySignature, MaxCounter: powCounterMaximum,
 		ScryptN: powScryptN, ScryptR: powScryptR, ScryptP: powScryptP,
-	})
+		Stateful: true,
+	}
+	token, err := h.signClaim(claim)
 	if err != nil {
 		return "", err
+	}
+	store, stateful := h.distributed.(challengeStateStore)
+	if !stateful || store.PutChallenge(r.Context(), token, challengeTTL) != nil {
+		claim.Stateful = false
+		token, err = h.signClaim(claim)
+		if err != nil {
+			return "", err
+		}
 	}
 	powChallengeCache.Store(cacheKey, cachedChallenge{token: token, expiresAt: expiresAt})
 	h.pruneChallengeCache(now)
@@ -211,6 +222,18 @@ func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, group
 	if !ok || !valid || !assessment.Accepted {
 		w.Header().Set("X-Goveto-WAF-Challenge", "rejected")
 		return false
+	}
+	if claim.Stateful {
+		if store, ok := h.distributed.(challengeStateStore); ok {
+			consumed, err := store.ConsumeChallenge(r.Context(), token)
+			if err == nil {
+				powChallengeCache.Delete(h.challengeCacheKey(groupID, r, ip))
+			}
+			if err == nil && !consumed {
+				w.Header().Set("X-Goveto-WAF-Challenge", "replayed")
+				return false
+			}
+		}
 	}
 	now := time.Now()
 	environment, _ := json.Marshal(assessment)

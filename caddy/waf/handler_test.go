@@ -1,11 +1,14 @@
 package waf
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,6 +17,58 @@ import (
 
 	"goveto-edge/internal/policy"
 )
+
+type fakeDistributedStore struct {
+	mu         sync.Mutex
+	counts     map[string]int
+	challenges map[string]bool
+	blocked    bool
+	err        error
+}
+
+func (s *fakeDistributedStore) PutChallenge(_ context.Context, token string, _ time.Duration) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.challenges == nil {
+		s.challenges = map[string]bool{}
+	}
+	s.challenges[token] = true
+	return nil
+}
+
+func (s *fakeDistributedStore) ConsumeChallenge(_ context.Context, token string) (bool, error) {
+	if s.err != nil {
+		return false, s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.challenges[token] {
+		return false, nil
+	}
+	delete(s.challenges, token)
+	return true, nil
+}
+
+func (s *fakeDistributedStore) Allow(_ context.Context, siteID, ruleID, value string, rule policy.RateLimitRule) (bool, time.Duration, error) {
+	if s.err != nil {
+		return false, 0, s.err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.counts == nil {
+		s.counts = map[string]int{}
+	}
+	key := siteID + ":" + ruleID + ":" + value
+	s.counts[key]++
+	return s.counts[key] <= rule.Requests+rule.Burst, time.Minute, nil
+}
+
+func (s *fakeDistributedStore) Blocked(context.Context, string, string) (bool, time.Duration, error) {
+	return s.blocked, time.Minute, s.err
+}
 
 type nextHandler struct {
 	calls int
@@ -121,6 +176,48 @@ func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
 	}
 	if response.Code != http.StatusOK || next.calls != 1 || response.Header().Get("X-Goveto-WAF") != "CAPTCHA-PASS" {
 		t.Fatalf("clearance status=%d calls=%d header=%q", response.Code, next.calls, response.Header().Get("X-Goveto-WAF"))
+	}
+}
+
+func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
+	handler := Handler{SiteID: "captcha-replay", ChallengeSecret: testChallengeSecret(), WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{{
+		ID: "shield", Enabled: true, Operator: "AND", Action: policy.WAFActionCaptcha,
+		Rules: []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/protected"}},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	handler.distributed = &fakeDistributedStore{}
+	ip := "198.51.100.21"
+	base := captchaRequest("http://example.test/protected", ip)
+	token, err := handler.challengeToken("shield", base, ip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim, ok := handler.verifyClaim(token)
+	if !ok || !claim.Stateful {
+		t.Fatal("challenge was not backed by distributed state")
+	}
+	proof := solveChallenge(t, token, testBrowserEnvironment(base))
+	target := "http://example.test/protected?__goveto_challenge=" + url.QueryEscape(token) + "&__goveto_proof=" + proof
+
+	first := httptest.NewRecorder()
+	if err = handler.ServeHTTP(first, captchaRequest(target, ip), caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if first.Code != http.StatusSeeOther {
+		t.Fatalf("first completion status=%d", first.Code)
+	}
+
+	replay := httptest.NewRecorder()
+	if err = handler.ServeHTTP(replay, captchaRequest(target, ip), caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if replay.Code != http.StatusServiceUnavailable || replay.Header().Get("X-Goveto-WAF-Challenge") != "replayed" {
+		t.Fatalf("replay status=%d headers=%v", replay.Code, replay.Header())
 	}
 }
 
@@ -420,6 +517,178 @@ func TestHandlerMonitorAndRateLimit(t *testing.T) {
 		if index == 2 && response.Code != http.StatusTooManyRequests {
 			t.Fatalf("third request status=%d, want 429", response.Code)
 		}
+	}
+}
+
+func TestRateLimitPathCounterAggregatesClients(t *testing.T) {
+	handler := Handler{
+		SiteID: "path-rate", WAF: policy.DefaultWAFPolicy(), Access: policy.DefaultAccessPolicy(),
+		RateLimit: policy.RateLimitPolicy{Enabled: true, Rules: []policy.RateLimitRule{{
+			ID: "downloads", Enabled: true, Key: "PATH", Requests: 1, WindowSeconds: 60,
+		}}},
+	}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	for index, address := range []string{"192.0.2.1:1000", "198.51.100.2:2000"} {
+		request := httptest.NewRequest(http.MethodGet, "http://example.test/download", nil)
+		request.RemoteAddr = address
+		response := httptest.NewRecorder()
+		if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+			t.Fatal(err)
+		}
+		want := http.StatusOK
+		if index == 1 {
+			want = http.StatusTooManyRequests
+		}
+		if response.Code != want {
+			t.Fatalf("request %d status=%d want=%d", index, response.Code, want)
+		}
+	}
+}
+
+func TestAccessPolicyUsesOnlyTrustedProxyChain(t *testing.T) {
+	access := policy.DefaultAccessPolicy()
+	access.Enabled = true
+	access.TrustedProxies = []string{"10.0.0.0/8"}
+	access.IPBlocklist = []string{"198.51.100.0/24"}
+	access.AllowedMethods = []string{"GET"}
+	handler := Handler{SiteID: "access", WAF: policy.DefaultWAFPolicy(), Access: access, RateLimit: policy.DefaultRateLimitPolicy()}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request.RemoteAddr = "10.0.0.2:1234"
+	request.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.8")
+	response := httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Rule") != "access:ip-blocklist" || response.Header().Get("X-Request-ID") == "" {
+		t.Fatalf("trusted proxy access decision status=%d headers=%v", response.Code, response.Header())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request.RemoteAddr = "192.0.2.2:1234"
+	request.Header.Set("X-Forwarded-For", "198.51.100.8")
+	response = httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("untrusted direct client spoofed XFF: status=%d", response.Code)
+	}
+}
+
+func TestDistributedRateLimitIsSharedAcrossHandlers(t *testing.T) {
+	shared := &fakeDistributedStore{}
+	newHandler := func() Handler {
+		handler := Handler{
+			SiteID: "distributed", WAF: policy.DefaultWAFPolicy(), Access: policy.DefaultAccessPolicy(),
+			RateLimit: policy.RateLimitPolicy{Enabled: true, Backend: "REDIS", FailureMode: "CLOSED", Rules: []policy.RateLimitRule{{
+				ID: "api", Enabled: true, Key: "CLIENT_IP_PATH", Requests: 1, WindowSeconds: 60,
+			}}},
+		}
+		if err := handler.Provision(caddy.Context{}); err != nil {
+			t.Fatal(err)
+		}
+		handler.distributed, handler.distributedErr = shared, nil
+		return handler
+	}
+	first, second := newHandler(), newHandler()
+	for index, handler := range []Handler{first, second} {
+		request := httptest.NewRequest(http.MethodGet, "http://example.test/api", nil)
+		request.RemoteAddr = "192.0.2.10:1234"
+		response := httptest.NewRecorder()
+		if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+			t.Fatal(err)
+		}
+		want := http.StatusOK
+		if index == 1 {
+			want = http.StatusTooManyRequests
+		}
+		if response.Code != want {
+			t.Fatalf("node %d status=%d want=%d", index, response.Code, want)
+		}
+	}
+}
+
+func TestRateLimitRedisFailureModes(t *testing.T) {
+	t.Setenv("EDGE_AGENT_REDIS_URL", "")
+	for _, test := range []struct {
+		mode string
+		want int
+	}{{mode: "OPEN", want: http.StatusOK}, {mode: "CLOSED", want: http.StatusServiceUnavailable}, {mode: "LOCAL", want: http.StatusOK}} {
+		t.Run(test.mode, func(t *testing.T) {
+			handler := Handler{SiteID: "failure-" + test.mode, WAF: policy.DefaultWAFPolicy(), Access: policy.DefaultAccessPolicy(), RateLimit: policy.RateLimitPolicy{
+				Enabled: true, Backend: "REDIS", FailureMode: test.mode,
+				Rules: []policy.RateLimitRule{{ID: "rule", Enabled: true, Key: "GLOBAL", Requests: 1, WindowSeconds: 60}},
+			}}
+			if err := handler.Provision(caddy.Context{}); err != nil {
+				t.Fatal(err)
+			}
+			response := httptest.NewRecorder()
+			if err := handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.test/", nil), caddyhttp.Handler(&nextHandler{})); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != test.want {
+				t.Fatalf("status=%d want=%d", response.Code, test.want)
+			}
+		})
+	}
+}
+
+func TestWAFExceptionBypassesSelectedRule(t *testing.T) {
+	wafPolicy := policy.DefaultWAFPolicy()
+	wafPolicy.Enabled = true
+	wafPolicy.Exceptions = []policy.WAFException{{
+		ID: "safe-path", Enabled: true, RuleIDs: []string{"preset:SQL_INJECTION"},
+		Conditions: policy.RequestConditions{Groups: []policy.RequestConditionGroup{{
+			Rules: []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/safe"}},
+		}}},
+	}}
+	handler := Handler{SiteID: "exceptions", WAF: wafPolicy, Access: policy.DefaultAccessPolicy(), RateLimit: policy.DefaultRateLimitPolicy()}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path string
+		want int
+	}{{path: "/safe?id=UNION%20SELECT%20x%20FROM%20y", want: http.StatusOK}, {path: "/unsafe?id=UNION%20SELECT%20x%20FROM%20y", want: http.StatusForbidden}} {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "http://example.test"+test.path, nil)
+		if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != test.want {
+			t.Fatalf("path=%s status=%d want=%d", test.path, response.Code, test.want)
+		}
+	}
+}
+
+func TestTemporaryBlockBackendDecision(t *testing.T) {
+	access := policy.DefaultAccessPolicy()
+	access.Enabled, access.TemporaryBlocks = true, true
+	handler := Handler{SiteID: "blocks", WAF: policy.DefaultWAFPolicy(), Access: access, RateLimit: policy.DefaultRateLimitPolicy()}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	handler.distributed, handler.distributedErr = &fakeDistributedStore{blocked: true}, nil
+	response := httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.test/", nil), caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Match") != "temporary_block" {
+		t.Fatalf("temporary block status=%d headers=%v", response.Code, response.Header())
+	}
+	handler.distributed = &fakeDistributedStore{err: errors.New("redis unavailable")}
+	handler.Access.TemporaryBlockFailure = "OPEN"
+	response = httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "http://example.test/", nil), caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("fail-open temporary block status=%d", response.Code)
 	}
 }
 

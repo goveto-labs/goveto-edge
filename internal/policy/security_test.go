@@ -9,17 +9,61 @@ import (
 func TestDefaultSecurityPoliciesSerializeEmptyCollectionsAsArrays(t *testing.T) {
 	value := struct {
 		WAF       WAFPolicy       `json:"waf"`
+		Access    AccessPolicy    `json:"access"`
 		RateLimit RateLimitPolicy `json:"rate_limit"`
-	}{WAF: DefaultWAFPolicy(), RateLimit: DefaultRateLimitPolicy()}
+	}{WAF: DefaultWAFPolicy(), Access: DefaultAccessPolicy(), RateLimit: DefaultRateLimitPolicy()}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, expected := range []string{`"groups":[]`, `"rules":[]`} {
+	for _, expected := range []string{`"groups":[]`, `"exceptions":[]`, `"rules":[]`, `"ip_allowlist":[]`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("default security JSON missing %s: %s", expected, text)
 		}
+	}
+}
+
+func TestAccessPolicyNormalizesNetworkAndRequestControls(t *testing.T) {
+	policy := DefaultAccessPolicy()
+	policy.Enabled = true
+	policy.TrustedProxies = []string{"10.0.0.1", "10.0.0.0/8"}
+	policy.IPBlocklist = []string{"192.0.2.4"}
+	policy.AllowedMethods = []string{"get", "HEAD"}
+	policy.AllowedRefererHosts = []string{"HTTPS://EXAMPLE.COM/path", "*.static.example"}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.IPBlocklist[0] != "192.0.2.4/32" || policy.AllowedMethods[0] != "GET" || policy.AllowedRefererHosts[0] != "*.static.example" {
+		t.Fatalf("access policy was not normalized: %#v", policy)
+	}
+}
+
+func TestVersionedWAFExceptionsAndDistributedFailureModeValidate(t *testing.T) {
+	waf := DefaultWAFPolicy()
+	waf.Exceptions = []WAFException{{Enabled: true, RuleIDs: []string{"preset:XSS"}}}
+	if err := waf.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if waf.RuleSetVersion != CurrentWAFRuleSetVersion || waf.Exceptions[0].ID == "" {
+		t.Fatalf("WAF version or exception was not normalized: %#v", waf)
+	}
+	rate := RateLimitPolicy{Backend: "redis", FailureMode: "closed"}
+	if err := rate.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if rate.Backend != "REDIS" || rate.FailureMode != "CLOSED" {
+		t.Fatalf("rate backend was not normalized: %#v", rate)
+	}
+}
+
+func TestRateLimitSupportsPathCounter(t *testing.T) {
+	policy := DefaultRateLimitPolicy()
+	policy.Rules = []RateLimitRule{{
+		ID: "path", Enabled: true, Key: "PATH", Requests: 10, WindowSeconds: 60,
+	}}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
 	}
 }
 

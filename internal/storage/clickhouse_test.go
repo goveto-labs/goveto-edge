@@ -72,6 +72,9 @@ func TestEmbeddedClickHouseSchemaIsExecutableStatementList(t *testing.T) {
 	if !strings.Contains(joined, "CREATE TABLE IF NOT EXISTS goveto.origin_health_metrics_minute") {
 		t.Fatal("embedded schema does not create origin health metrics table")
 	}
+	if !strings.Contains(joined, "ADD COLUMN IF NOT EXISTS waf_rule_id") {
+		t.Fatal("embedded schema does not add WAF analytics columns")
+	}
 }
 
 func TestApplyClickHouseDailyRollupReplacesDate(t *testing.T) {

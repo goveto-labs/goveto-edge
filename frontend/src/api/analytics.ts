@@ -8,6 +8,7 @@ import type {
     Summary,
     TopItem,
     TrafficResponse,
+    WAFRuleStat,
 } from './types.ts';
 
 import { get } from './client.ts';
@@ -101,6 +102,13 @@ export const analyticsApi = (clusterId: string) => ({
     siteLogs: (siteId: string, limit = 100) =>
         get<NodeRequestLog[]>(
             clusterPath(clusterId, `/analytics/sites/logs${buildQuery({ site_id: siteId, limit })}`)
+        ),
+    wafStats: (siteId: string, from: string, to: string, limit = 100) =>
+        get<WAFRuleStat[]>(
+            clusterPath(
+                clusterId,
+                `/analytics/waf${buildQuery({ site_id: siteId, from, to, limit })}`
+            )
         ),
 });
 

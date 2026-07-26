@@ -17,13 +17,14 @@ import (
 
 type securityPolicyResponse struct {
 	WAF          securitypolicy.WAFPolicy       `json:"waf"`
+	Access       securitypolicy.AccessPolicy    `json:"access"`
 	RateLimit    securitypolicy.RateLimitPolicy `json:"rate_limit"`
 	PublishJob   *types.PublishJob              `json:"publish_job,omitempty"`
 	PublishError string                         `json:"publish_error,omitempty"`
 }
 
 // @summary Get site security policy
-// @description Get the WAF and CC rate-limit policy for a site.
+// @description Get WAF, access-control, and rate-limit policy for a site.
 // @Tags sites
 func getSecurity(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -37,6 +38,7 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 		}
 		result := securityPolicyResponse{
 			WAF:       securitypolicy.DefaultWAFPolicy(),
+			Access:    securitypolicy.DefaultAccessPolicy(),
 			RateLimit: securitypolicy.DefaultRateLimitPolicy(),
 		}
 		if site.PolicyId != nil {
@@ -50,6 +52,9 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 			if err = json.Unmarshal(stored.CcJson, &result.RateLimit); err != nil {
 				return err
 			}
+			if err = json.Unmarshal(stored.AccessJson, &result.Access); err != nil {
+				return err
+			}
 		}
 		if err = result.WAF.NormalizeAndValidate(); err != nil {
 			return err
@@ -57,12 +62,15 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 		if err = result.RateLimit.NormalizeAndValidate(); err != nil {
 			return err
 		}
+		if err = result.Access.NormalizeAndValidate(); err != nil {
+			return err
+		}
 		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
 // @summary Update site security policy
-// @description Update WAF and CC rate-limit rules and enqueue a site publish.
+// @description Update WAF, access-control, and rate-limit rules and enqueue a site publish.
 // @Tags sites
 func updateSecurity(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -79,12 +87,19 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		if err := input.RateLimit.NormalizeAndValidate(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid rate-limit policy: "+err.Error())
 		}
+		if err := input.Access.NormalizeAndValidate(); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid access policy: "+err.Error())
+		}
 
 		wafJSON, err := json.Marshal(input.WAF)
 		if err != nil {
 			return err
 		}
 		rateLimitJSON, err := json.Marshal(input.RateLimit)
+		if err != nil {
+			return err
+		}
+		accessJSON, err := json.Marshal(input.Access)
 		if err != nil {
 			return err
 		}
@@ -95,7 +110,8 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 			return err
 		}
 		before := securityPolicyResponse{
-			WAF: securitypolicy.DefaultWAFPolicy(), RateLimit: securitypolicy.DefaultRateLimitPolicy(),
+			WAF: securitypolicy.DefaultWAFPolicy(), Access: securitypolicy.DefaultAccessPolicy(),
+			RateLimit: securitypolicy.DefaultRateLimitPolicy(),
 		}
 		if site.PolicyId != nil {
 			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
@@ -108,6 +124,9 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 			if err = json.Unmarshal(stored.CcJson, &before.RateLimit); err != nil {
 				return err
 			}
+			if err = json.Unmarshal(stored.AccessJson, &before.Access); err != nil {
+				return err
+			}
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if site.PolicyId != nil {
@@ -116,6 +135,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 					Set(
 						query.Policy.WafJson.Set(wafJSON),
 						query.Policy.CcJson.Set(rateLimitJSON),
+						query.Policy.AccessJson.Set(accessJSON),
 					).
 					Do(ctx)
 				return updateErr
@@ -131,7 +151,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 					query.Policy.CompressionJson.Set(empty),
 					query.Policy.WafJson.Set(wafJSON),
 					query.Policy.CcJson.Set(rateLimitJSON),
-					query.Policy.AccessJson.Set(empty),
+					query.Policy.AccessJson.Set(accessJSON),
 				).
 				Do(ctx); createErr != nil {
 				return createErr
@@ -146,7 +166,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 			return err
 		}
 
-		response := securityPolicyResponse{WAF: input.WAF, RateLimit: input.RateLimit}
+		response := securityPolicyResponse{WAF: input.WAF, Access: input.Access, RateLimit: input.RateLimit}
 		if job, publishErr := publishService.Enqueue(ctx, site.Id); publishErr == nil {
 			value := types.NewPublishJob(job)
 			response.PublishJob = &value

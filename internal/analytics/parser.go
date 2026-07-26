@@ -92,7 +92,21 @@ func ParseAccess(payload []byte, clusterID, nodeID, siteID string) (WebRequestLo
 		FileExtension:       strings.TrimPrefix(strings.ToLower(filepath.Ext(u.Path)), "."),
 		Referer:             raw.Request.Headers.Get("Referer"),
 		UserAgent:           raw.Request.Headers.Get("User-Agent"),
+		WAFAction:           headerValue(raw.RespHeaders, "X-Goveto-WAF"),
+		WAFRuleID:           headerValue(raw.RespHeaders, "X-Goveto-WAF-Rule"),
+		WAFSource:           headerValue(raw.RespHeaders, "X-Goveto-WAF-Source"),
+		WAFMatch:            headerValue(raw.RespHeaders, "X-Goveto-WAF-Match"),
+		WAFTags:             headerValue(raw.RespHeaders, "X-Goveto-WAF-Tag"),
 	}, nil
+}
+
+func headerValue(headers http.Header, name string) string {
+	for candidate, values := range headers {
+		if strings.EqualFold(candidate, name) && len(values) > 0 {
+			return values[0]
+		}
+	}
+	return ""
 }
 
 func headerBytes(headers http.Header) uint64 {

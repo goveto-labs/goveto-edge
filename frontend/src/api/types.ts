@@ -240,6 +240,21 @@ export interface NodeRequestLog {
     duration_us: number;
     upstream_address: string;
     cache_status: string;
+    waf_action?: string;
+    waf_rule_id?: string;
+    waf_source?: string;
+    waf_match?: string;
+    waf_tags?: string;
+}
+
+export interface WAFRuleStat {
+    rule_id: string;
+    action: string;
+    source: string;
+    match: string;
+    requests: number;
+    unique_ips: number;
+    last_seen: string;
 }
 
 export interface CreateNodeRequest {
@@ -331,6 +346,7 @@ export interface WAFRuleGroup {
     id: string;
     name: string;
     enabled: boolean;
+    rollout_percentage: number;
     operator: string;
     action: string;
     status_code?: number;
@@ -339,6 +355,13 @@ export interface WAFRuleGroup {
     redirect_status?: number;
     tag?: string;
     rules: WAFRequestRule[];
+}
+
+export interface WAFException {
+    id: string;
+    enabled: boolean;
+    rule_ids: string[];
+    conditions: RequestConditions;
 }
 
 export interface WAFResponse {
@@ -374,15 +397,41 @@ export interface RateLimitRule {
 export interface SecurityPolicy {
     waf: {
         enabled: boolean;
+        engine: string;
+        rule_set_version: string;
+        auto_update: boolean;
+        rollout_percentage: number;
         mode: string;
         block_status: number;
         block_response: WAFResponse;
         max_body_bytes: number;
         presets: string[];
         groups: WAFRuleGroup[];
+        exceptions: WAFException[];
+    };
+    access: {
+        enabled: boolean;
+        mode: string;
+        status_code: number;
+        trusted_proxies: string[];
+        ip_allowlist: string[];
+        ip_blocklist: string[];
+        allowed_countries: string[];
+        blocked_countries: string[];
+        allowed_regions: string[];
+        blocked_regions: string[];
+        allowed_methods: string[];
+        blocked_methods: string[];
+        allowed_referer_hosts: string[];
+        allow_empty_referer: boolean;
+        geoip_database?: string;
+        temporary_blocks: boolean;
+        temporary_block_failure: string;
     };
     rate_limit: {
         enabled: boolean;
+        backend: string;
+        failure_mode: string;
         rules: RateLimitRule[];
     };
 }

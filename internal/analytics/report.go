@@ -77,12 +77,18 @@ type NodeRequestLog struct {
 	DurationUS      uint64    `json:"duration_us"`
 	UpstreamAddress string    `json:"upstream_address"`
 	CacheStatus     string    `json:"cache_status"`
+	WAFAction       string    `json:"waf_action,omitempty"`
+	WAFRuleID       string    `json:"waf_rule_id,omitempty"`
+	WAFSource       string    `json:"waf_source,omitempty"`
+	WAFMatch        string    `json:"waf_match,omitempty"`
+	WAFTags         string    `json:"waf_tags,omitempty"`
 }
 
 func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, limit int) ([]NodeRequestLog, error) {
 	rows, err := s.db.Query(ctx, `SELECT
 		event_time, request_id, hostname, method, path, status_code,
-		duration_us, upstream_address, cache_status
+		duration_us, upstream_address, cache_status,
+		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
 	FROM goveto.web_request_logs
 	WHERE cluster_id = ? AND node_id = ?
 	ORDER BY event_time DESC
@@ -94,7 +100,7 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus); err != nil {
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -105,7 +111,8 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, limit int) ([]NodeRequestLog, error) {
 	rows, err := s.db.Query(ctx, `SELECT
 		event_time, request_id, hostname, method, path, status_code,
-		duration_us, upstream_address, cache_status
+		duration_us, upstream_address, cache_status,
+		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
 	FROM goveto.web_request_logs
 	WHERE cluster_id = ? AND site_id = ?
 	ORDER BY event_time DESC
@@ -117,7 +124,40 @@ func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, l
 	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus); err != nil {
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+type WAFRuleStat struct {
+	RuleID    string    `json:"rule_id"`
+	Action    string    `json:"action"`
+	Source    string    `json:"source"`
+	Match     string    `json:"match"`
+	Requests  uint64    `json:"requests"`
+	UniqueIPs uint64    `json:"unique_ips"`
+	LastSeen  time.Time `json:"last_seen"`
+}
+
+func (s *Store) WAFRuleStats(ctx context.Context, clusterID, siteID string, from, to time.Time, limit int) ([]WAFRuleStat, error) {
+	rows, err := s.db.Query(ctx, `SELECT waf_rule_id, waf_action, waf_source, waf_match,
+		count() AS requests, uniqExact(client_ip) AS unique_ips, max(event_time) AS last_seen
+	FROM goveto.web_request_logs
+	WHERE cluster_id = ? AND site_id = ? AND event_time >= ? AND event_time < ? AND waf_action != ''
+	GROUP BY waf_rule_id, waf_action, waf_source, waf_match
+	ORDER BY requests DESC, last_seen DESC
+	LIMIT ?`, clusterID, siteID, from, to, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]WAFRuleStat, 0, limit)
+	for rows.Next() {
+		var item WAFRuleStat
+		if err := rows.Scan(&item.RuleID, &item.Action, &item.Source, &item.Match, &item.Requests, &item.UniqueIPs, &item.LastSeen); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

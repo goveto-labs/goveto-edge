@@ -33,6 +33,29 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime/latest", latestNodeRuntime(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/logs", nodeLogs(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/sites/logs", siteLogs(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/waf", wafStats(store), require...)
+}
+
+func wafStats(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		siteID := c.QueryParam("site_id")
+		if siteID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "site_id is required")
+		}
+		from, to, err := period(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid time range")
+		}
+		limit := 100
+		if value, parseErr := strconv.Atoi(c.QueryParam("limit")); parseErr == nil && value > 0 && value <= 500 {
+			limit = value
+		}
+		items, err := s.WAFRuleStats(c.Request().Context(), c.Param("cluster_id"), siteID, from, to, limit)
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, items)
+	}
 }
 
 func siteLogs(s *analytics.Store) echo.HandlerFunc {

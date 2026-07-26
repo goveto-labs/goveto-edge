@@ -2,6 +2,7 @@ import type {
     RateLimitRule,
     RequestConditionGroup,
     SecurityPolicy,
+    WAFException,
     WAFRequestRule,
     WAFResponse,
     WAFRuleGroup,
@@ -9,7 +10,7 @@ import type {
 
 import { Button, Input } from '@heroui/react';
 import { Bot, Plus, Save, ShieldCheck, Trash2, Zap } from 'lucide-react';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
@@ -48,6 +49,7 @@ const operators = [
 ] as const;
 
 const wafActions = [
+    ['MONITOR', 'Monitor', 'Record the match and continue without enforcement.'],
     ['SHOW_PAGE', 'Show page', 'Return the built-in block page or custom content.'],
     ['BLOCK', 'Block', 'Stop immediately with an empty error response.'],
     ['CAPTCHA', 'CAPTCHA', 'Run the Scrypt five-second shield and browser integrity checks.'],
@@ -65,11 +67,21 @@ function newWAFGroup(): WAFRuleGroup {
         id: crypto.randomUUID(),
         name: 'Custom rule group',
         enabled: true,
+        rollout_percentage: 100,
         operator: 'AND',
         action: 'SHOW_PAGE',
         status_code: 403,
         response: { type: 'DEFAULT' },
         rules: [newRule()],
+    };
+}
+
+function newWAFException(): WAFException {
+    return {
+        id: crypto.randomUUID(),
+        enabled: true,
+        rule_ids: [],
+        conditions: { group_operator: 'AND', groups: [newConditionGroup()] },
     };
 }
 
@@ -99,6 +111,74 @@ function splitValues(value: string) {
         .filter(Boolean);
 }
 
+function CSVInput({
+    label,
+    values,
+    placeholder,
+    onChange,
+}: {
+    label: string;
+    values: string[];
+    placeholder?: string;
+    onChange: (values: string[]) => void;
+}) {
+    return (
+        <div className='flex flex-col gap-1.5 text-sm font-medium'>
+            <span>{label}</span>
+            <ValueListInput
+                ariaLabel={label}
+                placeholder={placeholder}
+                values={values}
+                onChange={onChange}
+            />
+        </div>
+    );
+}
+
+function ValueListInput({
+    ariaLabel,
+    values,
+    placeholder,
+    className,
+    onChange,
+}: {
+    ariaLabel: string;
+    values: string[];
+    placeholder?: string;
+    className?: string;
+    onChange: (values: string[]) => void;
+}) {
+    const [draft, setDraft] = useState(values.join(', '));
+    const focused = useRef(false);
+
+    useEffect(() => {
+        if (!focused.current) setDraft(values.join(', '));
+    }, [values]);
+
+    return (
+        <Input
+            aria-label={ariaLabel}
+            className={className}
+            placeholder={placeholder}
+            value={draft}
+            variant='secondary'
+            onBlur={() => {
+                focused.current = false;
+                const normalized = splitValues(draft);
+                setDraft(normalized.join(', '));
+                onChange(normalized);
+            }}
+            onChange={(event) => {
+                setDraft(event.target.value);
+                onChange(splitValues(event.target.value));
+            }}
+            onFocus={() => {
+                focused.current = true;
+            }}
+        />
+    );
+}
+
 function isValidResponse(response: WAFResponse) {
     if (response.type === 'DEFAULT') return true;
     if (!response.body || new TextEncoder().encode(response.body).length > 131_072) return false;
@@ -114,6 +194,7 @@ function isValidResponse(response: WAFResponse) {
 function LabeledInput({
     label,
     value,
+    placeholder,
     type = 'text',
     min,
     max,
@@ -121,6 +202,7 @@ function LabeledInput({
 }: {
     label: string;
     value: string;
+    placeholder?: string;
     type?: 'text' | 'number';
     min?: number;
     max?: number;
@@ -133,6 +215,7 @@ function LabeledInput({
                 aria-label={label}
                 max={max}
                 min={min}
+                placeholder={placeholder}
                 type={type}
                 value={value}
                 variant='secondary'
@@ -227,17 +310,14 @@ function RuleRow({
                 </div>
             )}
             {needsValues ? (
-                <Input
-                    aria-label='Match values'
+                <ValueListInput
+                    ariaLabel='Match values'
                     className='min-w-0'
                     placeholder={
                         rule.operator === 'CIDR' ? '192.0.2.0/24, 2001:db8::/32' : 'GET, HEAD'
                     }
-                    value={(rule.values ?? []).join(', ')}
-                    variant='secondary'
-                    onChange={(event) =>
-                        onChange({ ...rule, values: splitValues(event.target.value) })
-                    }
+                    values={rule.values ?? []}
+                    onChange={(values) => onChange({ ...rule, values })}
                 />
             ) : needsValue ? (
                 <Input
@@ -606,10 +686,14 @@ export function SiteSecuritySettings({
             policy.waf.block_status <= 599 &&
             policy.waf.max_body_bytes >= 0 &&
             policy.waf.max_body_bytes <= 1_048_576 &&
+            policy.waf.rollout_percentage >= 1 &&
+            policy.waf.rollout_percentage <= 100 &&
             isValidResponse(policy.waf.block_response) &&
             policy.waf.groups.every(
                 (group) =>
                     group.id.trim() &&
+                    group.rollout_percentage >= 1 &&
+                    group.rollout_percentage <= 100 &&
                     group.rules.length > 0 &&
                     (!['SHOW_PAGE', 'BLOCK'].includes(group.action) ||
                         ((group.status_code ?? policy.waf.block_status) >= 400 &&
@@ -619,6 +703,17 @@ export function SiteSecuritySettings({
                     (group.action !== 'REDIRECT' || Boolean(group.redirect_url?.trim())) &&
                     (group.action !== 'TAG' || Boolean(group.tag?.trim()))
             ) &&
+            policy.waf.exceptions.every(
+                (exception) => exception.id.trim() && exception.rule_ids.length > 0
+            ) &&
+            policy.access.status_code >= 400 &&
+            policy.access.status_code <= 599 &&
+            (policy.access.allowed_countries.length === 0 &&
+            policy.access.blocked_countries.length === 0 &&
+            policy.access.allowed_regions.length === 0 &&
+            policy.access.blocked_regions.length === 0
+                ? true
+                : Boolean(policy.access.geoip_database?.trim())) &&
             policy.rate_limit.rules.every(
                 (rule) =>
                     rule.id.trim() &&
@@ -639,6 +734,8 @@ export function SiteSecuritySettings({
         );
     const updateRateRules = (rules: RateLimitRule[]) =>
         onChange({ ...policy, rate_limit: { ...policy.rate_limit, rules } });
+    const updateExceptions = (exceptions: WAFException[]) =>
+        onChange({ ...policy, waf: { ...policy.waf, exceptions } });
 
     return (
         <ContentCard noPadding>
@@ -704,6 +801,47 @@ export function SiteSecuritySettings({
                             })
                         }
                     />
+                </div>
+
+                <div className='grid gap-4 md:grid-cols-4'>
+                    <LabeledInput
+                        label='Rule set version'
+                        value={policy.waf.rule_set_version}
+                        onChange={(ruleSetVersion) =>
+                            onChange({
+                                ...policy,
+                                waf: { ...policy.waf, rule_set_version: ruleSetVersion },
+                            })
+                        }
+                    />
+                    <LabeledInput
+                        label='WAF rollout %'
+                        max={100}
+                        min={1}
+                        type='number'
+                        value={String(policy.waf.rollout_percentage)}
+                        onChange={(value) =>
+                            onChange({
+                                ...policy,
+                                waf: { ...policy.waf, rollout_percentage: Number(value) },
+                            })
+                        }
+                    />
+                    <div className='flex items-end pb-1'>
+                        <ToggleSwitch
+                            isSelected={policy.waf.auto_update}
+                            label='Follow current rule set'
+                            onChange={(autoUpdate) =>
+                                onChange({
+                                    ...policy,
+                                    waf: { ...policy.waf, auto_update: autoUpdate },
+                                })
+                            }
+                        />
+                    </div>
+                    <div className='flex items-end pb-1 text-xs text-muted'>
+                        {policy.waf.engine}
+                    </div>
                 </div>
 
                 <div className='space-y-3 rounded-xl border border-border/70 p-4'>
@@ -810,6 +948,21 @@ export function SiteSecuritySettings({
                                         updateWAFGroup(groupIndex, { ...group, enabled })
                                     }
                                 />
+                                <Input
+                                    aria-label='Group rollout percentage'
+                                    className='w-24'
+                                    max={100}
+                                    min={1}
+                                    type='number'
+                                    value={String(group.rollout_percentage)}
+                                    variant='secondary'
+                                    onChange={(event) =>
+                                        updateWAFGroup(groupIndex, {
+                                            ...group,
+                                            rollout_percentage: Number(event.target.value),
+                                        })
+                                    }
+                                />
                                 <Button
                                     isIconOnly
                                     aria-label='Remove WAF group'
@@ -909,6 +1062,362 @@ export function SiteSecuritySettings({
                     ))}
                 </div>
 
+                <div className='space-y-3 border-t border-border pt-6'>
+                    <div className='flex flex-wrap items-start justify-between gap-3'>
+                        <div>
+                            <h3 className='text-sm font-semibold'>Rule exceptions</h3>
+                            <p className='mt-1 text-xs leading-5 text-muted'>
+                                Skip named managed or custom rules for narrowly matched requests.
+                            </p>
+                        </div>
+                        <Button
+                            variant='secondary'
+                            onPress={() =>
+                                updateExceptions([...policy.waf.exceptions, newWAFException()])
+                            }
+                        >
+                            <Plus className='mr-1.5 h-4 w-4' /> Add exception
+                        </Button>
+                    </div>
+                    {policy.waf.exceptions.length === 0 && (
+                        <div className='rounded-xl border border-dashed border-border px-5 py-6 text-center text-sm text-muted'>
+                            No rule exceptions are configured.
+                        </div>
+                    )}
+                    {policy.waf.exceptions.map((exception, exceptionIndex) => (
+                        <div
+                            className='overflow-hidden rounded-xl border border-border/70'
+                            key={exception.id}
+                        >
+                            <div className='flex flex-wrap items-center gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3'>
+                                <Input
+                                    aria-label='Exception ID'
+                                    className='min-w-48 flex-1'
+                                    value={exception.id}
+                                    variant='secondary'
+                                    onChange={(event) =>
+                                        updateExceptions(
+                                            policy.waf.exceptions.map((item, index) =>
+                                                index === exceptionIndex
+                                                    ? { ...item, id: event.target.value }
+                                                    : item
+                                            )
+                                        )
+                                    }
+                                />
+                                <ToggleSwitch
+                                    isSelected={exception.enabled}
+                                    label='Enable exception'
+                                    onChange={(enabled) =>
+                                        updateExceptions(
+                                            policy.waf.exceptions.map((item, index) =>
+                                                index === exceptionIndex
+                                                    ? { ...item, enabled }
+                                                    : item
+                                            )
+                                        )
+                                    }
+                                />
+                                <Button
+                                    isIconOnly
+                                    aria-label='Remove exception'
+                                    variant='ghost'
+                                    onPress={() =>
+                                        updateExceptions(
+                                            policy.waf.exceptions.filter(
+                                                (_, index) => index !== exceptionIndex
+                                            )
+                                        )
+                                    }
+                                >
+                                    <Trash2 className='h-4 w-4 text-danger' />
+                                </Button>
+                            </div>
+                            <div className='space-y-4 p-4'>
+                                <CSVInput
+                                    label='Rule IDs'
+                                    placeholder='SQL_INJECTION, custom-rule-id'
+                                    values={exception.rule_ids}
+                                    onChange={(ruleIds) =>
+                                        updateExceptions(
+                                            policy.waf.exceptions.map((item, index) =>
+                                                index === exceptionIndex
+                                                    ? { ...item, rule_ids: ruleIds }
+                                                    : item
+                                            )
+                                        )
+                                    }
+                                />
+                                <ConditionGroups
+                                    groupOperator={exception.conditions.group_operator}
+                                    groups={exception.conditions.groups}
+                                    onChange={(groups, groupOperator) =>
+                                        updateExceptions(
+                                            policy.waf.exceptions.map((item, index) =>
+                                                index === exceptionIndex
+                                                    ? {
+                                                          ...item,
+                                                          conditions: {
+                                                              groups,
+                                                              group_operator: groupOperator,
+                                                          },
+                                                      }
+                                                    : item
+                                            )
+                                        )
+                                    }
+                                />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className='space-y-5 border-t border-border pt-6'>
+                    <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                        <div>
+                            <h3 className='text-sm font-semibold'>Access control</h3>
+                            <p className='mt-1 text-xs leading-5 text-muted'>
+                                Enforce network, location, method and hotlink policies before WAF
+                                evaluation.
+                            </p>
+                        </div>
+                        <ToggleSwitch
+                            isSelected={policy.access.enabled}
+                            label='Enable access control'
+                            onChange={(enabled) =>
+                                onChange({ ...policy, access: { ...policy.access, enabled } })
+                            }
+                        />
+                    </div>
+
+                    <div className='grid gap-4 md:grid-cols-3'>
+                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                            <span>Operating mode</span>
+                            <select
+                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                value={policy.access.mode}
+                                onChange={(event) =>
+                                    onChange({
+                                        ...policy,
+                                        access: { ...policy.access, mode: event.target.value },
+                                    })
+                                }
+                            >
+                                <option value='BLOCK'>Block violations</option>
+                                <option value='MONITOR'>Monitor only</option>
+                            </select>
+                        </label>
+                        <LabeledInput
+                            label='Denied response status'
+                            max={599}
+                            min={400}
+                            type='number'
+                            value={String(policy.access.status_code)}
+                            onChange={(value) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, status_code: Number(value) },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Trusted proxy CIDRs'
+                            placeholder='10.0.0.0/8, 2001:db8::/32'
+                            values={policy.access.trusted_proxies}
+                            onChange={(trustedProxies) =>
+                                onChange({
+                                    ...policy,
+                                    access: {
+                                        ...policy.access,
+                                        trusted_proxies: trustedProxies,
+                                    },
+                                })
+                            }
+                        />
+                    </div>
+
+                    <div className='grid gap-4 md:grid-cols-2'>
+                        <CSVInput
+                            label='IP/CIDR allowlist'
+                            placeholder='192.0.2.10, 2001:db8::/32'
+                            values={policy.access.ip_allowlist}
+                            onChange={(ipAllowlist) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, ip_allowlist: ipAllowlist },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='IP/CIDR blocklist'
+                            placeholder='198.51.100.0/24'
+                            values={policy.access.ip_blocklist}
+                            onChange={(ipBlocklist) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, ip_blocklist: ipBlocklist },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Allowed countries'
+                            placeholder='US, SG'
+                            values={policy.access.allowed_countries}
+                            onChange={(allowedCountries) =>
+                                onChange({
+                                    ...policy,
+                                    access: {
+                                        ...policy.access,
+                                        allowed_countries: allowedCountries,
+                                    },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Blocked countries'
+                            placeholder='CN, RU'
+                            values={policy.access.blocked_countries}
+                            onChange={(blockedCountries) =>
+                                onChange({
+                                    ...policy,
+                                    access: {
+                                        ...policy.access,
+                                        blocked_countries: blockedCountries,
+                                    },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Allowed regions'
+                            placeholder='US-CA, CA-ON'
+                            values={policy.access.allowed_regions}
+                            onChange={(allowedRegions) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, allowed_regions: allowedRegions },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Blocked regions'
+                            placeholder='US-NY'
+                            values={policy.access.blocked_regions}
+                            onChange={(blockedRegions) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, blocked_regions: blockedRegions },
+                                })
+                            }
+                        />
+                    </div>
+
+                    <LabeledInput
+                        label='Agent GeoIP database path'
+                        placeholder='/var/lib/goveto/GeoLite2-City.mmdb'
+                        value={policy.access.geoip_database ?? ''}
+                        onChange={(geoIPDatabase) =>
+                            onChange({
+                                ...policy,
+                                access: { ...policy.access, geoip_database: geoIPDatabase },
+                            })
+                        }
+                    />
+
+                    <div className='grid gap-4 md:grid-cols-2'>
+                        <CSVInput
+                            label='Allowed HTTP methods'
+                            placeholder='GET, HEAD, POST'
+                            values={policy.access.allowed_methods}
+                            onChange={(allowedMethods) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, allowed_methods: allowedMethods },
+                                })
+                            }
+                        />
+                        <CSVInput
+                            label='Blocked HTTP methods'
+                            placeholder='TRACE, CONNECT'
+                            values={policy.access.blocked_methods}
+                            onChange={(blockedMethods) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, blocked_methods: blockedMethods },
+                                })
+                            }
+                        />
+                    </div>
+
+                    <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
+                        <CSVInput
+                            label='Allowed Referer hosts'
+                            placeholder='example.com, static.example.com'
+                            values={policy.access.allowed_referer_hosts}
+                            onChange={(allowedRefererHosts) =>
+                                onChange({
+                                    ...policy,
+                                    access: {
+                                        ...policy.access,
+                                        allowed_referer_hosts: allowedRefererHosts,
+                                    },
+                                })
+                            }
+                        />
+                        <div className='flex items-end pb-1'>
+                            <ToggleSwitch
+                                isSelected={policy.access.allow_empty_referer}
+                                label='Allow empty Referer'
+                                onChange={(allowEmptyReferer) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            allow_empty_referer: allowEmptyReferer,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                    </div>
+
+                    <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-[auto_minmax(220px,1fr)]'>
+                        <div className='flex items-end pb-1'>
+                            <ToggleSwitch
+                                isSelected={policy.access.temporary_blocks}
+                                label='Enforce temporary blocks'
+                                onChange={(temporaryBlocks) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            temporary_blocks: temporaryBlocks,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                            <span>Redis failure policy</span>
+                            <select
+                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                value={policy.access.temporary_block_failure}
+                                onChange={(event) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            temporary_block_failure: event.target.value,
+                                        },
+                                    })
+                                }
+                            >
+                                <option value='OPEN'>Fail open</option>
+                                <option value='CLOSED'>Fail closed</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+
                 <div className='space-y-4 border-t border-border pt-6'>
                     <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
                         <div>
@@ -933,6 +1442,47 @@ export function SiteSecuritySettings({
                                 })
                             }
                         />
+                    </div>
+                    <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-2'>
+                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                            <span>Counter backend</span>
+                            <select
+                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                value={policy.rate_limit.backend}
+                                onChange={(event) =>
+                                    onChange({
+                                        ...policy,
+                                        rate_limit: {
+                                            ...policy.rate_limit,
+                                            backend: event.target.value,
+                                        },
+                                    })
+                                }
+                            >
+                                <option value='LOCAL'>Local node memory</option>
+                                <option value='REDIS'>Distributed Redis</option>
+                            </select>
+                        </label>
+                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
+                            <span>Redis failure policy</span>
+                            <select
+                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                value={policy.rate_limit.failure_mode}
+                                onChange={(event) =>
+                                    onChange({
+                                        ...policy,
+                                        rate_limit: {
+                                            ...policy.rate_limit,
+                                            failure_mode: event.target.value,
+                                        },
+                                    })
+                                }
+                            >
+                                <option value='OPEN'>Fail open</option>
+                                <option value='CLOSED'>Fail closed</option>
+                                <option value='LOCAL'>Fall back to local counters</option>
+                            </select>
+                        </label>
                     </div>
                     {policy.rate_limit.rules.map((rule, ruleIndex) => (
                         <div
@@ -1008,6 +1558,7 @@ export function SiteSecuritySettings({
                                     >
                                         <option value='CLIENT_IP'>Client IP</option>
                                         <option value='CLIENT_IP_PATH'>Client IP and path</option>
+                                        <option value='PATH'>Path</option>
                                         <option value='HEADER'>Header value</option>
                                         <option value='COOKIE'>Cookie value</option>
                                         <option value='GLOBAL'>Entire site</option>

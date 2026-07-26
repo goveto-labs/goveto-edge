@@ -11,6 +11,7 @@ import type {
     SiteListenerConfig,
     SiteOrigin,
     TrafficPoint,
+    WAFRuleStat,
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
@@ -87,13 +88,30 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
             presets: policy.waf.presets ?? [],
             groups: (policy.waf.groups ?? []).map((group) => ({
                 ...group,
+                rollout_percentage: group.rollout_percentage ?? 100,
                 response: group.response ?? { type: 'DEFAULT' },
                 rules: (group.rules ?? []).map((rule) => ({
                     ...rule,
                     id: rule.id ?? crypto.randomUUID(),
                 })),
             })),
+            exceptions: (policy.waf.exceptions ?? []).map((exception) => ({
+                ...exception,
+                conditions: {
+                    ...exception.conditions,
+                    group_operator: exception.conditions?.group_operator ?? 'AND',
+                    groups: (exception.conditions?.groups ?? []).map((group) => ({
+                        ...group,
+                        id: group.id ?? crypto.randomUUID(),
+                        rules: (group.rules ?? []).map((rule) => ({
+                            ...rule,
+                            id: rule.id ?? crypto.randomUUID(),
+                        })),
+                    })),
+                },
+            })),
         },
+        access: policy.access,
         rate_limit: {
             ...policy.rate_limit,
             rules: (policy.rate_limit.rules ?? []).map((rule) => ({
@@ -272,14 +290,37 @@ export default function SiteDetail() {
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
             enabled: false,
+            engine: 'GOVETO_COMPAT',
+            rule_set_version: '2026.07.1',
+            auto_update: true,
+            rollout_percentage: 100,
             mode: 'BLOCK',
             block_status: 403,
             block_response: { type: 'DEFAULT' },
             max_body_bytes: 65536,
             presets: [],
             groups: [],
+            exceptions: [],
         },
-        rate_limit: { enabled: false, rules: [] },
+        access: {
+            enabled: false,
+            mode: 'BLOCK',
+            status_code: 403,
+            trusted_proxies: [],
+            ip_allowlist: [],
+            ip_blocklist: [],
+            allowed_countries: [],
+            blocked_countries: [],
+            allowed_regions: [],
+            blocked_regions: [],
+            allowed_methods: [],
+            blocked_methods: [],
+            allowed_referer_hosts: [],
+            allow_empty_referer: true,
+            temporary_blocks: false,
+            temporary_block_failure: 'OPEN',
+        },
+        rate_limit: { enabled: false, backend: 'LOCAL', failure_mode: 'LOCAL', rules: [] },
     });
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
     const [certificates, setCertificates] = useState<Certificate[]>([]);
@@ -298,6 +339,7 @@ export default function SiteDetail() {
     const [ipsRequests, setIpsRequests] = useState<DistributionItem[]>([]);
     const [ipsTraffic, setIpsTraffic] = useState<DistributionItem[]>([]);
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
+    const [wafStats, setWAFStats] = useState<WAFRuleStat[]>([]);
     const [logQuery, setLogQuery] = useState('');
     const [loading, setLoading] = useState(true);
     const [monitoringLoading, setMonitoringLoading] = useState(false);
@@ -431,7 +473,14 @@ export default function SiteDetail() {
         if (!clusterId || !siteId) return;
         setLogsLoading(true);
         try {
-            setLogs(await analytics.siteLogs(siteId, 300));
+            const to = new Date();
+            const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
+            const [entries, stats] = await Promise.all([
+                analytics.siteLogs(siteId, 300),
+                analytics.wafStats(siteId, from.toISOString(), to.toISOString(), 100),
+            ]);
+            setLogs(entries);
+            setWAFStats(stats);
             setError('');
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load logs');
@@ -534,7 +583,13 @@ export default function SiteDetail() {
     const saveSecurity = () =>
         runSave(async () => {
             const result = await api.updateSecurity(siteId, security);
-            setSecurity(withSecurityEditorIDs({ waf: result.waf, rate_limit: result.rate_limit }));
+            setSecurity(
+                withSecurityEditorIDs({
+                    waf: result.waf,
+                    access: result.access,
+                    rate_limit: result.rate_limit,
+                })
+            );
         }, 'Security settings saved and publishing queued.');
     const publish = async () => {
         setPublishingSite(true);
@@ -578,7 +633,7 @@ export default function SiteDetail() {
         values: { requests: point.requests },
     }));
     const filteredLogs = logs.filter((entry) =>
-        `${entry.hostname} ${entry.method} ${entry.path} ${entry.status_code} ${entry.cache_status}`
+        `${entry.hostname} ${entry.method} ${entry.path} ${entry.status_code} ${entry.cache_status} ${entry.request_id} ${entry.waf_action ?? ''} ${entry.waf_rule_id ?? ''} ${entry.waf_source ?? ''}`
             .toLowerCase()
             .includes(logQuery.toLowerCase())
     );
@@ -875,14 +930,72 @@ export default function SiteDetail() {
                                             </Button>
                                         </div>
                                     </div>
+                                    {wafStats.length > 0 && (
+                                        <div className='border-b border-border'>
+                                            <div className='px-4 py-3'>
+                                                <h3 className='text-sm font-semibold'>
+                                                    WAF activity, last 24 hours
+                                                </h3>
+                                            </div>
+                                            <div className='overflow-x-auto'>
+                                                <table className='w-full min-w-[760px] text-left text-sm'>
+                                                    <thead className='bg-surface-secondary/50 text-xs text-muted'>
+                                                        <tr>
+                                                            <th className='px-4 py-2.5'>Rule</th>
+                                                            <th className='px-4 py-2.5'>Action</th>
+                                                            <th className='px-4 py-2.5'>Source</th>
+                                                            <th className='px-4 py-2.5'>
+                                                                Requests
+                                                            </th>
+                                                            <th className='px-4 py-2.5'>
+                                                                Unique IPs
+                                                            </th>
+                                                            <th className='px-4 py-2.5'>
+                                                                Last seen
+                                                            </th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody className='divide-y divide-border'>
+                                                        {wafStats.map((item) => (
+                                                            <tr
+                                                                key={`${item.rule_id}-${item.action}-${item.source}-${item.match}`}
+                                                            >
+                                                                <td className='px-4 py-2.5 font-mono text-xs'>
+                                                                    {item.rule_id}
+                                                                </td>
+                                                                <td className='px-4 py-2.5'>
+                                                                    {item.action}
+                                                                </td>
+                                                                <td className='px-4 py-2.5 text-muted'>
+                                                                    {item.source}
+                                                                </td>
+                                                                <td className='px-4 py-2.5'>
+                                                                    {item.requests.toLocaleString()}
+                                                                </td>
+                                                                <td className='px-4 py-2.5'>
+                                                                    {item.unique_ips.toLocaleString()}
+                                                                </td>
+                                                                <td className='whitespace-nowrap px-4 py-2.5 text-muted'>
+                                                                    {new Date(
+                                                                        item.last_seen
+                                                                    ).toLocaleString()}
+                                                                </td>
+                                                            </tr>
+                                                        ))}
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    )}
                                     <div className='overflow-x-auto'>
-                                        <table className='w-full min-w-[980px] text-left text-sm'>
+                                        <table className='w-full min-w-[1120px] text-left text-sm'>
                                             <thead className='bg-surface-secondary/50 text-xs text-muted'>
                                                 <tr>
                                                     <th className='px-4 py-3'>Time</th>
                                                     <th className='px-4 py-3'>Request</th>
                                                     <th className='px-4 py-3'>Status</th>
                                                     <th className='px-4 py-3'>Cache</th>
+                                                    <th className='px-4 py-3'>Security</th>
                                                     <th className='px-4 py-3'>Upstream</th>
                                                     <th className='px-4 py-3'>Duration</th>
                                                 </tr>
@@ -904,12 +1017,35 @@ export default function SiteDetail() {
                                                             <div className='truncate font-mono text-xs text-muted'>
                                                                 {entry.path}
                                                             </div>
+                                                            <div className='truncate font-mono text-xs text-muted'>
+                                                                {entry.request_id}
+                                                            </div>
                                                         </td>
                                                         <td className='px-4 py-3 font-mono'>
                                                             {entry.status_code}
                                                         </td>
                                                         <td className='px-4 py-3'>
                                                             {entry.cache_status || '-'}
+                                                        </td>
+                                                        <td className='px-4 py-3'>
+                                                            {entry.waf_action ? (
+                                                                <div>
+                                                                    <div className='font-medium'>
+                                                                        {entry.waf_action}
+                                                                    </div>
+                                                                    <div className='font-mono text-xs text-muted'>
+                                                                        {entry.waf_rule_id}
+                                                                    </div>
+                                                                    <div className='text-xs text-muted'>
+                                                                        {entry.waf_source}
+                                                                        {entry.waf_match
+                                                                            ? ` / ${entry.waf_match}`
+                                                                            : ''}
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                '-'
+                                                            )}
                                                         </td>
                                                         <td className='px-4 py-3 font-mono text-xs'>
                                                             {entry.upstream_address || '-'}
@@ -924,7 +1060,7 @@ export default function SiteDetail() {
                                                     <tr>
                                                         <td
                                                             className='px-4 py-12 text-center text-muted'
-                                                            colSpan={6}
+                                                            colSpan={7}
                                                         >
                                                             No matching request logs.
                                                         </td>

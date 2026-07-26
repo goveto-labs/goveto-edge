@@ -21,7 +21,11 @@ func TestParseAccess(t *testing.T) {
 		"status": 200,
 		"resp_headers": {
 			"X-Cache": ["HIT"],
-			"Content-Type": ["application/javascript"]
+			"Content-Type": ["application/javascript"],
+			"X-Goveto-WAF": ["BLOCK"],
+			"X-Goveto-WAF-Rule": ["preset:XSS"],
+			"X-Goveto-WAF-Source": ["GOVETO_COMPAT:2026.07.1"],
+			"X-Goveto-WAF-Match": ["XSS"]
 		}
 	}`)
 	event, err := ParseAccess(payload, "cluster", "node", "site")
@@ -36,5 +40,8 @@ func TestParseAccess(t *testing.T) {
 	}
 	if event.RequestHeaderBytes == 0 || event.ResponseHeaderBytes == 0 {
 		t.Fatal("header traffic was not counted")
+	}
+	if event.WAFAction != "BLOCK" || event.WAFRuleID != "preset:XSS" || event.WAFMatch != "XSS" {
+		t.Fatalf("WAF event fields were not parsed: %#v", event)
 	}
 }

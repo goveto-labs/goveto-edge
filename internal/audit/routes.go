@@ -65,6 +65,8 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/cache", "site.cache.update", "site", "site_id"},
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/compression", "site.compression.update", "site", "site_id"},
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/security", "site.security.update", "site", "site_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/security/blocks", "site.security.block", "security_block", "site_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/sites/:site_id/security/blocks", "site.security.unblock", "security_block", "site_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/publish", "site.publish", "site", "site_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/purge", "cache.purge", "site", "site_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/prewarm", "cache.prewarm", "site", "site_id"},

@@ -15,6 +15,7 @@ require (
 	github.com/klauspost/compress v1.18.6
 	github.com/labstack/echo/v5 v5.2.1
 	github.com/mholt/acmez/v3 v3.1.6
+	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/pquerna/otp v1.5.0
 	github.com/redis/go-redis/v9 v9.21.0
@@ -105,6 +106,7 @@ require (
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pires/go-proxyproto v0.12.0 // indirect

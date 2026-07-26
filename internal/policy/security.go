@@ -13,8 +13,10 @@ import (
 )
 
 const (
-	WAFModeBlock   = "BLOCK"
-	WAFModeMonitor = "MONITOR"
+	WAFEngineGovetoCompat    = "GOVETO_COMPAT"
+	CurrentWAFRuleSetVersion = "2026.07.1"
+	WAFModeBlock             = "BLOCK"
+	WAFModeMonitor           = "MONITOR"
 
 	WAFActionShowPage = "SHOW_PAGE"
 	WAFActionBlock    = "BLOCK"
@@ -40,27 +42,40 @@ var supportedWAFPresets = map[string]struct{}{
 }
 
 type WAFPolicy struct {
-	Enabled       bool           `json:"enabled"`
-	Mode          string         `json:"mode"`
-	BlockStatus   int            `json:"block_status"`
-	BlockResponse WAFResponse    `json:"block_response"`
-	MaxBodyBytes  int64          `json:"max_body_bytes"`
-	Presets       []string       `json:"presets"`
-	Groups        []WAFRuleGroup `json:"groups"`
+	Enabled           bool           `json:"enabled"`
+	Engine            string         `json:"engine"`
+	RuleSetVersion    string         `json:"rule_set_version"`
+	AutoUpdate        bool           `json:"auto_update"`
+	RolloutPercentage int            `json:"rollout_percentage"`
+	Mode              string         `json:"mode"`
+	BlockStatus       int            `json:"block_status"`
+	BlockResponse     WAFResponse    `json:"block_response"`
+	MaxBodyBytes      int64          `json:"max_body_bytes"`
+	Presets           []string       `json:"presets"`
+	Groups            []WAFRuleGroup `json:"groups"`
+	Exceptions        []WAFException `json:"exceptions"`
 }
 
 type WAFRuleGroup struct {
-	ID             string           `json:"id"`
-	Name           string           `json:"name"`
-	Enabled        bool             `json:"enabled"`
-	Operator       string           `json:"operator"`
-	Action         string           `json:"action"`
-	StatusCode     int              `json:"status_code,omitempty"`
-	Response       WAFResponse      `json:"response,omitempty"`
-	RedirectURL    string           `json:"redirect_url,omitempty"`
-	RedirectStatus int              `json:"redirect_status,omitempty"`
-	Tag            string           `json:"tag,omitempty"`
-	Rules          []WAFRequestRule `json:"rules"`
+	ID                string           `json:"id"`
+	Name              string           `json:"name"`
+	Enabled           bool             `json:"enabled"`
+	RolloutPercentage int              `json:"rollout_percentage"`
+	Operator          string           `json:"operator"`
+	Action            string           `json:"action"`
+	StatusCode        int              `json:"status_code,omitempty"`
+	Response          WAFResponse      `json:"response,omitempty"`
+	RedirectURL       string           `json:"redirect_url,omitempty"`
+	RedirectStatus    int              `json:"redirect_status,omitempty"`
+	Tag               string           `json:"tag,omitempty"`
+	Rules             []WAFRequestRule `json:"rules"`
+}
+
+type WAFException struct {
+	ID         string            `json:"id"`
+	Enabled    bool              `json:"enabled"`
+	RuleIDs    []string          `json:"rule_ids"`
+	Conditions RequestConditions `json:"conditions"`
 }
 
 type WAFResponse struct {
@@ -79,8 +94,10 @@ type WAFRequestRule struct {
 }
 
 type RateLimitPolicy struct {
-	Enabled bool            `json:"enabled"`
-	Rules   []RateLimitRule `json:"rules"`
+	Enabled     bool            `json:"enabled"`
+	Backend     string          `json:"backend"`
+	FailureMode string          `json:"failure_mode"`
+	Rules       []RateLimitRule `json:"rules"`
 }
 
 type RateLimitRule struct {
@@ -109,18 +126,42 @@ type RequestConditionGroup struct {
 
 func DefaultWAFPolicy() WAFPolicy {
 	return WAFPolicy{
+		Engine: WAFEngineGovetoCompat, RuleSetVersion: CurrentWAFRuleSetVersion,
+		AutoUpdate: true, RolloutPercentage: 100,
 		Mode:          WAFModeBlock,
 		BlockStatus:   http.StatusForbidden,
 		BlockResponse: WAFResponse{Type: WAFResponseDefault},
 		MaxBodyBytes:  64 << 10,
 		Presets:       []string{"SQL_INJECTION", "XSS", "PATH_TRAVERSAL", "COMMAND_INJECTION", "SCANNER", "BAD_BOTS"},
 		Groups:        []WAFRuleGroup{},
+		Exceptions:    []WAFException{},
 	}
 }
 
-func DefaultRateLimitPolicy() RateLimitPolicy { return RateLimitPolicy{Rules: []RateLimitRule{}} }
+func DefaultRateLimitPolicy() RateLimitPolicy {
+	return RateLimitPolicy{Backend: "LOCAL", FailureMode: "LOCAL", Rules: []RateLimitRule{}}
+}
 
 func (p *WAFPolicy) NormalizeAndValidate() error {
+	p.Engine = strings.ToUpper(strings.TrimSpace(p.Engine))
+	if p.Engine == "" {
+		p.Engine = WAFEngineGovetoCompat
+	}
+	if p.Engine != WAFEngineGovetoCompat {
+		return fmt.Errorf("unsupported WAF engine %q", p.Engine)
+	}
+	if p.AutoUpdate || strings.TrimSpace(p.RuleSetVersion) == "" {
+		p.RuleSetVersion = CurrentWAFRuleSetVersion
+	}
+	if p.RuleSetVersion != CurrentWAFRuleSetVersion {
+		return fmt.Errorf("unsupported WAF rule set version %q", p.RuleSetVersion)
+	}
+	if p.RolloutPercentage == 0 {
+		p.RolloutPercentage = 100
+	}
+	if p.RolloutPercentage < 1 || p.RolloutPercentage > 100 {
+		return errors.New("rollout_percentage must be between 1 and 100")
+	}
 	p.Mode = strings.ToUpper(strings.TrimSpace(p.Mode))
 	if p.Mode == "" {
 		p.Mode = WAFModeBlock
@@ -160,6 +201,9 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 	if p.Groups == nil {
 		p.Groups = []WAFRuleGroup{}
 	}
+	if p.Exceptions == nil {
+		p.Exceptions = []WAFException{}
+	}
 
 	if len(p.Groups) > 64 {
 		return errors.New("WAF policy cannot contain more than 64 groups")
@@ -176,6 +220,12 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 		}
 		seenIDs[group.ID] = struct{}{}
 		group.Name = strings.TrimSpace(group.Name)
+		if group.RolloutPercentage == 0 {
+			group.RolloutPercentage = 100
+		}
+		if group.RolloutPercentage < 1 || group.RolloutPercentage > 100 {
+			return fmt.Errorf("groups[%d].rollout_percentage must be between 1 and 100", index)
+		}
 		group.Operator = normalizeBooleanOperator(group.Operator)
 		if !booleanOperator(group.Operator) {
 			return fmt.Errorf("groups[%d].operator must be AND or OR", index)
@@ -213,6 +263,33 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 			return fmt.Errorf("groups[%d] must contain between 1 and 64 rules", index)
 		}
 		if err := normalizeRequestRules(group.Rules, fmt.Sprintf("groups[%d]", index)); err != nil {
+			return err
+		}
+	}
+	if len(p.Exceptions) > 64 {
+		return errors.New("WAF policy cannot contain more than 64 exceptions")
+	}
+	seenExceptions := map[string]struct{}{}
+	for index := range p.Exceptions {
+		exception := &p.Exceptions[index]
+		exception.ID = strings.TrimSpace(exception.ID)
+		if exception.ID == "" {
+			exception.ID = fmt.Sprintf("exception-%d", index+1)
+		}
+		if _, exists := seenExceptions[exception.ID]; exists {
+			return fmt.Errorf("duplicate WAF exception id %q", exception.ID)
+		}
+		seenExceptions[exception.ID] = struct{}{}
+		if len(exception.RuleIDs) == 0 || len(exception.RuleIDs) > 64 {
+			return fmt.Errorf("exceptions[%d].rule_ids must contain between 1 and 64 values", index)
+		}
+		for ruleIndex := range exception.RuleIDs {
+			exception.RuleIDs[ruleIndex] = strings.TrimSpace(exception.RuleIDs[ruleIndex])
+			if exception.RuleIDs[ruleIndex] == "" {
+				return fmt.Errorf("exceptions[%d].rule_ids contains an empty value", index)
+			}
+		}
+		if err := normalizeConditions(&exception.Conditions, fmt.Sprintf("exceptions[%d].conditions", index)); err != nil {
 			return err
 		}
 	}
@@ -268,6 +345,20 @@ func normalizeRedirect(group *WAFRuleGroup, index int) error {
 }
 
 func (p *RateLimitPolicy) NormalizeAndValidate() error {
+	p.Backend = strings.ToUpper(strings.TrimSpace(p.Backend))
+	if p.Backend == "" {
+		p.Backend = "LOCAL"
+	}
+	if p.Backend != "LOCAL" && p.Backend != "REDIS" {
+		return errors.New("rate-limit backend must be LOCAL or REDIS")
+	}
+	p.FailureMode = strings.ToUpper(strings.TrimSpace(p.FailureMode))
+	if p.FailureMode == "" {
+		p.FailureMode = "LOCAL"
+	}
+	if p.FailureMode != "OPEN" && p.FailureMode != "CLOSED" && p.FailureMode != "LOCAL" {
+		return errors.New("rate-limit failure_mode must be OPEN, CLOSED or LOCAL")
+	}
 	if p.Rules == nil {
 		p.Rules = []RateLimitRule{}
 	}
@@ -288,7 +379,7 @@ func (p *RateLimitPolicy) NormalizeAndValidate() error {
 		rule.Name = strings.TrimSpace(rule.Name)
 		rule.Key = strings.ToUpper(strings.TrimSpace(rule.Key))
 		switch rule.Key {
-		case "CLIENT_IP", "CLIENT_IP_PATH", "GLOBAL":
+		case "CLIENT_IP", "CLIENT_IP_PATH", "PATH", "GLOBAL":
 			rule.KeyName = ""
 		case "HEADER":
 			rule.KeyName = http.CanonicalHeaderKey(strings.TrimSpace(rule.KeyName))
