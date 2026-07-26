@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
@@ -115,6 +116,8 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 		if err != nil {
 			return err
 		}
+		before := current
+		before.OriginPolicy = redactOriginPolicy(before.OriginPolicy)
 		var input updateDetailsRequest
 		if err = c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -306,6 +309,7 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 		current.OriginPolicy = originPolicy
 		current.UpdatedAt = time.Now().UTC()
 		current.OriginPolicy = redactOriginPolicy(current.OriginPolicy)
+		audit.SetChange(c, before, current)
 		return types.JSON(c, http.StatusOK, current)
 	}
 }
@@ -370,6 +374,7 @@ func deleteSite(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		audit.SetChange(c, current, nil)
 		return c.NoContent(http.StatusNoContent)
 	}
 }

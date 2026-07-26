@@ -17,6 +17,7 @@ import (
 
 	"golang.org/x/net/idna"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnsprovider"
@@ -203,6 +204,15 @@ func updateConfig(
 
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
+		beforeCluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		beforeProvider, err := db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		before := types.NewDNSConfig(beforeCluster.PrimaryHostname, beforeProvider)
 		credentialsProvided := len(input.Credentials) > 0
 		encryptedInput := ""
 		var credentialsRaw []byte
@@ -408,7 +418,9 @@ func updateConfig(
 		if findErr != nil {
 			return findErr
 		}
-		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, config))
+		response := types.NewDNSConfig(cluster.PrimaryHostname, config)
+		audit.SetChange(c, before, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -417,12 +429,23 @@ func updateConfig(
 // @Tags dns
 func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if err := service.DeleteConfiguration(c.Request().Context(), c.Param("cluster_id")); err != nil {
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
+		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		provider, err := db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		if err := service.DeleteConfiguration(ctx, clusterID); err != nil {
 			if errors.Is(err, dnssync.ErrDNSNotConfigured) {
 				return echo.NewHTTPError(http.StatusNotFound, err.Error())
 			}
 			return err
 		}
+		audit.SetChange(c, types.NewDNSConfig(cluster.PrimaryHostname, provider), nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
 }
@@ -444,6 +467,7 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 		if config == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
 		}
+		before := types.NewDNSConfig(nil, config)
 		plain, err := cipher.Decrypt(config.CredentialsEncrypted)
 		if err != nil {
 			return err
@@ -512,7 +536,9 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, config))
+		response := types.NewDNSConfig(cluster.PrimaryHostname, config)
+		audit.SetChange(c, before, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -571,9 +597,12 @@ func syncNow(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
 			return err
 		}
 		if job == nil {
+			audit.SetChange(c, nil, map[string]any{"changed": false})
 			return types.JSON(c, http.StatusOK, nil)
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewDNSJob(job))
+		response := types.NewDNSJob(job)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 
@@ -650,7 +679,10 @@ func createLine(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, types.NewDNSLine(item))
+		response := types.NewDNSLine(item)
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 
@@ -661,6 +693,7 @@ func deleteLine(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
+		var deleted *model.DNSLine
 		err := db.Tx(ctx, func(tx *client.Client) error {
 			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
 				return lockErr
@@ -704,11 +737,13 @@ func deleteLine(db *client.Client) echo.HandlerFunc {
 				Do(ctx); deleteErr != nil {
 				return deleteErr
 			}
+			deleted = line
 			return nil
 		})
 		if err != nil {
 			return err
 		}
+		audit.SetChange(c, types.NewDNSLine(deleted), nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
 }

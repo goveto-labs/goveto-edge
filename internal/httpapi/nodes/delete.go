@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
@@ -75,6 +76,7 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, gateway *edge
 			}
 		}
 		_ = queue.Delete(ctx, nodeID)
+		audit.SetChange(c, node, nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
 }

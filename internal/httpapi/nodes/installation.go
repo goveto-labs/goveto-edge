@@ -8,7 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
-	"goveto-edge/internal/auth"
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -60,9 +60,6 @@ func getInstallation(db *client.Client, cipher *node.CredentialCipher) echo.Hand
 	return func(c *echo.Context) error {
 		item, identityJSON, err := installationCredential(c, db, cipher)
 		if err != nil {
-			return err
-		}
-		if err := auditBootstrapIdentityAccess(c, db, item.Id, "node.bootstrap_identity.view"); err != nil {
 			return err
 		}
 		c.Response().Header().Set("Cache-Control", "no-store")
@@ -130,11 +127,13 @@ func initializeManualInstallation(
 		if err := enqueueDNSIfChanged(ctx, dnsService, item.ClusterId); err != nil {
 			return err
 		}
-		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": map[string]any{
+		response := map[string]any{
 			"id":      item.Id,
 			"status":  model.NodeStatusONLINE,
 			"message": "node initialized through the mTLS management channel",
-		}})
+		}
+		audit.SetChange(c, item, response)
+		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": response})
 	}
 }
 
@@ -158,11 +157,8 @@ func downloadAgentBinary(db *client.Client) echo.HandlerFunc {
 
 func downloadIdentity(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		item, identityJSON, err := installationCredential(c, db, cipher)
+		_, identityJSON, err := installationCredential(c, db, cipher)
 		if err != nil {
-			return err
-		}
-		if err := auditBootstrapIdentityAccess(c, db, item.Id, "node.bootstrap_identity.download"); err != nil {
 			return err
 		}
 		var identityValue any
@@ -172,17 +168,6 @@ func downloadIdentity(db *client.Client, cipher *node.CredentialCipher) echo.Han
 		c.Response().Header().Set("Content-Disposition", `attachment; filename="identity.json"`)
 		return c.Blob(http.StatusOK, "application/json", data)
 	}
-}
-
-func auditBootstrapIdentityAccess(c *echo.Context, db *client.Client, nodeID, action string) error {
-	uid := auth.CurrentUID(c)
-	_, err := db.AuditLog.Create().Set(
-		query.AuditLog.ActorId.Set(uid),
-		query.AuditLog.Actor.Set(uid),
-		query.AuditLog.Action.Set(action),
-		query.AuditLog.Resource.Set("node/"+nodeID+"/bootstrap-identity"),
-	).Do(c.Request().Context())
-	return err
 }
 
 func downloadServiceUnit(db *client.Client) echo.HandlerFunc {

@@ -1,0 +1,60 @@
+package audit
+
+import "net/http"
+
+// ControlPlaneRoutes enumerates the current security-relevant HTTP mutations.
+var ControlPlaneRoutes = []Route{
+	{http.MethodPost, "/api/v1/auth/login", "auth.login", "session", ""},
+	{http.MethodPost, "/api/v1/auth/register", "user.register", "user", ""},
+	{http.MethodPost, "/api/v1/init", "system.initialize", "system", ""},
+	{http.MethodPost, "/api/v1/clusters", "cluster.create", "cluster", ""},
+	{http.MethodPut, "/api/v1/session/cluster", "cluster.select", "cluster", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/groups", "cluster_group.create", "cluster_group", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/regions", "cluster_region.create", "cluster_region", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/members", "cluster_member.add", "cluster_member", ""},
+
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes", "node.create", "node", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/ssh-credentials", "ssh_credential.create", "ssh_credential", ""},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", "ssh_credential.update", "ssh_credential", "credential_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/ssh-credentials/:credential_id", "ssh_credential.delete", "ssh_credential", "credential_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/cache-config", "node.cache_config.update", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/addresses", "node.address.add", "node", "node_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", "node.address.update", "node", "node_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", "node.address.delete", "node", "node_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", "node.dns_lines.update", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/enable", "node.enable", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/disable", "node.disable", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", "node.credential.revoke", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", "node.install", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", "node.install.initialize", "node", "node_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/nodes/:node_id", "node.delete", "node", "node_id"},
+	{http.MethodGet, "/api/v1/clusters/:cluster_id/nodes/:node_id/installation", "node.bootstrap_identity.view", "node", "node_id"},
+	{http.MethodGet, "/api/v1/clusters/:cluster_id/nodes/:node_id/installation/identity", "node.bootstrap_identity.download", "node", "node_id"},
+
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/dns", "dns_provider.update", "dns_provider", "cluster_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/dns", "dns_provider.delete", "dns_provider", "cluster_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/refresh", "dns_provider.refresh", "dns_provider", "cluster_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/sync", "dns_record.sync", "dns_record", "cluster_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/lines", "dns_line.create", "dns_line", ""},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/dns/lines/:line_id", "dns_line.delete", "dns_line", "line_id"},
+
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates", "certificate.upload", "certificate", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/acme", "certificate.issue", "certificate", ""},
+	{http.MethodPatch, "/api/v1/clusters/:cluster_id/certificates/:certificate_id", "certificate.update", "certificate", "certificate_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/material", "certificate.replace", "certificate", "certificate_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/certificates/:certificate_id", "certificate.delete", "certificate", "certificate_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/renew", "certificate.renew", "certificate", "certificate_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/reissue", "certificate.reissue", "certificate", "certificate_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/publish", "certificate.publish", "certificate", "certificate_id"},
+
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites", "site.create", "site", ""},
+	{http.MethodPatch, "/api/v1/clusters/:cluster_id/sites/:site_id", "site.update", "site", "site_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/sites/:site_id", "site.delete", "site", "site_id"},
+	{http.MethodPatch, "/api/v1/clusters/:cluster_id/sites/:site_id/listener", "site.listener.update", "site", "site_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/cache", "site.cache.update", "site", "site_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/compression", "site.compression.update", "site", "site_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/sites/:site_id/security", "site.security.update", "site", "site_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/publish", "site.publish", "site", "site_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/purge", "cache.purge", "site", "site_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/:site_id/prewarm", "cache.prewarm", "site", "site_id"},
+}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/settings"
@@ -66,6 +67,7 @@ func initialize(db *client.Client) echo.HandlerFunc {
 		}
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 		input.Name = strings.TrimSpace(input.Name)
+		audit.SetActor(c, "", input.Email)
 		if input.Email == "" || input.Name == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "email and name are required")
 		}
@@ -85,7 +87,7 @@ func initialize(db *client.Client) echo.HandlerFunc {
 				return lockErr
 			}
 
-			store := settings.New(tx)
+			store := settings.New(tx, audit.New(tx))
 			initialized, statusErr := store.Initialized(ctx)
 			if statusErr != nil {
 				return statusErr
@@ -111,9 +113,13 @@ func initialize(db *client.Client) echo.HandlerFunc {
 			return err
 		}
 
-		return types.JSON(c, http.StatusCreated, userResponse{
+		response := userResponse{
 			ID: administrator.Id, Email: administrator.Email, Name: administrator.Name,
 			Role: administrator.Role, Status: administrator.Status,
-		})
+		}
+		audit.SetActor(c, administrator.Id, administrator.Email)
+		audit.SetResourceID(c, administrator.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }

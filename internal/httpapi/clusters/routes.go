@@ -7,6 +7,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
@@ -94,6 +95,8 @@ func createGroup(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, types.NewClusterGroup(item))
 		return types.JSON(c, http.StatusCreated, types.NewClusterGroup(item))
 	}
 }
@@ -142,6 +145,8 @@ func createRegion(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, types.NewClusterRegion(item))
 		return types.JSON(c, http.StatusCreated, types.NewClusterRegion(item))
 	}
 }

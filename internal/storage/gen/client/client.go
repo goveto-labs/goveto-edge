@@ -3280,7 +3280,7 @@ func (a AgentTaskActions) GroupBy(ctx context.Context, fields []string, opts ...
 
 func quotedAuditLogTable(c *Client) string { return c.quoteIdentifier("audit_logs") }
 func quotedAuditLogColumns(c *Client) string {
-	cols := []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"}
+	cols := []string{"id", "actor_id", "actor", "source_ip", "user_agent", "action", "resource", "resource_id", "before_json", "after_json", "request_id", "result", "failure_reason", "created_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -3295,13 +3295,25 @@ func quoteAuditLogField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "actor":
 		return c.quoteIdentifier(field), nil
+	case "source_ip":
+		return c.quoteIdentifier(field), nil
+	case "user_agent":
+		return c.quoteIdentifier(field), nil
 	case "action":
 		return c.quoteIdentifier(field), nil
 	case "resource":
 		return c.quoteIdentifier(field), nil
+	case "resource_id":
+		return c.quoteIdentifier(field), nil
 	case "before_json":
 		return c.quoteIdentifier(field), nil
 	case "after_json":
+		return c.quoteIdentifier(field), nil
+	case "request_id":
+		return c.quoteIdentifier(field), nil
+	case "result":
+		return c.quoteIdentifier(field), nil
+	case "failure_reason":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -3514,14 +3526,14 @@ func (b AuditLogCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Aud
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildAuditLogCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"})
+		q, args := b.action.buildAuditLogCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "actor_id", "actor", "source_ip", "user_agent", "action", "resource", "resource_id", "before_json", "after_json", "request_id", "result", "failure_reason", "created_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("AuditLog.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.AuditLog
-			if err := rows.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("AuditLog.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -3548,7 +3560,7 @@ func (b AuditLogCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"}
+		returningColumns = []string{"id", "actor_id", "actor", "source_ip", "user_agent", "action", "resource", "resource_id", "before_json", "after_json", "request_id", "result", "failure_reason", "created_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -3800,7 +3812,7 @@ func (a AuditLogActions) FindMany(ctx context.Context, opts ...query.AuditLogQue
 	var results []model.AuditLog
 	for rows.Next() {
 		var item model.AuditLog
-		if err := rows.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("AuditLog.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -3832,7 +3844,7 @@ func (a AuditLogActions) FindUnique(ctx context.Context, where query.AuditLogWhe
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.AuditLog
-	if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -3863,7 +3875,7 @@ func (a AuditLogActions) CreateOne(ctx context.Context, sets ...query.AuditLogSe
 		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.AuditLog
-		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("AuditLog.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -3882,7 +3894,7 @@ func (a AuditLogActions) CreateMany(ctx context.Context, data []query.AuditLogCr
 }
 
 func (a AuditLogActions) buildAuditLogCreateManySQL(data []query.AuditLogCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "actor_id", "actor", "action", "resource", "before_json", "after_json", "created_at"}
+	cols := []string{"id", "actor_id", "actor", "source_ip", "user_agent", "action", "resource", "resource_id", "before_json", "after_json", "request_id", "result", "failure_reason", "created_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -3955,7 +3967,7 @@ func (a AuditLogActions) UpdateOne(ctx context.Context, where query.AuditLogWher
 		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
-		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -4060,7 +4072,7 @@ func (a AuditLogActions) UpsertOne(ctx context.Context, where query.AuditLogWher
 		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
-		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("AuditLog.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -4084,7 +4096,7 @@ func (a AuditLogActions) DeleteOne(ctx context.Context, where query.AuditLogWher
 		q += " RETURNING " + quotedAuditLogColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.AuditLog
-		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.Action, &item.Resource, &item.BeforeJson, &item.AfterJson, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ActorId, &item.Actor, &item.SourceIp, &item.UserAgent, &item.Action, &item.ResourceType, &item.ResourceId, &item.BeforeJson, &item.AfterJson, &item.RequestId, &item.Result, &item.FailureReason, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

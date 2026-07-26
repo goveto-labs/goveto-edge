@@ -59,15 +59,21 @@ type AgentTask struct {
 
 // AuditLog represents the AuditLog model.
 type AuditLog struct {
-	Id         string           `db:"id" json:"id"`
-	ActorId    *string          `db:"actor_id" json:"actorId"`
-	Actor      string           `db:"actor" json:"actor"`
-	Action     string           `db:"action" json:"action"`
-	Resource   string           `db:"resource" json:"resource"`
-	BeforeJson *json.RawMessage `db:"before_json" json:"beforeJson"`
-	AfterJson  *json.RawMessage `db:"after_json" json:"afterJson"`
-	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
-	User       *User            `db:"-" json:"user,omitempty"`
+	Id            string           `db:"id" json:"id"`
+	ActorId       *string          `db:"actor_id" json:"actorId"`
+	Actor         string           `db:"actor" json:"actor"`
+	SourceIp      string           `db:"source_ip" json:"sourceIp"`
+	UserAgent     string           `db:"user_agent" json:"userAgent"`
+	Action        string           `db:"action" json:"action"`
+	ResourceType  string           `db:"resource" json:"resourceType"`
+	ResourceId    string           `db:"resource_id" json:"resourceId"`
+	BeforeJson    *json.RawMessage `db:"before_json" json:"beforeJson"`
+	AfterJson     *json.RawMessage `db:"after_json" json:"afterJson"`
+	RequestId     string           `db:"request_id" json:"requestId"`
+	Result        string           `db:"result" json:"result"`
+	FailureReason *string          `db:"failure_reason" json:"failureReason"`
+	CreatedAt     time.Time        `db:"created_at" json:"createdAt"`
+	User          *User            `db:"-" json:"user,omitempty"`
 }
 
 // Certificate represents the Certificate model.

@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
@@ -287,6 +288,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 
 	rollbackJSON, _ := json.Marshal(rollback)
 	rollbackHash := sha256.Sum256(rollbackJSON)
+	rollbackComplete := allSucceeded(rollbackResults)
 	if _, err = s.db.ConfigVersion.Update().
 		Where(
 			query.ConfigVersion.SiteId.Equals(site.Id),
@@ -294,10 +296,10 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 		).
 		Set(query.ConfigVersion.Status.Set(model.ConfigStatusFAILED)).
 		DoMany(ctx); err != nil {
+		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
 		return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
 	}
 
-	rollbackComplete := allSucceeded(rollbackResults)
 	rollbackStatus := model.ConfigStatusFAILED
 	if rollbackComplete {
 		rollbackStatus = model.ConfigStatusROLLED_BACK
@@ -312,6 +314,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 			query.ConfigVersion.Status.Set(rollbackStatus),
 		).
 		Do(ctx); err != nil {
+		s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
 		return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
 	}
 
@@ -320,6 +323,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 			Where(query.Site.Id.Equals(site.Id)).
 			Set(query.Site.Version.Set(rollbackVersion)).
 			Do(ctx); err != nil {
+			s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, err)
 			return s.finish(ctx, job.Id, model.JobStatusFAILED, results, err)
 		}
 	}
@@ -336,7 +340,29 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) error {
 	if !rollbackComplete {
 		message = "one or more nodes rejected the configuration; rollback was incomplete"
 	}
-	return s.finish(ctx, job.Id, model.JobStatusFAILED, results, errors.New(message))
+	publishErr := errors.New(message)
+	var rollbackErr error
+	if !rollbackComplete {
+		rollbackErr = publishErr
+	}
+	s.recordRollback(ctx, site.Id, job.Version, rollbackVersion, results, rollbackResults, rollbackComplete, rollbackErr)
+	return s.finish(ctx, job.Id, model.JobStatusFAILED, results, publishErr)
+}
+
+func (s *Service) recordRollback(
+	ctx context.Context,
+	siteID string,
+	failedVersion, rollbackVersion int64,
+	publishResults, rollbackResults []targetResult,
+	complete bool,
+	rollbackErr error,
+) {
+	audit.RecordSystem(
+		ctx, audit.New(s.db), "site.rollback", "site", siteID,
+		map[string]any{"failed_version": failedVersion, "publish_results": publishResults},
+		map[string]any{"rollback_version": rollbackVersion, "complete": complete, "rollback_results": rollbackResults},
+		rollbackErr,
+	)
 }
 
 func allSucceeded(results []targetResult) bool {

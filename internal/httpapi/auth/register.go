@@ -6,6 +6,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/password"
@@ -58,6 +59,8 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 		}
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
 		input.Name = strings.TrimSpace(input.Name)
+		audit.SetActor(c, "", input.Email)
+		audit.SetResourceID(c, input.Email)
 		if input.Email == "" || input.Name == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "email and name are required")
 		}
@@ -102,7 +105,11 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status})
+		response := userResponse{ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status}
+		audit.SetActor(c, user.Id, user.Email)
+		audit.SetResourceID(c, user.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 

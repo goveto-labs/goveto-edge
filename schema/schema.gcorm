@@ -201,18 +201,25 @@ model AgentTask {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  actorId    String?  @map("actor_id")
-  actor      String
-  action     String
-  resource   String
-  beforeJson Json?    @map("before_json")
-  afterJson  Json?    @map("after_json")
-  createdAt  DateTime @default(now()) @map("created_at")
-  user       User?    @relation(fields: [actorId], references: [id])
+  id            String   @id @default(uuid())
+  actorId       String?  @map("actor_id")
+  actor         String
+  sourceIp      String   @default("unknown") @map("source_ip")
+  userAgent     String   @default("") @db.Text @map("user_agent")
+  action        String
+  resourceType  String   @map("resource")
+  resourceId    String   @default("unknown") @map("resource_id")
+  beforeJson    Json?    @map("before_json")
+  afterJson     Json?    @map("after_json")
+  requestId     String   @default(uuid()) @map("request_id")
+  result        String   @default("SUCCESS")
+  failureReason String?  @db.Text @map("failure_reason")
+  createdAt     DateTime @default(now()) @map("created_at")
+  user          User?    @relation(fields: [actorId], references: [id])
 
   @@index([actorId, createdAt])
-  @@index([resource, createdAt])
+  @@index([resourceType, resourceId, createdAt])
+  @@index([requestId])
   @@index([action, createdAt])
   @@map("audit_logs")
 }

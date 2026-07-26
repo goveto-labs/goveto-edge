@@ -11,6 +11,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
@@ -179,7 +180,7 @@ func writeSSEBytes(response http.ResponseWriter, event string, data []byte) erro
 func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		site, err := db.Site.FindUnique(c.Request().Context(), query.Site.Id.Equals(c.Param("site_id")))
-		if err != nil || site.ClusterId != c.Param("cluster_id") {
+		if err != nil || site == nil || site.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "site not found")
 		}
 
@@ -187,7 +188,9 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewPublishJob(job))
+		response := types.NewPublishJob(job)
+		audit.SetChange(c, map[string]any{"site_id": site.Id, "version": site.Version}, response)
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
@@ -120,7 +121,10 @@ func upload(db *client.Client, service *certmanager.Service) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, types.NewCertificate(item))
+		response := types.NewCertificate(item)
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 
@@ -184,7 +188,10 @@ func issueACME(db *client.Client, service *certmanager.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, map[string]any{"certificate": types.NewCertificate(item), "job": types.NewCertificateJob(job)})
+		response := map[string]any{"certificate": types.NewCertificate(item), "job": types.NewCertificateJob(job)}
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 
@@ -194,6 +201,7 @@ func update(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		before := types.NewCertificate(item)
 		var input updateRequest
 		if err = c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -225,7 +233,9 @@ func update(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, types.NewCertificate(item))
+		response := types.NewCertificate(item)
+		audit.SetChange(c, before, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -235,6 +245,7 @@ func replaceMaterial(db *client.Client, service *certmanager.Service) echo.Handl
 		if err != nil {
 			return err
 		}
+		before := types.NewCertificate(item)
 		var input uploadRequest
 		if err = c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -250,7 +261,9 @@ func replaceMaterial(db *client.Client, service *certmanager.Service) echo.Handl
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, types.NewCertificate(item))
+		response := types.NewCertificate(item)
+		audit.SetChange(c, before, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -263,6 +276,7 @@ func remove(db *client.Client, service *certmanager.Service) echo.HandlerFunc {
 		if err = service.Delete(c.Request().Context(), item.Id); err != nil {
 			return err
 		}
+		audit.SetChange(c, types.NewCertificate(item), nil)
 		return c.NoContent(http.StatusNoContent)
 	}
 }
@@ -280,7 +294,9 @@ func enqueueOperation(db *client.Client, service *certmanager.Service, operation
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewCertificateJob(job))
+		response := types.NewCertificateJob(job)
+		audit.SetChange(c, types.NewCertificate(item), response)
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 

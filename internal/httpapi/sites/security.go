@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
 	securitypolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
@@ -34,7 +35,6 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-
 		result := securityPolicyResponse{
 			WAF:       securitypolicy.DefaultWAFPolicy(),
 			RateLimit: securitypolicy.DefaultRateLimitPolicy(),
@@ -94,6 +94,21 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		if err != nil {
 			return err
 		}
+		before := securityPolicyResponse{
+			WAF: securitypolicy.DefaultWAFPolicy(), RateLimit: securitypolicy.DefaultRateLimitPolicy(),
+		}
+		if site.PolicyId != nil {
+			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
+			if findErr != nil {
+				return findErr
+			}
+			if err = json.Unmarshal(stored.WafJson, &before.WAF); err != nil {
+				return err
+			}
+			if err = json.Unmarshal(stored.CcJson, &before.RateLimit); err != nil {
+				return err
+			}
+		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if site.PolicyId != nil {
 				_, updateErr := tx.Policy.Update().
@@ -138,6 +153,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		} else {
 			response.PublishError = publishErr.Error()
 		}
+		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
 	}
 }

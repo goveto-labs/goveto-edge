@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/dnssync"
@@ -116,6 +117,7 @@ func reinstall(
 		if node == nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
+		before := types.NewNode(node)
 		if (node.Status == model.NodeStatusPENDING || node.Status == model.NodeStatusINSTALLING) && !input.Force {
 			return echo.NewHTTPError(http.StatusConflict, "node installation is already in progress")
 		}
@@ -209,6 +211,7 @@ func reinstall(
 		if err := loadNodeRelations(ctx, db, node, true); err != nil {
 			return err
 		}
+		audit.SetChange(c, before, types.NewNode(node))
 		return types.JSON(c, http.StatusAccepted, types.NewNode(node))
 	}
 }
@@ -361,6 +364,8 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			"group_count", len(created.GroupMemberships),
 			"region_count", len(created.RegionMemberships),
 		)
+		audit.SetResourceID(c, created.Id)
+		audit.SetChange(c, nil, types.NewNode(created))
 		return types.JSON(c, http.StatusAccepted, types.NewNode(created))
 	}
 }

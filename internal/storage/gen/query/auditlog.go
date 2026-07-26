@@ -31,38 +31,56 @@ func ApplyAuditLogOptions(opts []AuditLogQueryOption) AuditLogQueryConfig {
 
 // AuditLogQuery is the namespace for AuditLog query operations.
 type AuditLogQuery struct {
-	Id         auditLogIdField
-	ActorId    auditLogActorIdField
-	Actor      auditLogActorField
-	Action     auditLogActionField
-	Resource   auditLogResourceField
-	BeforeJson auditLogBeforeJsonField
-	AfterJson  auditLogAfterJsonField
-	CreatedAt  auditLogCreatedAtField
-	User       auditLogUserRelation
+	Id            auditLogIdField
+	ActorId       auditLogActorIdField
+	Actor         auditLogActorField
+	SourceIp      auditLogSourceIpField
+	UserAgent     auditLogUserAgentField
+	Action        auditLogActionField
+	ResourceType  auditLogResourceTypeField
+	ResourceId    auditLogResourceIdField
+	BeforeJson    auditLogBeforeJsonField
+	AfterJson     auditLogAfterJsonField
+	RequestId     auditLogRequestIdField
+	Result        auditLogResultField
+	FailureReason auditLogFailureReasonField
+	CreatedAt     auditLogCreatedAtField
+	User          auditLogUserRelation
 }
 
 const AuditLogTable = "audit_logs"
 const AuditLogIdColumn = "id"
 const AuditLogActorIdColumn = "actor_id"
 const AuditLogActorColumn = "actor"
+const AuditLogSourceIpColumn = "source_ip"
+const AuditLogUserAgentColumn = "user_agent"
 const AuditLogActionColumn = "action"
-const AuditLogResourceColumn = "resource"
+const AuditLogResourceTypeColumn = "resource"
+const AuditLogResourceIdColumn = "resource_id"
 const AuditLogBeforeJsonColumn = "before_json"
 const AuditLogAfterJsonColumn = "after_json"
+const AuditLogRequestIdColumn = "request_id"
+const AuditLogResultColumn = "result"
+const AuditLogFailureReasonColumn = "failure_reason"
 const AuditLogCreatedAtColumn = "created_at"
 
 // AuditLogQuery provides query building methods for the AuditLog model.
 var AuditLog = AuditLogQuery{
-	Id:         auditLogIdField{},
-	ActorId:    auditLogActorIdField{},
-	Actor:      auditLogActorField{},
-	Action:     auditLogActionField{},
-	Resource:   auditLogResourceField{},
-	BeforeJson: auditLogBeforeJsonField{},
-	AfterJson:  auditLogAfterJsonField{},
-	CreatedAt:  auditLogCreatedAtField{},
-	User:       auditLogUserRelation{},
+	Id:            auditLogIdField{},
+	ActorId:       auditLogActorIdField{},
+	Actor:         auditLogActorField{},
+	SourceIp:      auditLogSourceIpField{},
+	UserAgent:     auditLogUserAgentField{},
+	Action:        auditLogActionField{},
+	ResourceType:  auditLogResourceTypeField{},
+	ResourceId:    auditLogResourceIdField{},
+	BeforeJson:    auditLogBeforeJsonField{},
+	AfterJson:     auditLogAfterJsonField{},
+	RequestId:     auditLogRequestIdField{},
+	Result:        auditLogResultField{},
+	FailureReason: auditLogFailureReasonField{},
+	CreatedAt:     auditLogCreatedAtField{},
+	User:          auditLogUserRelation{},
 }
 
 // AuditLogWhereClause represents a WHERE condition for AuditLog.
@@ -347,6 +365,128 @@ func (auditLogActorField) Desc() AuditLogOrderByClause {
 	return AuditLogOrderByClause{Field: "actor", Direction: "DESC"}
 }
 
+// SourceIpField provides query operations for the sourceIp field.
+type auditLogSourceIpField struct{}
+
+// Equals creates an equality condition.
+func (auditLogSourceIpField) Equals(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "source_ip", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogSourceIpField) Not(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "source_ip", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogSourceIpField) In(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "source_ip", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogSourceIpField) NotIn(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "source_ip", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogSourceIpField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "source_ip", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogSourceIpField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "source_ip", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogSourceIpField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "source_ip", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogSourceIpField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "source_ip", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogSourceIpField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "source_ip", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogSourceIpField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "source_ip", Direction: "DESC"}
+}
+
+// UserAgentField provides query operations for the userAgent field.
+type auditLogUserAgentField struct{}
+
+// Equals creates an equality condition.
+func (auditLogUserAgentField) Equals(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "user_agent", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogUserAgentField) Not(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "user_agent", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogUserAgentField) In(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "user_agent", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogUserAgentField) NotIn(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "user_agent", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogUserAgentField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "user_agent", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogUserAgentField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "user_agent", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogUserAgentField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "user_agent", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogUserAgentField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "user_agent", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogUserAgentField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "user_agent", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogUserAgentField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "user_agent", Direction: "DESC"}
+}
+
 // ActionField provides query operations for the action field.
 type auditLogActionField struct{}
 
@@ -408,21 +548,21 @@ func (auditLogActionField) Desc() AuditLogOrderByClause {
 	return AuditLogOrderByClause{Field: "action", Direction: "DESC"}
 }
 
-// ResourceField provides query operations for the resource field.
-type auditLogResourceField struct{}
+// ResourceTypeField provides query operations for the resourceType field.
+type auditLogResourceTypeField struct{}
 
 // Equals creates an equality condition.
-func (auditLogResourceField) Equals(v string) AuditLogWhereClause {
+func (auditLogResourceTypeField) Equals(v string) AuditLogWhereClause {
 	return AuditLogWhereClause{Field: "resource", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (auditLogResourceField) Not(v string) AuditLogWhereClause {
+func (auditLogResourceTypeField) Not(v string) AuditLogWhereClause {
 	return AuditLogWhereClause{Field: "resource", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (auditLogResourceField) In(vals ...string) AuditLogWhereClause {
+func (auditLogResourceTypeField) In(vals ...string) AuditLogWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -431,7 +571,7 @@ func (auditLogResourceField) In(vals ...string) AuditLogWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (auditLogResourceField) NotIn(vals ...string) AuditLogWhereClause {
+func (auditLogResourceTypeField) NotIn(vals ...string) AuditLogWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -440,33 +580,94 @@ func (auditLogResourceField) NotIn(vals ...string) AuditLogWhereClause {
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (auditLogResourceField) Contains(v string) AuditLogWhereClause {
+func (auditLogResourceTypeField) Contains(v string) AuditLogWhereClause {
 	return AuditLogWhereClause{Field: "resource", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (auditLogResourceField) StartsWith(v string) AuditLogWhereClause {
+func (auditLogResourceTypeField) StartsWith(v string) AuditLogWhereClause {
 	return AuditLogWhereClause{Field: "resource", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (auditLogResourceField) EndsWith(v string) AuditLogWhereClause {
+func (auditLogResourceTypeField) EndsWith(v string) AuditLogWhereClause {
 	return AuditLogWhereClause{Field: "resource", Operator: "ENDS_WITH", Value: v}
 }
 
 // Set creates a set operation for create/update.
-func (auditLogResourceField) Set(v string) AuditLogSetClause {
+func (auditLogResourceTypeField) Set(v string) AuditLogSetClause {
 	return AuditLogSetClause{Field: "resource", Value: v}
 }
 
 // Asc returns an ascending order clause for this field.
-func (auditLogResourceField) Asc() AuditLogOrderByClause {
+func (auditLogResourceTypeField) Asc() AuditLogOrderByClause {
 	return AuditLogOrderByClause{Field: "resource", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (auditLogResourceField) Desc() AuditLogOrderByClause {
+func (auditLogResourceTypeField) Desc() AuditLogOrderByClause {
 	return AuditLogOrderByClause{Field: "resource", Direction: "DESC"}
+}
+
+// ResourceIdField provides query operations for the resourceId field.
+type auditLogResourceIdField struct{}
+
+// Equals creates an equality condition.
+func (auditLogResourceIdField) Equals(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "resource_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogResourceIdField) Not(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "resource_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogResourceIdField) In(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "resource_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogResourceIdField) NotIn(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "resource_id", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogResourceIdField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "resource_id", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogResourceIdField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "resource_id", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogResourceIdField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "resource_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogResourceIdField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "resource_id", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogResourceIdField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "resource_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogResourceIdField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "resource_id", Direction: "DESC"}
 }
 
 // BeforeJsonField provides query operations for the beforeJson field.
@@ -581,6 +782,199 @@ func (auditLogAfterJsonField) Desc() AuditLogOrderByClause {
 	return AuditLogOrderByClause{Field: "after_json", Direction: "DESC"}
 }
 
+// RequestIdField provides query operations for the requestId field.
+type auditLogRequestIdField struct{}
+
+// Equals creates an equality condition.
+func (auditLogRequestIdField) Equals(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "request_id", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogRequestIdField) Not(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "request_id", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogRequestIdField) In(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "request_id", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogRequestIdField) NotIn(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "request_id", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogRequestIdField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "request_id", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogRequestIdField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "request_id", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogRequestIdField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "request_id", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogRequestIdField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "request_id", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogRequestIdField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "request_id", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogRequestIdField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "request_id", Direction: "DESC"}
+}
+
+// ResultField provides query operations for the result field.
+type auditLogResultField struct{}
+
+// Equals creates an equality condition.
+func (auditLogResultField) Equals(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "result", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogResultField) Not(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "result", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogResultField) In(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "result", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogResultField) NotIn(vals ...string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "result", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogResultField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "result", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogResultField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "result", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogResultField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "result", Operator: "ENDS_WITH", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogResultField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "result", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogResultField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "result", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogResultField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "result", Direction: "DESC"}
+}
+
+// FailureReasonField provides query operations for the failureReason field.
+type auditLogFailureReasonField struct{}
+
+// Equals creates an equality condition.
+func (auditLogFailureReasonField) Equals(v *string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (auditLogFailureReasonField) Not(v *string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (auditLogFailureReasonField) In(vals ...*string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (auditLogFailureReasonField) NotIn(vals ...*string) AuditLogWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (auditLogFailureReasonField) Contains(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (auditLogFailureReasonField) StartsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (auditLogFailureReasonField) EndsWith(v string) AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (auditLogFailureReasonField) IsNull() AuditLogWhereClause {
+	return AuditLogWhereClause{Field: "failure_reason", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (auditLogFailureReasonField) Set(v string) AuditLogSetClause {
+	return AuditLogSetClause{Field: "failure_reason", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (auditLogFailureReasonField) SetNull() AuditLogSetClause {
+	return AuditLogSetClause{Field: "failure_reason", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (auditLogFailureReasonField) Asc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "failure_reason", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (auditLogFailureReasonField) Desc() AuditLogOrderByClause {
+	return AuditLogOrderByClause{Field: "failure_reason", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type auditLogCreatedAtField struct{}
 
@@ -688,20 +1082,26 @@ type AuditLogGroupByResult struct {
 
 // AuditLogCreateInput holds data for creating a AuditLog record.
 type AuditLogCreateInput struct {
-	Id         string
-	ActorId    **string
-	Actor      string
-	Action     string
-	Resource   string
-	BeforeJson **json.RawMessage
-	AfterJson  **json.RawMessage
-	CreatedAt  time.Time
-	User       *UserCreateNestedInput
+	Id            string
+	ActorId       **string
+	Actor         string
+	SourceIp      string
+	UserAgent     string
+	Action        string
+	ResourceType  string
+	ResourceId    string
+	BeforeJson    **json.RawMessage
+	AfterJson     **json.RawMessage
+	RequestId     string
+	Result        string
+	FailureReason **string
+	CreatedAt     time.Time
+	User          *UserCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d AuditLogCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ActorId, d.Actor, d.Action, d.Resource, d.BeforeJson, d.AfterJson, d.CreatedAt}
+	return []any{d.Id, d.ActorId, d.Actor, d.SourceIp, d.UserAgent, d.Action, d.ResourceType, d.ResourceId, d.BeforeJson, d.AfterJson, d.RequestId, d.Result, d.FailureReason, d.CreatedAt}
 }
 
 // AuditLogCreateNestedInput supports nested creates and connects.

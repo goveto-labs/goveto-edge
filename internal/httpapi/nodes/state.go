@@ -3,9 +3,12 @@ package nodes
 import (
 	"context"
 	"net/http"
+	"sort"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
@@ -26,6 +29,18 @@ type nodeStatusResponse struct {
 	Status  model.NodeStatus `json:"status"`
 	Message string           `json:"message,omitempty"`
 }
+type nodeStateSnapshot struct {
+	ID           string           `json:"id"`
+	Status       model.NodeStatus `json:"status"`
+	HeartbeatAt  *time.Time       `json:"heartbeat_at,omitempty"`
+	InstallError *string          `json:"install_error,omitempty"`
+}
+
+func newNodeStateSnapshot(node *model.Node) nodeStateSnapshot {
+	return nodeStateSnapshot{
+		ID: node.Id, Status: node.Status, HeartbeatAt: node.HeartbeatAt, InstallError: node.InstallError,
+	}
+}
 
 // @summary Update node DNS lines
 // @description Replace the DNS lines assigned to a node and enqueue DNS reconciliation.
@@ -37,6 +52,15 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 		if err != nil {
 			return err
 		}
+		current, err := db.NodeDNSLine.Query().Where(query.NodeDNSLine.NodeId.Equals(node.Id)).Do(ctx)
+		if err != nil {
+			return err
+		}
+		beforeIDs := make([]string, len(current))
+		for index := range current {
+			beforeIDs[index] = current[index].DnsLineId
+		}
+		sort.Strings(beforeIDs)
 		var input dnsLinesRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -69,10 +93,15 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 		if err != nil {
 			return err
 		}
+		afterIDs := append([]string(nil), input.DNSLineIDs...)
+		sort.Strings(afterIDs)
+		before := dnsLinesResponse{NodeID: node.Id, DNSLineIDs: beforeIDs}
+		after := dnsLinesResponse{NodeID: node.Id, DNSLineIDs: afterIDs}
+		audit.SetChange(c, before, after)
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, dnsLinesResponse{NodeID: node.Id, DNSLineIDs: input.DNSLineIDs})
+		return types.JSON(c, http.StatusOK, after)
 	}
 }
 
@@ -89,6 +118,7 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if node.Status != model.NodeStatusDISABLED {
 			return echo.NewHTTPError(http.StatusConflict, "only a disabled node can be enabled")
 		}
+		before := newNodeStateSnapshot(node)
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
 				query.Node.Status.Set(model.NodeStatusOFFLINE),
@@ -102,6 +132,11 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
+		after := before
+		after.Status = model.NodeStatusOFFLINE
+		after.HeartbeatAt = nil
+		after.InstallError = nil
+		audit.SetChange(c, before, after)
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
@@ -128,11 +163,14 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 			if gateway != nil {
 				gateway.Disconnect(ctx, node.Id)
 			}
+			state := newNodeStateSnapshot(node)
+			audit.SetChange(c, state, state)
 			return types.JSON(c, http.StatusOK, nodeStatusResponse{ID: node.Id, Status: node.Status})
 		}
 		if node.Status != model.NodeStatusONLINE && node.Status != model.NodeStatusOFFLINE && node.Status != model.NodeStatusINSTALL_FAILED {
 			return echo.NewHTTPError(http.StatusConflict, "node cannot be disabled while installation is pending")
 		}
+		before := newNodeStateSnapshot(node)
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusDISABLED)).Do(ctx); err != nil {
 				return err
@@ -148,6 +186,9 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 		if gateway != nil {
 			gateway.Disconnect(ctx, node.Id)
 		}
+		after := before
+		after.Status = model.NodeStatusDISABLED
+		audit.SetChange(c, before, after)
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
@@ -165,6 +206,7 @@ func revokeNodeCredential(db *client.Client, gateway *edgecontrol.Gateway, dnsSe
 		if err != nil {
 			return err
 		}
+		before := newNodeStateSnapshot(node)
 		if err := gateway.Revoke(ctx, node.Id); err != nil {
 			return err
 		}
@@ -174,12 +216,21 @@ func revokeNodeCredential(db *client.Client, gateway *edgecontrol.Gateway, dnsSe
 		).Do(ctx); err != nil {
 			return err
 		}
+		after := before
+		after.Status = model.NodeStatusOFFLINE
+		after.HeartbeatAt = nil
+		audit.SetChange(
+			c,
+			map[string]any{"node": before, "credential_revoked": false},
+			map[string]any{"node": after, "credential_revoked": true},
+		)
 		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, nodeStatusResponse{
+		response := nodeStatusResponse{
 			ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "management credential revoked; reinstall the node to reconnect",
-		})
+		}
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 

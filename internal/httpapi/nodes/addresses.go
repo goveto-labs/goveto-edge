@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
@@ -52,12 +53,14 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		if err != nil {
 			return err
 		}
+		response := types.NewNodeAddress(created)
+		audit.SetChange(c, nil, response)
 		if dnsService != nil {
 			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
 				return err
 			}
 		}
-		return types.JSON(c, http.StatusCreated, types.NewNodeAddress(created))
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 
@@ -79,6 +82,13 @@ func updateAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		if err != nil {
 			return err
 		}
+		current, err := db.NodeAddress.FindUnique(ctx, query.NodeAddress.Id.Equals(c.Param("address_id")))
+		if err != nil {
+			return err
+		}
+		if current == nil || current.NodeId != node.Id {
+			return echo.NewHTTPError(http.StatusNotFound, "address not found")
+		}
 		updated, err := db.NodeAddress.Update().
 			Where(
 				query.NodeAddress.Id.Equals(c.Param("address_id")),
@@ -92,12 +102,14 @@ func updateAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		if updated == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "address not found")
 		}
+		response := types.NewNodeAddress(updated)
+		audit.SetChange(c, types.NewNodeAddress(current), response)
 		if dnsService != nil {
 			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
 				return err
 			}
 		}
-		return types.JSON(c, http.StatusOK, types.NewNodeAddress(updated))
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -121,6 +133,7 @@ func deleteAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		if deleted == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "address not found")
 		}
+		audit.SetChange(c, types.NewNodeAddress(deleted), nil)
 		if dnsService != nil {
 			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
 				return err

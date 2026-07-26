@@ -13,6 +13,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
@@ -102,6 +103,7 @@ func prewarm(db *client.Client) echo.HandlerFunc {
 			}()
 		}
 		wait.Wait()
+		audit.SetChange(c, input, results)
 		return types.JSON(c, http.StatusOK, results)
 	}
 }
@@ -195,7 +197,9 @@ func enqueue(db *client.Client, service *purge.Service) echo.HandlerFunc {
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		return types.JSON(c, http.StatusAccepted, types.NewPurgeJob(job))
+		response := types.NewPurgeJob(job)
+		audit.SetChange(c, input, response)
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 

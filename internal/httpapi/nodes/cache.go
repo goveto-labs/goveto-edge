@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
@@ -63,6 +64,14 @@ func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.Han
 			return echo.NewHTTPError(http.StatusBadRequest, "max_disk_usage_percent must be between 1 and 95")
 		}
 		ctx, nodeID := c.Request().Context(), c.Param("node_id")
+		current, err := db.NodeCacheConfig.FindUnique(ctx, query.NodeCacheConfig.NodeId.Equals(nodeID))
+		if err != nil {
+			return err
+		}
+		if current == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "node cache config not found")
+		}
+		before := types.NewNodeCacheConfig(current)
 		sets := []query.NodeCacheConfigSetClause{
 			query.NodeCacheConfig.CacheDir.Set(input.CacheDirectory),
 			query.NodeCacheConfig.AutoMaxSize.Set(input.AutoMaxSize),
@@ -83,6 +92,7 @@ func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.Han
 		}
 
 		response := cacheUpdateResponse{CacheConfig: types.NewNodeCacheConfig(updated)}
+		audit.SetChange(c, before, response.CacheConfig)
 		dispatchCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		defer cancel()
 		if syncErr := gateway.Dispatch(dispatchCtx, nodeID, edgeprotocol.TaskNodeCacheConfig, input, nil); syncErr == nil {

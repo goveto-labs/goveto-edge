@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
 	cachepolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
@@ -78,6 +79,21 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 		if err != nil {
 			return err
 		}
+		before := cachepolicy.DefaultCachePolicy()
+		if site.PolicyId != nil {
+			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
+			if findErr != nil {
+				return findErr
+			}
+			if stored == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "site policy not found")
+			}
+			if len(stored.CacheJson) > 0 {
+				if err = json.Unmarshal(stored.CacheJson, &before); err != nil {
+					return err
+				}
+			}
+		}
 
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if site.PolicyId != nil {
@@ -121,6 +137,7 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 		} else {
 			response.PublishError = publishErr.Error()
 		}
+		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
 	}
 }

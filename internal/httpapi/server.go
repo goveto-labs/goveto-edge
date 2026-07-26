@@ -7,6 +7,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/analytics"
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/certmanager"
@@ -47,9 +48,10 @@ func New(
 ) *echo.Echo {
 	e := echo.New()
 	e.HTTPErrorHandler = types.HTTPErrorHandler
-	e.Use(sessions.Session, sessions.RequireActiveUser(orm))
+	auditRecorder := audit.New(orm)
+	e.Use(sessions.Session, sessions.RequireActiveUser(orm), audit.Middleware(auditRecorder, audit.ControlPlaneRoutes))
 
-	settingStore := settings.New(orm)
+	settingStore := settings.New(orm, auditRecorder)
 	captchaVerifier := captcha.New()
 
 	health.Register(e, db)

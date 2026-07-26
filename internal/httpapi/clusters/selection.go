@@ -8,6 +8,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
@@ -128,7 +129,10 @@ func create(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, item.Id); err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, clusterCreateResponse{Cluster: clusterChoice{ID: item.Id, Name: item.Name, Role: "OWNER", CreatedAt: item.CreatedAt}, SelectedClusterID: item.Id})
+		response := clusterCreateResponse{Cluster: clusterChoice{ID: item.Id, Name: item.Name, Role: "OWNER", CreatedAt: item.CreatedAt}, SelectedClusterID: item.Id}
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response.Cluster)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 
@@ -158,6 +162,8 @@ func selectCurrent(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 		if err = sessions.SetSelectedCluster(c.Request().Context(), c, input.ClusterID); err != nil {
 			return err
 		}
+		audit.SetResourceID(c, input.ClusterID)
+		audit.SetChange(c, nil, selectResponse{SelectedClusterID: input.ClusterID})
 		return types.JSON(c, http.StatusOK, selectResponse{SelectedClusterID: input.ClusterID})
 	}
 }

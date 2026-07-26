@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -18,11 +19,12 @@ const (
 )
 
 type Store struct {
-	db *client.Client
+	db       *client.Client
+	recorder audit.Recorder
 }
 
-func New(db *client.Client) *Store {
-	return &Store{db: db}
+func New(db *client.Client, recorder audit.Recorder) *Store {
+	return &Store{db: db, recorder: recorder}
 }
 
 func (s *Store) Get(ctx context.Context, key string, target any) (bool, error) {
@@ -44,6 +46,10 @@ func (s *Store) Set(ctx context.Context, key string, value any, description stri
 	if err != nil {
 		return fmt.Errorf("encode setting %q: %w", key, err)
 	}
+	previous, err := s.db.DynamicSetting.FindUnique(ctx, query.DynamicSetting.Key.Equals(key))
+	if err != nil {
+		return fmt.Errorf("read setting %q before update: %w", key, err)
+	}
 	now := time.Now().UTC()
 	_, err = s.db.DynamicSetting.UpsertOne(
 		ctx,
@@ -60,6 +66,16 @@ func (s *Store) Set(ctx context.Context, key string, value any, description stri
 			query.DynamicSetting.UpdatedAt.Set(now),
 		},
 	)
+	if s.recorder != nil {
+		var before any
+		if previous != nil {
+			before = map[string]any{"value": previous.ValueJson, "description": previous.Description}
+		}
+		audit.RecordContext(
+			ctx, s.recorder, "system_setting.update", "dynamic_setting", key,
+			before, map[string]any{"value": json.RawMessage(encoded), "description": description}, err,
+		)
+	}
 	if err != nil {
 		return fmt.Errorf("write setting %q: %w", key, err)
 	}

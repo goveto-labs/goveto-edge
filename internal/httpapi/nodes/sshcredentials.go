@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
 	nodedomain "goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -97,7 +98,10 @@ func createSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher)
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusCreated, newSSHCredentialResponse(item, 0))
+		response := newSSHCredentialResponse(item, 0)
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
 	}
 }
 
@@ -160,7 +164,9 @@ func updateSSHCredential(db *client.Client, cipher *nodedomain.CredentialCipher)
 		if err != nil {
 			return err
 		}
-		return types.JSON(c, http.StatusOK, newSSHCredentialResponse(updated, count))
+		response := newSSHCredentialResponse(updated, count)
+		audit.SetChange(c, newSSHCredentialResponse(item, count), response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -189,6 +195,7 @@ func deleteSSHCredential(db *client.Client) echo.HandlerFunc {
 		if _, err := db.SSHCredential.Delete().Where(query.SSHCredential.Id.Equals(item.Id)).Do(ctx); err != nil {
 			return err
 		}
+		audit.SetChange(c, newSSHCredentialResponse(item, 0), nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
 }

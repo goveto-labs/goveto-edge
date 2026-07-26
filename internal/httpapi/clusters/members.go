@@ -5,6 +5,7 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -53,6 +54,8 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		audit.SetResourceID(c, item.ClusterId+":"+item.UserId)
+		audit.SetChange(c, nil, types.NewClusterMember(item))
 		return types.JSON(c, http.StatusCreated, types.NewClusterMember(item))
 	}
 }

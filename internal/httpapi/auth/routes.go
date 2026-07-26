@@ -8,6 +8,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"github.com/pquerna/otp/totp"
+	"goveto-edge/internal/audit"
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/httpapi/types"
@@ -58,6 +59,8 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 		}
 
 		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+		audit.SetActor(c, "", input.Email)
+		audit.SetResourceID(c, input.Email)
 		if input.Email == "" || input.Password == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "email and password are required")
 		}
@@ -85,13 +88,16 @@ func login(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
 			}
 		}
 
+		audit.SetActor(c, user.Id, user.Email)
 		token, err := sessions.Create(c.Request().Context(), user.Id)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "session storage unavailable")
 		}
 
 		sessions.SetCookie(c, token)
-		return types.JSON(c, http.StatusOK, newUserResponse(user))
+		response := newUserResponse(user)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 

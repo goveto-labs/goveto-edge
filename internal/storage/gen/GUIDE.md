@@ -152,10 +152,16 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Actorid` (String, optional)
   - `Actor` (String)
+  - `Sourceip` (String)
+  - `Useragent` (String)
   - `Action` (String)
-  - `Resource` (String)
+  - `Resourcetype` (String)
+  - `Resourceid` (String)
   - `Beforejson` (Json, optional)
   - `Afterjson` (Json, optional)
+  - `Requestid` (String)
+  - `Result` (String)
+  - `Failurereason` (String, optional)
   - `Createdat` (DateTime)
 
 ### Certificate

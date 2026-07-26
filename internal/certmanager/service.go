@@ -20,6 +20,7 @@ import (
 	"github.com/mholt/acmez/v3"
 	"github.com/mholt/acmez/v3/acme"
 
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/dnsprovider"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
@@ -107,20 +108,26 @@ func (s *Service) migrateLegacyPrivateKeys(ctx context.Context) {
 }
 
 func (s *Service) Enqueue(ctx context.Context, certificateID string, operation model.CertificateOperation) (*model.CertificateJob, error) {
+	job, _, err := s.enqueue(ctx, certificateID, operation)
+	return job, err
+}
+
+func (s *Service) enqueue(ctx context.Context, certificateID string, operation model.CertificateOperation) (*model.CertificateJob, bool, error) {
 	active, err := s.db.CertificateJob.Query().Where(
 		query.CertificateJob.CertificateId.Equals(certificateID),
 		query.CertificateJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
 	).OrderBy(query.CertificateJob.CreatedAt.Desc()).First(ctx)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	if active != nil {
-		return active, nil
+		return active, false, nil
 	}
-	return s.db.CertificateJob.Create().Set(
+	job, err := s.db.CertificateJob.Create().Set(
 		query.CertificateJob.CertificateId.Set(certificateID),
 		query.CertificateJob.Operation.Set(operation),
 	).Do(ctx)
+	return job, err == nil, err
 }
 
 func (s *Service) Delete(ctx context.Context, certificateID string) error {
@@ -471,7 +478,13 @@ func (s *Service) reconcileLifecycle(ctx context.Context) {
 			}
 		}
 		if certificate.Source == model.CertificateSourceACME && certificate.AutoRenew && certificate.ExpiresAt != nil && !now.Before(certificate.ExpiresAt.AddDate(0, 0, -certificate.RenewBeforeDays)) {
-			_, _ = s.Enqueue(ctx, certificate.Id, model.CertificateOperationRENEW)
+			job, created, enqueueErr := s.enqueue(ctx, certificate.Id, model.CertificateOperationRENEW)
+			if created || enqueueErr != nil {
+				audit.RecordSystem(
+					ctx, audit.New(s.db), "certificate.auto_renew", "certificate", certificate.Id,
+					certificate, job, enqueueErr,
+				)
+			}
 		}
 	}
 	_, _ = s.db.ACMEChallenge.Delete().Where(query.ACMEChallenge.ExpiresAt.Lt(now)).DoMany(ctx)

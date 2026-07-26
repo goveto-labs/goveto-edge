@@ -15,6 +15,7 @@ import (
 	"golang.org/x/net/idna"
 
 	"goveto-edge/internal/analytics"
+	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
@@ -324,6 +325,8 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		} else {
 			response.PublishError = publishErr.Error()
 		}
+		audit.SetResourceID(c, siteID)
+		audit.SetChange(c, nil, response)
 		return types.JSON(c, http.StatusCreated, response)
 	}
 }
