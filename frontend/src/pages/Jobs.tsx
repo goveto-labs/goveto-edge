@@ -63,49 +63,49 @@ export default function Jobs() {
     const [mutating, setMutating] = useState('');
     const [loadError, setLoadError] = useState('');
     const [actionError, setActionError] = useState('');
-	const listRequestVersion = useRef(0);
-	const historyRequestVersion = useRef(0);
-	const mutationRequestVersion = useRef(0);
-	const activeClusterID = useRef(clusterId);
-	const previousClusterID = useRef(clusterId);
-	activeClusterID.current = clusterId;
+    const listRequestVersion = useRef(0);
+    const historyRequestVersion = useRef(0);
+    const mutationRequestVersion = useRef(0);
+    const activeClusterID = useRef(clusterId);
+    const previousClusterID = useRef(clusterId);
+    activeClusterID.current = clusterId;
 
     const load = useCallback(async () => {
         if (!clusterId) return;
-		const version = ++listRequestVersion.current;
-		const requestedClusterID = clusterId;
-		setLoading(true);
-		try {
-			const result = await api.list({ kind, status });
-			if (
-				version !== listRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
+        const version = ++listRequestVersion.current;
+        const requestedClusterID = clusterId;
+        setLoading(true);
+        try {
+            const result = await api.list({ kind, status });
+            if (
+                version !== listRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
             setJobs(result ?? []);
             setLoadError('');
         } catch (loadError) {
-			if (
-				version !== listRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
+            if (
+                version !== listRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
             setLoadError(loadError instanceof ApiError ? loadError.message : 'Failed to load jobs');
         } finally {
-			if (
-				version === listRequestVersion.current &&
-				requestedClusterID === activeClusterID.current
-			)
-				setLoading(false);
+            if (
+                version === listRequestVersion.current &&
+                requestedClusterID === activeClusterID.current
+            )
+                setLoading(false);
         }
     }, [api, clusterId, kind, status]);
 
     useEffect(() => {
-		if (previousClusterID.current === clusterId) return;
-		previousClusterID.current = clusterId;
-		listRequestVersion.current++;
-		historyRequestVersion.current++;
-		mutationRequestVersion.current++;
+        if (previousClusterID.current === clusterId) return;
+        previousClusterID.current = clusterId;
+        listRequestVersion.current++;
+        historyRequestVersion.current++;
+        mutationRequestVersion.current++;
         setJobs([]);
         setSelected(null);
         setExecutions([]);
@@ -117,75 +117,75 @@ export default function Jobs() {
 
     useAutoRefresh(load, Boolean(clusterId));
 
-	const loadHistory = async (job: ManagedJob) => {
-		const version = ++historyRequestVersion.current;
-		const requestedClusterID = clusterId;
+    const loadHistory = async (job: ManagedJob) => {
+        const version = ++historyRequestVersion.current;
+        const requestedClusterID = clusterId;
         setSelected(job);
         setExecutions([]);
         setHistoryLoading(true);
         try {
             const result = await api.executions(job.kind, job.id);
-			if (
-				version !== historyRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
+            if (
+                version !== historyRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
             setExecutions(result ?? []);
             setLoadError('');
         } catch (loadError) {
-			if (
-				version !== historyRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
+            if (
+                version !== historyRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
             setLoadError(
                 loadError instanceof ApiError ? loadError.message : 'Failed to load job history'
             );
         } finally {
-			if (
-				version === historyRequestVersion.current &&
-				requestedClusterID === activeClusterID.current
-			)
-				setHistoryLoading(false);
+            if (
+                version === historyRequestVersion.current &&
+                requestedClusterID === activeClusterID.current
+            )
+                setHistoryLoading(false);
         }
     };
 
-	const mutate = async (job: ManagedJob, action: 'cancel' | 'replay') => {
-		const version = ++mutationRequestVersion.current;
-		const requestedClusterID = clusterId;
-		setMutating(`${action}:${job.id}`);
+    const mutate = async (job: ManagedJob, action: 'cancel' | 'replay') => {
+        const version = ++mutationRequestVersion.current;
+        const requestedClusterID = clusterId;
+        setMutating(`${action}:${job.id}`);
         setActionError('');
-		try {
-			await api[action](job.kind, job.id);
-			if (
-				version !== mutationRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
-			await load();
-			if (
-				version !== mutationRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
-			if (selected?.id === job.id) await loadHistory(job);
-		} catch (mutationError) {
-			if (
-				version !== mutationRequestVersion.current ||
-				requestedClusterID !== activeClusterID.current
-			)
-				return;
+        try {
+            await api[action](job.kind, job.id);
+            if (
+                version !== mutationRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
+            await load();
+            if (
+                version !== mutationRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
+            if (selected?.id === job.id) await loadHistory(job);
+        } catch (mutationError) {
+            if (
+                version !== mutationRequestVersion.current ||
+                requestedClusterID !== activeClusterID.current
+            )
+                return;
             setActionError(
                 mutationError instanceof ApiError
                     ? mutationError.message
                     : `Failed to ${action} job`
             );
-		} finally {
-			if (
-				version === mutationRequestVersion.current &&
-				requestedClusterID === activeClusterID.current
-			)
-				setMutating('');
+        } finally {
+            if (
+                version === mutationRequestVersion.current &&
+                requestedClusterID === activeClusterID.current
+            )
+                setMutating('');
         }
     };
 

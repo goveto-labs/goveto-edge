@@ -599,6 +599,18 @@ query.PostAuthorIdColumn
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
+### PasswordResetToken
+
+- Client handle: `c.PasswordResetToken`
+- Query namespace: `query.PasswordResetToken`
+- Fields:
+  - `Id` (String, id)
+  - `Userid` (String)
+  - `Tokenhash` (String, unique)
+  - `Expiresat` (DateTime)
+  - `Usedat` (DateTime, optional)
+  - `Createdat` (DateTime)
+
 ### Policy
 
 - Client handle: `c.Policy`
@@ -747,7 +759,12 @@ query.PostAuthorIdColumn
   - `Role` ()
   - `Status` ()
   - `Totpsecret` (String, optional)
+  - `Totprecoverycodes` (Json, optional)
+  - `Failedloginattempts` (Int)
+  - `Lastfailedloginat` (DateTime, optional)
+  - `Lockeduntil` (DateTime, optional)
   - `Lastloginat` (DateTime, optional)
+  - `Passwordchangedat` (DateTime, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -759,7 +776,11 @@ query.PostAuthorIdColumn
   - `Id` (String, id)
   - `Userid` (String)
   - `Tokenhash` (String, unique)
+  - `Ipaddress` (String, optional)
+  - `Useragent` (String, optional)
   - `Expiresat` (DateTime)
+  - `Lastseenat` (DateTime)
+  - `Revokedat` (DateTime, optional)
   - `Createdat` (DateTime)
 
 ### When generating application code:

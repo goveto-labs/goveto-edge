@@ -33,3 +33,6 @@ Bootstrap identities contain an agent private key. They are available only to
 the cluster owner during installation and are removed from PostgreSQL when the
 agent first establishes its authenticated management channel. Viewing or
 downloading an identity creates an audit log entry.
+
+Control API cookie, CSRF, authentication, request-limit, and proxy requirements
+are documented in [Control API security](../../docs/control-api-security.md).

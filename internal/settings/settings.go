@@ -15,6 +15,7 @@ import (
 const (
 	RegistrationEnabledKey = "auth.registration.enabled"
 	CaptchaKey             = "auth.captcha"
+	RequireTOTPKey         = "auth.totp.required"
 	InstanceInitializedKey = "instance.initialized"
 )
 
@@ -112,6 +113,16 @@ func (s *Store) RegistrationEnabled(ctx context.Context) (bool, error) {
 	var enabled bool
 	found, err := s.Get(ctx, RegistrationEnabledKey, &enabled)
 	return found && enabled, err
+}
+
+func (s *Store) RequireTOTP(ctx context.Context) (bool, error) {
+	var required bool
+	found, err := s.Get(ctx, RequireTOTPKey, &required)
+	return found && required, err
+}
+
+func (s *Store) SetRequireTOTP(ctx context.Context, required bool) error {
+	return s.Set(ctx, RequireTOTPKey, required, "Require active users to enroll time-based one-time passwords")
 }
 
 type CaptchaConfig struct {

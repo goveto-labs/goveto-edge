@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -22,6 +23,13 @@ type Config struct {
 	HTTPHost                  string
 	HTTPPort                  int
 	HTTPReadHeaderTimeout     time.Duration
+	HTTPReadTimeout           time.Duration
+	HTTPWriteTimeout          time.Duration
+	HTTPIdleTimeout           time.Duration
+	HTTPMaxHeaderBytes        int
+	HTTPMaxBodyBytes          int64
+	HTTPMaxUploadBytes        int64
+	HTTPTrustedProxies        []string
 	AgentGatewayHost          string
 	AgentGatewayPort          int
 	AgentGatewayPublicAddress string
@@ -55,6 +63,34 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	readTimeout, err := envDuration("HTTP_READ_TIMEOUT", 15*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	writeTimeout, err := envDuration("HTTP_WRITE_TIMEOUT", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	idleTimeout, err := envDuration("HTTP_IDLE_TIMEOUT", 60*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	maxHeaderBytes, err := envInt("HTTP_MAX_HEADER_BYTES", 32<<10)
+	if err != nil {
+		return Config{}, err
+	}
+	maxBodyBytes, err := envInt("HTTP_MAX_BODY_BYTES", 2<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	maxUploadBytes, err := envInt("HTTP_MAX_UPLOAD_BYTES", 16<<20)
+	if err != nil {
+		return Config{}, err
+	}
+	trustedProxies, err := envCIDRList("HTTP_TRUSTED_PROXIES")
+	if err != nil {
+		return Config{}, err
+	}
 	shutdownTimeout, err := envDuration("SHUTDOWN_TIMEOUT", 10*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -71,6 +107,13 @@ func Load() (Config, error) {
 		HTTPHost:                  envString("HTTP_HOST", "0.0.0.0"),
 		HTTPPort:                  port,
 		HTTPReadHeaderTimeout:     readHeaderTimeout,
+		HTTPReadTimeout:           readTimeout,
+		HTTPWriteTimeout:          writeTimeout,
+		HTTPIdleTimeout:           idleTimeout,
+		HTTPMaxHeaderBytes:        maxHeaderBytes,
+		HTTPMaxBodyBytes:          int64(maxBodyBytes),
+		HTTPMaxUploadBytes:        int64(maxUploadBytes),
+		HTTPTrustedProxies:        trustedProxies,
 		AgentGatewayHost:          envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
 		AgentGatewayPort:          agentGatewayPort,
 		AgentGatewayPublicAddress: envString("AGENT_GATEWAY_PUBLIC_ADDRESS", fmt.Sprintf("127.0.0.1:%d", agentGatewayPort)),
@@ -80,6 +123,9 @@ func Load() (Config, error) {
 		ClickHouseDSN:             os.Getenv("CLICKHOUSE_DSN"),
 		SessionCookieName:         envString("SESSION_COOKIE_NAME", "goveto_session"),
 		SessionCookieSecure:       envBool("SESSION_COOKIE_SECURE", false),
+	}
+	if strings.EqualFold(appEnv, "production") {
+		cfg.SessionCookieSecure = true
 	}
 	cfg.SessionTTL, err = envDuration("SESSION_TTL", 24*time.Hour)
 	if err != nil {
@@ -96,6 +142,12 @@ func Load() (Config, error) {
 	}
 	if cfg.AgentGatewayPort < 1 || cfg.AgentGatewayPort > 65535 {
 		return Config{}, fmt.Errorf("AGENT_GATEWAY_PORT must be between 1 and 65535")
+	}
+	if cfg.HTTPReadHeaderTimeout <= 0 || cfg.HTTPReadTimeout <= 0 || cfg.HTTPWriteTimeout <= 0 || cfg.HTTPIdleTimeout <= 0 {
+		return Config{}, errors.New("HTTP timeouts must be positive")
+	}
+	if cfg.HTTPMaxHeaderBytes < 1024 || cfg.HTTPMaxBodyBytes < 1024 || cfg.HTTPMaxUploadBytes < cfg.HTTPMaxBodyBytes {
+		return Config{}, errors.New("HTTP size limits are invalid")
 	}
 	if configuredMasterKey := strings.TrimSpace(os.Getenv("NODE_CREDENTIAL_MASTER_KEY")); configuredMasterKey != "" {
 		cfg.NodeCredentialMasterKey, err = validateMasterKey(configuredMasterKey, "NODE_CREDENTIAL_MASTER_KEY")
@@ -244,6 +296,34 @@ func envInt(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
 	return parsed, nil
+}
+
+// envCIDRList parses a comma-separated list of proxy addresses. Bare IPs are
+// normalized to single-host CIDRs so operators can list either form.
+func envCIDRList(key string) ([]string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return nil, nil
+	}
+	var entries []string
+	for entry := range strings.SplitSeq(value, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !strings.Contains(entry, "/") {
+			if strings.Contains(entry, ":") {
+				entry += "/128"
+			} else {
+				entry += "/32"
+			}
+		}
+		if _, _, err := net.ParseCIDR(entry); err != nil {
+			return nil, fmt.Errorf("%s contains an invalid IP or CIDR %q", key, entry)
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
 }
 
 func envDuration(key string, fallback time.Duration) (time.Duration, error) {

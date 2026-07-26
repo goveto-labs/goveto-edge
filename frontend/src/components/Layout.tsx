@@ -61,9 +61,12 @@ export function Layout() {
         setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
     };
 
-    const handleLogout = () => {
-        logout();
-        navigate('/login');
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } finally {
+            navigate('/login');
+        }
     };
 
     const handleCreateCluster = async (event: React.FormEvent) => {

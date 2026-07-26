@@ -329,13 +329,13 @@ func sensitiveKey(key string) bool {
 	normalized := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
 	for _, marker := range []string{
 		"password", "passphrase", "secret", "token", "privatekey", "credential",
-		"authorization", "apikey", "cookie",
+		"authorization", "apikey", "cookie", "totp", "recoverycode",
 	} {
 		if strings.Contains(normalized, marker) {
 			return true
 		}
 	}
-	return false
+	return normalized == "code"
 }
 
 func nonempty(value, fallback string) string {

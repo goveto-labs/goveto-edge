@@ -5,6 +5,7 @@ import (
 	"database/sql"
 
 	"github.com/labstack/echo/v5"
+	"github.com/redis/go-redis/v9"
 
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/audit"
@@ -26,6 +27,7 @@ import (
 	purgeapi "goveto-edge/internal/httpapi/purge"
 	"goveto-edge/internal/httpapi/sites"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
@@ -45,19 +47,33 @@ func New(
 	certificateService *certmanager.Service,
 	purgeService *purge.Service,
 	dnsService *dnssync.Service,
+	redisClient *redis.Client,
+	securityOptions httpsecurity.Options,
 	analyticsStore ...*analytics.Store,
 ) *echo.Echo {
 	e := echo.New()
 	e.HTTPErrorHandler = types.HTTPErrorHandler
+	if securityOptions.IPExtractor != nil {
+		e.IPExtractor = securityOptions.IPExtractor
+	}
 	auditRecorder := audit.New(orm)
-	e.Use(sessions.Session, sessions.RequireActiveUser(orm), audit.Middleware(auditRecorder, audit.ControlPlaneRoutes))
-
 	settingStore := settings.New(orm, auditRecorder)
+	securityOptions.SessionCookieName = sessions.CookieName()
+	securityOptions.CSRFCookieName = sessions.CSRFCookieName()
+	e.Use(
+		httpsecurity.Middleware(securityOptions),
+		sessions.Session,
+		sessions.RequireActiveUser(orm),
+		authapi.RequireTOTPEnrollment(settingStore),
+		audit.Middleware(auditRecorder, audit.ControlPlaneRoutes),
+	)
+
 	captchaVerifier := captcha.New()
+	limiter := httpsecurity.NewRateLimiter(redisClient)
 
 	health.Register(e, db)
-	initialization.Register(e, orm, settingStore)
-	authapi.Register(e, orm, sessions, settingStore, captchaVerifier)
+	initialization.Register(e, orm, settingStore, limiter)
+	authapi.Register(e, orm, sessions, settingStore, captchaVerifier, limiter)
 	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, credentialCipher, dnsService)

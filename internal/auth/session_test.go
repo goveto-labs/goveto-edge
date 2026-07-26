@@ -14,15 +14,23 @@ import (
 )
 
 type fakeRedisStore struct {
+	values  map[string]string
 	deleted []string
 }
 
-func (store *fakeRedisStore) Get(context.Context, string) *redis.StringCmd {
+func (store *fakeRedisStore) Get(_ context.Context, key string) *redis.StringCmd {
+	if value, ok := store.values[key]; ok {
+		return redis.NewStringResult(value, nil)
+	}
 	return redis.NewStringResult("", redis.Nil)
 }
 
 func (store *fakeRedisStore) Set(context.Context, string, any, time.Duration) *redis.StatusCmd {
 	return redis.NewStatusResult("OK", nil)
+}
+
+func (store *fakeRedisStore) SetNX(context.Context, string, any, time.Duration) *redis.BoolCmd {
+	return redis.NewBoolResult(true, nil)
 }
 
 func (store *fakeRedisStore) Del(_ context.Context, keys ...string) *redis.IntCmd {
@@ -96,5 +104,59 @@ func TestRequireActiveUserKeepsActiveSession(t *testing.T) {
 	}
 	if len(redisStore.deleted) != 0 {
 		t.Fatalf("active session keys were deleted: %v", redisStore.deleted)
+	}
+}
+
+func TestSetCookieCreatesSecureSessionAndCSRFCookies(t *testing.T) {
+	sessions := &SessionStore{cookieName: "session", csrfCookie: "session_csrf", ttl: time.Hour, secure: true}
+	recorder := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/login", nil), recorder)
+	if err := sessions.SetCookie(c, "session-token"); err != nil {
+		t.Fatal(err)
+	}
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 2 {
+		t.Fatalf("cookies = %#v", cookies)
+	}
+	if cookies[0].Name != "session" || !cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatalf("session cookie = %#v", cookies[0])
+	}
+	if cookies[1].Name != "session_csrf" || cookies[1].HttpOnly || !cookies[1].Secure || cookies[1].Value == "" {
+		t.Fatalf("CSRF cookie = %#v", cookies[1])
+	}
+}
+
+func TestSessionReissuesMissingCSRFCookie(t *testing.T) {
+	redisStore := &fakeRedisStore{values: map[string]string{sessionKey("token-1"): "user-1"}}
+	sessions := &SessionStore{redis: redisStore, cookieName: "session", csrfCookie: "session_csrf", ttl: time.Hour}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: "session", Value: "token-1"})
+	ctx := echo.New().NewContext(request, recorder)
+
+	handler := sessions.Session(func(c *echo.Context) error {
+		if CurrentUID(c) != "user-1" {
+			t.Fatal("session was not loaded")
+		}
+		return nil
+	})
+	if err := handler(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cookies := recorder.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "session_csrf" || cookies[0].Value == "" {
+		t.Fatalf("CSRF cookie was not reissued: %#v", cookies)
+	}
+
+	// A request that still carries the CSRF cookie must not receive a new one.
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/protected", nil)
+	request.AddCookie(&http.Cookie{Name: "session", Value: "token-1"})
+	request.AddCookie(&http.Cookie{Name: "session_csrf", Value: "existing"})
+	if err := handler(echo.New().NewContext(request, recorder)); err != nil {
+		t.Fatal(err)
+	}
+	if cookies := recorder.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("unexpected cookies on repeat request: %#v", cookies)
 	}
 }

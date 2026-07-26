@@ -18,7 +18,7 @@ interface AuthContextValue {
     error: string | null;
     login: (payload: LoginRequest) => Promise<void>;
     register: (payload: RegisterRequest) => Promise<void>;
-    logout: () => void;
+    logout: () => Promise<void>;
     refresh: () => Promise<void>;
 }
 
@@ -60,8 +60,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await authApi.register(payload);
     }, []);
 
-    const logout = useCallback(() => {
-        setUser(null);
+    const logout = useCallback(async () => {
+        try {
+            await authApi.logout();
+        } finally {
+            setUser(null);
+        }
     }, []);
 
     const value = useMemo(

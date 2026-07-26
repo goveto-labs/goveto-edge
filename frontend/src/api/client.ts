@@ -65,6 +65,22 @@ export const apiClient = axios.create({
     },
 });
 
+apiClient.interceptors.request.use((config) => {
+    const method = (config.method || 'get').toLowerCase();
+    if (!['get', 'head', 'options'].includes(method) && typeof document !== 'undefined') {
+        const csrfCookie = document.cookie
+            .split('; ')
+            .find((entry) => entry.slice(0, entry.indexOf('=')).endsWith('_csrf'));
+        if (csrfCookie) {
+            config.headers.set(
+                'X-CSRF-Token',
+                decodeURIComponent(csrfCookie.slice(csrfCookie.indexOf('=') + 1))
+            );
+        }
+    }
+    return config;
+});
+
 apiClient.interceptors.response.use(
     (response) => response,
     (error: AxiosError<unknown>) => {

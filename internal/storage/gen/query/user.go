@@ -2,6 +2,7 @@
 package query
 
 import (
+	"encoding/json"
 	"goveto-edge/internal/storage/gen/model"
 	"time"
 )
@@ -31,21 +32,27 @@ func ApplyUserOptions(opts []UserQueryOption) UserQueryConfig {
 
 // UserQuery is the namespace for User query operations.
 type UserQuery struct {
-	Id                 userIdField
-	Email              userEmailField
-	PasswordHash       userPasswordHashField
-	Name               userNameField
-	Role               userRoleField
-	Status             userStatusField
-	TotpSecret         userTotpSecretField
-	LastLoginAt        userLastLoginAtField
-	CreatedAt          userCreatedAtField
-	UpdatedAt          userUpdatedAtField
-	Sessions           userSessionsRelation
-	AuditLogs          userAuditLogsRelation
-	CreatedClusters    userCreatedClustersRelation
-	ClusterMemberships userClusterMembershipsRelation
-	CreatedSites       userCreatedSitesRelation
+	Id                  userIdField
+	Email               userEmailField
+	PasswordHash        userPasswordHashField
+	Name                userNameField
+	Role                userRoleField
+	Status              userStatusField
+	TotpSecret          userTotpSecretField
+	TotpRecoveryCodes   userTotpRecoveryCodesField
+	FailedLoginAttempts userFailedLoginAttemptsField
+	LastFailedLoginAt   userLastFailedLoginAtField
+	LockedUntil         userLockedUntilField
+	LastLoginAt         userLastLoginAtField
+	PasswordChangedAt   userPasswordChangedAtField
+	CreatedAt           userCreatedAtField
+	UpdatedAt           userUpdatedAtField
+	Sessions            userSessionsRelation
+	PasswordResetTokens userPasswordResetTokensRelation
+	AuditLogs           userAuditLogsRelation
+	CreatedClusters     userCreatedClustersRelation
+	ClusterMemberships  userClusterMembershipsRelation
+	CreatedSites        userCreatedSitesRelation
 }
 
 const UserTable = "users"
@@ -56,27 +63,38 @@ const UserNameColumn = "name"
 const UserRoleColumn = "role"
 const UserStatusColumn = "status"
 const UserTotpSecretColumn = "totp_secret"
+const UserTotpRecoveryCodesColumn = "totp_recovery_codes"
+const UserFailedLoginAttemptsColumn = "failed_login_attempts"
+const UserLastFailedLoginAtColumn = "last_failed_login_at"
+const UserLockedUntilColumn = "locked_until"
 const UserLastLoginAtColumn = "last_login_at"
+const UserPasswordChangedAtColumn = "password_changed_at"
 const UserCreatedAtColumn = "created_at"
 const UserUpdatedAtColumn = "updated_at"
 
 // UserQuery provides query building methods for the User model.
 var User = UserQuery{
-	Id:                 userIdField{},
-	Email:              userEmailField{},
-	PasswordHash:       userPasswordHashField{},
-	Name:               userNameField{},
-	Role:               userRoleField{},
-	Status:             userStatusField{},
-	TotpSecret:         userTotpSecretField{},
-	LastLoginAt:        userLastLoginAtField{},
-	CreatedAt:          userCreatedAtField{},
-	UpdatedAt:          userUpdatedAtField{},
-	Sessions:           userSessionsRelation{},
-	AuditLogs:          userAuditLogsRelation{},
-	CreatedClusters:    userCreatedClustersRelation{},
-	ClusterMemberships: userClusterMembershipsRelation{},
-	CreatedSites:       userCreatedSitesRelation{},
+	Id:                  userIdField{},
+	Email:               userEmailField{},
+	PasswordHash:        userPasswordHashField{},
+	Name:                userNameField{},
+	Role:                userRoleField{},
+	Status:              userStatusField{},
+	TotpSecret:          userTotpSecretField{},
+	TotpRecoveryCodes:   userTotpRecoveryCodesField{},
+	FailedLoginAttempts: userFailedLoginAttemptsField{},
+	LastFailedLoginAt:   userLastFailedLoginAtField{},
+	LockedUntil:         userLockedUntilField{},
+	LastLoginAt:         userLastLoginAtField{},
+	PasswordChangedAt:   userPasswordChangedAtField{},
+	CreatedAt:           userCreatedAtField{},
+	UpdatedAt:           userUpdatedAtField{},
+	Sessions:            userSessionsRelation{},
+	PasswordResetTokens: userPasswordResetTokensRelation{},
+	AuditLogs:           userAuditLogsRelation{},
+	CreatedClusters:     userCreatedClustersRelation{},
+	ClusterMemberships:  userClusterMembershipsRelation{},
+	CreatedSites:        userCreatedSitesRelation{},
 }
 
 // UserWhereClause represents a WHERE condition for User.
@@ -575,6 +593,280 @@ func (userTotpSecretField) Desc() UserOrderByClause {
 	return UserOrderByClause{Field: "totp_secret", Direction: "DESC"}
 }
 
+// TotpRecoveryCodesField provides query operations for the totpRecoveryCodes field.
+type userTotpRecoveryCodesField struct{}
+
+// Equals creates an equality condition.
+func (userTotpRecoveryCodesField) Equals(v *json.RawMessage) UserWhereClause {
+	return UserWhereClause{Field: "totp_recovery_codes", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userTotpRecoveryCodesField) Not(v *json.RawMessage) UserWhereClause {
+	return UserWhereClause{Field: "totp_recovery_codes", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userTotpRecoveryCodesField) In(vals ...*json.RawMessage) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "totp_recovery_codes", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userTotpRecoveryCodesField) NotIn(vals ...*json.RawMessage) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "totp_recovery_codes", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (userTotpRecoveryCodesField) IsNull() UserWhereClause {
+	return UserWhereClause{Field: "totp_recovery_codes", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userTotpRecoveryCodesField) Set(v json.RawMessage) UserSetClause {
+	return UserSetClause{Field: "totp_recovery_codes", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userTotpRecoveryCodesField) SetNull() UserSetClause {
+	return UserSetClause{Field: "totp_recovery_codes", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userTotpRecoveryCodesField) Asc() UserOrderByClause {
+	return UserOrderByClause{Field: "totp_recovery_codes", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userTotpRecoveryCodesField) Desc() UserOrderByClause {
+	return UserOrderByClause{Field: "totp_recovery_codes", Direction: "DESC"}
+}
+
+// FailedLoginAttemptsField provides query operations for the failedLoginAttempts field.
+type userFailedLoginAttemptsField struct{}
+
+// Equals creates an equality condition.
+func (userFailedLoginAttemptsField) Equals(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userFailedLoginAttemptsField) Not(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userFailedLoginAttemptsField) In(vals ...int) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userFailedLoginAttemptsField) NotIn(vals ...int) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userFailedLoginAttemptsField) Lt(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userFailedLoginAttemptsField) Lte(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userFailedLoginAttemptsField) Gt(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userFailedLoginAttemptsField) Gte(v int) UserWhereClause {
+	return UserWhereClause{Field: "failed_login_attempts", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (userFailedLoginAttemptsField) Set(v int) UserSetClause {
+	return UserSetClause{Field: "failed_login_attempts", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userFailedLoginAttemptsField) Asc() UserOrderByClause {
+	return UserOrderByClause{Field: "failed_login_attempts", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userFailedLoginAttemptsField) Desc() UserOrderByClause {
+	return UserOrderByClause{Field: "failed_login_attempts", Direction: "DESC"}
+}
+
+// LastFailedLoginAtField provides query operations for the lastFailedLoginAt field.
+type userLastFailedLoginAtField struct{}
+
+// Equals creates an equality condition.
+func (userLastFailedLoginAtField) Equals(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userLastFailedLoginAtField) Not(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userLastFailedLoginAtField) In(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userLastFailedLoginAtField) NotIn(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userLastFailedLoginAtField) Lt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userLastFailedLoginAtField) Lte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userLastFailedLoginAtField) Gt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userLastFailedLoginAtField) Gte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userLastFailedLoginAtField) IsNull() UserWhereClause {
+	return UserWhereClause{Field: "last_failed_login_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userLastFailedLoginAtField) Set(v time.Time) UserSetClause {
+	return UserSetClause{Field: "last_failed_login_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userLastFailedLoginAtField) SetNull() UserSetClause {
+	return UserSetClause{Field: "last_failed_login_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userLastFailedLoginAtField) Asc() UserOrderByClause {
+	return UserOrderByClause{Field: "last_failed_login_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userLastFailedLoginAtField) Desc() UserOrderByClause {
+	return UserOrderByClause{Field: "last_failed_login_at", Direction: "DESC"}
+}
+
+// LockedUntilField provides query operations for the lockedUntil field.
+type userLockedUntilField struct{}
+
+// Equals creates an equality condition.
+func (userLockedUntilField) Equals(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userLockedUntilField) Not(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userLockedUntilField) In(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "locked_until", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userLockedUntilField) NotIn(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "locked_until", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userLockedUntilField) Lt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userLockedUntilField) Lte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userLockedUntilField) Gt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userLockedUntilField) Gte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userLockedUntilField) IsNull() UserWhereClause {
+	return UserWhereClause{Field: "locked_until", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userLockedUntilField) Set(v time.Time) UserSetClause {
+	return UserSetClause{Field: "locked_until", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userLockedUntilField) SetNull() UserSetClause {
+	return UserSetClause{Field: "locked_until", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userLockedUntilField) Asc() UserOrderByClause {
+	return UserOrderByClause{Field: "locked_until", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userLockedUntilField) Desc() UserOrderByClause {
+	return UserOrderByClause{Field: "locked_until", Direction: "DESC"}
+}
+
 // LastLoginAtField provides query operations for the lastLoginAt field.
 type userLastLoginAtField struct{}
 
@@ -649,6 +941,82 @@ func (userLastLoginAtField) Asc() UserOrderByClause {
 // Desc returns a descending order clause for this field.
 func (userLastLoginAtField) Desc() UserOrderByClause {
 	return UserOrderByClause{Field: "last_login_at", Direction: "DESC"}
+}
+
+// PasswordChangedAtField provides query operations for the passwordChangedAt field.
+type userPasswordChangedAtField struct{}
+
+// Equals creates an equality condition.
+func (userPasswordChangedAtField) Equals(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userPasswordChangedAtField) Not(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userPasswordChangedAtField) In(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "password_changed_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userPasswordChangedAtField) NotIn(vals ...*time.Time) UserWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserWhereClause{Field: "password_changed_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userPasswordChangedAtField) Lt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userPasswordChangedAtField) Lte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userPasswordChangedAtField) Gt(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userPasswordChangedAtField) Gte(v *time.Time) UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userPasswordChangedAtField) IsNull() UserWhereClause {
+	return UserWhereClause{Field: "password_changed_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userPasswordChangedAtField) Set(v time.Time) UserSetClause {
+	return UserSetClause{Field: "password_changed_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userPasswordChangedAtField) SetNull() UserSetClause {
+	return UserSetClause{Field: "password_changed_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userPasswordChangedAtField) Asc() UserOrderByClause {
+	return UserOrderByClause{Field: "password_changed_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userPasswordChangedAtField) Desc() UserOrderByClause {
+	return UserOrderByClause{Field: "password_changed_at", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -791,6 +1159,14 @@ func (userSessionsRelation) Fetch() UserIncludeClause {
 	return UserIncludeClause{Relation: "sessions"}
 }
 
+// PasswordResetTokensRelation provides relation query helpers for passwordResetTokens.
+type userPasswordResetTokensRelation struct{}
+
+// Fetch creates an include clause to fetch related passwordResetTokens.
+func (userPasswordResetTokensRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "passwordResetTokens"}
+}
+
 // AuditLogsRelation provides relation query helpers for auditLogs.
 type userAuditLogsRelation struct{}
 
@@ -856,26 +1232,32 @@ type UserGroupByResult struct {
 
 // UserCreateInput holds data for creating a User record.
 type UserCreateInput struct {
-	Id                 string
-	Email              string
-	PasswordHash       string
-	Name               string
-	Role               model.UserRole
-	Status             model.UserStatus
-	TotpSecret         **string
-	LastLoginAt        **time.Time
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	Sessions           *UserSessionCreateNestedInput
-	AuditLogs          *AuditLogCreateNestedInput
-	CreatedClusters    *ClusterCreateNestedInput
-	ClusterMemberships *ClusterMemberCreateNestedInput
-	CreatedSites       *SiteCreateNestedInput
+	Id                  string
+	Email               string
+	PasswordHash        string
+	Name                string
+	Role                model.UserRole
+	Status              model.UserStatus
+	TotpSecret          **string
+	TotpRecoveryCodes   **json.RawMessage
+	FailedLoginAttempts int
+	LastFailedLoginAt   **time.Time
+	LockedUntil         **time.Time
+	LastLoginAt         **time.Time
+	PasswordChangedAt   **time.Time
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
+	Sessions            *UserSessionCreateNestedInput
+	PasswordResetTokens *PasswordResetTokenCreateNestedInput
+	AuditLogs           *AuditLogCreateNestedInput
+	CreatedClusters     *ClusterCreateNestedInput
+	ClusterMemberships  *ClusterMemberCreateNestedInput
+	CreatedSites        *SiteCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d UserCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecret, d.LastLoginAt, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecret, d.TotpRecoveryCodes, d.FailedLoginAttempts, d.LastFailedLoginAt, d.LockedUntil, d.LastLoginAt, d.PasswordChangedAt, d.CreatedAt, d.UpdatedAt}
 }
 
 // UserCreateNestedInput supports nested creates and connects.

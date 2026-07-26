@@ -4,6 +4,8 @@ export interface User {
     name: string;
     role: string;
     status: string;
+    totp_enabled?: boolean;
+    totp_required?: boolean;
 }
 
 export interface LoginRequest {

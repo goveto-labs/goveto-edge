@@ -482,6 +482,17 @@ type OriginPool struct {
 	Sites      []*Site          `db:"-" json:"sites,omitempty"`
 }
 
+// PasswordResetToken represents the PasswordResetToken model.
+type PasswordResetToken struct {
+	Id        string     `db:"id" json:"id"`
+	UserId    string     `db:"user_id" json:"userId"`
+	TokenHash string     `db:"token_hash" json:"tokenHash"`
+	ExpiresAt time.Time  `db:"expires_at" json:"expiresAt"`
+	UsedAt    *time.Time `db:"used_at" json:"usedAt"`
+	CreatedAt time.Time  `db:"created_at" json:"createdAt"`
+	User      *User      `db:"-" json:"user,omitempty"`
+}
+
 // Policy represents the Policy model.
 type Policy struct {
 	Id              string          `db:"id" json:"id"`
@@ -626,29 +637,39 @@ type SiteListenerConfig struct {
 
 // User represents the User model.
 type User struct {
-	Id                 string           `db:"id" json:"id"`
-	Email              string           `db:"email" json:"email"`
-	PasswordHash       string           `db:"password_hash" json:"passwordHash"`
-	Name               string           `db:"name" json:"name"`
-	Role               UserRole         `db:"role" json:"role"`
-	Status             UserStatus       `db:"status" json:"status"`
-	TotpSecret         *string          `db:"totp_secret" json:"totpSecret"`
-	LastLoginAt        *time.Time       `db:"last_login_at" json:"lastLoginAt"`
-	CreatedAt          time.Time        `db:"created_at" json:"createdAt"`
-	UpdatedAt          time.Time        `db:"updated_at" json:"updatedAt"`
-	Sessions           []*UserSession   `db:"-" json:"sessions,omitempty"`
-	AuditLogs          []*AuditLog      `db:"-" json:"auditLogs,omitempty"`
-	CreatedClusters    []*Cluster       `db:"-" json:"createdClusters,omitempty"`
-	ClusterMemberships []*ClusterMember `db:"-" json:"clusterMemberships,omitempty"`
-	CreatedSites       []*Site          `db:"-" json:"createdSites,omitempty"`
+	Id                  string                `db:"id" json:"id"`
+	Email               string                `db:"email" json:"email"`
+	PasswordHash        string                `db:"password_hash" json:"passwordHash"`
+	Name                string                `db:"name" json:"name"`
+	Role                UserRole              `db:"role" json:"role"`
+	Status              UserStatus            `db:"status" json:"status"`
+	TotpSecret          *string               `db:"totp_secret" json:"totpSecret"`
+	TotpRecoveryCodes   *json.RawMessage      `db:"totp_recovery_codes" json:"totpRecoveryCodes"`
+	FailedLoginAttempts int                   `db:"failed_login_attempts" json:"failedLoginAttempts"`
+	LastFailedLoginAt   *time.Time            `db:"last_failed_login_at" json:"lastFailedLoginAt"`
+	LockedUntil         *time.Time            `db:"locked_until" json:"lockedUntil"`
+	LastLoginAt         *time.Time            `db:"last_login_at" json:"lastLoginAt"`
+	PasswordChangedAt   *time.Time            `db:"password_changed_at" json:"passwordChangedAt"`
+	CreatedAt           time.Time             `db:"created_at" json:"createdAt"`
+	UpdatedAt           time.Time             `db:"updated_at" json:"updatedAt"`
+	Sessions            []*UserSession        `db:"-" json:"sessions,omitempty"`
+	PasswordResetTokens []*PasswordResetToken `db:"-" json:"passwordResetTokens,omitempty"`
+	AuditLogs           []*AuditLog           `db:"-" json:"auditLogs,omitempty"`
+	CreatedClusters     []*Cluster            `db:"-" json:"createdClusters,omitempty"`
+	ClusterMemberships  []*ClusterMember      `db:"-" json:"clusterMemberships,omitempty"`
+	CreatedSites        []*Site               `db:"-" json:"createdSites,omitempty"`
 }
 
 // UserSession represents the UserSession model.
 type UserSession struct {
-	Id        string    `db:"id" json:"id"`
-	UserId    string    `db:"user_id" json:"userId"`
-	TokenHash string    `db:"token_hash" json:"tokenHash"`
-	ExpiresAt time.Time `db:"expires_at" json:"expiresAt"`
-	CreatedAt time.Time `db:"created_at" json:"createdAt"`
-	User      *User     `db:"-" json:"user,omitempty"`
+	Id         string     `db:"id" json:"id"`
+	UserId     string     `db:"user_id" json:"userId"`
+	TokenHash  string     `db:"token_hash" json:"tokenHash"`
+	IpAddress  *string    `db:"ip_address" json:"ipAddress"`
+	UserAgent  *string    `db:"user_agent" json:"userAgent"`
+	ExpiresAt  time.Time  `db:"expires_at" json:"expiresAt"`
+	LastSeenAt time.Time  `db:"last_seen_at" json:"lastSeenAt"`
+	RevokedAt  *time.Time `db:"revoked_at" json:"revokedAt"`
+	CreatedAt  time.Time  `db:"created_at" json:"createdAt"`
+	User       *User      `db:"-" json:"user,omitempty"`
 }

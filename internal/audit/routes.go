@@ -5,7 +5,18 @@ import "net/http"
 // ControlPlaneRoutes enumerates the current security-relevant HTTP mutations.
 var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/auth/login", "auth.login", "session", ""},
+	{http.MethodPost, "/api/v1/auth/logout", "auth.logout", "session", ""},
 	{http.MethodPost, "/api/v1/auth/register", "user.register", "user", ""},
+	{http.MethodPut, "/api/v1/auth/password", "auth.password.change", "user", ""},
+	{http.MethodPost, "/api/v1/auth/password-reset/admin-token", "auth.password_reset.issue", "user", ""},
+	{http.MethodPost, "/api/v1/auth/password-reset", "auth.password_reset.complete", "user", ""},
+	{http.MethodPost, "/api/v1/auth/totp/enable", "auth.totp.enable", "user", ""},
+	{http.MethodPost, "/api/v1/auth/totp/reset", "auth.totp.reset", "user", ""},
+	{http.MethodPost, "/api/v1/auth/totp/recovery-codes", "auth.totp.recovery_codes", "user", ""},
+	{http.MethodDelete, "/api/v1/auth/totp", "auth.totp.disable", "user", ""},
+	{http.MethodPut, "/api/v1/auth/security-policy", "auth.security_policy.update", "dynamic_setting", ""},
+	{http.MethodDelete, "/api/v1/auth/sessions/:session_id", "auth.session.revoke", "session", "session_id"},
+	{http.MethodPost, "/api/v1/auth/sessions/revoke-others", "auth.session.revoke_others", "session", ""},
 	{http.MethodPost, "/api/v1/init", "system.initialize", "system", ""},
 	{http.MethodPost, "/api/v1/clusters", "cluster.create", "cluster", ""},
 	{http.MethodPut, "/api/v1/session/cluster", "cluster.select", "cluster", ""},

@@ -48,6 +48,21 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestProductionForcesSecureSessionCookie(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("SESSION_COOKIE_SECURE", "false")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.SessionCookieSecure {
+		t.Fatal("production accepted an insecure session cookie")
+	}
+}
+
 func TestMasterKeyGeneratedOnceAndReused(t *testing.T) {
 	dir := t.TempDir()
 	first, err := loadOrCreateMasterKey(dir)

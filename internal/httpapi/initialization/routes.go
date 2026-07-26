@@ -10,6 +10,7 @@ import (
 
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -37,10 +38,10 @@ type userResponse struct {
 	Status model.UserStatus `json:"status"`
 }
 
-func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store) {
+func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, limiter *httpsecurity.RateLimiter) {
 	group := e.Group("/api/v1/init")
-	group.GET("/status", status(settingStore))
-	group.POST("", initialize(db))
+	group.GET("/status", status(settingStore), limiter.Limit("initialization-status", 60, time.Minute))
+	group.POST("", initialize(db), limiter.Limit("initialization", 5, time.Hour))
 }
 
 // @summary Instance initialization status

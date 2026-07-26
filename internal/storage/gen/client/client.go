@@ -53,6 +53,7 @@ type Client struct {
 	NodeSiteConfigVersion NodeSiteConfigVersionActions
 	OriginBackend         OriginBackendActions
 	OriginPool            OriginPoolActions
+	PasswordResetToken    PasswordResetTokenActions
 	Policy                PolicyActions
 	PublishJob            PublishJobActions
 	PurgeJob              PurgeJobActions
@@ -100,6 +101,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
+	c.PasswordResetToken = PasswordResetTokenActions{client: c}
 	c.Policy = PolicyActions{client: c}
 	c.PublishJob = PublishJobActions{client: c}
 	c.PurgeJob = PurgeJobActions{client: c}
@@ -307,6 +309,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
+	txClient.PasswordResetToken = PasswordResetTokenActions{client: txClient}
 	txClient.Policy = PolicyActions{client: txClient}
 	txClient.PublishJob = PublishJobActions{client: txClient}
 	txClient.PurgeJob = PurgeJobActions{client: txClient}
@@ -28752,6 +28755,980 @@ func (a OriginPoolActions) GroupBy(ctx context.Context, fields []string, opts ..
 	return results, rows.Err()
 }
 
+func quotedPasswordResetTokenTable(c *Client) string {
+	return c.quoteIdentifier("password_reset_tokens")
+}
+func quotedPasswordResetTokenColumns(c *Client) string {
+	cols := []string{"id", "user_id", "token_hash", "expires_at", "used_at", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quotePasswordResetTokenField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "user_id":
+		return c.quoteIdentifier(field), nil
+	case "token_hash":
+		return c.quoteIdentifier(field), nil
+	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "used_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown PasswordResetToken field %q", field)
+	}
+}
+
+// buildPasswordResetTokenWhere recursively builds a WHERE clause string and arguments.
+func buildPasswordResetTokenWhere(c *Client, wheres []query.PasswordResetTokenWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.PasswordResetTokenWhereClause); ok {
+				sub, subArgs := buildPasswordResetTokenWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.PasswordResetTokenWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildPasswordResetTokenWhere(c, []query.PasswordResetTokenWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.PasswordResetTokenWhereClause); ok {
+				sub, subArgs := buildPasswordResetTokenWhere(c, []query.PasswordResetTokenWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quotePasswordResetTokenField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// PasswordResetTokenActions provides database operations for the PasswordResetToken model.
+type PasswordResetTokenActions struct {
+	client *Client
+}
+
+// PasswordResetTokenCreateBuilder builds a PasswordResetToken create operation incrementally.
+type PasswordResetTokenCreateBuilder struct {
+	action PasswordResetTokenActions
+	sets   []query.PasswordResetTokenSetClause
+}
+
+// Create starts a staged PasswordResetToken create operation.
+func (a PasswordResetTokenActions) Create() PasswordResetTokenCreateBuilder {
+	return PasswordResetTokenCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b PasswordResetTokenCreateBuilder) Set(sets ...query.PasswordResetTokenSetClause) PasswordResetTokenCreateBuilder {
+	next := PasswordResetTokenCreateBuilder{
+		action: b.action,
+		sets:   make([]query.PasswordResetTokenSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b PasswordResetTokenCreateBuilder) Do(ctx context.Context) (*model.PasswordResetToken, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// PasswordResetTokenCreateManyBuilder builds a bulk PasswordResetToken insert operation.
+type PasswordResetTokenCreateManyBuilder struct {
+	action            PasswordResetTokenActions
+	data              []query.PasswordResetTokenCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk PasswordResetToken insert operation.
+func (a PasswordResetTokenActions) BulkCreate(data []query.PasswordResetTokenCreateInput) PasswordResetTokenCreateManyBuilder {
+	return PasswordResetTokenCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b PasswordResetTokenCreateManyBuilder) OnConflictDoNothing(columns ...string) PasswordResetTokenCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b PasswordResetTokenCreateManyBuilder) Returning(columns ...string) PasswordResetTokenCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b PasswordResetTokenCreateManyBuilder) BatchSize(n int) PasswordResetTokenCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b PasswordResetTokenCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildPasswordResetTokenCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("PasswordResetToken.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("PasswordResetToken.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b PasswordResetTokenCreateManyBuilder) DoReturning(ctx context.Context) ([]model.PasswordResetToken, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.PasswordResetToken
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildPasswordResetTokenCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "user_id", "token_hash", "expires_at", "used_at", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.PasswordResetToken
+			if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b PasswordResetTokenCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "user_id", "token_hash", "expires_at", "used_at", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildPasswordResetTokenCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("PasswordResetToken.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// PasswordResetTokenQueryBuilder builds a PasswordResetToken query incrementally.
+type PasswordResetTokenQueryBuilder struct {
+	action PasswordResetTokenActions
+	opts   []query.PasswordResetTokenQueryOption
+}
+
+// Query starts a staged PasswordResetToken query.
+func (a PasswordResetTokenActions) Query() PasswordResetTokenQueryBuilder {
+	return PasswordResetTokenQueryBuilder{action: a}
+}
+
+func (b PasswordResetTokenQueryBuilder) withOptions(opts ...query.PasswordResetTokenQueryOption) PasswordResetTokenQueryBuilder {
+	next := PasswordResetTokenQueryBuilder{
+		action: b.action,
+		opts:   make([]query.PasswordResetTokenQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b PasswordResetTokenQueryBuilder) Where(clauses ...query.PasswordResetTokenWhereClause) PasswordResetTokenQueryBuilder {
+	opts := make([]query.PasswordResetTokenQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b PasswordResetTokenQueryBuilder) OrderBy(clause query.PasswordResetTokenOrderByClause) PasswordResetTokenQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b PasswordResetTokenQueryBuilder) Include(clauses ...query.PasswordResetTokenIncludeClause) PasswordResetTokenQueryBuilder {
+	opts := make([]query.PasswordResetTokenQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b PasswordResetTokenQueryBuilder) Take(n int) PasswordResetTokenQueryBuilder {
+	return b.withOptions(query.PasswordResetTokenTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b PasswordResetTokenQueryBuilder) Skip(n int) PasswordResetTokenQueryBuilder {
+	return b.withOptions(query.PasswordResetTokenSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b PasswordResetTokenQueryBuilder) Do(ctx context.Context) ([]model.PasswordResetToken, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b PasswordResetTokenQueryBuilder) First(ctx context.Context) (*model.PasswordResetToken, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b PasswordResetTokenQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyPasswordResetTokenOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// PasswordResetTokenUpdateBuilder builds a PasswordResetToken update operation incrementally.
+type PasswordResetTokenUpdateBuilder struct {
+	action PasswordResetTokenActions
+	wheres []query.PasswordResetTokenWhereClause
+	sets   []query.PasswordResetTokenSetClause
+}
+
+// Update starts a staged PasswordResetToken update operation.
+func (a PasswordResetTokenActions) Update() PasswordResetTokenUpdateBuilder {
+	return PasswordResetTokenUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b PasswordResetTokenUpdateBuilder) Where(clauses ...query.PasswordResetTokenWhereClause) PasswordResetTokenUpdateBuilder {
+	next := PasswordResetTokenUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.PasswordResetTokenWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.PasswordResetTokenSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b PasswordResetTokenUpdateBuilder) Set(sets ...query.PasswordResetTokenSetClause) PasswordResetTokenUpdateBuilder {
+	next := PasswordResetTokenUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.PasswordResetTokenWhereClause(nil), b.wheres...),
+		sets:   make([]query.PasswordResetTokenSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b PasswordResetTokenUpdateBuilder) combinedWhere() (query.PasswordResetTokenWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.PasswordResetTokenWhereClause{}, fmt.Errorf("PasswordResetToken.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.PasswordResetToken.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b PasswordResetTokenUpdateBuilder) Do(ctx context.Context) (*model.PasswordResetToken, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b PasswordResetTokenUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// PasswordResetTokenDeleteBuilder builds a PasswordResetToken delete operation incrementally.
+type PasswordResetTokenDeleteBuilder struct {
+	action PasswordResetTokenActions
+	wheres []query.PasswordResetTokenWhereClause
+}
+
+// Delete starts a staged PasswordResetToken delete operation.
+func (a PasswordResetTokenActions) Delete() PasswordResetTokenDeleteBuilder {
+	return PasswordResetTokenDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b PasswordResetTokenDeleteBuilder) Where(clauses ...query.PasswordResetTokenWhereClause) PasswordResetTokenDeleteBuilder {
+	next := PasswordResetTokenDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.PasswordResetTokenWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b PasswordResetTokenDeleteBuilder) combinedWhere() (query.PasswordResetTokenWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.PasswordResetTokenWhereClause{}, fmt.Errorf("PasswordResetToken.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.PasswordResetToken.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b PasswordResetTokenDeleteBuilder) Do(ctx context.Context) (*model.PasswordResetToken, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b PasswordResetTokenDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple PasswordResetToken records.
+func (a PasswordResetTokenActions) FindMany(ctx context.Context, opts ...query.PasswordResetTokenQueryOption) ([]model.PasswordResetToken, error) {
+	cfg := query.ApplyPasswordResetTokenOptions(opts)
+	q := "SELECT " + quotedPasswordResetTokenColumns(a.client) + " FROM " + quotedPasswordResetTokenTable(a.client)
+	argIdx := 0
+	where, args := buildPasswordResetTokenWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quotePasswordResetTokenField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.PasswordResetToken
+	for rows.Next() {
+		var item model.PasswordResetToken
+		if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching PasswordResetToken record.
+func (a PasswordResetTokenActions) FindFirst(ctx context.Context, opts ...query.PasswordResetTokenQueryOption) (*model.PasswordResetToken, error) {
+	opts = append(opts, query.PasswordResetTokenTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single PasswordResetToken record by unique constraint.
+func (a PasswordResetTokenActions) FindUnique(ctx context.Context, where query.PasswordResetTokenWhereClause) (*model.PasswordResetToken, error) {
+	argIdx := 0
+	whereSQL, args := buildPasswordResetTokenWhere(a.client, []query.PasswordResetTokenWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedPasswordResetTokenColumns(a.client) + " FROM " + quotedPasswordResetTokenTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.PasswordResetToken
+	if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("PasswordResetToken.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single PasswordResetToken record.
+func (a PasswordResetTokenActions) CreateOne(ctx context.Context, sets ...query.PasswordResetTokenSetClause) (*model.PasswordResetToken, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("PasswordResetToken.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quotePasswordResetTokenField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPasswordResetTokenTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedPasswordResetTokenColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.PasswordResetToken
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple PasswordResetToken records.
+func (a PasswordResetTokenActions) CreateMany(ctx context.Context, data []query.PasswordResetTokenCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a PasswordResetTokenActions) buildPasswordResetTokenCreateManySQL(data []query.PasswordResetTokenCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "user_id", "token_hash", "expires_at", "used_at", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedPasswordResetTokenTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single PasswordResetToken record matching the where clause.
+func (a PasswordResetTokenActions) UpdateOne(ctx context.Context, where query.PasswordResetTokenWhereClause, sets ...query.PasswordResetTokenSetClause) (*model.PasswordResetToken, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("PasswordResetToken.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quotePasswordResetTokenField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildPasswordResetTokenWhere(a.client, []query.PasswordResetTokenWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPasswordResetTokenTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedPasswordResetTokenColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.PasswordResetToken
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("PasswordResetToken.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple PasswordResetToken records matching the where clauses.
+func (a PasswordResetTokenActions) UpdateMany(ctx context.Context, wheres []query.PasswordResetTokenWhereClause, sets ...query.PasswordResetTokenSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("PasswordResetToken.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quotePasswordResetTokenField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildPasswordResetTokenWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedPasswordResetTokenTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("PasswordResetToken.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single PasswordResetToken record.
+func (a PasswordResetTokenActions) UpsertOne(ctx context.Context, where query.PasswordResetTokenWhereClause, create []query.PasswordResetTokenSetClause, update []query.PasswordResetTokenSetClause) (*model.PasswordResetToken, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("PasswordResetToken.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quotePasswordResetTokenField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedPasswordResetTokenTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quotePasswordResetTokenField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quotePasswordResetTokenField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quotePasswordResetTokenField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedPasswordResetTokenColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.PasswordResetToken
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single PasswordResetToken record matching the where clause.
+func (a PasswordResetTokenActions) DeleteOne(ctx context.Context, where query.PasswordResetTokenWhereClause) (*model.PasswordResetToken, error) {
+	argIdx := 0
+	whereSQL, args := buildPasswordResetTokenWhere(a.client, []query.PasswordResetTokenWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedPasswordResetTokenTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedPasswordResetTokenColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.PasswordResetToken
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.UsedAt, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("PasswordResetToken.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple PasswordResetToken records matching the where clauses.
+func (a PasswordResetTokenActions) DeleteMany(ctx context.Context, wheres ...query.PasswordResetTokenWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildPasswordResetTokenWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedPasswordResetTokenTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("PasswordResetToken.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of PasswordResetToken records matching the where clauses.
+func (a PasswordResetTokenActions) Count(ctx context.Context, wheres ...query.PasswordResetTokenWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildPasswordResetTokenWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedPasswordResetTokenTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("PasswordResetToken.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for PasswordResetToken.
+func (a PasswordResetTokenActions) Aggregate(ctx context.Context, opts ...query.PasswordResetTokenAggregateOption) (*query.PasswordResetTokenAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePasswordResetTokenField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedPasswordResetTokenTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.PasswordResetTokenAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on PasswordResetToken.
+func (a PasswordResetTokenActions) GroupBy(ctx context.Context, fields []string, opts ...query.PasswordResetTokenAggregateOption) ([]query.PasswordResetTokenGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quotePasswordResetTokenField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quotePasswordResetTokenField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedPasswordResetTokenTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("PasswordResetToken.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.PasswordResetTokenGroupByResult
+	for rows.Next() {
+		r := query.PasswordResetTokenGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("PasswordResetToken.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
 func quotedPolicyTable(c *Client) string { return c.quoteIdentifier("policies") }
 func quotedPolicyColumns(c *Client) string {
 	cols := []string{"id", "name", "cache_json", "compression_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
@@ -36612,7 +37589,7 @@ func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string,
 
 func quotedUserTable(c *Client) string { return c.quoteIdentifier("users") }
 func quotedUserColumns(c *Client) string {
-	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
+	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_recovery_codes", "failed_login_attempts", "last_failed_login_at", "locked_until", "last_login_at", "password_changed_at", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -36635,7 +37612,17 @@ func quoteUserField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "totp_secret":
 		return c.quoteIdentifier(field), nil
+	case "totp_recovery_codes":
+		return c.quoteIdentifier(field), nil
+	case "failed_login_attempts":
+		return c.quoteIdentifier(field), nil
+	case "last_failed_login_at":
+		return c.quoteIdentifier(field), nil
+	case "locked_until":
+		return c.quoteIdentifier(field), nil
 	case "last_login_at":
+		return c.quoteIdentifier(field), nil
+	case "password_changed_at":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -36850,14 +37837,14 @@ func (b UserCreateManyBuilder) DoReturning(ctx context.Context) ([]model.User, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"})
+		q, args := b.action.buildUserCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_recovery_codes", "failed_login_attempts", "last_failed_login_at", "locked_until", "last_login_at", "password_changed_at", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("User.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.User
-			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("User.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -36884,7 +37871,7 @@ func (b UserCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
+		returningColumns = []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_recovery_codes", "failed_login_attempts", "last_failed_login_at", "locked_until", "last_login_at", "password_changed_at", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -37136,7 +38123,7 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 	var results []model.User
 	for rows.Next() {
 		var item model.User
-		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -37168,7 +38155,7 @@ func (a UserActions) FindUnique(ctx context.Context, where query.UserWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.User
-	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -37199,7 +38186,7 @@ func (a UserActions) CreateOne(ctx context.Context, sets ...query.UserSetClause)
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -37218,7 +38205,7 @@ func (a UserActions) CreateMany(ctx context.Context, data []query.UserCreateInpu
 }
 
 func (a UserActions) buildUserCreateManySQL(data []query.UserCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "last_login_at", "created_at", "updated_at"}
+	cols := []string{"id", "email", "password_hash", "name", "role", "status", "totp_secret", "totp_recovery_codes", "failed_login_attempts", "last_failed_login_at", "locked_until", "last_login_at", "password_changed_at", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -37291,7 +38278,7 @@ func (a UserActions) UpdateOne(ctx context.Context, where query.UserWhereClause,
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -37396,7 +38383,7 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -37420,7 +38407,7 @@ func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause)
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.LastLoginAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -37592,7 +38579,7 @@ func (a UserActions) GroupBy(ctx context.Context, fields []string, opts ...query
 
 func quotedUserSessionTable(c *Client) string { return c.quoteIdentifier("user_sessions") }
 func quotedUserSessionColumns(c *Client) string {
-	cols := []string{"id", "user_id", "token_hash", "expires_at", "created_at"}
+	cols := []string{"id", "user_id", "token_hash", "ip_address", "user_agent", "expires_at", "last_seen_at", "revoked_at", "created_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -37607,7 +38594,15 @@ func quoteUserSessionField(c *Client, field string) (string, error) {
 		return c.quoteIdentifier(field), nil
 	case "token_hash":
 		return c.quoteIdentifier(field), nil
+	case "ip_address":
+		return c.quoteIdentifier(field), nil
+	case "user_agent":
+		return c.quoteIdentifier(field), nil
 	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "last_seen_at":
+		return c.quoteIdentifier(field), nil
+	case "revoked_at":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -37820,14 +38815,14 @@ func (b UserSessionCreateManyBuilder) DoReturning(ctx context.Context) ([]model.
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildUserSessionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "user_id", "token_hash", "expires_at", "created_at"})
+		q, args := b.action.buildUserSessionCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "user_id", "token_hash", "ip_address", "user_agent", "expires_at", "last_seen_at", "revoked_at", "created_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("UserSession.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.UserSession
-			if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("UserSession.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -37854,7 +38849,7 @@ func (b UserSessionCreateManyBuilder) DoReturningValues(ctx context.Context) ([]
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "user_id", "token_hash", "expires_at", "created_at"}
+		returningColumns = []string{"id", "user_id", "token_hash", "ip_address", "user_agent", "expires_at", "last_seen_at", "revoked_at", "created_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -38106,7 +39101,7 @@ func (a UserSessionActions) FindMany(ctx context.Context, opts ...query.UserSess
 	var results []model.UserSession
 	for rows.Next() {
 		var item model.UserSession
-		if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("UserSession.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -38138,7 +39133,7 @@ func (a UserSessionActions) FindUnique(ctx context.Context, where query.UserSess
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.UserSession
-	if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -38169,7 +39164,7 @@ func (a UserSessionActions) CreateOne(ctx context.Context, sets ...query.UserSes
 		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.UserSession
-		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("UserSession.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -38188,7 +39183,7 @@ func (a UserSessionActions) CreateMany(ctx context.Context, data []query.UserSes
 }
 
 func (a UserSessionActions) buildUserSessionCreateManySQL(data []query.UserSessionCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "user_id", "token_hash", "expires_at", "created_at"}
+	cols := []string{"id", "user_id", "token_hash", "ip_address", "user_agent", "expires_at", "last_seen_at", "revoked_at", "created_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -38261,7 +39256,7 @@ func (a UserSessionActions) UpdateOne(ctx context.Context, where query.UserSessi
 		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
-		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -38366,7 +39361,7 @@ func (a UserSessionActions) UpsertOne(ctx context.Context, where query.UserSessi
 		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
-		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 			return nil, fmt.Errorf("UserSession.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -38390,7 +39385,7 @@ func (a UserSessionActions) DeleteOne(ctx context.Context, where query.UserSessi
 		q += " RETURNING " + quotedUserSessionColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.UserSession
-		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.ExpiresAt, &item.CreatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.UserId, &item.TokenHash, &item.IpAddress, &item.UserAgent, &item.ExpiresAt, &item.LastSeenAt, &item.RevokedAt, &item.CreatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

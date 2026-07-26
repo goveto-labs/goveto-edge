@@ -30,29 +30,41 @@ func ApplyUserSessionOptions(opts []UserSessionQueryOption) UserSessionQueryConf
 
 // UserSessionQuery is the namespace for UserSession query operations.
 type UserSessionQuery struct {
-	Id        userSessionIdField
-	UserId    userSessionUserIdField
-	TokenHash userSessionTokenHashField
-	ExpiresAt userSessionExpiresAtField
-	CreatedAt userSessionCreatedAtField
-	User      userSessionUserRelation
+	Id         userSessionIdField
+	UserId     userSessionUserIdField
+	TokenHash  userSessionTokenHashField
+	IpAddress  userSessionIpAddressField
+	UserAgent  userSessionUserAgentField
+	ExpiresAt  userSessionExpiresAtField
+	LastSeenAt userSessionLastSeenAtField
+	RevokedAt  userSessionRevokedAtField
+	CreatedAt  userSessionCreatedAtField
+	User       userSessionUserRelation
 }
 
 const UserSessionTable = "user_sessions"
 const UserSessionIdColumn = "id"
 const UserSessionUserIdColumn = "user_id"
 const UserSessionTokenHashColumn = "token_hash"
+const UserSessionIpAddressColumn = "ip_address"
+const UserSessionUserAgentColumn = "user_agent"
 const UserSessionExpiresAtColumn = "expires_at"
+const UserSessionLastSeenAtColumn = "last_seen_at"
+const UserSessionRevokedAtColumn = "revoked_at"
 const UserSessionCreatedAtColumn = "created_at"
 
 // UserSessionQuery provides query building methods for the UserSession model.
 var UserSession = UserSessionQuery{
-	Id:        userSessionIdField{},
-	UserId:    userSessionUserIdField{},
-	TokenHash: userSessionTokenHashField{},
-	ExpiresAt: userSessionExpiresAtField{},
-	CreatedAt: userSessionCreatedAtField{},
-	User:      userSessionUserRelation{},
+	Id:         userSessionIdField{},
+	UserId:     userSessionUserIdField{},
+	TokenHash:  userSessionTokenHashField{},
+	IpAddress:  userSessionIpAddressField{},
+	UserAgent:  userSessionUserAgentField{},
+	ExpiresAt:  userSessionExpiresAtField{},
+	LastSeenAt: userSessionLastSeenAtField{},
+	RevokedAt:  userSessionRevokedAtField{},
+	CreatedAt:  userSessionCreatedAtField{},
+	User:       userSessionUserRelation{},
 }
 
 // UserSessionWhereClause represents a WHERE condition for UserSession.
@@ -327,6 +339,148 @@ func (userSessionTokenHashField) Desc() UserSessionOrderByClause {
 	return UserSessionOrderByClause{Field: "token_hash", Direction: "DESC"}
 }
 
+// IpAddressField provides query operations for the ipAddress field.
+type userSessionIpAddressField struct{}
+
+// Equals creates an equality condition.
+func (userSessionIpAddressField) Equals(v *string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userSessionIpAddressField) Not(v *string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userSessionIpAddressField) In(vals ...*string) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "ip_address", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userSessionIpAddressField) NotIn(vals ...*string) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "ip_address", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (userSessionIpAddressField) Contains(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (userSessionIpAddressField) StartsWith(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (userSessionIpAddressField) EndsWith(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userSessionIpAddressField) IsNull() UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "ip_address", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userSessionIpAddressField) Set(v string) UserSessionSetClause {
+	return UserSessionSetClause{Field: "ip_address", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userSessionIpAddressField) SetNull() UserSessionSetClause {
+	return UserSessionSetClause{Field: "ip_address", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userSessionIpAddressField) Asc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "ip_address", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userSessionIpAddressField) Desc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "ip_address", Direction: "DESC"}
+}
+
+// UserAgentField provides query operations for the userAgent field.
+type userSessionUserAgentField struct{}
+
+// Equals creates an equality condition.
+func (userSessionUserAgentField) Equals(v *string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userSessionUserAgentField) Not(v *string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userSessionUserAgentField) In(vals ...*string) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "user_agent", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userSessionUserAgentField) NotIn(vals ...*string) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "user_agent", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (userSessionUserAgentField) Contains(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (userSessionUserAgentField) StartsWith(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (userSessionUserAgentField) EndsWith(v string) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userSessionUserAgentField) IsNull() UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "user_agent", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userSessionUserAgentField) Set(v string) UserSessionSetClause {
+	return UserSessionSetClause{Field: "user_agent", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userSessionUserAgentField) SetNull() UserSessionSetClause {
+	return UserSessionSetClause{Field: "user_agent", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userSessionUserAgentField) Asc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "user_agent", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userSessionUserAgentField) Desc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "user_agent", Direction: "DESC"}
+}
+
 // ExpiresAtField provides query operations for the expiresAt field.
 type userSessionExpiresAtField struct{}
 
@@ -391,6 +545,148 @@ func (userSessionExpiresAtField) Asc() UserSessionOrderByClause {
 // Desc returns a descending order clause for this field.
 func (userSessionExpiresAtField) Desc() UserSessionOrderByClause {
 	return UserSessionOrderByClause{Field: "expires_at", Direction: "DESC"}
+}
+
+// LastSeenAtField provides query operations for the lastSeenAt field.
+type userSessionLastSeenAtField struct{}
+
+// Equals creates an equality condition.
+func (userSessionLastSeenAtField) Equals(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userSessionLastSeenAtField) Not(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userSessionLastSeenAtField) In(vals ...time.Time) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userSessionLastSeenAtField) NotIn(vals ...time.Time) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userSessionLastSeenAtField) Lt(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userSessionLastSeenAtField) Lte(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userSessionLastSeenAtField) Gt(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userSessionLastSeenAtField) Gte(v time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "last_seen_at", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (userSessionLastSeenAtField) Set(v time.Time) UserSessionSetClause {
+	return UserSessionSetClause{Field: "last_seen_at", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userSessionLastSeenAtField) Asc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "last_seen_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userSessionLastSeenAtField) Desc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "last_seen_at", Direction: "DESC"}
+}
+
+// RevokedAtField provides query operations for the revokedAt field.
+type userSessionRevokedAtField struct{}
+
+// Equals creates an equality condition.
+func (userSessionRevokedAtField) Equals(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (userSessionRevokedAtField) Not(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (userSessionRevokedAtField) In(vals ...*time.Time) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (userSessionRevokedAtField) NotIn(vals ...*time.Time) UserSessionWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (userSessionRevokedAtField) Lt(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (userSessionRevokedAtField) Lte(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (userSessionRevokedAtField) Gt(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (userSessionRevokedAtField) Gte(v *time.Time) UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (userSessionRevokedAtField) IsNull() UserSessionWhereClause {
+	return UserSessionWhereClause{Field: "revoked_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (userSessionRevokedAtField) Set(v time.Time) UserSessionSetClause {
+	return UserSessionSetClause{Field: "revoked_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (userSessionRevokedAtField) SetNull() UserSessionSetClause {
+	return UserSessionSetClause{Field: "revoked_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (userSessionRevokedAtField) Asc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "revoked_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (userSessionRevokedAtField) Desc() UserSessionOrderByClause {
+	return UserSessionOrderByClause{Field: "revoked_at", Direction: "DESC"}
 }
 
 // CreatedAtField provides query operations for the createdAt field.
@@ -500,17 +796,21 @@ type UserSessionGroupByResult struct {
 
 // UserSessionCreateInput holds data for creating a UserSession record.
 type UserSessionCreateInput struct {
-	Id        string
-	UserId    string
-	TokenHash string
-	ExpiresAt time.Time
-	CreatedAt time.Time
-	User      *UserCreateNestedInput
+	Id         string
+	UserId     string
+	TokenHash  string
+	IpAddress  **string
+	UserAgent  **string
+	ExpiresAt  time.Time
+	LastSeenAt time.Time
+	RevokedAt  **time.Time
+	CreatedAt  time.Time
+	User       *UserCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d UserSessionCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.UserId, d.TokenHash, d.ExpiresAt, d.CreatedAt}
+	return []any{d.Id, d.UserId, d.TokenHash, d.IpAddress, d.UserAgent, d.ExpiresAt, d.LastSeenAt, d.RevokedAt, d.CreatedAt}
 }
 
 // UserSessionCreateNestedInput supports nested creates and connects.

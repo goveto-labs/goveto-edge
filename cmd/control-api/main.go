@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi"
+	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
@@ -71,7 +73,13 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	sessions := auth.NewSessionStore(redisClient, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
+	sessions := auth.NewSessionStore(redisClient, orm, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
+
+	ipExtractor, err := httpsecurity.TrustedProxyIPExtractor(cfg.HTTPTrustedProxies)
+	if err != nil {
+		slog.Error("configure trusted proxies", "error", err)
+		os.Exit(1)
+	}
 
 	credentialCipher, err := node.NewCredentialCipher(cfg.NodeCredentialMasterKey)
 	if err != nil {
@@ -200,9 +208,19 @@ func main() {
 			certificateService,
 			purgeService,
 			dnsService,
+			redisClient,
+			httpsecurity.Options{
+				MaxBodyBytes: cfg.HTTPMaxBodyBytes, MaxUploadBytes: cfg.HTTPMaxUploadBytes,
+				MaxHeaderCount: 100, HSTS: strings.EqualFold(cfg.AppEnv, "production"),
+				IPExtractor: ipExtractor,
+			},
 			analyticsStore,
 		),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,
+		ReadTimeout:       cfg.HTTPReadTimeout,
+		WriteTimeout:      cfg.HTTPWriteTimeout,
+		IdleTimeout:       cfg.HTTPIdleTimeout,
+		MaxHeaderBytes:    cfg.HTTPMaxHeaderBytes,
 	}
 
 	go func() {

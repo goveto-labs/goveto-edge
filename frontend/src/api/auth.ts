@@ -7,4 +7,5 @@ export const authApi = {
     register: (payload: RegisterRequest) => post<User>('/auth/register', payload),
     me: () => get<User>('/auth/me'),
     registrationConfig: () => get<RegistrationConfig>('/auth/registration-config'),
+    logout: () => post<void>('/auth/logout'),
 };
