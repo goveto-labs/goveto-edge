@@ -49,6 +49,7 @@ type ClusterQuery struct {
 	AcmeAccounts    clusterAcmeAccountsRelation
 	OriginPools     clusterOriginPoolsRelation
 	Sites           clusterSitesRelation
+	SiteTemplates   clusterSiteTemplatesRelation
 	SshCredentials  clusterSshCredentialsRelation
 }
 
@@ -81,6 +82,7 @@ var Cluster = ClusterQuery{
 	AcmeAccounts:    clusterAcmeAccountsRelation{},
 	OriginPools:     clusterOriginPoolsRelation{},
 	Sites:           clusterSitesRelation{},
+	SiteTemplates:   clusterSiteTemplatesRelation{},
 	SshCredentials:  clusterSshCredentialsRelation{},
 }
 
@@ -663,6 +665,14 @@ func (clusterSitesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "sites"}
 }
 
+// SiteTemplatesRelation provides relation query helpers for siteTemplates.
+type clusterSiteTemplatesRelation struct{}
+
+// Fetch creates an include clause to fetch related siteTemplates.
+func (clusterSiteTemplatesRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "siteTemplates"}
+}
+
 // SshCredentialsRelation provides relation query helpers for sshCredentials.
 type clusterSshCredentialsRelation struct{}
 
@@ -723,6 +733,7 @@ type ClusterCreateInput struct {
 	AcmeAccounts    *ACMEAccountCreateNestedInput
 	OriginPools     *OriginPoolCreateNestedInput
 	Sites           *SiteCreateNestedInput
+	SiteTemplates   *SiteTemplateCreateNestedInput
 	SshCredentials  *SSHCredentialCreateNestedInput
 }
 

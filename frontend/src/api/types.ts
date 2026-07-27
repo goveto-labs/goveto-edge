@@ -331,6 +331,86 @@ export interface SiteCompressionUpdateResponse {
     publish_error?: string;
 }
 
+export interface HeaderRule {
+    operation: 'SET' | 'ADD' | 'DELETE';
+    name: string;
+    value?: string;
+}
+
+export interface DeliveryOrigin {
+    protocol: 'http' | 'https';
+    address: string;
+    host_header?: string;
+    weight?: number;
+}
+
+export interface PathOriginPool {
+    name: string;
+    paths: string[];
+    scheduler?: string;
+    origins: DeliveryOrigin[];
+}
+
+export interface TrafficSplitRule {
+    name: string;
+    pool: string;
+    header_name?: string;
+    cookie_name?: string;
+    value?: string;
+    percentage?: number;
+}
+
+export interface DeliveryPolicy {
+    request_headers: HeaderRule[];
+    response_headers: HeaderRule[];
+    rewrites: Array<{ path: string; replacement: string }>;
+    redirects: Array<{ path: string; location: string; status: number }>;
+    cors: {
+        enabled: boolean;
+        allow_origins: string[];
+        allow_methods: string[];
+        allow_headers: string[];
+        expose_headers: string[];
+        allow_credentials: boolean;
+        max_age_seconds: number;
+    };
+    protocols: { websocket: boolean; grpc: boolean; http_upgrade: boolean };
+    error_pages: Array<{ statuses: number[]; content_type?: string; body: string }>;
+    origin_prefix: string;
+    origin_pools: PathOriginPool[];
+    splits: TrafficSplitRule[];
+    maintenance: { enabled: boolean; status: number; content_type: string; body: string };
+}
+
+export interface SiteDeliveryUpdateResponse {
+    delivery: DeliveryPolicy;
+    publish_job?: PublishJob;
+    publish_error?: string;
+}
+
+export interface SiteTemplate {
+    id: string;
+    name: string;
+    config?: SiteBundle;
+    updated_at: string;
+}
+
+export interface SiteBundle {
+    schema_version: number;
+    name: string;
+    status: string;
+    domains: string[];
+    certificate_ids?: string[];
+    origins: SiteOrigin[];
+    [key: string]: unknown;
+}
+
+export interface BulkSiteResult {
+    site_id: string;
+    ok: boolean;
+    error?: string;
+}
+
 export interface WAFRequestRule {
     id?: string;
     field: string;

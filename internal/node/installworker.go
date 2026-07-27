@@ -34,7 +34,7 @@ const reconcileTerminalInstallJobsSQL = `WITH latest AS (
 	SELECT DISTINCT ON (node_id) node_id, status, error FROM install_jobs
 	ORDER BY node_id, updated_at DESC, id DESC
 ) UPDATE nodes n SET
-	status=CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END,
+	status=(CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END)::"NodeStatus",
 	install_error=CASE WHEN j.status='CANCELLED' THEN NULL
 		ELSE COALESCE(j.error, 'installation job ended without completing') END,
 	updated_at=NOW()

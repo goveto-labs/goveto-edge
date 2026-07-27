@@ -1,16 +1,21 @@
 import type {
+    BulkSiteResult,
     CachePolicy,
     CompressionPolicy,
     CreateSiteRequest,
+    DeliveryPolicy,
     SecurityPolicy,
+    SiteBundle,
     SiteCacheUpdateResponse,
     SiteCompressionUpdateResponse,
     SiteCreateResponse,
+    SiteDeliveryUpdateResponse,
     SiteDetails,
     SiteListenerConfig,
     SiteListenerUpdateResponse,
     SiteSecurityUpdateResponse,
     SiteSummary,
+    SiteTemplate,
     UpdateSiteRequest,
 } from './types.ts';
 
@@ -53,4 +58,28 @@ export const sitesApi = (clusterId: string) => ({
             clusterPath(clusterId, `/sites/${siteId}/security`),
             payload
         ),
+    getDelivery: (siteId: string) =>
+        get<DeliveryPolicy>(clusterPath(clusterId, `/sites/${siteId}/delivery`)),
+    updateDelivery: (siteId: string, payload: DeliveryPolicy) =>
+        put<SiteDeliveryUpdateResponse>(
+            clusterPath(clusterId, `/sites/${siteId}/delivery`),
+            payload
+        ),
+    export: (siteId: string) => get<SiteBundle>(clusterPath(clusterId, `/sites/${siteId}/export`)),
+    clone: (siteId: string, payload: { name: string; domains: string[] }) =>
+        post<SiteCreateResponse>(clusterPath(clusterId, `/sites/${siteId}/clone`), payload),
+    import: (sites: SiteBundle[]) =>
+        post<BulkSiteResult[]>(clusterPath(clusterId, '/sites/import'), { sites }),
+    bulk: (payload: {
+        site_ids: string[];
+        action: 'ENABLE' | 'DISABLE' | 'PUBLISH' | 'SET_DELIVERY';
+        delivery?: DeliveryPolicy;
+    }) => post<BulkSiteResult[]>(clusterPath(clusterId, '/sites/bulk'), payload),
+    listTemplates: () => get<SiteTemplate[]>(clusterPath(clusterId, '/site-templates')),
+    getTemplate: (templateId: string) =>
+        get<SiteTemplate>(clusterPath(clusterId, `/site-templates/${templateId}`)),
+    createTemplate: (payload: { name: string; site_id?: string; config?: SiteBundle }) =>
+        post<SiteTemplate>(clusterPath(clusterId, '/site-templates'), payload),
+    deleteTemplate: (templateId: string) =>
+        del(clusterPath(clusterId, `/site-templates/${templateId}`)),
 });

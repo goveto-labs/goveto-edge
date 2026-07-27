@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/caddyserver/caddy/v2"
+
 	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
 
@@ -457,6 +459,135 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	}
 }
 
+func TestDeliveryCORSRoutesRequireCrossOriginHeaders(t *testing.T) {
+	site := SiteConfig{SiteID: "cors-site", Domains: []string{"cors.example.test"}}
+	policy := cachepolicy.DefaultDeliveryPolicy()
+	policy.CORS = cachepolicy.CORSConfig{Enabled: true, AllowOrigins: []string{"*"}, AllowMethods: []string{"GET", "OPTIONS"}}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+
+	preflight := routeByID(t, deliveryPreludeRoutes(site, policy), "site_cors-site_cors_preflight")
+	preflightMatch := preflight["match"].([]any)[0].(map[string]any)
+	preflightHeaders := preflightMatch["header"].(map[string][]string)
+	if len(preflightHeaders["Origin"]) == 0 || len(preflightHeaders["Access-Control-Request-Method"]) == 0 {
+		t.Fatalf("preflight route does not require CORS headers: %#v", preflightMatch)
+	}
+
+	actual := deliveryCORSRoute(site, policy)
+	actualMatch := actual["match"].([]any)[0].(map[string]any)
+	actualHeaders := actualMatch["header"].(map[string][]string)
+	if values := actualHeaders["Origin"]; len(values) != 1 || values[0] != "*" {
+		t.Fatalf("actual CORS route matches requests without Origin: %#v", actualMatch)
+	}
+}
+
+func TestDeliveryProtocolFlagsRejectOtherUpgradesIndependently(t *testing.T) {
+	ensureAgentLogSink(t)
+	config := SiteConfig{
+		SiteID: "site-1", Version: 1, Domains: []string{"example.com"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: 18080},
+		Origins:  []OriginConfig{{Protocol: "http", Address: "origin:80"}},
+	}
+	policy := cachepolicy.DefaultDeliveryPolicy()
+	config.Delivery = toMap(t, policy)
+
+	routes := deliveryPreludeRoutes(config, policy)
+	rejection := routeByID(t, routes, "site_site-1_reject_upgrade")
+	match := rejection["match"].([]any)[0].(map[string]any)
+	if _, ok := match["not"]; !ok {
+		t.Fatalf("WebSocket-only policy did not reject non-WebSocket upgrades: %#v", match)
+	}
+
+	policy.Protocols = cachepolicy.ProtocolConfig{HTTPUpgrade: true}
+	routes = deliveryPreludeRoutes(config, policy)
+	rejection = routeByID(t, routes, "site_site-1_reject_upgrade")
+	match = rejection["match"].([]any)[0].(map[string]any)
+	if _, ok := match["header_regexp"]; !ok {
+		t.Fatalf("generic Upgrade policy did not reject WebSocket: %#v", match)
+	}
+
+	policy = cachepolicy.DefaultDeliveryPolicy()
+	config.Delivery = toMap(t, policy)
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var caddyConfig caddy.Config
+	if err = json.Unmarshal(caddy.RemoveMetaFields(encoded), &caddyConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = caddy.Validate(&caddyConfig); err != nil {
+		t.Fatalf("Caddy rejected independent Upgrade matchers: %v", err)
+	}
+}
+
+func TestDeliverySplitRouteKeepsPoolPathConstraint(t *testing.T) {
+	site := SiteConfig{SiteID: "split-site", Domains: []string{"split.example.test"}}
+	policy := cachepolicy.DefaultDeliveryPolicy()
+	policy.OriginPools = []cachepolicy.PathOriginPool{{
+		Name: "api", Paths: []string{"/api/*"}, Origins: []cachepolicy.DeliveryOrigin{{Protocol: "http", Address: "api.internal:80"}},
+	}}
+	policy.Splits = []cachepolicy.TrafficSplitRule{{Name: "canary", Pool: "api", Percentage: 10}}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	baseProxy := map[string]any{
+		"load_balancing": map[string]any{},
+		"transport":      map[string]any{"protocol": "goveto_http"},
+	}
+	routes, err := deliveryPoolRoutes(site, policy, nil, baseProxy, edgeprotocol.DefaultOriginPolicy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	split := routeByID(t, routes, "site_split-site_split_0")
+	match := split["match"].([]any)[0].(map[string]any)
+	paths, ok := match["path"].([]string)
+	if !ok || len(paths) != 1 || paths[0] != "/api/*" {
+		t.Fatalf("split route lost pool path constraint: %#v", match)
+	}
+}
+
+func TestDeliveryHTTPSPoolPreservesPrivateCAAndMTLS(t *testing.T) {
+	_, _, caPEM := createTestCertificateAuthority(t)
+	originPolicy := edgeprotocol.DefaultOriginPolicy()
+	originPolicy.Transport.TLSRootCAPEM = []string{caPEM}
+	originPolicy.Transport.TLSClientCertificatePEM = "client certificate"
+	originPolicy.Transport.TLSClientPrivateKeyPEM = "client private key"
+	baseProxy := map[string]any{
+		"load_balancing": map[string]any{},
+		"transport":      map[string]any{"protocol": "goveto_http"},
+	}
+	pool := cachepolicy.PathOriginPool{
+		Name: "secure", Paths: []string{"/*"},
+		Origins: []cachepolicy.DeliveryOrigin{{Protocol: "https", Address: "secure.internal:443", Weight: 1}},
+	}
+	proxy, err := deliveryProxy(baseProxy, pool, "site", originPolicy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := proxy["transport"].(map[string]any)
+	tlsConfig := transport["tls"].(map[string]any)
+	if _, ok := tlsConfig["ca"]; !ok {
+		t.Fatalf("private CA was dropped from HTTPS pool transport: %#v", transport)
+	}
+	if transport["client_certificate_pem"] != "client certificate" || transport["client_private_key_pem"] != "client private key" {
+		t.Fatalf("mTLS credentials were dropped from HTTPS pool transport: %#v", transport)
+	}
+}
+
+func routeByID(t *testing.T, routes []any, id string) map[string]any {
+	t.Helper()
+	for _, raw := range routes {
+		route, ok := raw.(map[string]any)
+		if ok && route["@id"] == id {
+			return route
+		}
+	}
+	t.Fatalf("route %q not found in %#v", id, routes)
+	return nil
+}
+
 func TestCompressionConfigRendersAllSettings(t *testing.T) {
 	config := validHTTPConfig(t)
 	policy := cachepolicy.DefaultCompressionPolicy()
@@ -553,6 +684,56 @@ func TestCaptchaConfigPassesPublishedChallengeSecret(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"challenge_secret":"published-secret"`) {
 		t.Fatalf("rendered config omitted CAPTCHA challenge secret: %s", encoded)
+	}
+}
+
+func TestDeliveryConfigRendersHeadersRoutesPoolsAndSplits(t *testing.T) {
+	ensureAgentLogSink(t)
+	config := SiteConfig{
+		SiteID: "delivery-site", Version: 1, Domains: []string{"delivery.example.test"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: 8080},
+		Origins:  []OriginConfig{{Protocol: "http", Address: "default-origin:80", Weight: 1}},
+	}
+	delivery := cachepolicy.DefaultDeliveryPolicy()
+	delivery.RequestHeaders = []cachepolicy.HeaderRule{{Operation: "SET", Name: "X-Origin-Env", Value: "production"}}
+	delivery.ResponseHeaders = []cachepolicy.HeaderRule{{Operation: "SET", Name: "X-Edge", Value: "goveto"}}
+	delivery.Rewrites = []cachepolicy.RewriteRule{{Path: "/legacy/*", Replacement: "/current{http.request.uri.path}"}}
+	delivery.Redirects = []cachepolicy.RedirectRule{{Path: "/moved", Location: "/new", Status: 308}}
+	delivery.CORS = cachepolicy.CORSConfig{Enabled: true, AllowOrigins: []string{"https://app.example.test"}, AllowMethods: []string{"GET", "OPTIONS"}}
+	delivery.Protocols = cachepolicy.ProtocolConfig{WebSocket: true, GRPC: true, HTTPUpgrade: true}
+	delivery.ErrorPages = []cachepolicy.ErrorPage{{Statuses: []int{404, 502}, ContentType: "text/html", Body: "custom error"}}
+	delivery.OriginPrefix = "/production"
+	delivery.OriginPools = []cachepolicy.PathOriginPool{{
+		Name: "api", Paths: []string{"/api/*"}, Scheduler: "weighted_round_robin",
+		Origins: []cachepolicy.DeliveryOrigin{{Protocol: "https", Address: "api-origin:443", HostHeader: "api.internal", Weight: 3}},
+	}}
+	delivery.Splits = []cachepolicy.TrafficSplitRule{{Name: "canary", Pool: "api", CookieName: "cohort", Value: "canary", Percentage: 25}}
+	if err := delivery.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	config.Delivery = toMap(t, delivery)
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":8080", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	for _, expected := range []string{
+		`"X-Origin-Env":["production"]`, `"X-Edge":["goveto"]`, `"handler":"rewrite"`,
+		`"status_code":308`, `"Access-Control-Allow-Origin"`, `"versions":["1.1","2","h2c"]`,
+		`"handle_response"`, `"uri":"/production{http.request.uri.path}?{http.request.uri.query}"`,
+		`"path":["/api/*"]`, `"policy":"goveto_origin"`, `"goveto_split"`, `"cookie_name":"cohort"`,
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("delivery config missing %s: %s", expected, raw)
+		}
+	}
+	var caddyConfig caddy.Config
+	if err = json.Unmarshal(caddy.RemoveMetaFields(encoded), &caddyConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = caddy.Validate(&caddyConfig); err != nil {
+		t.Fatalf("Caddy rejected delivery config: %v", err)
 	}
 }
 

@@ -161,6 +161,7 @@ type Cluster struct {
 	AcmeAccounts    []*ACMEAccount      `db:"-" json:"acmeAccounts,omitempty"`
 	OriginPools     []*OriginPool       `db:"-" json:"originPools,omitempty"`
 	Sites           []*Site             `db:"-" json:"sites,omitempty"`
+	SiteTemplates   []*SiteTemplate     `db:"-" json:"siteTemplates,omitempty"`
 	SshCredentials  []*SSHCredential    `db:"-" json:"sshCredentials,omitempty"`
 }
 
@@ -499,6 +500,7 @@ type Policy struct {
 	Name            string          `db:"name" json:"name"`
 	CacheJson       json.RawMessage `db:"cache_json" json:"cacheJson"`
 	CompressionJson json.RawMessage `db:"compression_json" json:"compressionJson"`
+	DeliveryJson    json.RawMessage `db:"delivery_json" json:"deliveryJson"`
 	WafJson         json.RawMessage `db:"waf_json" json:"wafJson"`
 	CcJson          json.RawMessage `db:"cc_json" json:"ccJson"`
 	AccessJson      json.RawMessage `db:"access_json" json:"accessJson"`
@@ -633,6 +635,17 @@ type SiteListenerConfig struct {
 	CreatedAt             time.Time     `db:"created_at" json:"createdAt"`
 	UpdatedAt             time.Time     `db:"updated_at" json:"updatedAt"`
 	Site                  *Site         `db:"-" json:"site,omitempty"`
+}
+
+// SiteTemplate represents the SiteTemplate model.
+type SiteTemplate struct {
+	Id         string          `db:"id" json:"id"`
+	ClusterId  string          `db:"cluster_id" json:"clusterId"`
+	Name       string          `db:"name" json:"name"`
+	ConfigJson json.RawMessage `db:"config_json" json:"configJson"`
+	CreatedAt  time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt  time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster    *Cluster        `db:"-" json:"cluster,omitempty"`
 }
 
 // User represents the User model.

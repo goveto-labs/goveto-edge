@@ -3,6 +3,7 @@ import type {
     Certificate,
     ClusterChoice,
     CompressionPolicy,
+    DeliveryPolicy,
     DistributionItem,
     MonitoringOverview,
     NodeRequestLog,
@@ -29,6 +30,7 @@ import {
     Plus,
     RefreshCw,
     Rocket,
+    Route,
     Save,
     ScrollText,
     Server,
@@ -57,12 +59,14 @@ import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
+import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
 import { SiteSecuritySettings } from '@/components/SiteSecuritySettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { CacheOperations } from '@/pages/PurgeJobs.tsx';
+import { defaultDeliveryPolicy, normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
@@ -73,6 +77,7 @@ type SettingsPage =
     | 'http'
     | 'https'
     | 'origins'
+    | 'delivery'
     | 'security'
     | 'cache'
     | 'compression'
@@ -148,6 +153,7 @@ const settingsPages = [
     { id: 'http' as const, label: 'HTTP', icon: FileText },
     { id: 'https' as const, label: 'HTTPS', icon: LockKeyhole },
     { id: 'origins' as const, label: 'Origins', icon: Server },
+    { id: 'delivery' as const, label: 'Delivery', icon: Route },
     { id: 'security' as const, label: 'Security', icon: ShieldCheck },
     { id: 'cache' as const, label: 'Cache', icon: HardDrive },
     { id: 'compression' as const, label: 'Compression', icon: FileArchive },
@@ -287,6 +293,7 @@ export default function SiteDetail() {
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
     const [compression, setCompression] = useState<CompressionPolicy>({});
+    const [delivery, setDelivery] = useState<DeliveryPolicy>(defaultDeliveryPolicy);
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
             enabled: false,
@@ -374,6 +381,7 @@ export default function SiteDetail() {
                 listenerResult,
                 cacheResult,
                 compressionResult,
+                deliveryResult,
                 securityResult,
                 clusterResult,
                 dnsResult,
@@ -382,6 +390,7 @@ export default function SiteDetail() {
                 api.getListener(siteId),
                 api.getCache(siteId),
                 api.getCompression(siteId),
+                api.getDelivery(siteId),
                 api.getSecurity(siteId),
                 clustersApi.list(),
                 dns.config(),
@@ -395,6 +404,9 @@ export default function SiteDetail() {
             else failures.push(`cache: ${loadErrorMessage(cacheResult.reason)}`);
             if (compressionResult.status === 'fulfilled') setCompression(compressionResult.value);
             else failures.push(`compression: ${loadErrorMessage(compressionResult.reason)}`);
+            if (deliveryResult.status === 'fulfilled')
+                setDelivery(normalizeDeliveryPolicy(deliveryResult.value));
+            else failures.push(`delivery: ${loadErrorMessage(deliveryResult.reason)}`);
             if (securityResult.status === 'fulfilled')
                 setSecurity(withSecurityEditorIDs(securityResult.value));
             else failures.push(`security: ${loadErrorMessage(securityResult.reason)}`);
@@ -580,6 +592,11 @@ export default function SiteDetail() {
             const result = await api.updateCompression(siteId, compression);
             setCompression(result.compression);
         }, 'Compression settings saved and publishing queued.');
+    const saveDelivery = () =>
+        runSave(async () => {
+            const result = await api.updateDelivery(siteId, delivery);
+            setDelivery(normalizeDeliveryPolicy(result.delivery));
+        }, 'Delivery settings saved and publishing queued.');
     const saveSecurity = () =>
         runSave(async () => {
             const result = await api.updateSecurity(siteId, security);
@@ -1688,6 +1705,14 @@ export default function SiteDetail() {
                                                 saving={saving}
                                                 onChange={setCompression}
                                                 onSave={() => void saveCompression()}
+                                            />
+                                        )}
+                                        {settingsPage === 'delivery' && (
+                                            <SiteDeliverySettings
+                                                policy={delivery}
+                                                saving={saving}
+                                                onChange={setDelivery}
+                                                onSave={() => void saveDelivery()}
                                             />
                                         )}
                                         {settingsPage === 'security' && (

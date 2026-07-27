@@ -23,6 +23,7 @@ import (
 	_ "goveto-edge/caddy/compression"
 	_ "goveto-edge/caddy/origingovernance"
 	cachefs "goveto-edge/caddy/simplefs"
+	_ "goveto-edge/caddy/splitmatch"
 	"goveto-edge/internal/edgeprotocol"
 	cachepolicy "goveto-edge/internal/policy"
 )
@@ -256,6 +257,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 	sort.Strings(ids)
 
 	routes := make([]any, 0, len(ids)*2)
+	errorRoutes := make([]any, 0)
 
 	listeners, protocols := map[string]struct{}{}, map[string]struct{}{"h1": {}}
 	listeners[defaultListen] = struct{}{}
@@ -296,6 +298,17 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			if listener.HTTP3Enabled {
 				protocols["h3"] = struct{}{}
 			}
+		}
+		deliveryPolicy, deliveryConfigured, err := decodeDeliveryPolicy(site.Delivery)
+		if err != nil {
+			return nil, fmt.Errorf("site %s delivery policy: %w", id, err)
+		}
+		if deliveryConfigured {
+			if err = validateDeliveryPoolProtocols(deliveryPolicy); err != nil {
+				return nil, fmt.Errorf("site %s delivery policy: %w", id, err)
+			}
+			routes = append(routes, deliveryPreludeRoutes(site, deliveryPolicy)...)
+			errorRoutes = append(errorRoutes, deliveryErrorRoutes(site, deliveryPolicy)...)
 		}
 
 		if listener.RedirectHTTPToHTTPS {
@@ -378,6 +391,9 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 				"maximum_length":      compressionPolicy.MaximumLength,
 				"excluded_paths":      compressionPolicy.ExcludedPaths,
 			})
+		}
+		if deliveryConfigured && len(deliveryPolicy.ResponseHeaders) > 0 {
+			handlers = append(handlers, deliveryResponseHandler(deliveryPolicy))
 		}
 
 		originPolicy := edgeprotocol.NormalizeOriginPolicy(site.OriginPolicy)
@@ -475,14 +491,31 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			transport["client_certificate_pem"] = originPolicy.Transport.TLSClientCertificatePEM
 			transport["client_private_key_pem"] = originPolicy.Transport.TLSClientPrivateKeyPEM
 		}
+		if deliveryConfigured && deliveryPolicy.Protocols.GRPC {
+			transport["versions"] = []string{"1.1", "2", "h2c"}
+		}
 		reverseProxy["transport"] = transport
 
 		requestHeaders := cloneHeaders(originPolicy.Headers)
 		requestHeaders["Host"] = []string{"{goveto.origin.host}"}
 		reverseProxy["headers"] = map[string]any{"request": map[string]any{"set": requestHeaders}}
+		if deliveryConfigured {
+			applyDeliveryProxy(reverseProxy, deliveryPolicy)
+		}
 
 		originMetrics := map[string]any{
 			"handler": "goveto_origin_metrics", "site_id": id, "timeout": durationMS(originPolicy.TimeoutMS),
+		}
+		if deliveryConfigured && deliveryPolicy.CORS.Enabled {
+			routes = append(routes, deliveryCORSRoute(site, deliveryPolicy))
+		}
+		if deliveryConfigured && (len(deliveryPolicy.Splits) > 0 || len(deliveryPolicy.OriginPools) > 0) {
+			poolHandlers := append(append([]any{}, handlers...), originMetrics)
+			poolRoutes, routeErr := deliveryPoolRoutes(site, deliveryPolicy, poolHandlers, reverseProxy, originPolicy)
+			if routeErr != nil {
+				return nil, fmt.Errorf("site %s delivery pools: %w", id, routeErr)
+			}
+			routes = append(routes, poolRoutes...)
 		}
 
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
@@ -613,6 +646,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			"tls_connection_policies": policies,
 			"automatic_https":         map[string]any{"disable": true},
 			"logs":                    map[string]any{},
+			"errors":                  map[string]any{"routes": errorRoutes},
 		},
 	}
 	config := map[string]any{

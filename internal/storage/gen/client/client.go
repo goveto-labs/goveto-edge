@@ -62,6 +62,7 @@ type Client struct {
 	SiteCertificate       SiteCertificateActions
 	SiteDomain            SiteDomainActions
 	SiteListenerConfig    SiteListenerConfigActions
+	SiteTemplate          SiteTemplateActions
 	User                  UserActions
 	UserSession           UserSessionActions
 }
@@ -110,6 +111,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.SiteCertificate = SiteCertificateActions{client: c}
 	c.SiteDomain = SiteDomainActions{client: c}
 	c.SiteListenerConfig = SiteListenerConfigActions{client: c}
+	c.SiteTemplate = SiteTemplateActions{client: c}
 	c.User = UserActions{client: c}
 	c.UserSession = UserSessionActions{client: c}
 	return c
@@ -318,6 +320,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.SiteCertificate = SiteCertificateActions{client: txClient}
 	txClient.SiteDomain = SiteDomainActions{client: txClient}
 	txClient.SiteListenerConfig = SiteListenerConfigActions{client: txClient}
+	txClient.SiteTemplate = SiteTemplateActions{client: txClient}
 	txClient.User = UserActions{client: txClient}
 	txClient.UserSession = UserSessionActions{client: txClient}
 
@@ -29731,7 +29734,7 @@ func (a PasswordResetTokenActions) GroupBy(ctx context.Context, fields []string,
 
 func quotedPolicyTable(c *Client) string { return c.quoteIdentifier("policies") }
 func quotedPolicyColumns(c *Client) string {
-	cols := []string{"id", "name", "cache_json", "compression_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -29747,6 +29750,8 @@ func quotePolicyField(c *Client, field string) (string, error) {
 	case "cache_json":
 		return c.quoteIdentifier(field), nil
 	case "compression_json":
+		return c.quoteIdentifier(field), nil
+	case "delivery_json":
 		return c.quoteIdentifier(field), nil
 	case "waf_json":
 		return c.quoteIdentifier(field), nil
@@ -29967,14 +29972,14 @@ func (b PolicyCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Polic
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildPolicyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "cache_json", "compression_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"})
+		q, args := b.action.buildPolicyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Policy.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Policy
-			if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Policy.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -30001,7 +30006,7 @@ func (b PolicyCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[s
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "name", "cache_json", "compression_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+		returningColumns = []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -30253,7 +30258,7 @@ func (a PolicyActions) FindMany(ctx context.Context, opts ...query.PolicyQueryOp
 	var results []model.Policy
 	for rows.Next() {
 		var item model.Policy
-		if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -30285,7 +30290,7 @@ func (a PolicyActions) FindUnique(ctx context.Context, where query.PolicyWhereCl
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Policy
-	if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -30316,7 +30321,7 @@ func (a PolicyActions) CreateOne(ctx context.Context, sets ...query.PolicySetCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -30335,7 +30340,7 @@ func (a PolicyActions) CreateMany(ctx context.Context, data []query.PolicyCreate
 }
 
 func (a PolicyActions) buildPolicyCreateManySQL(data []query.PolicyCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "name", "cache_json", "compression_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -30408,7 +30413,7 @@ func (a PolicyActions) UpdateOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -30513,7 +30518,7 @@ func (a PolicyActions) UpsertOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -30537,7 +30542,7 @@ func (a PolicyActions) DeleteOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -37563,6 +37568,978 @@ func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string,
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("SiteListenerConfig.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedSiteTemplateTable(c *Client) string { return c.quoteIdentifier("site_templates") }
+func quotedSiteTemplateColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "config_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteSiteTemplateField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "config_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown SiteTemplate field %q", field)
+	}
+}
+
+// buildSiteTemplateWhere recursively builds a WHERE clause string and arguments.
+func buildSiteTemplateWhere(c *Client, wheres []query.SiteTemplateWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.SiteTemplateWhereClause); ok {
+				sub, subArgs := buildSiteTemplateWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.SiteTemplateWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildSiteTemplateWhere(c, []query.SiteTemplateWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.SiteTemplateWhereClause); ok {
+				sub, subArgs := buildSiteTemplateWhere(c, []query.SiteTemplateWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteSiteTemplateField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// SiteTemplateActions provides database operations for the SiteTemplate model.
+type SiteTemplateActions struct {
+	client *Client
+}
+
+// SiteTemplateCreateBuilder builds a SiteTemplate create operation incrementally.
+type SiteTemplateCreateBuilder struct {
+	action SiteTemplateActions
+	sets   []query.SiteTemplateSetClause
+}
+
+// Create starts a staged SiteTemplate create operation.
+func (a SiteTemplateActions) Create() SiteTemplateCreateBuilder {
+	return SiteTemplateCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b SiteTemplateCreateBuilder) Set(sets ...query.SiteTemplateSetClause) SiteTemplateCreateBuilder {
+	next := SiteTemplateCreateBuilder{
+		action: b.action,
+		sets:   make([]query.SiteTemplateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b SiteTemplateCreateBuilder) Do(ctx context.Context) (*model.SiteTemplate, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// SiteTemplateCreateManyBuilder builds a bulk SiteTemplate insert operation.
+type SiteTemplateCreateManyBuilder struct {
+	action            SiteTemplateActions
+	data              []query.SiteTemplateCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk SiteTemplate insert operation.
+func (a SiteTemplateActions) BulkCreate(data []query.SiteTemplateCreateInput) SiteTemplateCreateManyBuilder {
+	return SiteTemplateCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b SiteTemplateCreateManyBuilder) OnConflictDoNothing(columns ...string) SiteTemplateCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b SiteTemplateCreateManyBuilder) Returning(columns ...string) SiteTemplateCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b SiteTemplateCreateManyBuilder) BatchSize(n int) SiteTemplateCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b SiteTemplateCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteTemplateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("SiteTemplate.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("SiteTemplate.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b SiteTemplateCreateManyBuilder) DoReturning(ctx context.Context) ([]model.SiteTemplate, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.SiteTemplate
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteTemplateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "config_json", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.SiteTemplate
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b SiteTemplateCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "config_json", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildSiteTemplateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("SiteTemplate.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// SiteTemplateQueryBuilder builds a SiteTemplate query incrementally.
+type SiteTemplateQueryBuilder struct {
+	action SiteTemplateActions
+	opts   []query.SiteTemplateQueryOption
+}
+
+// Query starts a staged SiteTemplate query.
+func (a SiteTemplateActions) Query() SiteTemplateQueryBuilder {
+	return SiteTemplateQueryBuilder{action: a}
+}
+
+func (b SiteTemplateQueryBuilder) withOptions(opts ...query.SiteTemplateQueryOption) SiteTemplateQueryBuilder {
+	next := SiteTemplateQueryBuilder{
+		action: b.action,
+		opts:   make([]query.SiteTemplateQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b SiteTemplateQueryBuilder) Where(clauses ...query.SiteTemplateWhereClause) SiteTemplateQueryBuilder {
+	opts := make([]query.SiteTemplateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b SiteTemplateQueryBuilder) OrderBy(clause query.SiteTemplateOrderByClause) SiteTemplateQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b SiteTemplateQueryBuilder) Include(clauses ...query.SiteTemplateIncludeClause) SiteTemplateQueryBuilder {
+	opts := make([]query.SiteTemplateQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b SiteTemplateQueryBuilder) Take(n int) SiteTemplateQueryBuilder {
+	return b.withOptions(query.SiteTemplateTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b SiteTemplateQueryBuilder) Skip(n int) SiteTemplateQueryBuilder {
+	return b.withOptions(query.SiteTemplateSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b SiteTemplateQueryBuilder) Do(ctx context.Context) ([]model.SiteTemplate, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b SiteTemplateQueryBuilder) First(ctx context.Context) (*model.SiteTemplate, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b SiteTemplateQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplySiteTemplateOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// SiteTemplateUpdateBuilder builds a SiteTemplate update operation incrementally.
+type SiteTemplateUpdateBuilder struct {
+	action SiteTemplateActions
+	wheres []query.SiteTemplateWhereClause
+	sets   []query.SiteTemplateSetClause
+}
+
+// Update starts a staged SiteTemplate update operation.
+func (a SiteTemplateActions) Update() SiteTemplateUpdateBuilder {
+	return SiteTemplateUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b SiteTemplateUpdateBuilder) Where(clauses ...query.SiteTemplateWhereClause) SiteTemplateUpdateBuilder {
+	next := SiteTemplateUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.SiteTemplateWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.SiteTemplateSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b SiteTemplateUpdateBuilder) Set(sets ...query.SiteTemplateSetClause) SiteTemplateUpdateBuilder {
+	next := SiteTemplateUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.SiteTemplateWhereClause(nil), b.wheres...),
+		sets:   make([]query.SiteTemplateSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b SiteTemplateUpdateBuilder) combinedWhere() (query.SiteTemplateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteTemplateWhereClause{}, fmt.Errorf("SiteTemplate.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteTemplate.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b SiteTemplateUpdateBuilder) Do(ctx context.Context) (*model.SiteTemplate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b SiteTemplateUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// SiteTemplateDeleteBuilder builds a SiteTemplate delete operation incrementally.
+type SiteTemplateDeleteBuilder struct {
+	action SiteTemplateActions
+	wheres []query.SiteTemplateWhereClause
+}
+
+// Delete starts a staged SiteTemplate delete operation.
+func (a SiteTemplateActions) Delete() SiteTemplateDeleteBuilder {
+	return SiteTemplateDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b SiteTemplateDeleteBuilder) Where(clauses ...query.SiteTemplateWhereClause) SiteTemplateDeleteBuilder {
+	next := SiteTemplateDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.SiteTemplateWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b SiteTemplateDeleteBuilder) combinedWhere() (query.SiteTemplateWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.SiteTemplateWhereClause{}, fmt.Errorf("SiteTemplate.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.SiteTemplate.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b SiteTemplateDeleteBuilder) Do(ctx context.Context) (*model.SiteTemplate, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b SiteTemplateDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple SiteTemplate records.
+func (a SiteTemplateActions) FindMany(ctx context.Context, opts ...query.SiteTemplateQueryOption) ([]model.SiteTemplate, error) {
+	cfg := query.ApplySiteTemplateOptions(opts)
+	q := "SELECT " + quotedSiteTemplateColumns(a.client) + " FROM " + quotedSiteTemplateTable(a.client)
+	argIdx := 0
+	where, args := buildSiteTemplateWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteSiteTemplateField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.SiteTemplate
+	for rows.Next() {
+		var item model.SiteTemplate
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteTemplate.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching SiteTemplate record.
+func (a SiteTemplateActions) FindFirst(ctx context.Context, opts ...query.SiteTemplateQueryOption) (*model.SiteTemplate, error) {
+	opts = append(opts, query.SiteTemplateTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single SiteTemplate record by unique constraint.
+func (a SiteTemplateActions) FindUnique(ctx context.Context, where query.SiteTemplateWhereClause) (*model.SiteTemplate, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteTemplateWhere(a.client, []query.SiteTemplateWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedSiteTemplateColumns(a.client) + " FROM " + quotedSiteTemplateTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.SiteTemplate
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("SiteTemplate.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single SiteTemplate record.
+func (a SiteTemplateActions) CreateOne(ctx context.Context, sets ...query.SiteTemplateSetClause) (*model.SiteTemplate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteTemplate.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteSiteTemplateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteTemplateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSiteTemplateColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.SiteTemplate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteTemplate.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple SiteTemplate records.
+func (a SiteTemplateActions) CreateMany(ctx context.Context, data []query.SiteTemplateCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a SiteTemplateActions) buildSiteTemplateCreateManySQL(data []query.SiteTemplateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "config_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedSiteTemplateTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single SiteTemplate record matching the where clause.
+func (a SiteTemplateActions) UpdateOne(ctx context.Context, where query.SiteTemplateWhereClause, sets ...query.SiteTemplateSetClause) (*model.SiteTemplate, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("SiteTemplate.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteSiteTemplateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteTemplateWhere(a.client, []query.SiteTemplateWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteTemplateTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSiteTemplateColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteTemplate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteTemplate.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple SiteTemplate records matching the where clauses.
+func (a SiteTemplateActions) UpdateMany(ctx context.Context, wheres []query.SiteTemplateWhereClause, sets ...query.SiteTemplateSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("SiteTemplate.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteSiteTemplateField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildSiteTemplateWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedSiteTemplateTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteTemplate.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single SiteTemplate record.
+func (a SiteTemplateActions) UpsertOne(ctx context.Context, where query.SiteTemplateWhereClause, create []query.SiteTemplateSetClause, update []query.SiteTemplateSetClause) (*model.SiteTemplate, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("SiteTemplate.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteSiteTemplateField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedSiteTemplateTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteSiteTemplateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteSiteTemplateField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteSiteTemplateField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSiteTemplateColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteTemplate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("SiteTemplate.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single SiteTemplate record matching the where clause.
+func (a SiteTemplateActions) DeleteOne(ctx context.Context, where query.SiteTemplateWhereClause) (*model.SiteTemplate, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteTemplateWhere(a.client, []query.SiteTemplateWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedSiteTemplateTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedSiteTemplateColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.SiteTemplate
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.ConfigJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("SiteTemplate.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple SiteTemplate records matching the where clauses.
+func (a SiteTemplateActions) DeleteMany(ctx context.Context, wheres ...query.SiteTemplateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteTemplateWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedSiteTemplateTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("SiteTemplate.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of SiteTemplate records matching the where clauses.
+func (a SiteTemplateActions) Count(ctx context.Context, wheres ...query.SiteTemplateWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildSiteTemplateWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedSiteTemplateTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("SiteTemplate.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for SiteTemplate.
+func (a SiteTemplateActions) Aggregate(ctx context.Context, opts ...query.SiteTemplateAggregateOption) (*query.SiteTemplateAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteTemplateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedSiteTemplateTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.SiteTemplateAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("SiteTemplate.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on SiteTemplate.
+func (a SiteTemplateActions) GroupBy(ctx context.Context, fields []string, opts ...query.SiteTemplateAggregateOption) ([]query.SiteTemplateGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteSiteTemplateField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteSiteTemplateField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedSiteTemplateTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("SiteTemplate.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.SiteTemplateGroupByResult
+	for rows.Next() {
+		r := query.SiteTemplateGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("SiteTemplate.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

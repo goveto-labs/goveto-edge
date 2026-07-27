@@ -620,6 +620,7 @@ query.PostAuthorIdColumn
   - `Name` (String)
   - `Cachejson` (Json)
   - `Compressionjson` (Json)
+  - `Deliveryjson` (Json)
   - `Wafjson` (Json)
   - `Ccjson` (Json)
   - `Accessjson` (Json)
@@ -744,6 +745,18 @@ query.PostAuthorIdColumn
   - `Hstsincludesubdomains` (Boolean)
   - `Hstspreload` (Boolean)
   - `Ocspstaplingenabled` (Boolean)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### SiteTemplate
+
+- Client handle: `c.SiteTemplate`
+- Query namespace: `query.SiteTemplate`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Configjson` (Json)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

@@ -102,6 +102,7 @@ func updateCompression(db *client.Client, publishService *publisher.Service) ech
 					query.Policy.Name.Set("site:"+site.Id),
 					query.Policy.CacheJson.Set(empty),
 					query.Policy.CompressionJson.Set(encoded),
+					query.Policy.DeliveryJson.Set(empty),
 					query.Policy.WafJson.Set(empty),
 					query.Policy.CcJson.Set(empty),
 					query.Policy.AccessJson.Set(empty),

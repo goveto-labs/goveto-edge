@@ -317,6 +317,7 @@ model Cluster {
   acmeAccounts    ACMEAccount[]
   originPools     OriginPool[]
   sites           Site[]
+  siteTemplates   SiteTemplate[]
   sshCredentials  SSHCredential[]
 
   @@unique([name])
@@ -713,6 +714,7 @@ model Policy {
   name            String
   cacheJson       Json     @map("cache_json")
   compressionJson Json     @default("{}") @map("compression_json")
+  deliveryJson    Json     @default("{}") @map("delivery_json")
   wafJson         Json     @map("waf_json")
   ccJson          Json     @map("cc_json")
   accessJson      Json     @map("access_json")
@@ -874,6 +876,20 @@ model SiteListenerConfig {
   site                  Site          @relation(fields: [siteId], references: [id])
 
   @@map("site_listener_configs")
+}
+
+model SiteTemplate {
+  id         String   @id @default(uuid())
+  clusterId  String   @map("cluster_id")
+  name       String
+  configJson Json     @map("config_json")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+  cluster    Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, name])
+  @@index([clusterId, updatedAt])
+  @@map("site_templates")
 }
 
 model User {

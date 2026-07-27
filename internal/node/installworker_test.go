@@ -26,7 +26,7 @@ func TestInstallJobTimeoutCoversExecutionLimit(t *testing.T) {
 func TestReconcileTerminalJobsIsDeterministicAndCancellationIsNotFailure(t *testing.T) {
 	for _, fragment := range []string{
 		"ORDER BY node_id, updated_at DESC, id DESC",
-		"CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END",
+		`CASE WHEN j.status='CANCELLED' THEN 'PENDING' ELSE 'INSTALL_FAILED' END)::"NodeStatus"`,
 		"CASE WHEN j.status='CANCELLED' THEN NULL",
 	} {
 		if !strings.Contains(reconcileTerminalInstallJobsSQL, fragment) {

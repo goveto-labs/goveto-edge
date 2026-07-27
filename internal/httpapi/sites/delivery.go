@@ -9,66 +9,59 @@ import (
 
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/types"
-	cachepolicy "goveto-edge/internal/policy"
+	deliverypolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
 
-type cacheUpdateResponse struct {
-	Cache        cachepolicy.CachePolicy `json:"cache"`
-	PublishJob   *types.PublishJob       `json:"publish_job,omitempty"`
-	PublishError string                  `json:"publish_error,omitempty"`
+type deliveryUpdateResponse struct {
+	Delivery     deliverypolicy.DeliveryPolicy `json:"delivery"`
+	PublishJob   *types.PublishJob             `json:"publish_job,omitempty"`
+	PublishError string                        `json:"publish_error,omitempty"`
 }
 
-// @summary Get site cache policy
-// @description Get the site cache policy (defaults when none stored).
-// @Tags sites
-func getCache(db *client.Client) echo.HandlerFunc {
+func getDelivery(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
 		}
-
-		site, err := db.Site.FindUnique(c.Request().Context(), query.Site.Id.Equals(c.Param("site_id")))
+		ctx := c.Request().Context()
+		site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(c.Param("site_id")))
 		if err != nil {
 			return err
 		}
-
-		result := cachepolicy.DefaultCachePolicy()
+		result := deliverypolicy.DefaultDeliveryPolicy()
 		if site.PolicyId != nil {
-			stored, findErr := db.Policy.FindUnique(
-				c.Request().Context(),
-				query.Policy.Id.Equals(*site.PolicyId),
-			)
+			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
 			if findErr != nil {
 				return findErr
 			}
-			if err = json.Unmarshal(stored.CacheJson, &result); err != nil {
-				return err
+			if stored != nil && len(stored.DeliveryJson) > 0 && string(stored.DeliveryJson) != "{}" {
+				if err = json.Unmarshal(stored.DeliveryJson, &result); err != nil {
+					return err
+				}
 			}
+		}
+		if err = result.NormalizeAndValidate(); err != nil {
+			return err
 		}
 		return types.JSON(c, http.StatusOK, result)
 	}
 }
 
-// @summary Update site cache policy
-// @description Create or update the site cache policy and enqueue publish.
-// @Tags sites
-func updateCache(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func updateDelivery(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
 		}
-
-		var input cachepolicy.CachePolicy
+		var input deliverypolicy.DeliveryPolicy
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
 		if err := input.NormalizeAndValidate(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-
 		encoded, err := json.Marshal(input)
 		if err != nil {
 			return err
@@ -79,17 +72,14 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 		if err != nil {
 			return err
 		}
-		before := cachepolicy.DefaultCachePolicy()
+		before := deliverypolicy.DefaultDeliveryPolicy()
 		if site.PolicyId != nil {
 			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
 			if findErr != nil {
 				return findErr
 			}
-			if stored == nil {
-				return echo.NewHTTPError(http.StatusNotFound, "site policy not found")
-			}
-			if len(stored.CacheJson) > 0 {
-				if err = json.Unmarshal(stored.CacheJson, &before); err != nil {
+			if stored != nil && len(stored.DeliveryJson) > 0 && string(stored.DeliveryJson) != "{}" {
+				if err = json.Unmarshal(stored.DeliveryJson, &before); err != nil {
 					return err
 				}
 			}
@@ -99,39 +89,32 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 			if site.PolicyId != nil {
 				_, updateErr := tx.Policy.Update().
 					Where(query.Policy.Id.Equals(*site.PolicyId)).
-					Set(query.Policy.CacheJson.Set(encoded)).
+					Set(query.Policy.DeliveryJson.Set(encoded)).
 					Do(ctx)
 				return updateErr
 			}
-
 			policyID := uuid.NewString()
 			empty := json.RawMessage(`{}`)
-			if _, createErr := tx.Policy.Create().
-				Set(
-					query.Policy.Id.Set(policyID),
-					query.Policy.Name.Set("site:"+site.Id),
-					query.Policy.CacheJson.Set(encoded),
-					query.Policy.CompressionJson.Set(empty),
-					query.Policy.DeliveryJson.Set(empty),
-					query.Policy.WafJson.Set(empty),
-					query.Policy.CcJson.Set(empty),
-					query.Policy.AccessJson.Set(empty),
-				).
-				Do(ctx); createErr != nil {
+			if _, createErr := tx.Policy.Create().Set(
+				query.Policy.Id.Set(policyID),
+				query.Policy.Name.Set("site:"+site.Id),
+				query.Policy.CacheJson.Set(empty),
+				query.Policy.CompressionJson.Set(empty),
+				query.Policy.DeliveryJson.Set(encoded),
+				query.Policy.WafJson.Set(empty),
+				query.Policy.CcJson.Set(empty),
+				query.Policy.AccessJson.Set(empty),
+			).Do(ctx); createErr != nil {
 				return createErr
 			}
-
-			_, updateErr := tx.Site.Update().
-				Where(query.Site.Id.Equals(site.Id)).
-				Set(query.Site.PolicyId.Set(policyID)).
-				Do(ctx)
+			_, updateErr := tx.Site.Update().Where(query.Site.Id.Equals(site.Id)).Set(query.Site.PolicyId.Set(policyID)).Do(ctx)
 			return updateErr
 		})
 		if err != nil {
 			return err
 		}
 
-		response := cacheUpdateResponse{Cache: input}
+		response := deliveryUpdateResponse{Delivery: input}
 		if job, publishErr := publishService.Enqueue(ctx, site.Id); publishErr == nil {
 			value := types.NewPublishJob(job)
 			response.PublishJob = &value

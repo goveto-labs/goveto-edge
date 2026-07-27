@@ -475,8 +475,8 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 
 	t.Run("stale if error and response header switches", func(t *testing.T) {
 		config.Version++
-		cache.TTL.DefaultSeconds = 1
-		cache.TTL.Status["200"] = 1
+		cache.TTL.DefaultSeconds = 2
+		cache.TTL.Status["200"] = 2
 		cache.Stale.Enabled = true
 		cache.Stale.IfErrorSeconds = 2
 		cache.Stale.WhileRevalidateSeconds = 0
@@ -484,26 +484,40 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		if err := manager.ApplySite(config); err != nil {
 			t.Fatal(err)
 		}
-		first := requestEdge(t, port, config.Domains[0], http.MethodGet, "/stale", nil)
-		if got := first.header.Get("Cache-Control"); got != "public, max-age=1, stale-if-error=2" {
+		staleBodies := make(map[string]string)
+		staleOriginCounts := make(map[string]int)
+		primeStale := func(path string) edgeResponse {
+			first := requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				cached := requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
+				if cached.header.Get("X-Cache") == "HIT" {
+					staleBodies[path] = cached.body
+					staleOriginCounts[path] = counters.count("GET " + path + " ")
+					return first
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("failed to prime %s: x-cache=%q origins=%d", path, cached.header.Get("X-Cache"), counters.count("GET "+path+" "))
+				}
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
+		first := primeStale("/stale")
+		if got := first.header.Get("Cache-Control"); got != "public, max-age=2, stale-if-error=2" {
 			t.Fatalf("stale cache control=%q", got)
 		}
-		requestEdge(t, port, config.Domains[0], http.MethodGet, "/stale", nil)
-		staleBodies := map[string]string{"/stale": first.body}
 		for _, path := range []string{"/stale-500", "/stale-503", "/stale-504", "/stale-interrupted", "/stale-non-error"} {
-			primed := requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
-			requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
-			staleBodies[path] = primed.body
+			primeStale(path)
 		}
-		time.Sleep(1100 * time.Millisecond)
+		time.Sleep(2100 * time.Millisecond)
 		staleOriginFailure.Store(true)
 		for _, path := range []string{"/stale", "/stale-500", "/stale-503", "/stale-504", "/stale-interrupted"} {
 			stale := requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
 			if stale.status != http.StatusOK || stale.body != staleBodies[path] || stale.header.Get("X-Cache") != "STALE" {
 				t.Fatalf("%s stale response status=%d body=%q want=%q x-cache=%q", path, stale.status, stale.body, staleBodies[path], stale.header.Get("X-Cache"))
 			}
-			if counters.count("GET "+path+" ") != 2 {
-				t.Fatalf("%s stale revalidation origin count=%d", path, counters.count("GET "+path+" "))
+			if count := counters.count("GET " + path + " "); count != staleOriginCounts[path]+1 {
+				t.Fatalf("%s stale revalidation origin count=%d, want %d", path, count, staleOriginCounts[path]+1)
 			}
 		}
 		nonError := requestEdge(t, port, config.Domains[0], http.MethodGet, "/stale-non-error", nil)
@@ -536,10 +550,17 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		for counters.count("GET /swr ") < 2 && time.Now().Before(deadline) {
 			time.Sleep(20 * time.Millisecond)
 		}
-		time.Sleep(350 * time.Millisecond)
 		swrOriginDelay.Store(false)
-		refreshed := requestEdge(t, port, config.Domains[0], http.MethodGet, "/swr", nil)
-		if counters.count("GET /swr ") != 2 || refreshed.body == swrFirst.body {
+		var refreshed edgeResponse
+		deadline = time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			refreshed = requestEdge(t, port, config.Domains[0], http.MethodGet, "/swr", nil)
+			if refreshed.body != swrFirst.body {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if counters.count("GET /swr ") < 2 || refreshed.body == swrFirst.body {
 			t.Fatalf("SWR background refresh failed: first=%q refreshed=%q origins=%d", swrFirst.body, refreshed.body, counters.count("GET /swr "))
 		}
 

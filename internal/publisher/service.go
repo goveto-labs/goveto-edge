@@ -544,6 +544,7 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 	config := edgeprotocol.SiteConfig{
 		SiteID:    site.Id,
 		Version:   version,
+		Disabled:  site.Status == model.SiteStatusDISABLED,
 		Scheduler: pool.Scheduler,
 		Listener: edgeprotocol.ListenerConfig{
 			HTTPEnabled:           listener.HttpEnabled,
@@ -639,6 +640,9 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		}
 		if err = json.Unmarshal(policy.CompressionJson, &config.Compression); err != nil {
 			return config, nil, fmt.Errorf("decode compression policy: %w", err)
+		}
+		if err = json.Unmarshal(policy.DeliveryJson, &config.Delivery); err != nil {
+			return config, nil, fmt.Errorf("decode delivery policy: %w", err)
 		}
 		if err = json.Unmarshal(policy.WafJson, &config.WAF); err != nil {
 			return config, nil, fmt.Errorf("decode WAF policy: %w", err)
