@@ -66,35 +66,55 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 		}
 		if r.Type == "node_runtime" {
 			var m struct {
-				Minute         time.Time `json:"minute"`
-				CPU            float32   `json:"cpu_usage_percent"`
-				MemoryUsed     uint64    `json:"memory_used_bytes"`
-				MemoryTotal    uint64    `json:"memory_total_bytes"`
-				Load1          float32   `json:"load_1"`
-				Load5          float32   `json:"load_5"`
-				Load15         float32   `json:"load_15"`
-				Connections    uint64    `json:"connections"`
-				CacheUsed      uint64    `json:"cache_used_bytes"`
-				CacheDirectory string    `json:"cache_directory"`
-				DiskUsed       uint64    `json:"disk_used_bytes"`
-				DiskTotal      uint64    `json:"disk_total_bytes"`
+				Minute              time.Time `json:"minute"`
+				CPU                 float32   `json:"cpu_usage_percent"`
+				MemoryUsed          uint64    `json:"memory_used_bytes"`
+				MemoryTotal         uint64    `json:"memory_total_bytes"`
+				Load1               float32   `json:"load_1"`
+				Load5               float32   `json:"load_5"`
+				Load15              float32   `json:"load_15"`
+				Connections         uint64    `json:"connections"`
+				CacheUsed           uint64    `json:"cache_used_bytes"`
+				CacheDirectory      string    `json:"cache_directory"`
+				CacheEntries        uint64    `json:"cache_entries"`
+				CacheHits           uint64    `json:"cache_hits"`
+				CacheMisses         uint64    `json:"cache_misses"`
+				CacheStaleHits      uint64    `json:"cache_stale_hits"`
+				CacheEvictions      uint64    `json:"cache_evictions"`
+				CacheRejectedWrites uint64    `json:"cache_rejected_writes"`
+				CacheCorruptions    uint64    `json:"cache_corruptions"`
+				CacheHitRate        float32   `json:"cache_hit_rate"`
+				CacheCapacityRatio  float32   `json:"cache_capacity_ratio"`
+				CacheAlerts         []string  `json:"cache_alerts"`
+				DiskUsed            uint64    `json:"disk_used_bytes"`
+				DiskTotal           uint64    `json:"disk_total_bytes"`
 			}
 			if json.Unmarshal(r.Payload, &m) == nil {
 				if err := i.store.InsertRuntime(ctx, NodeRuntimeMetric{
-					Minute:         m.Minute,
-					ClusterID:      clusterID,
-					NodeID:         nodeID,
-					CPU:            m.CPU,
-					MemoryUsed:     m.MemoryUsed,
-					MemoryTotal:    m.MemoryTotal,
-					Load1:          m.Load1,
-					Load5:          m.Load5,
-					Load15:         m.Load15,
-					Connections:    m.Connections,
-					CacheUsed:      m.CacheUsed,
-					CacheDirectory: m.CacheDirectory,
-					DiskUsed:       m.DiskUsed,
-					DiskTotal:      m.DiskTotal,
+					Minute:              m.Minute,
+					ClusterID:           clusterID,
+					NodeID:              nodeID,
+					CPU:                 m.CPU,
+					MemoryUsed:          m.MemoryUsed,
+					MemoryTotal:         m.MemoryTotal,
+					Load1:               m.Load1,
+					Load5:               m.Load5,
+					Load15:              m.Load15,
+					Connections:         m.Connections,
+					CacheUsed:           m.CacheUsed,
+					CacheDirectory:      m.CacheDirectory,
+					CacheEntries:        m.CacheEntries,
+					CacheHits:           m.CacheHits,
+					CacheMisses:         m.CacheMisses,
+					CacheStaleHits:      m.CacheStaleHits,
+					CacheEvictions:      m.CacheEvictions,
+					CacheRejectedWrites: m.CacheRejectedWrites,
+					CacheCorruptions:    m.CacheCorruptions,
+					CacheHitRate:        m.CacheHitRate,
+					CacheCapacityRatio:  m.CacheCapacityRatio,
+					CacheAlerts:         m.CacheAlerts,
+					DiskUsed:            m.DiskUsed,
+					DiskTotal:           m.DiskTotal,
 				}); err != nil {
 					return err
 				}

@@ -441,6 +441,15 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 		`"path":"/var/cache/goveto/site-1"`,
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,
+		`"mode":"strict"`,
+		`"disable_coalescing":true`,
+		`"coalesce":true`,
+		`"coalesce_headers":["Accept-Encoding","Range","If-Range"]`,
+		`"cache_range_requests":true`,
+		`"max_cacheable_body_bytes":67108864`,
+		`"headers":["Accept-Encoding","Range","If-Range"]`,
+		`"stale":"86400s"`,
+		`"stale_while_revalidate_ttl":30`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing SimpleFS cache policy %s: %s", expected, text)

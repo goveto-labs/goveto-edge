@@ -282,6 +282,9 @@ CREATE TABLE IF NOT EXISTS goveto.node_runtime_metrics_minute
     load_1 Float32, load_5 Float32, load_15 Float32,
     connections UInt64,
     cache_used_bytes UInt64, cache_directory String,
+    cache_entries UInt64, cache_hits UInt64, cache_misses UInt64, cache_stale_hits UInt64,
+    cache_evictions UInt64, cache_rejected_writes UInt64, cache_corruptions UInt64,
+    cache_hit_rate Float32, cache_capacity_ratio Float32, cache_alerts Array(String),
     disk_used_bytes UInt64, disk_total_bytes UInt64
 )
 ENGINE = ReplacingMergeTree
@@ -291,6 +294,18 @@ TTL minute + INTERVAL 90 DAY DELETE;
 
 ALTER TABLE goveto.node_runtime_metrics_minute
     ADD COLUMN IF NOT EXISTS connections UInt64 DEFAULT 0 AFTER load_15;
+
+ALTER TABLE goveto.node_runtime_metrics_minute
+    ADD COLUMN IF NOT EXISTS cache_entries UInt64 DEFAULT 0 AFTER cache_directory,
+    ADD COLUMN IF NOT EXISTS cache_hits UInt64 DEFAULT 0 AFTER cache_entries,
+    ADD COLUMN IF NOT EXISTS cache_misses UInt64 DEFAULT 0 AFTER cache_hits,
+    ADD COLUMN IF NOT EXISTS cache_stale_hits UInt64 DEFAULT 0 AFTER cache_misses,
+    ADD COLUMN IF NOT EXISTS cache_evictions UInt64 DEFAULT 0 AFTER cache_stale_hits,
+    ADD COLUMN IF NOT EXISTS cache_rejected_writes UInt64 DEFAULT 0 AFTER cache_evictions,
+    ADD COLUMN IF NOT EXISTS cache_corruptions UInt64 DEFAULT 0 AFTER cache_rejected_writes,
+    ADD COLUMN IF NOT EXISTS cache_hit_rate Float32 DEFAULT 0 AFTER cache_corruptions,
+    ADD COLUMN IF NOT EXISTS cache_capacity_ratio Float32 DEFAULT 0 AFTER cache_hit_rate,
+    ADD COLUMN IF NOT EXISTS cache_alerts Array(String) DEFAULT [] AFTER cache_capacity_ratio;
 
 ALTER TABLE goveto.node_runtime_metrics_minute
     DROP COLUMN IF EXISTS cache_max_bytes;

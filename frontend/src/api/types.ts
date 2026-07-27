@@ -471,9 +471,13 @@ export interface CachePolicy {
         age?: boolean;
     };
     allow_purge_method?: boolean;
+    request_coalescing?: boolean;
+    cache_range_requests?: boolean;
+    max_body_bytes?: number;
     stale?: {
         enabled?: boolean;
         if_error_seconds?: number;
+        while_revalidate_seconds?: number;
     };
     ttl?: {
         default_seconds?: number;
@@ -718,6 +722,16 @@ export interface NodeRuntimePoint {
     connections: number;
     cache_used_bytes: number;
     cache_directory: string;
+    cache_entries: number;
+    cache_hits: number;
+    cache_misses: number;
+    cache_stale_hits: number;
+    cache_evictions: number;
+    cache_rejected_writes: number;
+    cache_corruptions: number;
+    cache_hit_rate: number;
+    cache_capacity_ratio: number;
+    cache_alerts: string[];
     disk_used_bytes: number;
     disk_total_bytes: number;
 }

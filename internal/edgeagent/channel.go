@@ -275,7 +275,7 @@ func (c *channelClient) executeTask(ctx context.Context, task edgeprotocol.Agent
 	case edgeprotocol.TaskPurgeSite:
 		var request edgeprotocol.PurgeRequest
 		if err = json.Unmarshal(task.Payload, &request); err == nil {
-			err = c.configs.Purge(ctx, request)
+			value, err = c.configs.PurgeDetailed(request)
 		}
 	case edgeprotocol.TaskNodeCacheConfig:
 		var config NodeConfig

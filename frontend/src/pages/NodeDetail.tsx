@@ -824,7 +824,7 @@ export default function NodeDetail() {
     const cacheIsValid = Boolean(
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
-            cache.max_disk_usage_percent <= 95
+            cache.max_disk_usage_percent <= 90
     );
     const enteringNetworkTab =
         previousDetailPathRef.current !== detailPath &&
@@ -1666,8 +1666,8 @@ export default function NodeDetail() {
                                             <FormField
                                                 error={
                                                     cache.max_disk_usage_percent < 1 ||
-                                                    cache.max_disk_usage_percent > 95
-                                                        ? 'Enter a percentage from 1 to 95.'
+                                                    cache.max_disk_usage_percent > 90
+                                                        ? 'Enter a percentage from 1 to 90.'
                                                         : undefined
                                                 }
                                                 hint='The agent stops growing the cache before this threshold.'
@@ -1676,7 +1676,7 @@ export default function NodeDetail() {
                                             >
                                                 <Input
                                                     id='node-cache-disk-percent'
-                                                    max={95}
+                                                    max={90}
                                                     min={1}
                                                     type='number'
                                                     value={String(cache.max_disk_usage_percent)}

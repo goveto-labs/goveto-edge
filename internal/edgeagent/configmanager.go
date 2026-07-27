@@ -52,6 +52,7 @@ func NewConfigManager(path, defaultListen string) *ConfigManager {
 func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	config.MaxDiskUsagePercent = normalizeCacheDiskPercent(config.MaxDiskUsagePercent)
 
 	encoded, err := renderCaddyConfig(m.sites, m.defaultListen, "", config)
 	if err != nil {
@@ -173,31 +174,40 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
 
 func (m *ConfigManager) Purge(_ context.Context, purge edgeprotocol.PurgeRequest) error {
+	_, err := m.PurgeDetailed(purge)
+	return err
+}
+
+func (m *ConfigManager) PurgeDetailed(purge edgeprotocol.PurgeRequest) (edgeprotocol.PurgeResult, error) {
+	result := edgeprotocol.PurgeResult{Type: purge.Type}
+	if err := purge.Validate(); err != nil {
+		return result, fmt.Errorf("invalid purge request: %w", err)
+	}
 	m.mu.Lock()
 	site, ok := m.sites[purge.SiteID]
 	cacheDirectory := m.nodeConfig.CacheDirectory
 	m.mu.Unlock()
 
 	if !ok || site.Disabled {
-		return errors.New("site config is not active")
+		return result, errors.New("site config is not active")
 	}
 	cachePolicy, configured, err := decodeCachePolicy(site.Cache)
 	if err != nil {
-		return fmt.Errorf("invalid site cache policy: %w", err)
+		return result, fmt.Errorf("invalid site cache policy: %w", err)
 	}
 	if !configured || !cachePolicy.Enabled {
-		return errors.New("site cache is not enabled")
+		return result, errors.New("site cache is not enabled")
 	}
 	if len(site.Domains) == 0 {
-		return errors.New("site has no domain")
+		return result, errors.New("site has no domain")
 	}
-	_, err = cachefs.Purge(
+	result.Objects, err = cachefs.Purge(
 		filepath.Join(cacheDirectory, site.SiteID),
 		purge.Type,
 		site.Domains,
 		purge.Values,
 	)
-	return err
+	return result, err
 }
 
 func persistSites(path string, sites map[string]SiteConfig) error {
@@ -236,6 +246,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 	}
 	if len(nodeConfigs) > 0 {
 		nodeConfig = nodeConfigs[0]
+		nodeConfig.MaxDiskUsagePercent = normalizeCacheDiskPercent(nodeConfig.MaxDiskUsagePercent)
 	}
 
 	ids := make([]string, 0, len(sites))
@@ -492,9 +503,14 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			})
 			cachedHandlers := append([]any(nil), handlers...)
 			cachedHandlers = append(cachedHandlers, map[string]any{
-				"handler": "goveto_cache_headers",
-				"x_cache": cachePolicy.ResponseHeaders.XCache,
-				"age":     cachePolicy.ResponseHeaders.Age,
+				"handler":                    "goveto_cache_headers",
+				"site_id":                    id,
+				"x_cache":                    cachePolicy.ResponseHeaders.XCache,
+				"age":                        cachePolicy.ResponseHeaders.Age,
+				"stale_while_revalidate_ttl": staleWhileRevalidateTTL(cachePolicy),
+				"background_revalidate":      cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
+				"coalesce":                   cachePolicy.RequestCoalescing,
+				"coalesce_headers":           cacheKeyHeaders(cachePolicy),
 			})
 			cachedHandlers = append(cachedHandlers,
 				cacheHandler,
@@ -504,6 +520,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 					"default_ttl":        cachePolicy.TTL.DefaultSeconds,
 					"status_ttl":         cachePolicy.TTL.Status,
 					"stale_if_error_ttl": staleIfErrorTTL(cachePolicy),
+					"validate_upstream":  true,
 				},
 				originMetrics, reverseProxy,
 			)
@@ -535,7 +552,8 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 						"host":   site.Domains,
 						"method": methods,
 						"goveto_cache": map[string]any{
-							"conditions": cachePolicy.Conditions,
+							"conditions":           cachePolicy.Conditions,
+							"cache_range_requests": cachePolicy.CacheRangeRequests,
 						},
 					},
 				},
@@ -715,8 +733,10 @@ func decodeAccessPolicy(raw map[string]any) (cachepolicy.AccessPolicy, bool, err
 func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig NodeConfig) map[string]any {
 	stale := "0s"
 	if policy.Stale.Enabled {
-		stale = strconv.Itoa(policy.Stale.IfErrorSeconds) + "s"
+		staleSeconds := max(policy.Stale.IfErrorSeconds, policy.Stale.WhileRevalidateSeconds)
+		stale = strconv.Itoa(staleSeconds) + "s"
 	}
+	keyHeaders := cacheKeyHeaders(policy)
 
 	verbs := []string{http.MethodGet, http.MethodHead}
 	if policy.AllowPurgeMethod {
@@ -725,12 +745,15 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 
 	configuration := map[string]any{
 		"DefaultCache": map[string]any{
-			"allowed_http_verbs":    verbs,
-			"cache_name":            "Goveto-" + siteID,
-			"key":                   map[string]any{"headers": policy.VaryHeaders},
-			"ttl":                   strconv.Itoa(policy.TTL.DefaultSeconds) + "s",
-			"stale":                 stale,
-			"default_cache_control": "public, max-age=" + strconv.Itoa(policy.TTL.DefaultSeconds),
+			"allowed_http_verbs":       verbs,
+			"cache_name":               "Goveto-" + siteID,
+			"key":                      map[string]any{"headers": keyHeaders},
+			"mode":                     "strict",
+			"disable_coalescing":       true,
+			"max_cacheable_body_bytes": policy.MaxBodyBytes,
+			"ttl":                      strconv.Itoa(policy.TTL.DefaultSeconds) + "s",
+			"stale":                    stale,
+			"default_cache_control":    "public, max-age=" + strconv.Itoa(policy.TTL.DefaultSeconds),
 			"simplefs": map[string]any{
 				"found": true,
 				"path":  filepath.Join(nodeConfig.CacheDirectory, siteID),
@@ -757,6 +780,34 @@ func staleIfErrorTTL(policy cachepolicy.CachePolicy) int {
 		return 0
 	}
 	return policy.Stale.IfErrorSeconds
+}
+
+func staleWhileRevalidateTTL(policy cachepolicy.CachePolicy) int {
+	if !policy.Stale.Enabled {
+		return 0
+	}
+	return policy.Stale.WhileRevalidateSeconds
+}
+
+func containsFold(values []string, target string) bool {
+	for _, value := range values {
+		if strings.EqualFold(value, target) {
+			return true
+		}
+	}
+	return false
+}
+
+func cacheKeyHeaders(policy cachepolicy.CachePolicy) []string {
+	headers := append([]string(nil), policy.VaryHeaders...)
+	if policy.CacheRangeRequests {
+		for _, header := range []string{"Range", "If-Range"} {
+			if !containsFold(headers, header) {
+				headers = append(headers, header)
+			}
+		}
+	}
+	return headers
 }
 
 func durationMS(value int) time.Duration {

@@ -66,6 +66,10 @@ func (t *HTTPTransport) Provision(ctx caddy.Context) error {
 func (t *HTTPTransport) RoundTrip(request *http.Request) (*http.Response, error) {
 	start := time.Now()
 	response, err := t.HTTPTransport.RoundTrip(request)
+	if response != nil {
+		response.Header.Del("X-Goveto-Origin-Content-Length")
+		response.Header.Del("X-Goveto-Origin-Method")
+	}
 	if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
 		if address, found := replacer.GetString("goveto.origin.address"); found && address != "" {
 			failed := err != nil || (response != nil && response.StatusCode >= http.StatusInternalServerError)

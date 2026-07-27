@@ -13,6 +13,9 @@ type CachePolicy struct {
 	Enabled            bool            `json:"enabled"`
 	ResponseHeaders    CacheHeaders    `json:"response_headers"`
 	AllowPurgeMethod   bool            `json:"allow_purge_method"`
+	RequestCoalescing  bool            `json:"request_coalescing"`
+	CacheRangeRequests bool            `json:"cache_range_requests"`
+	MaxBodyBytes       uint64          `json:"max_body_bytes"`
 	Stale              CacheStale      `json:"stale"`
 	TTL                CacheTTL        `json:"ttl"`
 	VaryHeaders        []string        `json:"vary_headers"`
@@ -25,8 +28,9 @@ type CacheHeaders struct {
 	Age    bool `json:"age"`
 }
 type CacheStale struct {
-	Enabled        bool `json:"enabled"`
-	IfErrorSeconds int  `json:"if_error_seconds"`
+	Enabled                bool `json:"enabled"`
+	IfErrorSeconds         int  `json:"if_error_seconds"`
+	WhileRevalidateSeconds int  `json:"while_revalidate_seconds"`
 }
 type CacheTTL struct {
 	DefaultSeconds int            `json:"default_seconds"`
@@ -48,8 +52,13 @@ type CacheConditionRule struct {
 
 func DefaultCachePolicy() CachePolicy {
 	return CachePolicy{
-		ResponseHeaders: CacheHeaders{XCache: true, Age: true},
-		Stale:           CacheStale{Enabled: true, IfErrorSeconds: 86400},
+		ResponseHeaders:    CacheHeaders{XCache: true, Age: true},
+		RequestCoalescing:  true,
+		CacheRangeRequests: true,
+		MaxBodyBytes:       64 << 20,
+		Stale: CacheStale{
+			Enabled: true, IfErrorSeconds: 86400, WhileRevalidateSeconds: 30,
+		},
 		TTL: CacheTTL{
 			DefaultSeconds: 300,
 			Status:         map[string]int{"200": 300, "301": 3600, "404": 60},
@@ -82,6 +91,12 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 	}
 	if p.Stale.Enabled && (p.Stale.IfErrorSeconds < 1 || p.Stale.IfErrorSeconds > 31536000) {
 		return errors.New("stale.if_error_seconds must be between 1 and 31536000")
+	}
+	if p.Stale.Enabled && (p.Stale.WhileRevalidateSeconds < 0 || p.Stale.WhileRevalidateSeconds > 31536000) {
+		return errors.New("stale.while_revalidate_seconds must be between 0 and 31536000")
+	}
+	if p.MaxBodyBytes < 1 || p.MaxBodyBytes > 4<<30 {
+		return errors.New("max_body_bytes must be between 1 and 4294967296")
 	}
 
 	for status, ttl := range p.TTL.Status {

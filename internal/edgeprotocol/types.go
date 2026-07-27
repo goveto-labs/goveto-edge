@@ -379,6 +379,11 @@ type PurgeRequest struct {
 	Values []string `json:"values,omitempty"`
 }
 
+type PurgeResult struct {
+	Type    string `json:"type"`
+	Objects int    `json:"objects"`
+}
+
 func (p PurgeRequest) Validate() error {
 	if p.SiteID == "" {
 		return errors.New("site_id is required")

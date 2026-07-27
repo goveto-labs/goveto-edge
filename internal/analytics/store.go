@@ -101,15 +101,19 @@ func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
 }
 
 type NodeRuntimeMetric struct {
-	Minute                  time.Time
-	ClusterID, NodeID       string
-	CPU                     float32
-	MemoryUsed, MemoryTotal uint64
-	Load1, Load5, Load15    float32
-	Connections             uint64
-	CacheUsed               uint64
-	CacheDirectory          string
-	DiskUsed, DiskTotal     uint64
+	Minute                                                time.Time
+	ClusterID, NodeID                                     string
+	CPU                                                   float32
+	MemoryUsed, MemoryTotal                               uint64
+	Load1, Load5, Load15                                  float32
+	Connections                                           uint64
+	CacheUsed                                             uint64
+	CacheDirectory                                        string
+	CacheEntries, CacheHits, CacheMisses, CacheStaleHits  uint64
+	CacheEvictions, CacheRejectedWrites, CacheCorruptions uint64
+	CacheHitRate, CacheCapacityRatio                      float32
+	CacheAlerts                                           []string
+	DiskUsed, DiskTotal                                   uint64
 }
 
 type OriginHealthMetric struct {
@@ -146,9 +150,12 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		connections,
 		cache_used_bytes,
 		cache_directory,
+		cache_entries, cache_hits, cache_misses, cache_stale_hits,
+		cache_evictions, cache_rejected_writes, cache_corruptions,
+		cache_hit_rate, cache_capacity_ratio, cache_alerts,
 		disk_used_bytes,
 		disk_total_bytes
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		m.Minute,
 		m.ClusterID,
 		m.NodeID,
@@ -161,6 +168,16 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		m.Connections,
 		m.CacheUsed,
 		m.CacheDirectory,
+		m.CacheEntries,
+		m.CacheHits,
+		m.CacheMisses,
+		m.CacheStaleHits,
+		m.CacheEvictions,
+		m.CacheRejectedWrites,
+		m.CacheCorruptions,
+		m.CacheHitRate,
+		m.CacheCapacityRatio,
+		m.CacheAlerts,
 		m.DiskUsed,
 		m.DiskTotal,
 	)

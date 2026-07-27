@@ -56,12 +56,8 @@ func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.Han
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
 
-		input.CacheDirectory = strings.TrimSpace(input.CacheDirectory)
-		if input.CacheDirectory == "" || !strings.HasPrefix(input.CacheDirectory, "/") {
-			return echo.NewHTTPError(http.StatusBadRequest, "cache_directory must be an absolute path")
-		}
-		if input.MaxDiskUsagePercent < 1 || input.MaxDiskUsagePercent > 95 {
-			return echo.NewHTTPError(http.StatusBadRequest, "max_disk_usage_percent must be between 1 and 95")
+		if err := validateCacheConfigInput(&input); err != nil {
+			return err
 		}
 		ctx, nodeID := c.Request().Context(), c.Param("node_id")
 		current, err := db.NodeCacheConfig.FindUnique(ctx, query.NodeCacheConfig.NodeId.Equals(nodeID))
@@ -102,6 +98,17 @@ func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.Han
 		}
 		return types.JSON(c, http.StatusOK, response)
 	}
+}
+
+func validateCacheConfigInput(input *edgeprotocol.NodeCacheConfig) error {
+	input.CacheDirectory = strings.TrimSpace(input.CacheDirectory)
+	if input.CacheDirectory == "" || !strings.HasPrefix(input.CacheDirectory, "/") {
+		return echo.NewHTTPError(http.StatusBadRequest, "cache_directory must be an absolute path")
+	}
+	if input.MaxDiskUsagePercent < 1 || input.MaxDiskUsagePercent > 90 {
+		return echo.NewHTTPError(http.StatusBadRequest, "max_disk_usage_percent must be between 1 and 90")
+	}
+	return nil
 }
 
 func ensureNodeInCluster(c *echo.Context, db *client.Client) error {

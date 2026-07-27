@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/disk"
 	gnet "github.com/shirou/gopsutil/v4/net"
 	origingovernance "goveto-edge/caddy/origingovernance"
+	cachefs "goveto-edge/caddy/simplefs"
 )
 
 func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
@@ -24,6 +27,12 @@ func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
 	if got.MaxDiskUsagePercent != 80 {
 		t.Fatalf("percent not normalized: %#v", got)
 	}
+	if err := store.Set(NodeConfig{MaxDiskUsagePercent: 95, MaxSizeBytes: 42}); err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Get().MaxDiskUsagePercent; got != 90 {
+		t.Fatalf("hard disk limit=%d, want 90", got)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +43,13 @@ func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
 	reloaded := NewNodeConfigStore(path)
 	if reloaded.Get().MaxSizeBytes != 42 {
 		t.Fatalf("reload failed: %#v", reloaded.Get())
+	}
+	legacyPath := filepath.Join(t.TempDir(), "legacy-node.json")
+	if err := os.WriteFile(legacyPath, []byte(`{"cache_directory":"/cache","max_disk_usage_percent":95}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := NewNodeConfigStore(legacyPath).Get().MaxDiskUsagePercent; got != 90 {
+		t.Fatalf("legacy hard disk limit=%d, want 90", got)
 	}
 }
 
@@ -64,7 +80,12 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	if err := json.Unmarshal(batch[0].Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections", "cache_directory", "cache_used_bytes"} {
+	for _, key := range []string{
+		"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections",
+		"cache_directory", "cache_used_bytes", "cache_entries", "cache_hits", "cache_misses",
+		"cache_evictions", "cache_rejected_writes", "cache_corruptions", "cache_hit_rate",
+		"cache_capacity_ratio", "cache_alerts",
+	} {
 		if _, ok := payload[key]; !ok {
 			t.Fatalf("missing metrics key %q in %#v", key, payload)
 		}
@@ -74,6 +95,43 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	}
 	if _, ok := payload["cache_max_bytes"]; ok {
 		t.Fatalf("runtime metrics must not expose cache max size: %#v", payload)
+	}
+}
+
+func TestCacheAlertsCoverCapacityEvictionFailureCorruptionAndHitRate(t *testing.T) {
+	stats := cachefs.Statistics{
+		Hits: 20, Misses: 80, HitRate: 0.2, Evictions: 1, RejectedWrites: 2, Corruptions: 3,
+	}
+	got := cacheAlerts(stats, 0.95)
+	want := []string{"CAPACITY_HIGH", "EVICTIONS", "WRITE_REJECTED", "CORRUPTION_RECOVERED", "HIT_RATE_LOW"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cache alerts = %#v, want %#v", got, want)
+	}
+	if ratio := cacheCapacityRatio(NodeConfig{MaxSizeBytes: 100}, 75, nil); ratio != 0.75 {
+		t.Fatalf("fixed cache capacity ratio = %v", ratio)
+	}
+	if ratio := cacheCapacityRatio(
+		NodeConfig{MaxSizeBytes: 1000, MaxDiskUsagePercent: 50},
+		100,
+		&disk.UsageStat{Total: 100, Used: 45},
+	); ratio != 0.9 {
+		t.Fatalf("filesystem-dominated fixed cache capacity ratio = %v, want 0.9", ratio)
+	}
+}
+
+func TestCacheEventAlertsUseActivitySincePreviousSample(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cache")
+	current := cachefs.Statistics{Hits: 20, Misses: 80, HitRate: 0.2, Evictions: 1, RejectedWrites: 1}
+	first := cacheActivitySinceLast(path, current)
+	if got := cacheAlerts(first, 0); !reflect.DeepEqual(got, []string{"EVICTIONS", "WRITE_REJECTED", "HIT_RATE_LOW"}) {
+		t.Fatalf("first activity alerts=%v", got)
+	}
+	unchanged := cacheActivitySinceLast(path, current)
+	if got := cacheAlerts(unchanged, 0); len(got) != 0 {
+		t.Fatalf("unchanged cumulative counters kept alerts active: %v", got)
+	}
+	if got := normalizeCacheDiskPercent(95); got != 90 {
+		t.Fatalf("normalizeCacheDiskPercent(95)=%d, want 90", got)
 	}
 }
 

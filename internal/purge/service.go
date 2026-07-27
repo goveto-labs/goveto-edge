@@ -120,6 +120,7 @@ type target struct{ NodeID string }
 type Result struct {
 	NodeID  string `json:"node_id"`
 	Success bool   `json:"success"`
+	Objects int    `json:"objects"`
 	Error   string `json:"error,omitempty"`
 }
 
@@ -160,8 +161,9 @@ func (s *Service) execute(ctx context.Context, job *model.PurgeJob) jobqueue.Out
 
 			dispatchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
-			err := s.gateway.Dispatch(dispatchCtx, item.NodeID, edgeprotocol.TaskPurgeSite, request, nil)
-			results[i] = Result{NodeID: item.NodeID, Success: err == nil}
+			var purgeResult edgeprotocol.PurgeResult
+			err := s.gateway.Dispatch(dispatchCtx, item.NodeID, edgeprotocol.TaskPurgeSite, request, &purgeResult)
+			results[i] = Result{NodeID: item.NodeID, Success: err == nil, Objects: purgeResult.Objects}
 			if err != nil {
 				results[i].Error = err.Error()
 			}

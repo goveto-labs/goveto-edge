@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/caddyserver/caddy/v2"
@@ -12,8 +13,9 @@ import (
 )
 
 type Matcher struct {
-	Conditions policy.CacheConditions `json:"conditions"`
-	compiled   [][]*regexp.Regexp
+	Conditions         policy.CacheConditions `json:"conditions"`
+	CacheRangeRequests bool                   `json:"cache_range_requests"`
+	compiled           [][]*regexp.Regexp
 }
 
 func init() { caddy.RegisterModule(Matcher{}) }
@@ -40,6 +42,11 @@ func (m *Matcher) Provision(_ caddy.Context) error {
 }
 
 func (m Matcher) Match(r *http.Request) bool {
+	if value := strings.Join(r.Header.Values("Range"), ","); value != "" {
+		if !m.CacheRangeRequests || r.Header.Get("If-Range") != "" || !cacheableRange(value) {
+			return false
+		}
+	}
 	groupMatches := make([]bool, len(m.Conditions.Groups))
 	for gi, group := range m.Conditions.Groups {
 		ruleMatches := make([]bool, len(group.Rules))
@@ -49,6 +56,26 @@ func (m Matcher) Match(r *http.Request) bool {
 		groupMatches[gi] = combine(group.Operator, ruleMatches)
 	}
 	return combine(m.Conditions.GroupOperator, groupMatches)
+}
+
+func cacheableRange(value string) bool {
+	unit, interval, ok := strings.Cut(strings.TrimSpace(value), "=")
+	if !ok || !strings.EqualFold(strings.TrimSpace(unit), "bytes") || strings.Contains(interval, ",") {
+		return false
+	}
+	startText, endText, ok := strings.Cut(strings.TrimSpace(interval), "-")
+	if !ok || startText == "" {
+		return false
+	}
+	start, err := strconv.ParseUint(strings.TrimSpace(startText), 10, 64)
+	if err != nil {
+		return false
+	}
+	if strings.TrimSpace(endText) == "" {
+		return false
+	}
+	end, err := strconv.ParseUint(strings.TrimSpace(endText), 10, 64)
+	return err == nil && end >= start
 }
 
 func (Matcher) matchRule(requestPath string, rule policy.CacheConditionRule, compiled *regexp.Regexp) bool {

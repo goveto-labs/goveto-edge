@@ -27,20 +27,27 @@ type NodeConfigStore struct {
 	path  string
 }
 
+var cacheAlertSamples = struct {
+	sync.Mutex
+	values map[string]cachefs.Statistics
+}{values: map[string]cachefs.Statistics{}}
+
 func NewNodeConfigStore(path string) *NodeConfigStore {
 	store := &NodeConfigStore{path: path, value: NodeConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: true, MaxDiskUsagePercent: 80}}
 	if data, err := os.ReadFile(path); err == nil {
 		_ = json.Unmarshal(data, &store.value)
 	}
+	if store.value.CacheDirectory == "" {
+		store.value.CacheDirectory = "/opt/goveto-edge/cache"
+	}
+	store.value.MaxDiskUsagePercent = normalizeCacheDiskPercent(store.value.MaxDiskUsagePercent)
 	return store
 }
 func (s *NodeConfigStore) Set(value NodeConfig) error {
 	if value.CacheDirectory == "" {
 		value.CacheDirectory = "/opt/goveto-edge/cache"
 	}
-	if value.MaxDiskUsagePercent < 1 || value.MaxDiskUsagePercent > 100 {
-		value.MaxDiskUsagePercent = 80
-	}
+	value.MaxDiskUsagePercent = normalizeCacheDiskPercent(value.MaxDiskUsagePercent)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
@@ -98,19 +105,32 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	connections, connectionErr := gnet.ConnectionsWithoutUids("tcp")
 	usage, diskErr := disk.Usage(config.CacheDirectory)
 	cacheUsed, cacheErr := cacheDirectorySize(config.CacheDirectory)
+	cacheStats := cachefs.Stats(config.CacheDirectory)
+	cacheActivity := cacheActivitySinceLast(config.CacheDirectory, cacheStats)
+	capacityRatio := cacheCapacityRatio(config, cacheUsed, usage)
 	payloadMap := map[string]any{
-		"minute":             time.Now().UTC().Truncate(time.Minute),
-		"cpu_usage_percent":  first(cpuValues),
-		"memory_used_bytes":  memoryUsed(memory),
-		"memory_total_bytes": memoryTotal(memory),
-		"load_1":             loadAt(loads, 1),
-		"load_5":             loadAt(loads, 5),
-		"load_15":            loadAt(loads, 15),
-		"connections":        establishedConnections(connections),
-		"cache_directory":    config.CacheDirectory,
-		"cache_used_bytes":   cacheUsed,
-		"disk_used_bytes":    diskUsed(usage),
-		"disk_total_bytes":   diskTotal(usage),
+		"minute":                time.Now().UTC().Truncate(time.Minute),
+		"cpu_usage_percent":     first(cpuValues),
+		"memory_used_bytes":     memoryUsed(memory),
+		"memory_total_bytes":    memoryTotal(memory),
+		"load_1":                loadAt(loads, 1),
+		"load_5":                loadAt(loads, 5),
+		"load_15":               loadAt(loads, 15),
+		"connections":           establishedConnections(connections),
+		"cache_directory":       config.CacheDirectory,
+		"cache_used_bytes":      cacheUsed,
+		"cache_entries":         cacheStats.Entries,
+		"cache_hits":            cacheStats.Hits,
+		"cache_misses":          cacheStats.Misses,
+		"cache_stale_hits":      cacheStats.StaleHits,
+		"cache_evictions":       cacheStats.Evictions,
+		"cache_rejected_writes": cacheStats.RejectedWrites,
+		"cache_corruptions":     cacheStats.Corruptions,
+		"cache_hit_rate":        cacheStats.HitRate,
+		"cache_capacity_ratio":  capacityRatio,
+		"cache_alerts":          cacheAlerts(cacheActivity, capacityRatio),
+		"disk_used_bytes":       diskUsed(usage),
+		"disk_total_bytes":      diskTotal(usage),
 	}
 	if cpuErr != nil {
 		payloadMap["cpu_error"] = cpuErr.Error()
@@ -130,6 +150,76 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	payload, _ := json.Marshal(payloadMap)
 	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
 	appendOriginMetrics(queue)
+}
+
+func cacheActivitySinceLast(path string, current cachefs.Statistics) cachefs.Statistics {
+	cacheAlertSamples.Lock()
+	previous := cacheAlertSamples.values[path]
+	cacheAlertSamples.values[path] = current
+	cacheAlertSamples.Unlock()
+
+	activity := cachefs.Statistics{
+		Hits:           counterDelta(current.Hits, previous.Hits),
+		Misses:         counterDelta(current.Misses, previous.Misses),
+		StaleHits:      counterDelta(current.StaleHits, previous.StaleHits),
+		Evictions:      counterDelta(current.Evictions, previous.Evictions),
+		RejectedWrites: counterDelta(current.RejectedWrites, previous.RejectedWrites),
+		Corruptions:    counterDelta(current.Corruptions, previous.Corruptions),
+	}
+	if total := activity.Hits + activity.Misses; total > 0 {
+		activity.HitRate = float64(activity.Hits) / float64(total)
+	}
+	return activity
+}
+
+func counterDelta(current, previous uint64) uint64 {
+	if current < previous {
+		return current
+	}
+	return current - previous
+}
+
+func cacheCapacityRatio(config NodeConfig, cacheUsed uint64, usage *disk.UsageStat) float64 {
+	diskRatio := 0.0
+	if usage != nil && usage.Total > 0 {
+		percent := normalizeCacheDiskPercent(config.MaxDiskUsagePercent)
+		target := float64(usage.Total) * float64(percent) / 100
+		diskRatio = float64(usage.Used) / target
+	}
+	if !config.AutoMaxSize && config.MaxSizeBytes > 0 {
+		return max(float64(cacheUsed)/float64(config.MaxSizeBytes), diskRatio)
+	}
+	return diskRatio
+}
+
+func normalizeCacheDiskPercent(value int) int {
+	if value < 1 {
+		return 80
+	}
+	if value > 90 {
+		return 90
+	}
+	return value
+}
+
+func cacheAlerts(stats cachefs.Statistics, capacityRatio float64) []string {
+	alerts := make([]string, 0, 4)
+	if capacityRatio >= 0.9 {
+		alerts = append(alerts, "CAPACITY_HIGH")
+	}
+	if stats.Evictions > 0 {
+		alerts = append(alerts, "EVICTIONS")
+	}
+	if stats.RejectedWrites > 0 {
+		alerts = append(alerts, "WRITE_REJECTED")
+	}
+	if stats.Corruptions > 0 {
+		alerts = append(alerts, "CORRUPTION_RECOVERED")
+	}
+	if stats.Hits+stats.Misses >= 100 && stats.HitRate < 0.5 {
+		alerts = append(alerts, "HIT_RATE_LOW")
+	}
+	return alerts
 }
 
 func appendOriginMetrics(queue *LogQueue) {

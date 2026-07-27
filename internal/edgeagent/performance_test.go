@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	cachefs "goveto-edge/caddy/simplefs"
 	securitypolicy "goveto-edge/internal/policy"
 )
 
@@ -28,11 +29,13 @@ func TestAgentPerformanceTarget(t *testing.T) {
 	defer origin.Close()
 
 	port := freePort(t)
+	cacheDirectory := filepath.Join(t.TempDir(), "cache")
+	t.Cleanup(cachefs.OverrideDiskUsageForTesting(cacheDirectory, 1<<40, 0))
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
 	manager.nodeConfig = NodeConfig{
-		CacheDirectory:      filepath.Join(t.TempDir(), "cache"),
+		CacheDirectory:      cacheDirectory,
 		MaxSizeBytes:        128 << 20,
-		MaxDiskUsagePercent: 95,
+		MaxDiskUsagePercent: 90,
 	}
 	config := SiteConfig{
 		SiteID:   "performance-site",
