@@ -46,6 +46,21 @@ const cancelAbandonedTaskSQL = `UPDATE agent_tasks SET status='CANCELLED',
 	lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 	WHERE id=$1 AND status IN ('PENDING','RUNNING')`
 
+const claimTasksSQL = `WITH picked AS (
+	SELECT t.id FROM agent_tasks t JOIN nodes n ON n.id = t.node_id
+	JOIN node_credentials c ON c.node_id = n.id
+	WHERE t.node_id = $1 AND n.status = 'ONLINE' AND c.revoked_at IS NULL
+	AND t.attempts < t.max_attempts AND t.cancel_requested_at IS NULL
+	AND (t.timeout_at IS NULL OR t.timeout_at > NOW()) AND (
+		(t.status = 'PENDING' AND t.next_attempt_at <= NOW()) OR
+		(t.status = 'RUNNING' AND (t.lease_until IS NULL OR t.lease_until < NOW())))
+	ORDER BY CASE WHEN t.kind = $5 THEN 0 ELSE 1 END, t.created_at
+	FOR UPDATE OF t SKIP LOCKED LIMIT $2)
+	UPDATE agent_tasks t SET status = 'RUNNING', lease_owner = $3,
+	lease_until = NOW() + ($4 * INTERVAL '1 second'), heartbeat_at=NOW(),
+	attempts = attempts + 1, updated_at = NOW()
+	FROM picked WHERE t.id = picked.id RETURNING t.id, t.kind, t.payload`
+
 var errInvalidCredentialCSR = errors.New("invalid credential CSR")
 
 type LogConsumer func(context.Context, string, []edgeprotocol.LogRecord) error
@@ -66,6 +81,7 @@ type Gateway struct {
 	onStatusChange func(context.Context, string)
 	mu             sync.Mutex
 	sessions       map[string]*session
+	geoIP          *geoIPAsset
 }
 
 type session struct {
@@ -95,6 +111,7 @@ func NewGateway(
 
 func (g *Gateway) Run(ctx context.Context) {
 	go g.listenForEvents(ctx)
+	go g.runGeoIP(ctx)
 	g.runTaskSweep(ctx)
 	g.cleanupTasks(ctx)
 	sweepTicker := time.NewTicker(taskSweepInterval)
@@ -155,6 +172,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 	if !wasOnline {
 		g.notifyStatusChange(ctx, clusterID)
 	}
+	g.ensureGeoIPTask(ctx, nodeID, first.Hello.GeoIP)
 	if err := stream.Send(&edgeprotocol.ServerMessage{Welcome: &edgeprotocol.ServerWelcome{
 		HeartbeatSeconds: int(heartbeatInterval.Seconds()), MaxInflightTasks: maxInflightTasks,
 		RotateBeforeHours: int(rotateBefore.Hours()), MaxLogBatchRecords: maxLogBatchRecords,
@@ -245,6 +263,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 				if _, _, err := g.recordHeartbeat(ctx, nodeID, message.Heartbeat.CacheConfig); err != nil {
 					return status.Error(codes.Internal, err.Error())
 				}
+				g.ensureGeoIPTask(ctx, nodeID, message.Heartbeat.GeoIP)
 			case message.TaskResult != nil:
 				delete(inflight, message.TaskResult.TaskID)
 				if err := g.completeTask(ctx, nodeID, current.owner, *message.TaskResult); err != nil {
@@ -604,20 +623,8 @@ func (g *Gateway) claimTasks(ctx context.Context, nodeID, owner string, limit in
 		Kind    string          `db:"kind"`
 		Payload json.RawMessage `db:"payload"`
 	}
-	rows, err := client.Raw[claimedTask](ctx, g.db, `WITH picked AS (
-		SELECT t.id FROM agent_tasks t JOIN nodes n ON n.id = t.node_id
-		JOIN node_credentials c ON c.node_id = n.id
-		WHERE t.node_id = $1 AND n.status = 'ONLINE' AND c.revoked_at IS NULL
-		AND t.attempts < t.max_attempts AND t.cancel_requested_at IS NULL
-		AND (t.timeout_at IS NULL OR t.timeout_at > NOW()) AND (
-			(t.status = 'PENDING' AND t.next_attempt_at <= NOW()) OR
-			(t.status = 'RUNNING' AND (t.lease_until IS NULL OR t.lease_until < NOW())))
-		ORDER BY t.created_at FOR UPDATE OF t SKIP LOCKED LIMIT $2)
-		UPDATE agent_tasks t SET status = 'RUNNING', lease_owner = $3,
-		lease_until = NOW() + ($4 * INTERVAL '1 second'), heartbeat_at=NOW(),
-		attempts = attempts + 1, updated_at = NOW()
-		FROM picked WHERE t.id = picked.id RETURNING t.id, t.kind, t.payload`,
-		nodeID, limit, owner, taskLease.Seconds())
+	rows, err := client.Raw[claimedTask](ctx, g.db, claimTasksSQL,
+		nodeID, limit, owner, taskLease.Seconds(), edgeprotocol.TaskSyncGeoIP)
 	if err != nil {
 		return nil, err
 	}

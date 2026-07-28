@@ -30,6 +30,7 @@ type channelClient struct {
 	configs      *ConfigManager
 	nodeConfigs  *NodeConfigStore
 	logs         *LogQueue
+	geoIP        *GeoIPStore
 }
 
 func (c *channelClient) Run(ctx context.Context) error {
@@ -73,12 +74,13 @@ func (c *channelClient) runSession(ctx context.Context) error {
 		return err
 	}
 	defer connection.Close()
-	stream, err := edgeprotocol.NewManagementClient(connection).Connect(ctx)
+	management := edgeprotocol.NewManagementClient(connection)
+	stream, err := management.Connect(ctx)
 	if err != nil {
 		return err
 	}
 	if err := stream.Send(&edgeprotocol.ClientMessage{Hello: &edgeprotocol.AgentHello{
-		NodeID: c.identity.NodeID, CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(),
+		NodeID: c.identity.NodeID, CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(), GeoIP: c.geoIPStatus(),
 	}}); err != nil {
 		return err
 	}
@@ -102,7 +104,7 @@ func (c *channelClient) runSession(ctx context.Context) error {
 	}()
 
 	tasks := make(chan edgeprotocol.AgentTask, 16)
-	go c.runTasks(sessionCtx, tasks, outbound)
+	go c.runTasks(sessionCtx, tasks, outbound, management)
 	heartbeat := time.NewTicker(10 * time.Second)
 	defer heartbeat.Stop()
 	logsWake := time.NewTicker(2 * time.Second)
@@ -167,6 +169,7 @@ func (c *channelClient) runSession(ctx context.Context) error {
 				CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(),
 				QueueBytes: queueStats.Bytes, QueueRecords: queueStats.Records,
 				DroppedLogs: queueStats.DroppedRecords,
+				GeoIP:       c.geoIPStatus(),
 			}}); err != nil {
 				return err
 			}
@@ -281,13 +284,13 @@ func (c *channelClient) prepareCredentialRequest() (*edgeprotocol.CredentialRequ
 	return request, privateKey, nil
 }
 
-func (c *channelClient) runTasks(ctx context.Context, tasks <-chan edgeprotocol.AgentTask, outbound chan<- *edgeprotocol.ClientMessage) {
+func (c *channelClient) runTasks(ctx context.Context, tasks <-chan edgeprotocol.AgentTask, outbound chan<- *edgeprotocol.ClientMessage, management edgeprotocol.ManagementClient) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case task := <-tasks:
-			result := c.executeTask(ctx, task)
+			result := c.executeTaskWithClient(ctx, task, management)
 			if sendClientMessage(ctx, outbound, &edgeprotocol.ClientMessage{TaskResult: &result}) != nil {
 				return
 			}
@@ -296,6 +299,10 @@ func (c *channelClient) runTasks(ctx context.Context, tasks <-chan edgeprotocol.
 }
 
 func (c *channelClient) executeTask(ctx context.Context, task edgeprotocol.AgentTask) edgeprotocol.AgentTaskResult {
+	return c.executeTaskWithClient(ctx, task, nil)
+}
+
+func (c *channelClient) executeTaskWithClient(ctx context.Context, task edgeprotocol.AgentTask, management edgeprotocol.ManagementClient) edgeprotocol.AgentTaskResult {
 	result := edgeprotocol.AgentTaskResult{TaskID: task.ID}
 	var value any
 	var err error
@@ -323,6 +330,18 @@ func (c *channelClient) executeTask(ctx context.Context, task edgeprotocol.Agent
 			err = c.configs.SetNodeConfig(c.nodeConfigs.Get())
 		}
 		value = c.nodeConfigs.Get()
+	case edgeprotocol.TaskSyncGeoIP:
+		var payload edgeprotocol.GeoIPSyncPayload
+		if err = json.Unmarshal(task.Payload, &payload); err == nil {
+			if management == nil || c.geoIP == nil {
+				err = errors.New("GeoIP download client is unavailable")
+			} else {
+				err = c.geoIP.Install(ctx, management, c.identity.NodeID, payload)
+			}
+		}
+		if c.geoIP != nil {
+			value = c.geoIP.Status()
+		}
 	default:
 		err = fmt.Errorf("unsupported agent task kind %q", task.Kind)
 	}
@@ -333,6 +352,13 @@ func (c *channelClient) executeTask(ctx context.Context, task edgeprotocol.Agent
 		result.Result, _ = json.Marshal(value)
 	}
 	return result
+}
+
+func (c *channelClient) geoIPStatus() edgeprotocol.GeoIPStatus {
+	if c.geoIP == nil {
+		return edgeprotocol.GeoIPStatus{}
+	}
+	return c.geoIP.Status()
 }
 
 func (c *channelClient) tlsConfig() (*tls.Config, error) {

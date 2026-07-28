@@ -62,7 +62,7 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 		if err = result.RateLimit.NormalizeAndValidate(); err != nil {
 			return err
 		}
-		if err = result.Access.NormalizeAndValidate(); err != nil {
+		if err = result.Access.NormalizeAndValidatePublic(); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, result)
@@ -87,7 +87,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		if err := input.RateLimit.NormalizeAndValidate(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid rate-limit policy: "+err.Error())
 		}
-		if err := input.Access.NormalizeAndValidate(); err != nil {
+		if err := input.Access.NormalizeAndValidatePublic(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid access policy: "+err.Error())
 		}
 

@@ -505,7 +505,6 @@ export interface SecurityPolicy {
         blocked_methods: string[];
         allowed_referer_hosts: string[];
         allow_empty_referer: boolean;
-        geoip_database?: string;
         temporary_blocks: boolean;
         temporary_block_failure: string;
     };

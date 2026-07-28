@@ -25,7 +25,7 @@ type AccessPolicy struct {
 	BlockedMethods        []string `json:"blocked_methods"`
 	AllowedRefererHosts   []string `json:"allowed_referer_hosts"`
 	AllowEmptyReferer     bool     `json:"allow_empty_referer"`
-	GeoIPDatabase         string   `json:"geoip_database,omitempty"`
+	GeoIPDatabase         string   `json:"geoip_database,omitempty" swaggerignore:"true"`
 	TemporaryBlocks       bool     `json:"temporary_blocks"`
 	TemporaryBlockFailure string   `json:"temporary_block_failure"`
 }
@@ -104,10 +104,13 @@ func (p *AccessPolicy) NormalizeAndValidate() error {
 	}
 	p.AllowedRefererHosts = uniqueSorted(hosts)
 	p.GeoIPDatabase = strings.TrimSpace(p.GeoIPDatabase)
-	if (len(p.AllowedCountries)+len(p.BlockedCountries)+len(p.AllowedRegions)+len(p.BlockedRegions) > 0) && p.GeoIPDatabase == "" {
-		return errors.New("geoip_database is required for country or region restrictions")
-	}
 	return nil
+}
+
+// NormalizeAndValidatePublic ignores the legacy client-controlled GeoIP path.
+func (p *AccessPolicy) NormalizeAndValidatePublic() error {
+	p.GeoIPDatabase = ""
+	return p.NormalizeAndValidate()
 }
 
 func normalizePrefixes(values []string) ([]string, error) {

@@ -1,6 +1,7 @@
 package waf
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -51,6 +52,10 @@ func compileAccess(input policy.AccessPolicy) (compiledAccess, error) {
 	result.regionsAllowed = stringSet(input.AllowedRegions)
 	result.regionsBlocked = stringSet(input.BlockedRegions)
 	result.referers = stringSet(input.AllowedRefererHosts)
+	needsGeoIP := len(input.AllowedCountries)+len(input.BlockedCountries)+len(input.AllowedRegions)+len(input.BlockedRegions) > 0
+	if needsGeoIP && input.GeoIPDatabase == "" {
+		return result, errors.New("GeoIP database is required for country or region restrictions")
+	}
 	if input.GeoIPDatabase != "" {
 		result.geo, err = geoip2.Open(input.GeoIPDatabase)
 		if err != nil {

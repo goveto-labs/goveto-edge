@@ -181,9 +181,14 @@ func main() {
 		consumeAgentLogs,
 		onNodeStatusChange,
 	)
-	go gateway.Run(ctx)
-
 	publishService = publisher.New(orm, credentialCipher, gateway)
+	gateway.ConfigureGeoIP(cfg.GeoIPDatabasePath, cfg.GeoIPDatabasePollInterval, func(callbackCtx context.Context) error {
+		if publishService != nil {
+			return publishService.EnqueueAll(context.WithoutCancel(callbackCtx))
+		}
+		return nil
+	})
+	go gateway.Run(ctx)
 	go publishService.Run(ctx)
 	certificateService := certmanager.New(orm, credentialCipher, publishService)
 	go certificateService.Run(ctx)

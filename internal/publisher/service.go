@@ -55,6 +55,21 @@ func (s *Service) EnqueueCluster(ctx context.Context, clusterID string) error {
 	return errors.Join(enqueueErrors...)
 }
 
+// EnqueueAll republishes all sites after a node-wide managed asset changes.
+func (s *Service) EnqueueAll(ctx context.Context) error {
+	sites, err := s.db.Site.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	var enqueueErrors []error
+	for index := range sites {
+		if _, enqueueErr := s.Enqueue(ctx, sites[index].Id); enqueueErr != nil {
+			enqueueErrors = append(enqueueErrors, fmt.Errorf("site %s: %w", sites[index].Id, enqueueErr))
+		}
+	}
+	return errors.Join(enqueueErrors...)
+}
+
 func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob, error) {
 	return s.EnqueueIdempotent(ctx, siteID, "")
 }

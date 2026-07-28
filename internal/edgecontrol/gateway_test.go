@@ -178,3 +178,15 @@ func TestAbandonedDispatchCancellationCoversPendingAndRunningTasks(t *testing.T)
 		}
 	}
 }
+
+func TestClaimTasksPrioritizesGeoIPSynchronization(t *testing.T) {
+	for _, fragment := range []string{
+		"ORDER BY CASE WHEN t.kind = $5 THEN 0 ELSE 1 END",
+		"t.created_at",
+		"FOR UPDATE OF t SKIP LOCKED",
+	} {
+		if !strings.Contains(claimTasksSQL, fragment) {
+			t.Fatalf("agent task claim SQL missing %q: %s", fragment, claimTasksSQL)
+		}
+	}
+}

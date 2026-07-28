@@ -7,6 +7,8 @@ on:
       - "cmd/agent-bench*/**"
       - "internal/agentbench/**"
       - "internal/edgeagent/**"
+      - "internal/node/**"
+      - "static/**"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/agent-benchmark.yml"
@@ -28,6 +30,11 @@ jobs:
           cache: true
       - name: Test benchmark framework
         run: go test ./internal/agentbench
+      - name: Build embedded Edge Agent artifacts
+        run: |
+          mkdir -p static/agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o static/agent/agent-linux-amd64 ./cmd/edge-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o static/agent/agent-linux-arm64 ./cmd/edge-agent
       - name: Collect ten microbenchmark samples
         run: |
           go test ./internal/edgeagent ./caddy/waf \
@@ -35,9 +42,11 @@ jobs:
             -bench 'Benchmark(RenderCaddyConfig|LogQueue|WAFRuleEvaluation|RateLimiter)$' \
             -benchmem -count 10 > agent-microbench.txt
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: agent-microbench-${{ runner.arch }}
           path: agent-microbench.txt
+          if-no-files-found: warn
           retention-days: 30
 
   command-build:

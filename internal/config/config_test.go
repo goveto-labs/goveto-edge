@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestLoadUsesSharedMasterKeyWithoutLocalSecretFile(t *testing.T) {
@@ -45,6 +46,31 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 	if cfg.AgentGatewayAddress() != "0.0.0.0:9443" || cfg.AgentGatewayPublicAddress != "control.example:9443" {
 		t.Fatalf("unexpected agent gateway config: listen=%s public=%s", cfg.AgentGatewayAddress(), cfg.AgentGatewayPublicAddress)
+	}
+}
+
+func TestGeoIPConfigurationDefaultsAndProductionOptIn(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("GEOIP_DATABASE_PATH", "")
+	t.Setenv("GEOIP_DATABASE_POLL_INTERVAL", "")
+	t.Setenv("APP_ENV", "test")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GeoIPDatabasePath != "./GeoLite2-City.mmdb" || cfg.GeoIPDatabasePollInterval != 30*time.Second {
+		t.Fatalf("unexpected test GeoIP defaults: %#v", cfg)
+	}
+	t.Setenv("APP_ENV", "production")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.GeoIPDatabasePath != "" {
+		t.Fatalf("production GeoIP should require opt-in, got %q", cfg.GeoIPDatabasePath)
 	}
 }
 

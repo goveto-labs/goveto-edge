@@ -2,6 +2,7 @@ package edgeagent
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -681,6 +682,39 @@ func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing security policy %s: %s", expected, text)
 		}
+	}
+}
+
+func TestManagedGeoIPPathIsRequiredAndInjected(t *testing.T) {
+	config := validHTTPConfig(t)
+	access := cachepolicy.DefaultAccessPolicy()
+	access.Enabled = true
+	access.AllowedCountries = []string{"US"}
+	access.GeoIPDatabase = "/client/controlled.mmdb"
+	config.Access = toMap(t, access)
+	if _, err := renderManagedCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", ""); !errors.Is(err, ErrGeoIPUnavailable) {
+		t.Fatalf("expected missing managed database error, got %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "GeoLite2-City.mmdb")
+	fixture, err := os.ReadFile(filepath.Join("..", "testdata", "GeoIP2-City-Test.mmdb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, fixture, 0600); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := renderManagedCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"geoip_database":"`+path+`"`) || strings.Contains(string(encoded), "/client/controlled.mmdb") {
+		t.Fatalf("managed GeoIP path was not injected: %s", encoded)
+	}
+	if err := os.WriteFile(path, []byte("corrupt"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = renderManagedCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", path); !errors.Is(err, ErrGeoIPUnavailable) {
+		t.Fatalf("expected corrupt managed database to enter recovery mode, got %v", err)
 	}
 }
 

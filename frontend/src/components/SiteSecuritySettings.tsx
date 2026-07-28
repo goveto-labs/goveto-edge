@@ -740,12 +740,6 @@ export function SiteSecuritySettings({
             ) &&
             policy.access.status_code >= 400 &&
             policy.access.status_code <= 599 &&
-            (policy.access.allowed_countries.length === 0 &&
-            policy.access.blocked_countries.length === 0 &&
-            policy.access.allowed_regions.length === 0 &&
-            policy.access.blocked_regions.length === 0
-                ? true
-                : Boolean(policy.access.geoip_database?.trim())) &&
             policy.rate_limit.rules.every(
                 (rule) =>
                     rule.id.trim() &&
@@ -1364,18 +1358,6 @@ export function SiteSecuritySettings({
                             }
                         />
                     </div>
-
-                    <LabeledInput
-                        label='Agent GeoIP database path'
-                        placeholder='/var/lib/goveto/GeoLite2-City.mmdb'
-                        value={policy.access.geoip_database ?? ''}
-                        onChange={(geoIPDatabase) =>
-                            onChange({
-                                ...policy,
-                                access: { ...policy.access, geoip_database: geoIPDatabase },
-                            })
-                        }
-                    />
 
                     <div className='grid gap-4 md:grid-cols-2'>
                         <div className='space-y-1.5'>

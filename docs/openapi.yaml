@@ -20,6 +20,7 @@ tags:
     - name: clusters-certificates
     - name: clusters-jobs
     - name: clusters-nodes
+    - name: clusters-site-templates
     - name: clusters-sites
     - name: clusters-ssh-credentials
     - name: dns
@@ -880,6 +881,41 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/analytics_DistributionItem'
+    /api/v1/clusters/{cluster_id}/analytics/logs/stream:
+        get:
+            operationId: liveLogs
+            summary: get /api/v1/clusters/{cluster_id}/analytics/logs/stream
+            tags:
+                - clusters-analytics
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: query
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        text/event-stream:
+                            schema:
+                                type: object
     /api/v1/clusters/{cluster_id}/analytics/nodes/logs:
         get:
             operationId: nodeLogs
@@ -4343,6 +4379,182 @@ paths:
                                                 type: string
                                             name:
                                                 type: string
+    /api/v1/clusters/{cluster_id}/site-templates:
+        get:
+            operationId: listTemplates
+            summary: get /api/v1/clusters/{cluster_id}/site-templates
+            tags:
+                - clusters-site-templates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/sites_templateResponse'
+        post:
+            operationId: createTemplate
+            summary: post /api/v1/clusters/{cluster_id}/site-templates
+            tags:
+                - clusters-site-templates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                config:
+                                    $ref: '#/components/schemas/sites_siteBundle'
+                                name:
+                                    type: string
+                                site_id:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+    /api/v1/clusters/{cluster_id}/site-templates/{template_id}:
+        get:
+            operationId: getTemplate
+            summary: get /api/v1/clusters/{cluster_id}/site-templates/{template_id}
+            tags:
+                - clusters-site-templates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: template_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            config:
+                                                $ref: '#/components/schemas/sites_siteBundle'
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+        delete:
+            operationId: deleteTemplate
+            summary: delete /api/v1/clusters/{cluster_id}/site-templates/{template_id}
+            tags:
+                - clusters-site-templates
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: template_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
     /api/v1/clusters/{cluster_id}/sites:
         get:
             operationId: list
@@ -4855,6 +5067,66 @@ paths:
                                         properties:
                                             cache:
                                                 $ref: '#/components/schemas/policy_CachePolicy'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/clone:
+        post:
+            operationId: cloneSite
+            summary: post /api/v1/clusters/{cluster_id}/sites/{site_id}/clone
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                domains:
+                                    type: array
+                                    items:
+                                        type: string
+                                name:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            id:
+                                                type: string
+                                            name:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_SiteStatus'
     /api/v1/clusters/{cluster_id}/sites/{site_id}/compression:
         get:
             operationId: getCompression
@@ -4995,6 +5267,286 @@ paths:
                                         properties:
                                             compression:
                                                 $ref: '#/components/schemas/policy_CompressionPolicy'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/delivery:
+        get:
+            operationId: getDelivery
+            summary: get /api/v1/clusters/{cluster_id}/sites/{site_id}/delivery
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            cors:
+                                                type: object
+                                                properties:
+                                                    allow_credentials:
+                                                        type: boolean
+                                                    allow_headers:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                                    allow_methods:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                                    allow_origins:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                                    enabled:
+                                                        type: boolean
+                                                    expose_headers:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                            error_pages:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_ErrorPage'
+                                            maintenance:
+                                                type: object
+                                                properties:
+                                                    body:
+                                                        type: string
+                                                        enum:
+                                                            - Service temporarily unavailable
+                                                    content_type:
+                                                        type: string
+                                                        enum:
+                                                            - text/html; charset=utf-8
+                                                    enabled:
+                                                        type: boolean
+                                                    status:
+                                                        type: number
+                                            origin_pools:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_PathOriginPool'
+                                            origin_prefix:
+                                                type: string
+                                            protocols:
+                                                type: object
+                                                properties:
+                                                    grpc:
+                                                        type: boolean
+                                                    http_upgrade:
+                                                        type: boolean
+                                                    websocket:
+                                                        type: boolean
+                                                        enum:
+                                                            - true
+                                            redirects:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_RedirectRule'
+                                            request_headers:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_HeaderRule'
+                                            response_headers:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_HeaderRule'
+                                            rewrites:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_RewriteRule'
+                                            splits:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_TrafficSplitRule'
+        put:
+            operationId: updateDelivery
+            summary: put /api/v1/clusters/{cluster_id}/sites/{site_id}/delivery
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                cors:
+                                    $ref: '#/components/schemas/policy_CORSConfig'
+                                error_pages:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_ErrorPage'
+                                maintenance:
+                                    $ref: '#/components/schemas/policy_MaintenanceConfig'
+                                origin_pools:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_PathOriginPool'
+                                origin_prefix:
+                                    type: string
+                                protocols:
+                                    $ref: '#/components/schemas/policy_ProtocolConfig'
+                                redirects:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_RedirectRule'
+                                request_headers:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_HeaderRule'
+                                response_headers:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_HeaderRule'
+                                rewrites:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_RewriteRule'
+                                splits:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_TrafficSplitRule'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            delivery:
+                                                $ref: '#/components/schemas/policy_DeliveryPolicy'
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/export:
+        get:
+            operationId: exportSite
+            summary: get /api/v1/clusters/{cluster_id}/sites/{site_id}/export
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            access:
+                                                type: object
+                                            cache:
+                                                type: object
+                                            certificate_ids:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            compression:
+                                                type: object
+                                            delivery:
+                                                type: object
+                                            domains:
+                                                type: array
+                                                items:
+                                                    type: string
+                                            listener:
+                                                $ref: '#/components/schemas/edgeprotocol_ListenerConfig'
+                                            name:
+                                                type: string
+                                            origin_policy:
+                                                $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                                            origins:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/sites_originInput'
+                                            rate_limit:
+                                                type: object
+                                            schema_version:
+                                                type: number
+                                            status:
+                                                $ref: '#/components/schemas/model_SiteStatus'
+                                            waf:
+                                                type: object
     /api/v1/clusters/{cluster_id}/sites/{site_id}/listener:
         get:
             operationId: getListener
@@ -6050,6 +6602,102 @@ paths:
                         application/json:
                             schema:
                                 type: object
+    /api/v1/clusters/{cluster_id}/sites/bulk:
+        post:
+            operationId: bulkSites
+            summary: post /api/v1/clusters/{cluster_id}/sites/bulk
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                action:
+                                    type: string
+                                delivery:
+                                    $ref: '#/components/schemas/policy_DeliveryPolicy'
+                                site_ids:
+                                    type: array
+                                    items:
+                                        type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+    /api/v1/clusters/{cluster_id}/sites/import:
+        post:
+            operationId: importSites
+            summary: post /api/v1/clusters/{cluster_id}/sites/import
+            tags:
+                - clusters-sites
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - write
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                sites:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/sites_siteBundle'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
     /api/v1/clusters/{cluster_id}/ssh-credentials:
         get:
             operationId: listSSHCredentials
@@ -6562,6 +7210,37 @@ components:
                     type: number
                 value:
                     type: string
+        analytics_LiveRequestLog:
+            type: object
+            properties:
+                cache_status:
+                    type: string
+                cluster_id:
+                    type: string
+                config_version:
+                    type: number
+                duration_us:
+                    type: number
+                event_time:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hostname:
+                    type: string
+                method:
+                    type: string
+                node_id:
+                    type: string
+                path:
+                    type: string
+                request_id:
+                    type: string
+                site_id:
+                    type: string
+                status_code:
+                    type: number
+                waf_action:
+                    type: string
         analytics_MonitoringOverview:
             type: object
             properties:
@@ -6584,6 +7263,8 @@ components:
             properties:
                 cache_status:
                     type: string
+                config_version:
+                    type: number
                 duration_us:
                     type: number
                 event_time:
@@ -7007,6 +7688,8 @@ components:
                     $ref: '#/components/schemas/client_SiteDomainActions'
                 siteListenerConfig:
                     $ref: '#/components/schemas/client_SiteListenerConfigActions'
+                siteTemplate:
+                    $ref: '#/components/schemas/client_SiteTemplateActions'
                 user:
                     $ref: '#/components/schemas/client_UserActions'
                 userSession:
@@ -7171,6 +7854,11 @@ components:
             properties:
                 client:
                     $ref: '#/components/schemas/client_Client'
+        client_SiteTemplateActions:
+            type: object
+            properties:
+                client:
+                    $ref: '#/components/schemas/client_Client'
         client_UserActions:
             type: object
             properties:
@@ -7235,6 +7923,35 @@ components:
                 private_key_pem:
                     type: string
                 server_name:
+                    type: string
+        edgeprotocol_ListenerConfig:
+            type: object
+            properties:
+                hsts_enabled:
+                    type: boolean
+                hsts_include_subdomains:
+                    type: boolean
+                hsts_max_age:
+                    type: number
+                hsts_preload:
+                    type: boolean
+                http_enabled:
+                    type: boolean
+                http_port:
+                    type: number
+                http2_enabled:
+                    type: boolean
+                http3_enabled:
+                    type: boolean
+                https_enabled:
+                    type: boolean
+                https_port:
+                    type: number
+                ocsp_stapling_enabled:
+                    type: boolean
+                redirect_http_to_https:
+                    type: boolean
+                tls_min_version:
                     type: string
         edgeprotocol_OriginActiveHealthConfig:
             type: object
@@ -7833,6 +8550,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/model_ClusterRegion'
+                siteTemplates:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/model_SiteTemplate'
                 sites:
                     type: array
                     items:
@@ -8505,6 +9226,8 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+                deliveryJson:
+                    type: object
                 id:
                     type: string
                 name:
@@ -8806,6 +9529,27 @@ components:
                     example: "2026-01-02T15:04:05Z"
         model_SiteStatus:
             type: string
+        model_SiteTemplate:
+            type: object
+            properties:
+                cluster:
+                    $ref: '#/components/schemas/model_Cluster'
+                clusterId:
+                    type: string
+                configJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_TLSMinVersion:
             type: string
         model_User:
@@ -9035,8 +9779,6 @@ components:
                         type: string
                 enabled:
                     type: boolean
-                geoip_database:
-                    type: string
                 ip_allowlist:
                     type: array
                     items:
@@ -9057,6 +9799,31 @@ components:
                     type: array
                     items:
                         type: string
+        policy_CORSConfig:
+            type: object
+            properties:
+                allow_credentials:
+                    type: boolean
+                allow_headers:
+                    type: array
+                    items:
+                        type: string
+                allow_methods:
+                    type: array
+                    items:
+                        type: string
+                allow_origins:
+                    type: array
+                    items:
+                        type: string
+                enabled:
+                    type: boolean
+                expose_headers:
+                    type: array
+                    items:
+                        type: string
+                max_age_seconds:
+                    type: number
         policy_CacheConditionGroup:
             type: object
             properties:
@@ -9165,6 +9932,111 @@ components:
                     type: number
                 recompress:
                     type: boolean
+        policy_DeliveryOrigin:
+            type: object
+            properties:
+                address:
+                    type: string
+                host_header:
+                    type: string
+                protocol:
+                    type: string
+                weight:
+                    type: number
+        policy_DeliveryPolicy:
+            type: object
+            properties:
+                cors:
+                    $ref: '#/components/schemas/policy_CORSConfig'
+                error_pages:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_ErrorPage'
+                maintenance:
+                    $ref: '#/components/schemas/policy_MaintenanceConfig'
+                origin_pools:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_PathOriginPool'
+                origin_prefix:
+                    type: string
+                protocols:
+                    $ref: '#/components/schemas/policy_ProtocolConfig'
+                redirects:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_RedirectRule'
+                request_headers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_HeaderRule'
+                response_headers:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_HeaderRule'
+                rewrites:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_RewriteRule'
+                splits:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_TrafficSplitRule'
+        policy_ErrorPage:
+            type: object
+            properties:
+                body:
+                    type: string
+                content_type:
+                    type: string
+                statuses:
+                    type: array
+                    items:
+                        type: number
+        policy_HeaderRule:
+            type: object
+            properties:
+                name:
+                    type: string
+                operation:
+                    type: string
+                value:
+                    type: string
+        policy_MaintenanceConfig:
+            type: object
+            properties:
+                body:
+                    type: string
+                content_type:
+                    type: string
+                enabled:
+                    type: boolean
+                status:
+                    type: number
+        policy_PathOriginPool:
+            type: object
+            properties:
+                name:
+                    type: string
+                origins:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_DeliveryOrigin'
+                paths:
+                    type: array
+                    items:
+                        type: string
+                scheduler:
+                    type: string
+        policy_ProtocolConfig:
+            type: object
+            properties:
+                grpc:
+                    type: boolean
+                http_upgrade:
+                    type: boolean
+                websocket:
+                    type: boolean
         policy_RateLimitPolicy:
             type: object
             properties:
@@ -9203,6 +10075,15 @@ components:
                     type: number
                 window_seconds:
                     type: number
+        policy_RedirectRule:
+            type: object
+            properties:
+                location:
+                    type: string
+                path:
+                    type: string
+                status:
+                    type: number
         policy_RequestConditionGroup:
             type: object
             properties:
@@ -9221,6 +10102,28 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/policy_RequestConditionGroup'
+        policy_RewriteRule:
+            type: object
+            properties:
+                path:
+                    type: string
+                replacement:
+                    type: string
+        policy_TrafficSplitRule:
+            type: object
+            properties:
+                cookie_name:
+                    type: string
+                header_name:
+                    type: string
+                name:
+                    type: string
+                percentage:
+                    type: number
+                pool:
+                    type: string
+                value:
+                    type: string
         policy_WAFException:
             type: object
             properties:
@@ -9391,6 +10294,15 @@ components:
                     type: string
                 site_key:
                     type: string
+        sites_bulkResult:
+            type: object
+            properties:
+                error:
+                    type: string
+                ok:
+                    type: boolean
+                site_id:
+                    type: string
         sites_cacheUpdateResponse:
             type: object
             properties:
@@ -9422,6 +10334,15 @@ components:
                     $ref: '#/components/schemas/types_PublishJob'
                 status:
                     $ref: '#/components/schemas/model_SiteStatus'
+        sites_deliveryUpdateResponse:
+            type: object
+            properties:
+                delivery:
+                    $ref: '#/components/schemas/policy_DeliveryPolicy'
+                publish_error:
+                    type: string
+                publish_job:
+                    $ref: '#/components/schemas/types_PublishJob'
         sites_listenerUpdateResponse:
             type: object
             properties:
@@ -9457,6 +10378,43 @@ components:
                     $ref: '#/components/schemas/policy_RateLimitPolicy'
                 waf:
                     $ref: '#/components/schemas/policy_WAFPolicy'
+        sites_siteBundle:
+            type: object
+            properties:
+                access:
+                    type: object
+                cache:
+                    type: object
+                certificate_ids:
+                    type: array
+                    items:
+                        type: string
+                compression:
+                    type: object
+                delivery:
+                    type: object
+                domains:
+                    type: array
+                    items:
+                        type: string
+                listener:
+                    $ref: '#/components/schemas/edgeprotocol_ListenerConfig'
+                name:
+                    type: string
+                origin_policy:
+                    $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                origins:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/sites_originInput'
+                rate_limit:
+                    type: object
+                schema_version:
+                    type: number
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+                waf:
+                    type: object
         sites_siteDetails:
             type: object
             properties:
@@ -9519,6 +10477,19 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 version:
                     type: number
+        sites_templateResponse:
+            type: object
+            properties:
+                config:
+                    $ref: '#/components/schemas/sites_siteBundle'
+                id:
+                    type: string
+                name:
+                    type: string
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         sites_temporaryBlock:
             type: object
             properties:

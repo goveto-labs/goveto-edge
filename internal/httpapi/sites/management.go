@@ -529,7 +529,7 @@ func normalizeSiteBundlePolicies(bundle *siteBundle) error {
 	if err != nil {
 		return err
 	}
-	bundle.Access, err = normalizeBundlePolicy("access", bundle.Access, deliverypolicy.DefaultAccessPolicy(), (*deliverypolicy.AccessPolicy).NormalizeAndValidate)
+	bundle.Access, err = normalizeBundlePolicy("access", bundle.Access, deliverypolicy.DefaultAccessPolicy(), (*deliverypolicy.AccessPolicy).NormalizeAndValidatePublic)
 	if err != nil {
 		return err
 	}

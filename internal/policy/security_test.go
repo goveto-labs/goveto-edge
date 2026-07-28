@@ -39,6 +39,18 @@ func TestAccessPolicyNormalizesNetworkAndRequestControls(t *testing.T) {
 	}
 }
 
+func TestAccessPolicyPublicNormalizationIgnoresGeoIPPath(t *testing.T) {
+	policy := DefaultAccessPolicy()
+	policy.AllowedCountries = []string{"us"}
+	policy.GeoIPDatabase = "/client/controlled.mmdb"
+	if err := policy.NormalizeAndValidatePublic(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.GeoIPDatabase != "" || len(policy.AllowedCountries) != 1 || policy.AllowedCountries[0] != "US" {
+		t.Fatalf("unexpected normalized access policy: %#v", policy)
+	}
+}
+
 func TestVersionedWAFExceptionsAndDistributedFailureModeValidate(t *testing.T) {
 	waf := DefaultWAFPolicy()
 	waf.Exceptions = []WAFException{{Enabled: true, RuleIDs: []string{"preset:XSS"}}}

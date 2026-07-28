@@ -4,3 +4,5 @@
 .data
 .agents
 static/agent/*
+GeoLite2-City.mmdb
+GeoLite2-City.mmdb.*

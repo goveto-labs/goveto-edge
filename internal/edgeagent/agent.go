@@ -20,16 +20,19 @@ type Agent struct {
 	configs      *ConfigManager
 	nodeConfigs  *NodeConfigStore
 	logs         *LogQueue
+	geoIP        *GeoIPStore
 }
 
 func New() *Agent {
 	dataDir := envOr("EDGE_AGENT_DATA_DIR", "/opt/goveto-edge/agent/data")
-	return &Agent{
+	agent := &Agent{
 		identityPath: envOr("EDGE_AGENT_IDENTITY_FILE", "/opt/goveto-edge/agent/identity.json"),
 		dataDir:      dataDir,
 		configs:      NewConfigManager(filepath.Join(dataDir, "sites.json"), envOr("EDGE_USER_LISTEN", ":80")),
 		nodeConfigs:  NewNodeConfigStore(filepath.Join(dataDir, "node.json")),
 	}
+	agent.geoIP = NewGeoIPStore(dataDir, agent.configs)
+	return agent
 }
 
 // Run waits for process shutdown.
@@ -52,7 +55,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
 		return fmt.Errorf("apply node cache config: %w", err)
 	}
-	if err := a.configs.Restore(); err != nil {
+	if err := a.configs.Restore(); err != nil && !errors.Is(err, ErrGeoIPUnavailable) {
 		return fmt.Errorf("restore site configs: %w", err)
 	}
 	go collectMetrics(ctx, a.logs, a.nodeConfigs)
@@ -60,7 +63,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go func() {
 		channelErrors <- (&channelClient{
 			identityPath: a.identityPath, identity: identity, configs: a.configs,
-			nodeConfigs: a.nodeConfigs, logs: a.logs,
+			nodeConfigs: a.nodeConfigs, logs: a.logs, geoIP: a.geoIP,
 		}).Run(ctx)
 	}()
 	select {

@@ -34,7 +34,10 @@ type ConfigManager struct {
 	path          string
 	defaultListen string
 	nodeConfig    NodeConfig
+	geoIPPath     string
 }
+
+var ErrGeoIPUnavailable = errors.New("managed GeoIP database is not installed")
 
 func NewConfigManager(path, defaultListen string) *ConfigManager {
 	manager := &ConfigManager{
@@ -47,6 +50,9 @@ func NewConfigManager(path, defaultListen string) *ConfigManager {
 	}
 	manager.path = path
 	manager.defaultListen = defaultListen
+	if path != "" {
+		manager.geoIPPath = filepath.Join(filepath.Dir(path), "geoip", "GeoLite2-City.mmdb")
+	}
 	return manager
 }
 
@@ -55,7 +61,7 @@ func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	defer m.mu.Unlock()
 	config.MaxDiskUsagePercent = normalizeCacheDiskPercent(config.MaxDiskUsagePercent)
 
-	encoded, err := renderCaddyConfig(m.sites, m.defaultListen, "", config)
+	encoded, err := renderManagedCaddyConfig(m.sites, m.defaultListen, m.geoIPPath, config)
 	if err != nil {
 		return err
 	}
@@ -83,18 +89,14 @@ func (m *ConfigManager) Restore() error {
 	if err := json.Unmarshal(data, &sites); err != nil {
 		return err
 	}
-	if err := m.load(sites); err != nil {
-		return err
-	}
-
 	m.mu.Lock()
 	m.sites = sites
 	m.mu.Unlock()
-	return nil
+	return m.load(sites)
 }
 
 func (m *ConfigManager) load(sites map[string]SiteConfig) error {
-	encoded, err := renderCaddyConfig(sites, m.defaultListen, "", m.nodeConfig)
+	encoded, err := renderManagedCaddyConfig(sites, m.defaultListen, m.geoIPPath, m.nodeConfig)
 	if err != nil {
 		return err
 	}
@@ -114,7 +116,7 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 		return errors.New("site config version is not newer")
 	}
 
-	previousEncoded, err := renderCaddyConfig(m.sites, m.defaultListen, "", m.nodeConfig)
+	previousEncoded, err := renderManagedCaddyConfig(m.sites, m.defaultListen, m.geoIPPath, m.nodeConfig)
 	if err != nil {
 		return fmt.Errorf("render previous site config: %w", err)
 	}
@@ -122,7 +124,7 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 	candidate := cloneSites(m.sites)
 	candidate[config.SiteID] = config
 
-	encoded, err := renderCaddyConfig(candidate, m.defaultListen, "", m.nodeConfig)
+	encoded, err := renderManagedCaddyConfig(candidate, m.defaultListen, m.geoIPPath, m.nodeConfig)
 	if err != nil {
 		return fmt.Errorf("render site config: %w", err)
 	}
@@ -173,6 +175,17 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 }
 
 func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
+
+// Reload reapplies all persisted sites after a managed node asset changes.
+func (m *ConfigManager) Reload() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	encoded, err := renderManagedCaddyConfig(m.sites, m.defaultListen, m.geoIPPath, m.nodeConfig)
+	if err != nil {
+		return err
+	}
+	return caddy.Load(encoded, true)
+}
 
 func (m *ConfigManager) Purge(_ context.Context, purge edgeprotocol.PurgeRequest) error {
 	_, err := m.PurgeDetailed(purge)
@@ -240,6 +253,10 @@ func cloneSites(source map[string]SiteConfig) map[string]SiteConfig {
 }
 
 func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nodeConfigs ...NodeConfig) ([]byte, error) {
+	return renderManagedCaddyConfig(sites, defaultListen, "", nodeConfigs...)
+}
+
+func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPPath string, nodeConfigs ...NodeConfig) ([]byte, error) {
 	nodeConfig := NodeConfig{
 		CacheDirectory:      "/opt/goveto-edge/cache",
 		AutoMaxSize:         true,
@@ -269,6 +286,20 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 	listeners, protocols := map[string]struct{}{}, map[string]struct{}{"h1": {}}
 	listeners[defaultListen] = struct{}{}
 	policies, certificates := make([]any, 0), make([]any, 0)
+	var geoIPValidationOnce sync.Once
+	var geoIPValidationErr error
+	validateGeoIP := func() error {
+		geoIPValidationOnce.Do(func() {
+			if geoIPPath == "" {
+				geoIPValidationErr = ErrGeoIPUnavailable
+				return
+			}
+			if _, err := validateCityDatabase(geoIPPath); err != nil {
+				geoIPValidationErr = errors.Join(ErrGeoIPUnavailable, fmt.Errorf("validate managed GeoIP database: %w", err))
+			}
+		})
+		return geoIPValidationErr
+	}
 
 	for _, id := range ids {
 		site := sites[id]
@@ -359,7 +390,7 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 		if err != nil {
 			return nil, fmt.Errorf("site %s rate-limit policy: %w", id, err)
 		}
-		accessPolicy, accessConfigured, err := decodeAccessPolicy(site.Access)
+		accessPolicy, accessConfigured, err := decodeAccessPolicy(site.Access, geoIPPath, validateGeoIP)
 		if err != nil {
 			return nil, fmt.Errorf("site %s access policy: %w", id, err)
 		}
@@ -759,7 +790,7 @@ func decodeRateLimitPolicy(raw map[string]any) (cachepolicy.RateLimitPolicy, boo
 	return policy, true, nil
 }
 
-func decodeAccessPolicy(raw map[string]any) (cachepolicy.AccessPolicy, bool, error) {
+func decodeAccessPolicy(raw map[string]any, geoIPPath string, validateGeoIP func() error) (cachepolicy.AccessPolicy, bool, error) {
 	if raw == nil {
 		return cachepolicy.AccessPolicy{}, false, nil
 	}
@@ -771,8 +802,16 @@ func decodeAccessPolicy(raw map[string]any) (cachepolicy.AccessPolicy, bool, err
 	if err = json.Unmarshal(data, &policy); err != nil {
 		return policy, false, err
 	}
+	policy.GeoIPDatabase = ""
 	if err = policy.NormalizeAndValidate(); err != nil {
 		return policy, false, err
+	}
+	needsGeoIP := len(policy.AllowedCountries)+len(policy.BlockedCountries)+len(policy.AllowedRegions)+len(policy.BlockedRegions) > 0
+	if needsGeoIP {
+		if err = validateGeoIP(); err != nil {
+			return policy, false, err
+		}
+		policy.GeoIPDatabase = geoIPPath
 	}
 	return policy, true, nil
 }

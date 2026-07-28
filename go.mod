@@ -17,8 +17,10 @@ require (
 	github.com/labstack/echo/v5 v5.2.1
 	github.com/mholt/acmez/v3 v3.1.6
 	github.com/oschwald/geoip2-golang v1.13.0
+	github.com/oschwald/maxminddb-golang v1.13.0
 	github.com/pierrec/lz4/v4 v4.1.27
 	github.com/pquerna/otp v1.5.0
+	github.com/quic-go/quic-go v0.59.1
 	github.com/redis/go-redis/v9 v9.21.0
 	github.com/shirou/gopsutil/v4 v4.26.6
 	go.etcd.io/bbolt v1.4.3
@@ -109,7 +111,6 @@ require (
 	github.com/mitchellh/go-ps v1.0.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
 	github.com/pbnjay/memory v0.0.0-20210728143218-7b4eea64cf58 // indirect
 	github.com/pires/go-proxyproto v0.12.0 // indirect
@@ -122,7 +123,6 @@ require (
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.59.1 // indirect
 	github.com/rs/xid v1.6.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect

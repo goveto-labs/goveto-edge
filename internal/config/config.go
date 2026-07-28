@@ -51,6 +51,8 @@ type Config struct {
 	SessionCookieName              string
 	SessionTTL                     time.Duration
 	SessionCookieSecure            bool
+	GeoIPDatabasePath              string
+	GeoIPDatabasePollInterval      time.Duration
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -114,6 +116,14 @@ func Load() (Config, error) {
 	}
 
 	appEnv := envString("APP_ENV", "development")
+	geoIPPollInterval, err := envDuration("GEOIP_DATABASE_POLL_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	defaultGeoIPPath := "./GeoLite2-City.mmdb"
+	if appEnv != "development" && appEnv != "test" {
+		defaultGeoIPPath = ""
+	}
 	defaultDataDir := ".data"
 	if appEnv != "development" && appEnv != "test" {
 		defaultDataDir = "/var/lib/goveto-edge"
@@ -148,6 +158,8 @@ func Load() (Config, error) {
 		AnalyticsArchiveS3SecretKey:    strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_SECRET_KEY")),
 		AnalyticsArchiveS3SessionToken: strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_SESSION_TOKEN")),
 		SessionCookieName:              envString("SESSION_COOKIE_NAME", "goveto_session"),
+		GeoIPDatabasePath:              strings.TrimSpace(envString("GEOIP_DATABASE_PATH", defaultGeoIPPath)),
+		GeoIPDatabasePollInterval:      geoIPPollInterval,
 		SessionCookieSecure:            envBool("SESSION_COOKIE_SECURE", false),
 	}
 	if strings.EqualFold(appEnv, "production") {
@@ -180,6 +192,9 @@ func Load() (Config, error) {
 	}
 	if cfg.AnalyticsRawRetentionDays < 1 || cfg.AnalyticsRawRetentionDays > 3650 {
 		return Config{}, errors.New("ANALYTICS_RAW_RETENTION_DAYS must be between 1 and 3650")
+	}
+	if cfg.GeoIPDatabasePollInterval <= 0 {
+		return Config{}, errors.New("GEOIP_DATABASE_POLL_INTERVAL must be positive")
 	}
 	if cfg.AnalyticsArchiveS3Endpoint != "" {
 		if cfg.AnalyticsArchiveDir != "" {

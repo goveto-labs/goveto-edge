@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -77,6 +78,17 @@ func TestManagementStreamOverMutualTLS(t *testing.T) {
 	if message.Welcome == nil || message.Welcome.HeartbeatSeconds != 10 {
 		t.Fatalf("unexpected welcome frame: %#v", message)
 	}
+	download, err := edgeprotocol.NewManagementClient(connection).DownloadGeoIP(ctx, &edgeprotocol.GeoIPDownloadRequest{NodeID: bundle.NodeID, SHA256: "version"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk, err := download.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if chunk.Offset != 0 || string(chunk.Data) != "database" {
+		t.Fatalf("unexpected GeoIP chunk: %#v", chunk)
+	}
 }
 
 type welcomeServer struct{}
@@ -90,4 +102,11 @@ func (welcomeServer) Connect(stream edgeprotocol.ManagementConnectServer) error 
 		return nil
 	}
 	return stream.Send(&edgeprotocol.ServerMessage{Welcome: &edgeprotocol.ServerWelcome{HeartbeatSeconds: 10}})
+}
+
+func (welcomeServer) DownloadGeoIP(request *edgeprotocol.GeoIPDownloadRequest, stream edgeprotocol.ManagementDownloadGeoIPServer) error {
+	if request.NodeID == "" || request.SHA256 != "version" {
+		return errors.New("invalid download request")
+	}
+	return stream.Send(&edgeprotocol.GeoIPChunk{Offset: 0, Data: []byte("database")})
 }

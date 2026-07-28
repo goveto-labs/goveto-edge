@@ -5,20 +5,42 @@ import (
 	"encoding/json"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/status"
 )
 
 const (
 	TaskApplySiteConfig = "APPLY_SITE_CONFIG"
 	TaskPurgeSite       = "PURGE_SITE"
 	TaskNodeCacheConfig = "NODE_CACHE_CONFIG"
+	TaskSyncGeoIP       = "SYNC_GEOIP_DATABASE"
 )
+
+type GeoIPStatus struct {
+	SHA256     string `json:"sha256,omitempty"`
+	Size       int64  `json:"size,omitempty"`
+	BuildEpoch uint64 `json:"build_epoch,omitempty"`
+}
+
+type GeoIPSyncPayload = GeoIPStatus
+
+type GeoIPDownloadRequest struct {
+	NodeID string `json:"node_id"`
+	SHA256 string `json:"sha256"`
+}
+
+type GeoIPChunk struct {
+	Offset int64  `json:"offset"`
+	Data   []byte `json:"data"`
+}
 
 type AgentHello struct {
 	NodeID       string            `json:"node_id"`
 	AgentVersion string            `json:"agent_version,omitempty"`
 	CacheConfig  NodeCacheConfig   `json:"cache_config"`
 	SiteVersions map[string]uint64 `json:"site_versions,omitempty"`
+	GeoIP        GeoIPStatus       `json:"geoip"`
 }
 
 type AgentHeartbeat struct {
@@ -27,6 +49,7 @@ type AgentHeartbeat struct {
 	QueueBytes   uint64            `json:"queue_bytes,omitempty"`
 	QueueRecords uint64            `json:"queue_records,omitempty"`
 	DroppedLogs  uint64            `json:"dropped_logs,omitempty"`
+	GeoIP        GeoIPStatus       `json:"geoip"`
 }
 
 type AgentTask struct {
@@ -103,6 +126,35 @@ func init() { encoding.RegisterCodec(JSONCodec{}) }
 
 type ManagementClient interface {
 	Connect(ctx context.Context, opts ...grpc.CallOption) (ManagementConnectClient, error)
+	DownloadGeoIP(ctx context.Context, request *GeoIPDownloadRequest, opts ...grpc.CallOption) (ManagementDownloadGeoIPClient, error)
+}
+
+func (c *managementClient) DownloadGeoIP(ctx context.Context, request *GeoIPDownloadRequest, opts ...grpc.CallOption) (ManagementDownloadGeoIPClient, error) {
+	stream, err := c.connection.NewStream(ctx, &ManagementServiceDesc.Streams[1], "/goveto.edge.Management/DownloadGeoIP", opts...)
+	if err != nil {
+		return nil, err
+	}
+	if err := stream.SendMsg(request); err != nil {
+		return nil, err
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return &managementDownloadGeoIPClient{ClientStream: stream}, nil
+}
+
+type ManagementDownloadGeoIPClient interface {
+	Recv() (*GeoIPChunk, error)
+	grpc.ClientStream
+}
+type managementDownloadGeoIPClient struct{ grpc.ClientStream }
+
+func (c *managementDownloadGeoIPClient) Recv() (*GeoIPChunk, error) {
+	chunk := new(GeoIPChunk)
+	if err := c.RecvMsg(chunk); err != nil {
+		return nil, err
+	}
+	return chunk, nil
 }
 
 type managementClient struct{ connection grpc.ClientConnInterface }
@@ -140,6 +192,18 @@ type ManagementServer interface {
 	Connect(ManagementConnectServer) error
 }
 
+type ManagementGeoIPServer interface {
+	DownloadGeoIP(*GeoIPDownloadRequest, ManagementDownloadGeoIPServer) error
+}
+
+type ManagementDownloadGeoIPServer interface {
+	Send(*GeoIPChunk) error
+	grpc.ServerStream
+}
+type managementDownloadGeoIPServer struct{ grpc.ServerStream }
+
+func (s *managementDownloadGeoIPServer) Send(chunk *GeoIPChunk) error { return s.SendMsg(chunk) }
+
 type ManagementConnectServer interface {
 	Send(*ServerMessage) error
 	Recv() (*ClientMessage, error)
@@ -165,6 +229,18 @@ func managementConnectHandler(server any, stream grpc.ServerStream) error {
 	return server.(ManagementServer).Connect(&managementConnectServer{ServerStream: stream})
 }
 
+func managementDownloadGeoIPHandler(server any, stream grpc.ServerStream) error {
+	request := new(GeoIPDownloadRequest)
+	if err := stream.RecvMsg(request); err != nil {
+		return err
+	}
+	downloader, ok := server.(ManagementGeoIPServer)
+	if !ok {
+		return status.Error(codes.Unimplemented, "GeoIP download is not supported")
+	}
+	return downloader.DownloadGeoIP(request, &managementDownloadGeoIPServer{ServerStream: stream})
+}
+
 var ManagementServiceDesc = grpc.ServiceDesc{
 	ServiceName: "goveto.edge.Management",
 	HandlerType: (*ManagementServer)(nil),
@@ -173,5 +249,7 @@ var ManagementServiceDesc = grpc.ServiceDesc{
 		Handler:       managementConnectHandler,
 		ServerStreams: true,
 		ClientStreams: true,
+	}, {
+		StreamName: "DownloadGeoIP", Handler: managementDownloadGeoIPHandler, ServerStreams: true,
 	}},
 }
