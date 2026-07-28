@@ -1,0 +1,7 @@
+.git
+.data
+.DS_Store
+frontend/node_modules
+deploy/benchmark/results
+deploy/benchmark/state
+static/agent

@@ -21,7 +21,21 @@ Run the capacity example (H3 over UDP) and write `report.json`, `summary.md`, an
 docker compose -f deploy/benchmark/compose.yaml --profile run run --rm load
 ```
 
-For H1 use `http://agent:8080/bytes/16384`; for H2 use the H3 URL with `--protocol h2`. Confirm `summary.negotiated_protocol` in every report. Capacity defaults are a 30 second warmup, 120 second measurement, and five repetitions. Run concurrency values `1,8,32,128,512` separately and stop once errors exceed 0.1%, p99 loses control, or Agent CPU remains above 90%.
+Run the H1/H2/H3 capacity matrix across concurrency levels `1,8,32,128,512`:
+
+```sh
+script/run_agent_benchmark_matrix.sh
+```
+
+The default matrix has 15 cases. The extended origin matrix adds 1 KiB, 16 KiB, and 1 MiB payloads plus reused and newly established connections:
+
+```sh
+script/run_agent_benchmark_matrix.sh --full-origin
+```
+
+Use `--suite pr` for a shorter functional run or `--dry-run` to inspect the expanded cases. Each invocation writes an isolated timestamped directory containing `hardware.json`, `matrix.tsv`, per-case logs, and the normal JSON/Markdown/CSV reports. By default the script resets only the Compose project's benchmark volumes to guarantee a fresh Agent identity and configuration; pass `--reuse-environment` to retain them.
+
+H1, H2, and H3 all use `https://agent:8444/bytes/16384`; select the transport with `--protocol`. Confirm `summary.negotiated_protocol` in every report. Capacity defaults are a 30 second warmup, 120 second measurement, and five repetitions. Run concurrency values `1,8,32,128,512` separately and stop once errors exceed 0.1%, p99 loses control, or Agent CPU remains above 90%.
 
 The mock Gateway uses real TLS 1.3 client authentication and the production JSON gRPC stream. Its `--ack-delay` and `--reject-logs` options cover delayed and rejected log uploads without requiring PostgreSQL or ClickHouse. Credentials in `state/` are disposable and must not be committed.
 

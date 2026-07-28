@@ -4,6 +4,7 @@ services:
       context: ../..
       dockerfile: deploy/benchmark/Dockerfile
     command: ["agent-bench-origin", "--listen", ":8080"]
+    user: "0:0"
     cpuset: "4"
     networks: [benchmark]
 
@@ -18,6 +19,7 @@ services:
       context: ../..
       dockerfile: deploy/benchmark/Dockerfile
     command: ["agent-bench-gateway", "--listen", ":8443", "--task", "/state/initial-task.json"]
+    user: "0:0"
     cpuset: "5"
     volumes:
       - ./state/certs:/certs:ro
@@ -29,6 +31,7 @@ services:
       context: ../..
       dockerfile: deploy/benchmark/Dockerfile
     command: ["edge-agent"]
+    user: "0:0"
     cpuset: "2-3"
     environment:
       EDGE_AGENT_IDENTITY_FILE: /state/identity.json
@@ -70,6 +73,7 @@ services:
       - "1"
       - --agent-metrics-url
       - http://agent:9900/metrics
+    user: "0:0"
     cpuset: "0-1"
     pid: "service:agent"
     volumes:
