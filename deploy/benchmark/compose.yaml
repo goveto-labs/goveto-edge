@@ -1,0 +1,86 @@
+services:
+  origin:
+    build:
+      context: ../..
+      dockerfile: deploy/benchmark/Dockerfile
+    command: ["agent-bench-origin", "--listen", ":8080"]
+    cpuset: "4"
+    networks: [benchmark]
+
+  redis:
+    image: redis:8.2-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    cpuset: "5"
+    networks: [benchmark]
+
+  gateway:
+    build:
+      context: ../..
+      dockerfile: deploy/benchmark/Dockerfile
+    command: ["agent-bench-gateway", "--listen", ":8443", "--task", "/state/initial-task.json"]
+    cpuset: "5"
+    volumes:
+      - ./state/certs:/certs:ro
+      - ./state/initial-task.json:/state/initial-task.json:ro
+    networks: [benchmark]
+
+  agent:
+    build:
+      context: ../..
+      dockerfile: deploy/benchmark/Dockerfile
+    command: ["edge-agent"]
+    cpuset: "2-3"
+    environment:
+      EDGE_AGENT_IDENTITY_FILE: /state/identity.json
+      EDGE_AGENT_DATA_DIR: /data
+      EDGE_USER_LISTEN: ":8080"
+      EDGE_AGENT_BENCHMARK_LISTEN: ":9900"
+    volumes:
+      - ./state/identity.json:/state/identity.json:ro
+      - agent-data:/data
+      - agent-cache:/opt/goveto-edge/cache
+    ports:
+      - "18080:8080/tcp"
+      - "18444:8444/tcp"
+      - "18444:8444/udp"
+    depends_on: [origin, gateway, redis]
+    networks: [benchmark]
+
+  load:
+    build:
+      context: ../..
+      dockerfile: deploy/benchmark/Dockerfile
+    command:
+      - agent-bench
+      - run
+      - --suite
+      - capacity
+      - --protocol
+      - h3
+      - --scenario
+      - pure-origin-16k
+      - --url
+      - https://agent:8444/bytes/16384
+      - --host
+      - benchmark.example.test
+      - --insecure-skip-verify
+      - --output
+      - /results
+      - --agent-pid
+      - "1"
+      - --agent-metrics-url
+      - http://agent:9900/metrics
+    cpuset: "0-1"
+    pid: "service:agent"
+    volumes:
+      - ./results:/results
+    depends_on: [agent]
+    networks: [benchmark]
+    profiles: [run]
+
+networks:
+  benchmark:
+
+volumes:
+  agent-data:
+  agent-cache:

@@ -45,6 +45,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open log queue: %w", err)
 	}
+	if benchmarkListen := os.Getenv("EDGE_AGENT_BENCHMARK_LISTEN"); benchmarkListen != "" {
+		go serveBenchmarkMetrics(ctx, benchmarkListen, a.logs, a.nodeConfigs)
+	}
 	agentlog.SetSink(agentLogSink{queue: a.logs, policy: logPolicyFromEnv()})
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
 		return fmt.Errorf("apply node cache config: %w", err)
