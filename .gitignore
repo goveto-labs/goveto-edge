@@ -4,5 +4,6 @@
 .data
 .agents
 static/agent/*
+!static/agent/.gitkeep
 GeoLite2-City.mmdb
 GeoLite2-City.mmdb.*
