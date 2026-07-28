@@ -13,7 +13,13 @@ import { Bot, Plus, Save, ShieldCheck, Trash2, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
+import {
+    type MultiAddOption,
+    SearchableMultiAddField,
+} from '@/components/SearchableMultiAddField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
+import { ValueListAddField } from '@/components/ValueListAddField.tsx';
+import { countryOptions } from '@/data/countries.ts';
 
 const presets = [
     ['SQL_INJECTION', 'SQL injection'],
@@ -57,6 +63,32 @@ const wafActions = [
     ['ALLOW', 'Allow', 'Bypass managed presets and continue the request.'],
     ['TAG', 'TAG', 'Attach a trusted edge tag and continue.'],
 ] as const;
+
+const httpMethodOptions = [
+    ['GET', 'Retrieve a resource'],
+    ['HEAD', 'Retrieve response headers'],
+    ['POST', 'Submit a resource'],
+    ['PUT', 'Replace a resource'],
+    ['PATCH', 'Update part of a resource'],
+    ['DELETE', 'Delete a resource'],
+    ['OPTIONS', 'Inspect supported methods'],
+    ['TRACE', 'Diagnostic loopback'],
+    ['CONNECT', 'Open a tunnel'],
+].map(([id, detail]) => ({ id, name: id, detail }));
+
+function includeSelectedOptions(
+    options: MultiAddOption[],
+    selected: string[],
+    fallbackDetail: string
+) {
+    const known = new Set(options.map((option) => option.id));
+    return [
+        ...options,
+        ...selected
+            .filter((id) => !known.has(id))
+            .map((id) => ({ id, name: id, detail: fallbackDetail })),
+    ];
+}
 
 function newRule(): WAFRequestRule {
     return { id: crypto.randomUUID(), field: 'PATH', operator: 'PREFIX', value: '/' };
@@ -803,44 +835,13 @@ export function SiteSecuritySettings({
                     />
                 </div>
 
-                <div className='grid gap-4 md:grid-cols-4'>
-                    <LabeledInput
-                        label='Rule set version'
-                        value={policy.waf.rule_set_version}
-                        onChange={(ruleSetVersion) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, rule_set_version: ruleSetVersion },
-                            })
-                        }
-                    />
-                    <LabeledInput
-                        label='WAF rollout %'
-                        max={100}
-                        min={1}
-                        type='number'
-                        value={String(policy.waf.rollout_percentage)}
-                        onChange={(value) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, rollout_percentage: Number(value) },
-                            })
-                        }
-                    />
-                    <div className='flex items-end pb-1'>
-                        <ToggleSwitch
-                            isSelected={policy.waf.auto_update}
-                            label='Follow current rule set'
-                            onChange={(autoUpdate) =>
-                                onChange({
-                                    ...policy,
-                                    waf: { ...policy.waf, auto_update: autoUpdate },
-                                })
-                            }
-                        />
-                    </div>
-                    <div className='flex items-end pb-1 text-xs text-muted'>
-                        {policy.waf.engine}
+                <div>
+                    <div className='flex flex-col gap-1.5'>
+                        <span className='text-sm font-medium'>Managed rule set</span>
+                        <div className='flex min-h-10 items-center gap-2'>
+                            <span className='font-mono text-sm'>{policy.waf.rule_set_version}</span>
+                            <span className='text-xs text-muted'>Current version</span>
+                        </div>
                     </div>
                 </div>
 
@@ -1220,9 +1221,12 @@ export function SiteSecuritySettings({
                                 })
                             }
                         />
-                        <CSVInput
+                        <ValueListAddField
+                            addLabel='Add proxy'
+                            dialogTitle='Add trusted proxy'
+                            emptyLabel='No trusted proxies'
                             label='Trusted proxy CIDRs'
-                            placeholder='10.0.0.0/8, 2001:db8::/32'
+                            placeholder='10.0.0.0/8'
                             values={policy.access.trusted_proxies}
                             onChange={(trustedProxies) =>
                                 onChange({
@@ -1237,9 +1241,12 @@ export function SiteSecuritySettings({
                     </div>
 
                     <div className='grid gap-4 md:grid-cols-2'>
-                        <CSVInput
+                        <ValueListAddField
+                            addLabel='Add address'
+                            dialogTitle='Add allowed IP or CIDR'
+                            emptyLabel='No allowed addresses'
                             label='IP/CIDR allowlist'
-                            placeholder='192.0.2.10, 2001:db8::/32'
+                            placeholder='192.0.2.10 or 2001:db8::/32'
                             values={policy.access.ip_allowlist}
                             onChange={(ipAllowlist) =>
                                 onChange({
@@ -1248,7 +1255,10 @@ export function SiteSecuritySettings({
                                 })
                             }
                         />
-                        <CSVInput
+                        <ValueListAddField
+                            addLabel='Add address'
+                            dialogTitle='Add blocked IP or CIDR'
+                            emptyLabel='No blocked addresses'
                             label='IP/CIDR blocklist'
                             placeholder='198.51.100.0/24'
                             values={policy.access.ip_blocklist}
@@ -1259,38 +1269,72 @@ export function SiteSecuritySettings({
                                 })
                             }
                         />
-                        <CSVInput
-                            label='Allowed countries'
-                            placeholder='US, SG'
-                            values={policy.access.allowed_countries}
-                            onChange={(allowedCountries) =>
-                                onChange({
-                                    ...policy,
-                                    access: {
-                                        ...policy.access,
-                                        allowed_countries: allowedCountries,
-                                    },
-                                })
-                            }
-                        />
-                        <CSVInput
-                            label='Blocked countries'
-                            placeholder='CN, RU'
-                            values={policy.access.blocked_countries}
-                            onChange={(blockedCountries) =>
-                                onChange({
-                                    ...policy,
-                                    access: {
-                                        ...policy.access,
-                                        blocked_countries: blockedCountries,
-                                    },
-                                })
-                            }
-                        />
-                        <CSVInput
+                        <div className='space-y-1.5'>
+                            <div className='text-sm font-medium'>Allowed countries</div>
+                            <SearchableMultiAddField
+                                addLabel='Add countries'
+                                dialogSubtitle='Search ISO countries and select those allowed to access this site.'
+                                dialogTitle='Select allowed countries'
+                                emptyLabel='No country allowlist'
+                                itemLabel='country'
+                                options={includeSelectedOptions(
+                                    countryOptions,
+                                    policy.access.allowed_countries,
+                                    'Existing country code'
+                                )}
+                                searchPlaceholder='Search by country name or code'
+                                selected={new Set(policy.access.allowed_countries)}
+                                onChange={(allowedCountries) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            allowed_countries: Array.from(allowedCountries),
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className='space-y-1.5'>
+                            <div className='text-sm font-medium'>Blocked countries</div>
+                            <SearchableMultiAddField
+                                addLabel='Add countries'
+                                dialogSubtitle='Search ISO countries and select those blocked from this site.'
+                                dialogTitle='Select blocked countries'
+                                emptyLabel='No blocked countries'
+                                itemLabel='country'
+                                options={includeSelectedOptions(
+                                    countryOptions,
+                                    policy.access.blocked_countries,
+                                    'Existing country code'
+                                )}
+                                searchPlaceholder='Search by country name or code'
+                                selected={new Set(policy.access.blocked_countries)}
+                                onChange={(blockedCountries) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            blocked_countries: Array.from(blockedCountries),
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <ValueListAddField
+                            addLabel='Add region'
+                            dialogTitle='Add allowed region'
+                            emptyLabel='No region allowlist'
                             label='Allowed regions'
-                            placeholder='US-CA, CA-ON'
+                            hint='Use an ISO 3166-2 subdivision code.'
+                            placeholder='US-CA'
                             values={policy.access.allowed_regions}
+                            normalize={(value) => value.trim().toUpperCase()}
+                            validate={(value) =>
+                                /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
+                                    ? ''
+                                    : 'Enter an ISO 3166-2 code such as US-CA.'
+                            }
                             onChange={(allowedRegions) =>
                                 onChange({
                                     ...policy,
@@ -1298,10 +1342,20 @@ export function SiteSecuritySettings({
                                 })
                             }
                         />
-                        <CSVInput
+                        <ValueListAddField
+                            addLabel='Add region'
+                            dialogTitle='Add blocked region'
+                            emptyLabel='No blocked regions'
                             label='Blocked regions'
+                            hint='Use an ISO 3166-2 subdivision code.'
                             placeholder='US-NY'
                             values={policy.access.blocked_regions}
+                            normalize={(value) => value.trim().toUpperCase()}
+                            validate={(value) =>
+                                /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
+                                    ? ''
+                                    : 'Enter an ISO 3166-2 code such as US-NY.'
+                            }
                             onChange={(blockedRegions) =>
                                 onChange({
                                     ...policy,
@@ -1324,35 +1378,74 @@ export function SiteSecuritySettings({
                     />
 
                     <div className='grid gap-4 md:grid-cols-2'>
-                        <CSVInput
-                            label='Allowed HTTP methods'
-                            placeholder='GET, HEAD, POST'
-                            values={policy.access.allowed_methods}
-                            onChange={(allowedMethods) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, allowed_methods: allowedMethods },
-                                })
-                            }
-                        />
-                        <CSVInput
-                            label='Blocked HTTP methods'
-                            placeholder='TRACE, CONNECT'
-                            values={policy.access.blocked_methods}
-                            onChange={(blockedMethods) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, blocked_methods: blockedMethods },
-                                })
-                            }
-                        />
+                        <div className='space-y-1.5'>
+                            <div className='text-sm font-medium'>Allowed HTTP methods</div>
+                            <SearchableMultiAddField
+                                addLabel='Add methods'
+                                dialogSubtitle='Select the HTTP methods allowed by this access policy.'
+                                dialogTitle='Select allowed HTTP methods'
+                                emptyLabel='All methods allowed by default'
+                                itemLabel='method'
+                                options={includeSelectedOptions(
+                                    httpMethodOptions,
+                                    policy.access.allowed_methods,
+                                    'Custom HTTP method'
+                                )}
+                                searchPlaceholder='Search HTTP methods'
+                                selected={new Set(policy.access.allowed_methods)}
+                                onChange={(allowedMethods) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            allowed_methods: Array.from(allowedMethods),
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className='space-y-1.5'>
+                            <div className='text-sm font-medium'>Blocked HTTP methods</div>
+                            <SearchableMultiAddField
+                                addLabel='Add methods'
+                                dialogSubtitle='Select the HTTP methods blocked by this access policy.'
+                                dialogTitle='Select blocked HTTP methods'
+                                emptyLabel='No blocked methods'
+                                itemLabel='method'
+                                options={includeSelectedOptions(
+                                    httpMethodOptions,
+                                    policy.access.blocked_methods,
+                                    'Custom HTTP method'
+                                )}
+                                searchPlaceholder='Search HTTP methods'
+                                selected={new Set(policy.access.blocked_methods)}
+                                onChange={(blockedMethods) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            blocked_methods: Array.from(blockedMethods),
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
                     </div>
 
                     <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
-                        <CSVInput
+                        <ValueListAddField
+                            addLabel='Add host'
+                            dialogTitle='Add allowed Referer host'
+                            emptyLabel='No Referer restrictions'
                             label='Allowed Referer hosts'
-                            placeholder='example.com, static.example.com'
+                            placeholder='example.com'
                             values={policy.access.allowed_referer_hosts}
+                            normalize={(value) => value.trim().toLowerCase().replace(/\.$/, '')}
+                            validate={(value) =>
+                                /[/:?#@\s]/.test(value)
+                                    ? 'Enter a hostname without a protocol, port or path.'
+                                    : ''
+                            }
                             onChange={(allowedRefererHosts) =>
                                 onChange({
                                     ...policy,

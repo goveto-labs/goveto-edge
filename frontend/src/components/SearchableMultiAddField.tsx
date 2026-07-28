@@ -17,6 +17,7 @@ export function SearchableMultiAddField({
     dialogTitle,
     itemLabel,
     searchPlaceholder,
+    dialogSubtitle,
     createOption,
     emptyLabel,
     onChange,
@@ -27,6 +28,7 @@ export function SearchableMultiAddField({
     dialogTitle: string;
     itemLabel: string;
     searchPlaceholder: string;
+    dialogSubtitle?: string;
     createOption?: (name: string) => Promise<MultiAddOption>;
     emptyLabel?: string;
     onChange: (value: Set<string>) => void;
@@ -192,7 +194,10 @@ export function SearchableMultiAddField({
             <DialogShell
                 isOpen={open}
                 size='lg'
-                subtitle={`${options.length} available. Search and select the ${itemLabel}s assigned to this node.`}
+                subtitle={
+                    dialogSubtitle ??
+                    `${options.length} available. Search and select the ${itemLabel}s assigned to this node.`
+                }
                 title={dialogTitle}
                 onOpenChange={handleOpenChange}
             >

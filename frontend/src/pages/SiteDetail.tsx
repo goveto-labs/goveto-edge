@@ -89,6 +89,7 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
     return {
         waf: {
             ...policy.waf,
+            rollout_percentage: 100,
             block_response: policy.waf.block_response ?? { type: 'DEFAULT' },
             presets: policy.waf.presets ?? [],
             groups: (policy.waf.groups ?? []).map((group) => ({
@@ -1090,7 +1091,7 @@ export default function SiteDetail() {
                             )}
                             {tab === 'settings' && (
                                 <div className='grid gap-6 lg:grid-cols-[200px_1fr]'>
-                                    <nav className='flex flex-col gap-1'>
+                                    <nav className='flex flex-col gap-1 lg:sticky lg:top-0 lg:self-start'>
                                         {settingsPages.map((item) => {
                                             const Icon = item.icon;
                                             return (
