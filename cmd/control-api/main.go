@@ -142,7 +142,7 @@ func main() {
 	}
 
 	var publishService *publisher.Service
-	var dnsService *dnssync.Service
+	dnsService := dnssync.New(orm, credentialCipher)
 	var consumeAgentLogs edgecontrol.LogConsumer
 	if analyticsIngest != nil {
 		consumeAgentLogs = analyticsIngest.Consume
@@ -150,9 +150,23 @@ func main() {
 	onNodeStatusChange := func(callbackCtx context.Context, clusterID string) {
 		callbackCtx = context.WithoutCancel(callbackCtx)
 		go func() {
-			if dnsService != nil {
-				_, _ = dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID)
+			if _, enqueueErr := dnsService.EnqueueNodeIPIfChanged(callbackCtx, clusterID); enqueueErr != nil {
+				slog.Warn("reconcile node DNS after status change", "cluster_id", clusterID, "error", enqueueErr)
 			}
+			go func() {
+				timer := time.NewTimer(dnssync.NodeDNSOfflineGracePeriod)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+				}
+				recheckCtx, cancelRecheck := context.WithTimeout(ctx, 30*time.Second)
+				defer cancelRecheck()
+				if _, recheckErr := dnsService.EnqueueNodeIPIfChanged(recheckCtx, clusterID); recheckErr != nil {
+					slog.Warn("reconcile node DNS after offline grace period", "cluster_id", clusterID, "error", recheckErr)
+				}
+			}()
 			if publishService != nil {
 				if err := publishService.EnqueueCluster(callbackCtx, clusterID); err != nil {
 					slog.Warn("republish cluster sites after node status change", "cluster_id", clusterID, "error", err)
@@ -177,7 +191,6 @@ func main() {
 	purgeService := purge.New(orm, gateway)
 	go purgeService.Run(ctx)
 
-	dnsService = dnssync.New(orm, credentialCipher)
 	go dnsService.Run(ctx)
 
 	installQueue := node.NewInstallQueue(orm)

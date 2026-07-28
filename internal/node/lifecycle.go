@@ -43,17 +43,26 @@ func (l *Lifecycle) Run(ctx context.Context) {
 
 func (l *Lifecycle) markOffline(ctx context.Context) {
 	type changedCluster struct {
-		ClusterID string `db:"cluster_id"`
+		NodeID      string     `db:"node_id"`
+		ClusterID   string     `db:"cluster_id"`
+		HeartbeatAt *time.Time `db:"heartbeat_at"`
 	}
 	clusters, err := client.Raw[changedCluster](ctx, l.db, `UPDATE nodes SET status = 'OFFLINE', updated_at = NOW()
 		WHERE status = 'ONLINE' AND (heartbeat_at IS NULL OR heartbeat_at < NOW() - ($1 * INTERVAL '1 second'))
-		RETURNING cluster_id`, l.offlineAfter.Seconds())
+		RETURNING id AS node_id, cluster_id, heartbeat_at`, l.offlineAfter.Seconds())
 	if err != nil {
 		slog.Warn("mark disconnected agents offline", "error", err)
 		return
 	}
 	notified := map[string]struct{}{}
 	for _, cluster := range clusters {
+		slog.Info(
+			"node marked offline after heartbeat timeout",
+			"node_id", cluster.NodeID,
+			"cluster_id", cluster.ClusterID,
+			"last_heartbeat_at", cluster.HeartbeatAt,
+			"offline_after", l.offlineAfter,
+		)
 		if _, exists := notified[cluster.ClusterID]; exists {
 			continue
 		}

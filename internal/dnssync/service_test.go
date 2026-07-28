@@ -2,10 +2,39 @@ package dnssync
 
 import (
 	"testing"
+	"time"
 
 	"goveto-edge/internal/dnsprovider"
 	"goveto-edge/internal/storage/gen/model"
 )
+
+func TestNodeDNSOfflineGracePeriod(t *testing.T) {
+	now := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	heartbeat := now.Add(-time.Minute)
+	recentlyOffline := now.Add(-NodeDNSOfflineGracePeriod + time.Second)
+	graceBoundary := now.Add(-NodeDNSOfflineGracePeriod)
+	expiredOffline := now.Add(-NodeDNSOfflineGracePeriod - time.Second)
+
+	tests := []struct {
+		name string
+		node model.Node
+		want bool
+	}{
+		{name: "online", node: model.Node{Status: model.NodeStatusONLINE}, want: true},
+		{name: "offline within grace", node: model.Node{Status: model.NodeStatusOFFLINE, HeartbeatAt: &heartbeat, UpdatedAt: recentlyOffline}, want: true},
+		{name: "offline at grace boundary", node: model.Node{Status: model.NodeStatusOFFLINE, HeartbeatAt: &heartbeat, UpdatedAt: graceBoundary}},
+		{name: "offline after grace", node: model.Node{Status: model.NodeStatusOFFLINE, HeartbeatAt: &heartbeat, UpdatedAt: expiredOffline}},
+		{name: "offline without heartbeat", node: model.Node{Status: model.NodeStatusOFFLINE}},
+		{name: "disabled", node: model.Node{Status: model.NodeStatusDISABLED, HeartbeatAt: &heartbeat, UpdatedAt: recentlyOffline}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := nodeEligibleForDNS(test.node, now); got != test.want {
+				t.Fatalf("nodeEligibleForDNS() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
 
 func TestNormalizeLineKey(t *testing.T) {
 	tests := map[string]string{

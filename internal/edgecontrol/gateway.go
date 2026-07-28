@@ -171,6 +171,8 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 
 	received := make(chan receiveResult, 1)
 	go receiveLoop(stream, received)
+	logResults := make(chan logConsumeResult, 1)
+	logInFlight := false
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	deadline := time.NewTimer(heartbeatTimeout)
@@ -211,6 +213,21 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 		case <-current.wake:
 		case <-deadline.C:
 			return status.Error(codes.DeadlineExceeded, "agent heartbeat timed out")
+		case result := <-logResults:
+			logInFlight = false
+			if result.err != nil {
+				slog.Warn("consume agent logs", "node_id", nodeID, "error", result.err)
+				ack := edgeprotocol.AgentLogAck{
+					Accepted: false, RetryAfterMS: 1000, Error: "ingest unavailable",
+				}
+				if err := stream.Send(&edgeprotocol.ServerMessage{LogsAck: &ack}); err != nil {
+					return err
+				}
+				break
+			}
+			if err := stream.Send(acceptedLogAck(result.through)); err != nil {
+				return err
+			}
 		case receivedFrame := <-received:
 			if receivedFrame.err != nil {
 				if errors.Is(receivedFrame.err, io.EOF) {
@@ -234,6 +251,9 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 					return status.Error(codes.Internal, err.Error())
 				}
 			case message.Logs != nil:
+				if logInFlight {
+					return status.Error(codes.FailedPrecondition, "an agent log batch is already being ingested")
+				}
 				if g.consumeLogs == nil {
 					ack := edgeprotocol.AgentLogAck{
 						Accepted: false, RetryAfterMS: 30000, Error: "analytics ingest is disabled",
@@ -252,22 +272,21 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 					}
 					break
 				}
-				if len(message.Logs.Records) > 0 {
-					if err := g.consumeLogs(ctx, nodeID, message.Logs.Records); err != nil {
-						slog.Warn("consume agent logs", "node_id", nodeID, "error", err)
-						ack := edgeprotocol.AgentLogAck{
-							Accepted: false, RetryAfterMS: 1000, Error: "ingest unavailable",
-						}
-						if sendErr := stream.Send(&edgeprotocol.ServerMessage{LogsAck: &ack}); sendErr != nil {
-							return sendErr
-						}
-						break
+				if len(message.Logs.Records) == 0 {
+					if err := stream.Send(acceptedLogAck(0)); err != nil {
+						return err
 					}
+					break
 				}
-				through := message.Logs.Through
-				if err := stream.Send(acceptedLogAck(through)); err != nil {
-					return err
-				}
+				logInFlight = true
+				batch := *message.Logs
+				go func() {
+					consumeErr := g.consumeLogs(ctx, nodeID, batch.Records)
+					select {
+					case logResults <- logConsumeResult{through: batch.Through, err: consumeErr}:
+					case <-ctx.Done():
+					}
+				}()
 			case message.CredentialRequest != nil:
 				certificatePEM, _, notAfter, err := g.rotateCredential(
 					ctx, nodeID, certificate.SerialNumber.Text(16), message.CredentialRequest.CSRPEM,
@@ -335,6 +354,11 @@ func validateLogBatch(batch edgeprotocol.AgentLogBatch) error {
 
 type receiveResult struct {
 	message *edgeprotocol.ClientMessage
+	err     error
+}
+
+type logConsumeResult struct {
+	through uint64
 	err     error
 }
 

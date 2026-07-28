@@ -22,6 +22,8 @@ import (
 
 const (
 	jobRetention = 30 * 24 * time.Hour
+
+	NodeDNSOfflineGracePeriod = 5 * time.Minute
 )
 
 var ErrDNSNotConfigured = errors.New("DNS provider is not configured")
@@ -437,12 +439,7 @@ func (s *Service) desiredNodeRecords(
 ) ([]dnsprovider.Record, error) {
 	result := make([]dnsprovider.Record, 0)
 	seen := map[string]bool{}
-	nodes, err := s.db.Node.Query().
-		Where(
-			query.Node.ClusterId.Equals(cluster.Id),
-			query.Node.Status.Equals(model.NodeStatusONLINE),
-		).
-		Do(ctx)
+	nodes, err := s.dnsEligibleNodes(ctx, cluster.Id, time.Now())
 	if err != nil {
 		return nil, err
 	}
@@ -505,6 +502,49 @@ func (s *Service) desiredNodeRecords(
 		}
 	}
 	return result, nil
+}
+
+func (s *Service) dnsEligibleNodes(ctx context.Context, clusterID string, now time.Time) ([]model.Node, error) {
+	nodes, err := s.db.Node.Query().
+		Where(
+			query.Node.ClusterId.Equals(clusterID),
+			query.Node.Status.In(model.NodeStatusONLINE, model.NodeStatusOFFLINE),
+		).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]model.Node, 0, len(nodes))
+	for _, currentNode := range nodes {
+		if !nodeEligibleForDNS(currentNode, now) {
+			continue
+		}
+		if currentNode.Status == model.NodeStatusOFFLINE {
+			credential, err := s.db.NodeCredential.FindUnique(
+				ctx,
+				query.NodeCredential.NodeId.Equals(currentNode.Id),
+			)
+			if err != nil {
+				return nil, err
+			}
+			if credential == nil || credential.RevokedAt != nil {
+				continue
+			}
+		}
+		result = append(result, currentNode)
+	}
+	return result, nil
+}
+
+// Keep a recently disconnected node in DNS while the Agent has a chance to
+// reconnect. Administrative disable and credential revocation bypass this path.
+func nodeEligibleForDNS(currentNode model.Node, now time.Time) bool {
+	if currentNode.Status == model.NodeStatusONLINE {
+		return true
+	}
+	return currentNode.Status == model.NodeStatusOFFLINE &&
+		currentNode.HeartbeatAt != nil &&
+		currentNode.UpdatedAt.After(now.Add(-NodeDNSOfflineGracePeriod))
 }
 
 func sameRecordSet(desired, remote []dnsprovider.Record) bool {
@@ -700,12 +740,7 @@ func (s *Service) desired(
 	supportsLines bool,
 ) ([]desiredRecord, error) {
 	result := []desiredRecord{}
-	nodes, err := s.db.Node.Query().
-		Where(
-			query.Node.ClusterId.Equals(cluster.Id),
-			query.Node.Status.Equals(model.NodeStatusONLINE),
-		).
-		Do(ctx)
+	nodes, err := s.dnsEligibleNodes(ctx, cluster.Id, time.Now())
 	if err != nil {
 		return nil, err
 	}
