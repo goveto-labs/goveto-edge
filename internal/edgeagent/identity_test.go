@@ -2,13 +2,10 @@ package edgeagent
 
 import (
 	"bytes"
-	"encoding/base64"
+	"encoding/pem"
 	"os"
 	"path/filepath"
 	"testing"
-
-	"goveto-edge/internal/edgecontrol"
-	"goveto-edge/internal/node"
 )
 
 func TestWriteIdentityUsesPrivatePermissions(t *testing.T) {
@@ -68,21 +65,13 @@ func TestPendingCredentialSurvivesRestart(t *testing.T) {
 
 func testIdentity(t *testing.T) Identity {
 	t.Helper()
-	cipher, err := node.NewCredentialCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	authority, err := edgecontrol.NewAuthority(cipher, "control.example:8443")
-	if err != nil {
-		t.Fatal(err)
-	}
-	bundle, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
-	if err != nil {
-		t.Fatal(err)
-	}
+	const nodeID = "550e8400-e29b-41d4-a716-446655440000"
+	ca, caPrivateKey, caPEM := createTestCertificateAuthority(t)
+	pair, privateKeyPEM := createSignedCertificate(t, ca, caPrivateKey, nodeID, false)
+	certificatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: pair.Certificate[0]})
 	return Identity{
-		NodeID: bundle.NodeID, GatewayAddress: bundle.GatewayAddress, ServerName: bundle.ServerName,
-		CACertificate: bundle.CACertificate, Certificate: bundle.Certificate, PrivateKey: bundle.PrivateKey,
+		NodeID: nodeID, GatewayAddress: "control.example:8443", ServerName: "control.example",
+		CACertificate: caPEM, Certificate: string(certificatePEM), PrivateKey: privateKeyPEM,
 	}
 }
 
