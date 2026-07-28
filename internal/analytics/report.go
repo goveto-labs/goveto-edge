@@ -70,6 +70,7 @@ func (s *Store) LatestSiteRates(ctx context.Context, cluster string) ([]SiteRate
 type NodeRequestLog struct {
 	EventTime       time.Time `json:"event_time"`
 	RequestID       string    `json:"request_id"`
+	ConfigVersion   uint64    `json:"config_version"`
 	Hostname        string    `json:"hostname"`
 	Method          string    `json:"method"`
 	Path            string    `json:"path"`
@@ -86,7 +87,7 @@ type NodeRequestLog struct {
 
 func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, limit int) ([]NodeRequestLog, error) {
 	rows, err := s.db.Query(ctx, `SELECT
-		event_time, request_id, hostname, method, path, status_code,
+		event_time, request_id, config_version, hostname, method, path, status_code,
 		duration_us, upstream_address, cache_status,
 		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
 	FROM goveto.web_request_logs
@@ -100,7 +101,7 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.ConfigVersion, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -110,7 +111,7 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 
 func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, limit int) ([]NodeRequestLog, error) {
 	rows, err := s.db.Query(ctx, `SELECT
-		event_time, request_id, hostname, method, path, status_code,
+		event_time, request_id, config_version, hostname, method, path, status_code,
 		duration_us, upstream_address, cache_status,
 		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
 	FROM goveto.web_request_logs
@@ -124,7 +125,7 @@ func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, l
 	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
+		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.ConfigVersion, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
 			return nil, err
 		}
 		items = append(items, item)

@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS goveto.web_request_logs
     cluster_id UUID,
     node_id UUID,
     site_id UUID,
+    config_version UInt64,
     hostname LowCardinality(String),
     method LowCardinality(String),
     scheme LowCardinality(String),
@@ -50,6 +51,7 @@ ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_rule_id String;
 ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_source LowCardinality(String);
 ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_match LowCardinality(String);
 ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS waf_tags String;
+ALTER TABLE goveto.web_request_logs ADD COLUMN IF NOT EXISTS config_version UInt64 AFTER site_id;
 
 -- Reusable cluster/node/site usage cube. UUID zero can be used by later
 -- rollups when a dimension is intentionally collapsed.

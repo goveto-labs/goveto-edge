@@ -75,6 +75,9 @@ func TestEmbeddedClickHouseSchemaIsExecutableStatementList(t *testing.T) {
 	if !strings.Contains(joined, "ADD COLUMN IF NOT EXISTS waf_rule_id") {
 		t.Fatal("embedded schema does not add WAF analytics columns")
 	}
+	if !strings.Contains(joined, "ADD COLUMN IF NOT EXISTS config_version") {
+		t.Fatal("embedded schema does not add access-log config versions")
+	}
 }
 
 func TestApplyClickHouseDailyRollupReplacesDate(t *testing.T) {

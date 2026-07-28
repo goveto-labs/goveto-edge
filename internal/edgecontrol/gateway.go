@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	_ "google.golang.org/grpc/encoding/gzip"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
@@ -32,6 +33,8 @@ const (
 	taskSweepInterval      = 30 * time.Second
 	agentTaskTimeout       = 15 * time.Minute
 	maxInflightTasks       = 16
+	maxLogBatchRecords     = 2000
+	maxLogBatchBytes       = 4 << 20
 	rotateBefore           = 7 * 24 * time.Hour
 	completedTaskTTL       = 7 * 24 * time.Hour
 	dispatchCleanupTimeout = 5 * time.Second
@@ -154,7 +157,8 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 	}
 	if err := stream.Send(&edgeprotocol.ServerMessage{Welcome: &edgeprotocol.ServerWelcome{
 		HeartbeatSeconds: int(heartbeatInterval.Seconds()), MaxInflightTasks: maxInflightTasks,
-		RotateBeforeHours: int(rotateBefore.Hours()),
+		RotateBeforeHours: int(rotateBefore.Hours()), MaxLogBatchRecords: maxLogBatchRecords,
+		MaxLogBatchBytes: maxLogBatchBytes,
 	}}); err != nil {
 		return err
 	}
@@ -231,16 +235,37 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 				}
 			case message.Logs != nil:
 				if g.consumeLogs == nil {
+					ack := edgeprotocol.AgentLogAck{
+						Accepted: false, RetryAfterMS: 30000, Error: "analytics ingest is disabled",
+					}
+					if err := stream.Send(&edgeprotocol.ServerMessage{LogsAck: &ack}); err != nil {
+						return err
+					}
+					break
+				}
+				if err := validateLogBatch(*message.Logs); err != nil {
+					ack := edgeprotocol.AgentLogAck{
+						Accepted: false, RetryAfterMS: 5000, Error: err.Error(),
+					}
+					if sendErr := stream.Send(&edgeprotocol.ServerMessage{LogsAck: &ack}); sendErr != nil {
+						return sendErr
+					}
 					break
 				}
 				if len(message.Logs.Records) > 0 {
 					if err := g.consumeLogs(ctx, nodeID, message.Logs.Records); err != nil {
 						slog.Warn("consume agent logs", "node_id", nodeID, "error", err)
+						ack := edgeprotocol.AgentLogAck{
+							Accepted: false, RetryAfterMS: 1000, Error: "ingest unavailable",
+						}
+						if sendErr := stream.Send(&edgeprotocol.ServerMessage{LogsAck: &ack}); sendErr != nil {
+							return sendErr
+						}
 						break
 					}
 				}
 				through := message.Logs.Through
-				if err := stream.Send(&edgeprotocol.ServerMessage{LogsAckThrough: &through}); err != nil {
+				if err := stream.Send(acceptedLogAck(through)); err != nil {
 					return err
 				}
 			case message.CredentialRequest != nil:
@@ -261,6 +286,51 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 			}
 		}
 	}
+}
+
+func acceptedLogAck(through uint64) *edgeprotocol.ServerMessage {
+	ack := edgeprotocol.AgentLogAck{Through: through, Accepted: true}
+	return &edgeprotocol.ServerMessage{LogsAckThrough: &through, LogsAck: &ack}
+}
+
+func validateLogBatch(batch edgeprotocol.AgentLogBatch) error {
+	if len(batch.Records) == 0 {
+		if batch.Through != 0 || batch.FirstID != 0 {
+			return errors.New("empty log batch has a cursor")
+		}
+		return nil
+	}
+	if len(batch.Records) > maxLogBatchRecords || batch.Bytes > maxLogBatchBytes {
+		return errors.New("log batch exceeds gateway limits")
+	}
+	first := batch.Records[0].ID
+	last := batch.Records[len(batch.Records)-1].ID
+	if first == 0 {
+		return errors.New("log batch record IDs must be positive")
+	}
+	if batch.FirstID != 0 && batch.FirstID != first || batch.Through != last {
+		return errors.New("log batch cursor does not match records")
+	}
+	var actualBytes uint64
+	previous := first
+	for index, record := range batch.Records {
+		encoded, err := json.Marshal(record)
+		if err != nil {
+			return fmt.Errorf("encode log batch record: %w", err)
+		}
+		actualBytes += uint64(len(encoded))
+		if actualBytes > maxLogBatchBytes {
+			return errors.New("log batch exceeds gateway limits")
+		}
+		if index == 0 {
+			continue
+		}
+		if record.ID <= previous {
+			return errors.New("log batch record IDs are not increasing")
+		}
+		previous = record.ID
+	}
+	return nil
 }
 
 type receiveResult struct {

@@ -17,6 +17,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding/gzip"
 
 	"goveto-edge/internal/edgeprotocol"
 )
@@ -63,6 +64,7 @@ func (c *channelClient) runSession(ctx context.Context) error {
 		grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)),
 		grpc.WithDefaultCallOptions(
 			grpc.ForceCodec(edgeprotocol.JSONCodec{}),
+			grpc.UseCompressor(gzip.Name),
 			grpc.MaxCallRecvMsgSize(32<<20),
 			grpc.MaxCallSendMsgSize(32<<20),
 		),
@@ -106,6 +108,9 @@ func (c *channelClient) runSession(ctx context.Context) error {
 	logsWake := time.NewTicker(2 * time.Second)
 	defer logsWake.Stop()
 	logsOutstanding := false
+	maxLogBatchRecords := 1000
+	maxLogBatchBytes := uint64(4 << 20)
+	var logsRetryAt time.Time
 	var pendingPrivateKey ed25519.PrivateKey
 	received := make(chan struct {
 		message *edgeprotocol.ServerMessage
@@ -129,15 +134,19 @@ func (c *channelClient) runSession(ctx context.Context) error {
 	}()
 
 	for {
-		if !logsOutstanding {
-			batch, batchErr := c.logs.Batch(1000)
+		if !logsOutstanding && !time.Now().Before(logsRetryAt) {
+			if _, dropErr := c.logs.DropOversizedHead(maxLogBatchBytes); dropErr != nil {
+				return dropErr
+			}
+			batch, batchBytes, batchErr := c.logs.BatchSized(maxLogBatchRecords, maxLogBatchBytes)
 			if batchErr != nil {
 				return batchErr
 			}
 			if len(batch) > 0 {
 				logsOutstanding = true
 				if err := sendClientMessage(sessionCtx, outbound, &edgeprotocol.ClientMessage{Logs: &edgeprotocol.AgentLogBatch{
-					Through: batch[len(batch)-1].ID, Records: batch,
+					FirstID: batch[0].ID, Through: batch[len(batch)-1].ID,
+					Bytes: batchBytes, Records: batch,
 				}}); err != nil {
 					return err
 				}
@@ -150,18 +159,32 @@ func (c *channelClient) runSession(ctx context.Context) error {
 		case err := <-writeErrors:
 			return err
 		case <-heartbeat.C:
+			queueStats, statsErr := c.logs.Stats()
+			if statsErr != nil {
+				return statsErr
+			}
 			if err := sendClientMessage(sessionCtx, outbound, &edgeprotocol.ClientMessage{Heartbeat: &edgeprotocol.AgentHeartbeat{
 				CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(),
+				QueueBytes: queueStats.Bytes, QueueRecords: queueStats.Records,
+				DroppedLogs: queueStats.DroppedRecords,
 			}}); err != nil {
 				return err
 			}
 		case <-logsWake.C:
+		case <-c.logs.Wait():
 		case response := <-received:
 			if response.err != nil {
 				return response.err
 			}
 			message := response.message
 			switch {
+			case message.Welcome != nil:
+				if message.Welcome.MaxLogBatchRecords > 0 {
+					maxLogBatchRecords = message.Welcome.MaxLogBatchRecords
+				}
+				if message.Welcome.MaxLogBatchBytes > 0 {
+					maxLogBatchBytes = uint64(message.Welcome.MaxLogBatchBytes)
+				}
 			case message.Task != nil:
 				select {
 				case tasks <- *message.Task:
@@ -171,6 +194,20 @@ func (c *channelClient) runSession(ctx context.Context) error {
 			case message.LogsAckThrough != nil:
 				if err := c.logs.Ack(*message.LogsAckThrough); err != nil {
 					return err
+				}
+				logsOutstanding = false
+			case message.LogsAck != nil:
+				if message.LogsAck.Accepted {
+					if err := c.logs.Ack(message.LogsAck.Through); err != nil {
+						return err
+					}
+					logsRetryAt = time.Time{}
+				} else {
+					retry := time.Duration(message.LogsAck.RetryAfterMS) * time.Millisecond
+					if retry <= 0 {
+						retry = time.Second
+					}
+					logsRetryAt = time.Now().Add(retry)
 				}
 				logsOutstanding = false
 			case message.RotateCredential:

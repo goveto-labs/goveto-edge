@@ -1,7 +1,9 @@
 package analytics
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -33,7 +35,51 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime/latest", latestNodeRuntime(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/logs", nodeLogs(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/sites/logs", siteLogs(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/logs/stream", liveLogs(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/waf", wafStats(store), require...)
+}
+
+func liveLogs(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		response := c.Response()
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.Header().Set("Cache-Control", "no-cache, no-transform")
+		response.Header().Set("Connection", "keep-alive")
+		response.Header().Set("X-Accel-Buffering", "no")
+		response.WriteHeader(http.StatusOK)
+
+		events := s.Subscribe(ctx, analytics.LiveFilter{
+			ClusterID: c.Param("cluster_id"), SiteID: c.QueryParam("site_id"),
+			NodeID: c.QueryParam("node_id"),
+		}, 256)
+		heartbeat := time.NewTicker(15 * time.Second)
+		defer heartbeat.Stop()
+		if _, err := fmt.Fprint(response, "event: ready\ndata: {}\n\n"); err != nil {
+			return nil
+		}
+		_ = http.NewResponseController(response).Flush()
+		for {
+			select {
+			case <-ctx.Done():
+				return nil
+			case event := <-events:
+				encoded, err := json.Marshal(event)
+				if err != nil {
+					continue
+				}
+				if _, err := fmt.Fprintf(response, "event: access_log\ndata: %s\n\n", encoded); err != nil {
+					return nil
+				}
+				_ = http.NewResponseController(response).Flush()
+			case <-heartbeat.C:
+				if _, err := fmt.Fprint(response, ": keepalive\n\n"); err != nil {
+					return nil
+				}
+				_ = http.NewResponseController(response).Flush()
+			}
+		}
+	}
 }
 
 func wafStats(s *analytics.Store) echo.HandlerFunc {

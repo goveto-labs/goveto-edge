@@ -2,20 +2,49 @@ package analytics
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 )
 
 type Store struct {
-	db clickhouse.Conn
+	db   clickhouse.Conn
+	live *LiveBroker
 }
 
 func NewStore(db clickhouse.Conn) *Store {
-	return &Store{db: db}
+	return &Store{db: db, live: NewLiveBroker()}
+}
+
+func (s *Store) Subscribe(ctx context.Context, filter LiveFilter, buffer int) <-chan LiveRequestLog {
+	return s.live.Subscribe(ctx, filter, buffer)
+}
+
+func (s *Store) publish(events []WebRequestLog) { s.live.Publish(events) }
+
+func (s *Store) ConfigureRawRetention(ctx context.Context, days int) error {
+	if days < 1 || days > 3650 {
+		return fmt.Errorf("raw analytics retention days must be between 1 and 3650")
+	}
+	return s.db.Exec(ctx, fmt.Sprintf(
+		"ALTER TABLE goveto.web_request_logs MODIFY TTL event_time + INTERVAL %d DAY DELETE",
+		days,
+	))
 }
 
 func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
+	const maxInsertBatch = 2000
+	for start := 0; start < len(events); start += maxInsertBatch {
+		end := min(start+maxInsertBatch, len(events))
+		if err := s.insert(ctx, events[start:end]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Store) insert(ctx context.Context, events []WebRequestLog) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -26,6 +55,7 @@ func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
 		cluster_id,
 		node_id,
 		site_id,
+		config_version,
 		hostname,
 		method,
 		scheme,
@@ -65,6 +95,7 @@ func (s *Store) Insert(ctx context.Context, events []WebRequestLog) error {
 			e.ClusterID,
 			e.NodeID,
 			e.SiteID,
+			e.ConfigVersion,
 			e.Hostname,
 			e.Method,
 			e.Scheme,

@@ -13,6 +13,7 @@ type WebRequestLog struct {
 	ClusterID           string
 	NodeID              string
 	SiteID              string
+	ConfigVersion       uint64
 	Hostname            string
 	Method              string
 	Scheme              string

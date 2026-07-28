@@ -25,6 +25,8 @@ type AgentHeartbeat struct {
 	CacheConfig  NodeCacheConfig   `json:"cache_config"`
 	SiteVersions map[string]uint64 `json:"site_versions,omitempty"`
 	QueueBytes   uint64            `json:"queue_bytes,omitempty"`
+	QueueRecords uint64            `json:"queue_records,omitempty"`
+	DroppedLogs  uint64            `json:"dropped_logs,omitempty"`
 }
 
 type AgentTask struct {
@@ -41,8 +43,17 @@ type AgentTaskResult struct {
 }
 
 type AgentLogBatch struct {
+	FirstID uint64      `json:"first_id,omitempty"`
 	Through uint64      `json:"through"`
+	Bytes   uint64      `json:"bytes,omitempty"`
 	Records []LogRecord `json:"records"`
+}
+
+type AgentLogAck struct {
+	Through      uint64 `json:"through,omitempty"`
+	Accepted     bool   `json:"accepted"`
+	RetryAfterMS int    `json:"retry_after_ms,omitempty"`
+	Error        string `json:"error,omitempty"`
 }
 
 type CredentialRequest struct {
@@ -63,15 +74,18 @@ type ClientMessage struct {
 }
 
 type ServerWelcome struct {
-	HeartbeatSeconds  int `json:"heartbeat_seconds"`
-	MaxInflightTasks  int `json:"max_inflight_tasks"`
-	RotateBeforeHours int `json:"rotate_before_hours"`
+	HeartbeatSeconds   int `json:"heartbeat_seconds"`
+	MaxInflightTasks   int `json:"max_inflight_tasks"`
+	RotateBeforeHours  int `json:"rotate_before_hours"`
+	MaxLogBatchRecords int `json:"max_log_batch_records,omitempty"`
+	MaxLogBatchBytes   int `json:"max_log_batch_bytes,omitempty"`
 }
 
 type ServerMessage struct {
 	Welcome          *ServerWelcome    `json:"welcome,omitempty"`
 	Task             *AgentTask        `json:"task,omitempty"`
 	LogsAckThrough   *uint64           `json:"logs_ack_through,omitempty"`
+	LogsAck          *AgentLogAck      `json:"logs_ack,omitempty"`
 	RotateCredential bool              `json:"rotate_credential,omitempty"`
 	Credential       *CredentialUpdate `json:"credential,omitempty"`
 	DisconnectReason string            `json:"disconnect_reason,omitempty"`

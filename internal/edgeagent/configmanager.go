@@ -258,6 +258,13 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 
 	routes := make([]any, 0, len(ids)*2)
 	errorRoutes := make([]any, 0)
+	loggerNames := make(map[string][]string, len(ids))
+	customLogs := map[string]any{
+		"default": map[string]any{
+			"writer":  map[string]any{"output": "goveto_buffer"},
+			"exclude": []string{"http.log.access"},
+		},
+	}
 
 	listeners, protocols := map[string]struct{}{}, map[string]struct{}{"h1": {}}
 	listeners[defaultListen] = struct{}{}
@@ -267,6 +274,16 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 		site := sites[id]
 		if site.Disabled {
 			continue
+		}
+		loggerName := "site_" + id
+		customLogs[loggerName] = map[string]any{
+			"writer": map[string]any{
+				"output": "goveto_buffer", "site_id": id, "config_version": site.Version,
+			},
+			"include": []string{"http.log.access." + loggerName},
+		}
+		for _, domain := range site.Domains {
+			loggerNames[strings.ToLower(domain)] = []string{loggerName}
 		}
 
 		listener := site.Listener
@@ -645,19 +662,15 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 			"routes":                  routes,
 			"tls_connection_policies": policies,
 			"automatic_https":         map[string]any{"disable": true},
-			"logs":                    map[string]any{},
-			"errors":                  map[string]any{"routes": errorRoutes},
+			"logs": map[string]any{
+				"logger_names": loggerNames, "skip_unmapped_hosts": true,
+			},
+			"errors": map[string]any{"routes": errorRoutes},
 		},
 	}
 	config := map[string]any{
-		"admin": map[string]any{"disabled": true},
-		"logging": map[string]any{
-			"logs": map[string]any{
-				"default": map[string]any{
-					"writer": map[string]any{"output": "goveto_buffer"},
-				},
-			},
-		},
+		"admin":   map[string]any{"disabled": true},
+		"logging": map[string]any{"logs": customLogs},
 		"apps": map[string]any{
 			"http": map[string]any{
 				"servers": servers,

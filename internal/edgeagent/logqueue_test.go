@@ -161,3 +161,92 @@ func TestLogQueueAckPartial(t *testing.T) {
 		t.Fatalf("unexpected batch after partial ack: %#v", batch)
 	}
 }
+
+func TestLogQueueSizedBatchAndStats(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	for i := range 3 {
+		payload, _ := json.Marshal(map[string]any{"index": i, "padding": "xxxxxxxxxxxxxxxxxxxx"})
+		if _, err := queue.Append(LogRecord{Type: "access", Payload: payload}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, bytes, err := queue.BatchSized(3, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 || bytes != 0 {
+		t.Fatalf("oversized first record must not produce an invalid batch: records=%d bytes=%d", len(batch), bytes)
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Records != 3 || stats.Bytes == 0 || stats.OldestID == 0 || stats.NewestID < stats.OldestID {
+		t.Fatalf("unexpected queue stats: %#v", stats)
+	}
+}
+
+func TestLogQueueDropsOversizedHeadWithoutBlockingLaterRecords(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if _, err := queue.Append(LogRecord{Type: "access", Payload: json.RawMessage(`{"padding":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queue.Append(LogRecord{Type: "access", Payload: json.RawMessage(`{"ok":true}`)}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := queue.Batch(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := uint64(len(all[1].Payload) + 100)
+	if uint64(len(all[0].Payload))+100 <= limit {
+		t.Fatal("test records do not exercise an oversized head")
+	}
+	dropped, err := queue.DropOversizedHead(limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped != 1 {
+		t.Fatalf("unexpected oversized drop count: %d", dropped)
+	}
+	batch, _, err := queue.BatchSized(2, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 1 || string(batch[0].Payload) != `{"ok":true}` {
+		t.Fatalf("later record remained blocked: %#v", batch)
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.DroppedRecords != 1 || stats.Records != 1 {
+		t.Fatalf("unexpected queue stats after oversized drop: %#v", stats)
+	}
+}
+
+func TestLogQueueCountsCapacityDrops(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 180)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	for range 4 {
+		_, _ = queue.Append(LogRecord{Type: "access", Payload: json.RawMessage(`{"padding":"xxxxxxxxxxxxxxxxxxxx"}`)})
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.DroppedRecords == 0 {
+		t.Fatalf("expected capacity eviction count: %#v", stats)
+	}
+}

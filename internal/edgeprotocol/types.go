@@ -368,10 +368,12 @@ func mergeHeaders(groups ...map[string][]string) map[string][]string {
 }
 
 type LogRecord struct {
-	ID        uint64          `json:"id"`
-	Type      string          `json:"type"`
-	CreatedAt time.Time       `json:"created_at"`
-	Payload   json.RawMessage `json:"payload"`
+	ID            uint64          `json:"id"`
+	Type          string          `json:"type"`
+	SiteID        string          `json:"site_id,omitempty"`
+	ConfigVersion uint64          `json:"config_version,omitempty"`
+	CreatedAt     time.Time       `json:"created_at"`
+	Payload       json.RawMessage `json:"payload"`
 }
 
 type PurgeRequest struct {

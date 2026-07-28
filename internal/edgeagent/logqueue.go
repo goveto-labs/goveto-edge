@@ -13,6 +13,9 @@ import (
 var logsBucket = []byte("logs")
 var metaBucket = []byte("meta")
 var totalBytesKey = []byte("total_bytes")
+var droppedRecordsKey = []byte("dropped_records")
+
+var ErrLogRecordTooLarge = errors.New("log record exceeds queue capacity")
 
 type LogRecord = edgeprotocol.LogRecord
 
@@ -20,6 +23,15 @@ type LogQueue struct {
 	db       *bolt.DB
 	notify   chan struct{}
 	maxBytes uint64
+}
+
+type LogQueueStats struct {
+	MaxBytes       uint64
+	Bytes          uint64
+	Records        uint64
+	DroppedRecords uint64
+	OldestID       uint64
+	NewestID       uint64
 }
 
 func OpenLogQueue(path string, maxBytes ...uint64) (*LogQueue, error) {
@@ -53,6 +65,7 @@ func (q *LogQueue) Append(record LogRecord) (uint64, error) {
 		record.CreatedAt = time.Now().UTC()
 	}
 	var id uint64
+	var oversized bool
 	err := q.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(logsBucket)
 		sequence, err := bucket.NextSequence()
@@ -66,6 +79,14 @@ func (q *LogQueue) Append(record LogRecord) (uint64, error) {
 			return err
 		}
 		meta := tx.Bucket(metaBucket)
+		if uint64(len(data)) > q.maxBytes {
+			dropped := readUint64(meta.Get(droppedRecordsKey)) + 1
+			if err := meta.Put(droppedRecordsKey, uint64Key(dropped)); err != nil {
+				return err
+			}
+			oversized = true
+			return nil
+		}
 		total := readUint64(meta.Get(totalBytesKey))
 		cursor := bucket.Cursor()
 		for total+uint64(len(data)) > q.maxBytes {
@@ -74,6 +95,10 @@ func (q *LogQueue) Append(record LogRecord) (uint64, error) {
 				break
 			}
 			if err := cursor.Delete(); err != nil {
+				return err
+			}
+			dropped := readUint64(meta.Get(droppedRecordsKey)) + 1
+			if err := meta.Put(droppedRecordsKey, uint64Key(dropped)); err != nil {
 				return err
 			}
 			if uint64(len(value)) <= total {
@@ -88,6 +113,9 @@ func (q *LogQueue) Append(record LogRecord) (uint64, error) {
 		total += uint64(len(data))
 		return meta.Put(totalBytesKey, uint64Key(total))
 	})
+	if err == nil && oversized {
+		return 0, ErrLogRecordTooLarge
+	}
 	if err == nil {
 		select {
 		case q.notify <- struct{}{}:
@@ -98,22 +126,67 @@ func (q *LogQueue) Append(record LogRecord) (uint64, error) {
 }
 
 func (q *LogQueue) Batch(limit int) ([]LogRecord, error) {
+	result, _, err := q.BatchSized(limit, 0)
+	return result, err
+}
+
+func (q *LogQueue) BatchSized(limit int, maxBytes uint64) ([]LogRecord, uint64, error) {
 	if limit <= 0 {
 		limit = 1000
 	}
 	result := make([]LogRecord, 0, limit)
+	var size uint64
 	err := q.db.View(func(tx *bolt.Tx) error {
 		cursor := tx.Bucket(logsBucket).Cursor()
 		for key, value := cursor.First(); key != nil && len(result) < limit; key, value = cursor.Next() {
+			if maxBytes > 0 && size+uint64(len(value)) > maxBytes {
+				break
+			}
 			var record LogRecord
 			if err := json.Unmarshal(value, &record); err != nil {
 				return err
 			}
 			result = append(result, record)
+			size += uint64(len(value))
 		}
 		return nil
 	})
-	return result, err
+	return result, size, err
+}
+
+func (q *LogQueue) DropOversizedHead(maxBytes uint64) (uint64, error) {
+	if maxBytes == 0 {
+		return 0, nil
+	}
+	var dropped uint64
+	err := q.db.Update(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(logsBucket)
+		meta := tx.Bucket(metaBucket)
+		total := readUint64(meta.Get(totalBytesKey))
+		cursor := bucket.Cursor()
+		for key, value := cursor.First(); key != nil && uint64(len(value)) > maxBytes; key, value = cursor.First() {
+			if err := cursor.Delete(); err != nil {
+				return err
+			}
+			dropped++
+			if uint64(len(value)) <= total {
+				total -= uint64(len(value))
+			} else {
+				total = 0
+			}
+		}
+		if dropped == 0 {
+			return nil
+		}
+		if err := meta.Put(totalBytesKey, uint64Key(total)); err != nil {
+			return err
+		}
+		return meta.Put(
+			droppedRecordsKey,
+			uint64Key(readUint64(meta.Get(droppedRecordsKey))+dropped),
+		)
+	})
+	return dropped, err
 }
 
 func (q *LogQueue) Ack(through uint64) error {
@@ -137,6 +210,27 @@ func (q *LogQueue) Ack(through uint64) error {
 }
 func (q *LogQueue) Wait() <-chan struct{} { return q.notify }
 func (q *LogQueue) Close() error          { return q.db.Close() }
+
+func (q *LogQueue) Stats() (LogQueueStats, error) {
+	stats := LogQueueStats{MaxBytes: q.maxBytes}
+	err := q.db.View(func(tx *bolt.Tx) error {
+		bucket := tx.Bucket(logsBucket)
+		meta := tx.Bucket(metaBucket)
+		stats.Bytes = readUint64(meta.Get(totalBytesKey))
+		stats.DroppedRecords = readUint64(meta.Get(droppedRecordsKey))
+		stats.Records = uint64(bucket.Stats().KeyN)
+		first, _ := bucket.Cursor().First()
+		last, _ := bucket.Cursor().Last()
+		if first != nil {
+			stats.OldestID = binary.BigEndian.Uint64(first)
+		}
+		if last != nil {
+			stats.NewestID = binary.BigEndian.Uint64(last)
+		}
+		return nil
+	})
+	return stats, err
+}
 func uint64Key(value uint64) []byte {
 	key := make([]byte, 8)
 	binary.BigEndian.PutUint64(key, value)

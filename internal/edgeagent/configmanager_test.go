@@ -22,7 +22,7 @@ import (
 
 type nopLogSink struct{}
 
-func (nopLogSink) WriteCaddyLog([]byte) error { return nil }
+func (nopLogSink) WriteCaddyLog(string, uint64, []byte) error { return nil }
 
 func ensureAgentLogSink(t *testing.T) {
 	t.Helper()
@@ -177,6 +177,24 @@ func TestRenderCaddyConfigIncludesACMEHTTPChallengeBeforeSiteRoutes(t *testing.T
 	challengePath := "/.well-known/acme-challenge/token-1"
 	if !strings.Contains(text, challengePath) || !strings.Contains(text, "token-1.thumbprint") {
 		t.Fatalf("challenge route missing from %s", text)
+	}
+}
+
+func TestRenderCaddyConfigBindsSiteMetadataToAccessLogger(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Version = 42
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		`"logger_names":{"` + config.Domains[0] + `":["site_` + config.SiteID + `"]}`,
+		`"config_version":42`, `"site_id":"` + config.SiteID + `"`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("site access logger metadata %s missing from %s", expected, text)
+		}
 	}
 }
 

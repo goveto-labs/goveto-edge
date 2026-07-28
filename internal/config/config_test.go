@@ -48,6 +48,60 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestLoadS3ArchiveConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("ANALYTICS_ARCHIVE_DIR", "")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ENDPOINT", "https://objects.example.com")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_BUCKET", "edge-logs")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_REGION", "us-east-1")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ACCESS_KEY", "access")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_SECRET_KEY", "secret")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_SESSION_TOKEN", "token")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AnalyticsArchiveS3Endpoint != "https://objects.example.com" ||
+		cfg.AnalyticsArchiveS3Bucket != "edge-logs" || cfg.AnalyticsArchiveS3SessionToken != "token" {
+		t.Fatalf("unexpected S3 archive configuration: %#v", cfg)
+	}
+}
+
+func TestLoadRejectsIncompleteS3ArchiveConfiguration(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("ANALYTICS_ARCHIVE_DIR", "")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ENDPOINT", "https://objects.example.com")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_BUCKET", "")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_REGION", "us-east-1")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ACCESS_KEY", "access")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_SECRET_KEY", "secret")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("incomplete S3 archive configuration was accepted")
+	}
+}
+
+func TestLoadRejectsMultipleArchiveStores(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("ANALYTICS_ARCHIVE_DIR", "/tmp/archive")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ENDPOINT", "https://objects.example.com")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_BUCKET", "edge-logs")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_REGION", "us-east-1")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_ACCESS_KEY", "access")
+	t.Setenv("ANALYTICS_ARCHIVE_S3_SECRET_KEY", "secret")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("filesystem and S3 archives were both accepted")
+	}
+}
+
 func TestProductionForcesSecureSessionCookie(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")

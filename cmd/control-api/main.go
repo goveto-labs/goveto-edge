@@ -112,7 +112,32 @@ func main() {
 		slog.Info("ClickHouse schema is up to date", "statements", statementCount)
 
 		analyticsStore = analytics.NewStore(clickhouseConn)
-		analyticsIngest = analytics.NewIngest(orm, credentialCipher, analyticsStore)
+		if clickhouseErr = analyticsStore.ConfigureRawRetention(ctx, cfg.AnalyticsRawRetentionDays); clickhouseErr != nil {
+			slog.Error("configure analytics retention", "error", clickhouseErr)
+			os.Exit(1)
+		}
+		analyticsIngest = analytics.NewIngestWithConcurrency(
+			orm, analyticsStore, cfg.AnalyticsIngestConcurrency,
+		)
+		if cfg.AnalyticsArchiveS3Endpoint != "" {
+			archiveStore, archiveErr := analytics.NewS3ObjectStore(analytics.S3Options{
+				Endpoint:     cfg.AnalyticsArchiveS3Endpoint,
+				Bucket:       cfg.AnalyticsArchiveS3Bucket,
+				Region:       cfg.AnalyticsArchiveS3Region,
+				AccessKey:    cfg.AnalyticsArchiveS3AccessKey,
+				SecretKey:    cfg.AnalyticsArchiveS3SecretKey,
+				SessionToken: cfg.AnalyticsArchiveS3SessionToken,
+			})
+			if archiveErr != nil {
+				slog.Error("configure S3 analytics archive", "error", archiveErr)
+				os.Exit(1)
+			}
+			analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(archiveStore, "access-logs"))
+		} else if cfg.AnalyticsArchiveDir != "" {
+			analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(
+				analytics.NewFileObjectStore(cfg.AnalyticsArchiveDir), "access-logs",
+			))
+		}
 		go analytics.NewDailyRollup(analyticsStore, clickhouseschema.FS).Run(ctx)
 	}
 

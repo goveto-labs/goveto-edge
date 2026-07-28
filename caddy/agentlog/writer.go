@@ -11,7 +11,9 @@ import (
 	"github.com/caddyserver/caddy/v2"
 )
 
-type Sink interface{ WriteCaddyLog([]byte) error }
+type Sink interface {
+	WriteCaddyLog(siteID string, configVersion uint64, payload []byte) error
+}
 
 var state struct {
 	sync.RWMutex
@@ -21,24 +23,38 @@ var state struct {
 func init()             { caddy.RegisterModule(Writer{}) }
 func SetSink(sink Sink) { state.Lock(); state.sink = sink; state.Unlock() }
 
-type Writer struct{}
+type Writer struct {
+	SiteID        string `json:"site_id,omitempty"`
+	ConfigVersion uint64 `json:"config_version,omitempty"`
+}
 
 func (Writer) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "caddy.logging.writers.goveto_buffer", New: func() caddy.Module { return new(Writer) }}
 }
-func (Writer) String() string    { return "Goveto durable agent log buffer" }
-func (Writer) WriterKey() string { return "goveto_buffer" }
-func (Writer) OpenWriter() (io.WriteCloser, error) {
+func (w Writer) String() string {
+	if w.SiteID == "" {
+		return "Goveto durable agent log buffer"
+	}
+	return fmt.Sprintf("Goveto durable agent log buffer for %s at version %d", w.SiteID, w.ConfigVersion)
+}
+func (w Writer) WriterKey() string {
+	return fmt.Sprintf("goveto_buffer:%s:%d", w.SiteID, w.ConfigVersion)
+}
+func (w Writer) OpenWriter() (io.WriteCloser, error) {
 	state.RLock()
 	sink := state.sink
 	state.RUnlock()
 	if sink == nil {
 		return nil, errors.New("agent log queue is not ready")
 	}
-	return &queueWriter{sink: sink}, nil
+	return &queueWriter{sink: sink, siteID: w.SiteID, configVersion: w.ConfigVersion}, nil
 }
 
-type queueWriter struct{ sink Sink }
+type queueWriter struct {
+	sink          Sink
+	siteID        string
+	configVersion uint64
+}
 
 func (w *queueWriter) Write(data []byte) (int, error) {
 	for _, line := range bytes.Split(data, []byte{'\n'}) {
@@ -46,7 +62,7 @@ func (w *queueWriter) Write(data []byte) (int, error) {
 		if len(line) == 0 {
 			continue
 		}
-		if err := w.sink.WriteCaddyLog(append([]byte(nil), line...)); err != nil {
+		if err := w.sink.WriteCaddyLog(w.siteID, w.configVersion, append([]byte(nil), line...)); err != nil {
 			return 0, fmt.Errorf("buffer caddy log: %w", err)
 		}
 	}

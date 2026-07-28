@@ -233,6 +233,7 @@ export interface NodeInstallationInfo {
 export interface NodeRequestLog {
     event_time: string;
     request_id: string;
+    config_version: number;
     hostname: string;
     method: string;
     path: string;

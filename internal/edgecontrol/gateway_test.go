@@ -6,7 +6,51 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/encoding"
+
+	"goveto-edge/internal/edgeprotocol"
 )
+
+func TestGatewayRegistersGzipAndKeepsLegacyLogAck(t *testing.T) {
+	if encoding.GetCompressor("gzip") == nil {
+		t.Fatal("gateway cannot decompress gzip agent messages")
+	}
+	message := acceptedLogAck(42)
+	if message.LogsAck == nil || !message.LogsAck.Accepted || message.LogsAck.Through != 42 {
+		t.Fatalf("structured log acknowledgement is missing: %#v", message)
+	}
+	if message.LogsAckThrough == nil || *message.LogsAckThrough != 42 {
+		t.Fatalf("legacy agent acknowledgement is missing: %#v", message)
+	}
+}
+
+func TestValidateLogBatch(t *testing.T) {
+	valid := edgeprotocol.AgentLogBatch{
+		FirstID: 10, Through: 11, Bytes: 100,
+		Records: []edgeprotocol.LogRecord{{ID: 10}, {ID: 11}},
+	}
+	if err := validateLogBatch(valid); err != nil {
+		t.Fatal(err)
+	}
+	invalid := valid
+	invalid.Through = 12
+	if err := validateLogBatch(invalid); err == nil {
+		t.Fatal("mismatched acknowledgement cursor was accepted")
+	}
+	invalid = valid
+	invalid.Records[1].ID = 9
+	if err := validateLogBatch(invalid); err == nil {
+		t.Fatal("decreasing record IDs were accepted")
+	}
+	oversized := edgeprotocol.AgentLogBatch{
+		Through: 1,
+		Records: []edgeprotocol.LogRecord{{ID: 1, Payload: json.RawMessage(`{"padding":"` + strings.Repeat("x", maxLogBatchBytes) + `"}`)}},
+	}
+	if err := validateLogBatch(oversized); err == nil {
+		t.Fatal("batch with an understated byte count exceeded the gateway limit")
+	}
+}
 
 func TestDisconnectCancelsLocalSessionWithoutDatabase(t *testing.T) {
 	gateway := NewGateway(nil, nil, nil, nil, nil)

@@ -45,7 +45,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open log queue: %w", err)
 	}
-	agentlog.SetSink(agentLogSink{queue: a.logs})
+	agentlog.SetSink(agentLogSink{queue: a.logs, policy: logPolicyFromEnv()})
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
 		return fmt.Errorf("apply node cache config: %w", err)
 	}
@@ -106,9 +106,24 @@ func envUint64(key string, fallback uint64) uint64 {
 	return parsed
 }
 
-type agentLogSink struct{ queue *LogQueue }
+func envBool(key string, fallback bool) bool {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
 
-func (s agentLogSink) WriteCaddyLog(payload []byte) error {
+type agentLogSink struct {
+	queue  *LogQueue
+	policy LogPolicy
+}
+
+func (s agentLogSink) WriteCaddyLog(siteID string, configVersion uint64, payload []byte) error {
 	recordType := "caddy"
 	var access struct {
 		Request json.RawMessage `json:"request"`
@@ -116,7 +131,14 @@ func (s agentLogSink) WriteCaddyLog(payload []byte) error {
 	}
 	if json.Unmarshal(payload, &access) == nil && len(access.Request) > 0 && access.Status > 0 {
 		recordType = "access"
+		var keep bool
+		payload, keep = s.policy.Apply(payload)
+		if !keep {
+			return nil
+		}
 	}
-	_, err := s.queue.Append(LogRecord{Type: recordType, Payload: payload})
+	_, err := s.queue.Append(LogRecord{
+		Type: recordType, SiteID: siteID, ConfigVersion: configVersion, Payload: payload,
+	})
 	return err
 }

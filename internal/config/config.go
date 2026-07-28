@@ -19,29 +19,38 @@ import (
 )
 
 type Config struct {
-	AppEnv                    string
-	HTTPHost                  string
-	HTTPPort                  int
-	HTTPReadHeaderTimeout     time.Duration
-	HTTPReadTimeout           time.Duration
-	HTTPWriteTimeout          time.Duration
-	HTTPIdleTimeout           time.Duration
-	HTTPMaxHeaderBytes        int
-	HTTPMaxBodyBytes          int64
-	HTTPMaxUploadBytes        int64
-	HTTPTrustedProxies        []string
-	AgentGatewayHost          string
-	AgentGatewayPort          int
-	AgentGatewayPublicAddress string
-	ShutdownTimeout           time.Duration
-	DatabaseURL               string
-	RedisURL                  string
-	ClickHouseDSN             string
-	NodeCredentialMasterKey   string
-	DataDir                   string
-	SessionCookieName         string
-	SessionTTL                time.Duration
-	SessionCookieSecure       bool
+	AppEnv                         string
+	HTTPHost                       string
+	HTTPPort                       int
+	HTTPReadHeaderTimeout          time.Duration
+	HTTPReadTimeout                time.Duration
+	HTTPWriteTimeout               time.Duration
+	HTTPIdleTimeout                time.Duration
+	HTTPMaxHeaderBytes             int
+	HTTPMaxBodyBytes               int64
+	HTTPMaxUploadBytes             int64
+	HTTPTrustedProxies             []string
+	AgentGatewayHost               string
+	AgentGatewayPort               int
+	AgentGatewayPublicAddress      string
+	ShutdownTimeout                time.Duration
+	DatabaseURL                    string
+	RedisURL                       string
+	ClickHouseDSN                  string
+	AnalyticsIngestConcurrency     int
+	AnalyticsRawRetentionDays      int
+	AnalyticsArchiveDir            string
+	AnalyticsArchiveS3Endpoint     string
+	AnalyticsArchiveS3Bucket       string
+	AnalyticsArchiveS3Region       string
+	AnalyticsArchiveS3AccessKey    string
+	AnalyticsArchiveS3SecretKey    string
+	AnalyticsArchiveS3SessionToken string
+	NodeCredentialMasterKey        string
+	DataDir                        string
+	SessionCookieName              string
+	SessionTTL                     time.Duration
+	SessionCookieSecure            bool
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -95,6 +104,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	analyticsIngestConcurrency, err := envInt("ANALYTICS_INGEST_CONCURRENCY", 4)
+	if err != nil {
+		return Config{}, err
+	}
+	analyticsRawRetentionDays, err := envInt("ANALYTICS_RAW_RETENTION_DAYS", 7)
+	if err != nil {
+		return Config{}, err
+	}
 
 	appEnv := envString("APP_ENV", "development")
 	defaultDataDir := ".data"
@@ -102,27 +119,36 @@ func Load() (Config, error) {
 		defaultDataDir = "/var/lib/goveto-edge"
 	}
 	cfg := Config{
-		AppEnv:                    appEnv,
-		DataDir:                   envString("GOVETO_DATA_DIR", defaultDataDir),
-		HTTPHost:                  envString("HTTP_HOST", "0.0.0.0"),
-		HTTPPort:                  port,
-		HTTPReadHeaderTimeout:     readHeaderTimeout,
-		HTTPReadTimeout:           readTimeout,
-		HTTPWriteTimeout:          writeTimeout,
-		HTTPIdleTimeout:           idleTimeout,
-		HTTPMaxHeaderBytes:        maxHeaderBytes,
-		HTTPMaxBodyBytes:          int64(maxBodyBytes),
-		HTTPMaxUploadBytes:        int64(maxUploadBytes),
-		HTTPTrustedProxies:        trustedProxies,
-		AgentGatewayHost:          envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
-		AgentGatewayPort:          agentGatewayPort,
-		AgentGatewayPublicAddress: envString("AGENT_GATEWAY_PUBLIC_ADDRESS", fmt.Sprintf("127.0.0.1:%d", agentGatewayPort)),
-		ShutdownTimeout:           shutdownTimeout,
-		DatabaseURL:               os.Getenv("DATABASE_URL"),
-		RedisURL:                  os.Getenv("REDIS_URL"),
-		ClickHouseDSN:             os.Getenv("CLICKHOUSE_DSN"),
-		SessionCookieName:         envString("SESSION_COOKIE_NAME", "goveto_session"),
-		SessionCookieSecure:       envBool("SESSION_COOKIE_SECURE", false),
+		AppEnv:                         appEnv,
+		DataDir:                        envString("GOVETO_DATA_DIR", defaultDataDir),
+		HTTPHost:                       envString("HTTP_HOST", "0.0.0.0"),
+		HTTPPort:                       port,
+		HTTPReadHeaderTimeout:          readHeaderTimeout,
+		HTTPReadTimeout:                readTimeout,
+		HTTPWriteTimeout:               writeTimeout,
+		HTTPIdleTimeout:                idleTimeout,
+		HTTPMaxHeaderBytes:             maxHeaderBytes,
+		HTTPMaxBodyBytes:               int64(maxBodyBytes),
+		HTTPMaxUploadBytes:             int64(maxUploadBytes),
+		HTTPTrustedProxies:             trustedProxies,
+		AgentGatewayHost:               envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
+		AgentGatewayPort:               agentGatewayPort,
+		AgentGatewayPublicAddress:      envString("AGENT_GATEWAY_PUBLIC_ADDRESS", fmt.Sprintf("127.0.0.1:%d", agentGatewayPort)),
+		ShutdownTimeout:                shutdownTimeout,
+		DatabaseURL:                    os.Getenv("DATABASE_URL"),
+		RedisURL:                       os.Getenv("REDIS_URL"),
+		ClickHouseDSN:                  os.Getenv("CLICKHOUSE_DSN"),
+		AnalyticsIngestConcurrency:     analyticsIngestConcurrency,
+		AnalyticsRawRetentionDays:      analyticsRawRetentionDays,
+		AnalyticsArchiveDir:            strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_DIR")),
+		AnalyticsArchiveS3Endpoint:     strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_ENDPOINT")),
+		AnalyticsArchiveS3Bucket:       strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_BUCKET")),
+		AnalyticsArchiveS3Region:       strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_REGION")),
+		AnalyticsArchiveS3AccessKey:    strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_ACCESS_KEY")),
+		AnalyticsArchiveS3SecretKey:    strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_SECRET_KEY")),
+		AnalyticsArchiveS3SessionToken: strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_SESSION_TOKEN")),
+		SessionCookieName:              envString("SESSION_COOKIE_NAME", "goveto_session"),
+		SessionCookieSecure:            envBool("SESSION_COOKIE_SECURE", false),
 	}
 	if strings.EqualFold(appEnv, "production") {
 		cfg.SessionCookieSecure = true
@@ -148,6 +174,21 @@ func Load() (Config, error) {
 	}
 	if cfg.HTTPMaxHeaderBytes < 1024 || cfg.HTTPMaxBodyBytes < 1024 || cfg.HTTPMaxUploadBytes < cfg.HTTPMaxBodyBytes {
 		return Config{}, errors.New("HTTP size limits are invalid")
+	}
+	if cfg.AnalyticsIngestConcurrency < 1 || cfg.AnalyticsIngestConcurrency > 64 {
+		return Config{}, errors.New("ANALYTICS_INGEST_CONCURRENCY must be between 1 and 64")
+	}
+	if cfg.AnalyticsRawRetentionDays < 1 || cfg.AnalyticsRawRetentionDays > 3650 {
+		return Config{}, errors.New("ANALYTICS_RAW_RETENTION_DAYS must be between 1 and 3650")
+	}
+	if cfg.AnalyticsArchiveS3Endpoint != "" {
+		if cfg.AnalyticsArchiveDir != "" {
+			return Config{}, errors.New("ANALYTICS_ARCHIVE_DIR and ANALYTICS_ARCHIVE_S3_ENDPOINT are mutually exclusive")
+		}
+		if cfg.AnalyticsArchiveS3Bucket == "" || cfg.AnalyticsArchiveS3Region == "" ||
+			cfg.AnalyticsArchiveS3AccessKey == "" || cfg.AnalyticsArchiveS3SecretKey == "" {
+			return Config{}, errors.New("S3 analytics archive requires bucket, region, access key, and secret key")
+		}
 	}
 	if configuredMasterKey := strings.TrimSpace(os.Getenv("NODE_CREDENTIAL_MASTER_KEY")); configuredMasterKey != "" {
 		cfg.NodeCredentialMasterKey, err = validateMasterKey(configuredMasterKey, "NODE_CREDENTIAL_MASTER_KEY")
