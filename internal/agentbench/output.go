@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 )
 
@@ -74,6 +75,26 @@ func writeMarkdown(path string, report Report) error {
 			_, _ = fmt.Fprintf(file, "- %s\n", reason)
 		}
 	}
+	if len(report.Summary.ResponseHeaders) > 0 {
+		_, _ = io.WriteString(file, "\n## Captured response headers\n\n| Header | Value | Responses |\n|---|---|---:|\n")
+		names := sortedKeys(report.Summary.ResponseHeaders)
+		for _, name := range names {
+			values := sortedKeys(report.Summary.ResponseHeaders[name])
+			for _, value := range values {
+				_, _ = fmt.Fprintf(file, "| %s | %s | %d |\n", name, value, report.Summary.ResponseHeaders[name][value])
+			}
+		}
+	}
+	cacheActivity := false
+	for _, run := range report.Runs {
+		cacheActivity = cacheActivity || run.Resources.CacheHitsDelta > 0 || run.Resources.CacheMissesDelta > 0 || run.Resources.CacheEvictionsDelta > 0
+	}
+	if cacheActivity {
+		_, _ = io.WriteString(file, "\n## Cache activity\n\n| Run | Hits | Misses | Evictions |\n|---:|---:|---:|---:|\n")
+		for _, run := range report.Runs {
+			_, _ = fmt.Fprintf(file, "| %d | %d | %d | %d |\n", run.Index, run.Resources.CacheHitsDelta, run.Resources.CacheMissesDelta, run.Resources.CacheEvictionsDelta)
+		}
+	}
 	if report.Baseline != nil {
 		_, _ = io.WriteString(file, "\n## Baseline\n\n| Metric | Baseline | Current | Change | Limit | Passed |\n|---|---:|---:|---:|---:|:---:|\n")
 		for _, comparison := range report.Baseline.Comparisons {
@@ -81,6 +102,15 @@ func writeMarkdown(path string, report Report) error {
 		}
 	}
 	return nil
+}
+
+func sortedKeys[V any](values map[string]V) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func writeCSV(path string, report Report) error {

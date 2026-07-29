@@ -17,6 +17,18 @@ import (
 
 type headerFlags map[string]string
 
+type stringFlags []string
+
+func (values *stringFlags) String() string { return strings.Join(*values, ",") }
+func (values *stringFlags) Set(input string) error {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return errors.New("value cannot be empty")
+	}
+	*values = append(*values, input)
+	return nil
+}
+
 func (values *headerFlags) String() string {
 	parts := make([]string, 0, len(*values))
 	for name, value := range *values {
@@ -58,6 +70,7 @@ func run(args []string) error {
 	baseline := flags.String("baseline", "", "baseline report.json")
 	duration := flags.Duration("duration", 0, "measurement duration")
 	warmup := flags.Duration("warmup", 0, "warmup duration")
+	skipWarmup := flags.Bool("skip-warmup", false, "disable warmup even when the suite has a default")
 	repeats := flags.Int("repeats", 0, "measurement repetitions")
 	concurrency := flags.Int("concurrency", 32, "concurrent workers")
 	timeout := flags.Duration("request-timeout", 10*time.Second, "per-request timeout")
@@ -65,11 +78,20 @@ func run(args []string) error {
 	expectedHash := flags.String("expected-sha256", "", "expected response body SHA-256")
 	insecure := flags.Bool("insecure-skip-verify", false, "accept the benchmark environment's private certificate")
 	newConnection := flags.Bool("new-connection", false, "create a new transport for every request")
+	uniqueQuery := flags.Bool("unique-query", false, "append a unique _bench query value to every request")
 	agentPID := flags.Int("agent-pid", 0, "Edge Agent PID to sample")
 	agentMetricsURL := flags.String("agent-metrics-url", "", "optional benchmark telemetry URL")
+	minCacheHits := flags.Uint64("min-cache-hits", 0, "minimum cache hit delta required in every run")
+	minCacheMisses := flags.Uint64("min-cache-misses", 0, "minimum cache miss delta required in every run")
+	minCacheEvictions := flags.Uint64("min-cache-evictions", 0, "minimum cache eviction delta required in every run")
+	maxCapturedValues := flags.Int("max-captured-values", 0, "maximum distinct values allowed for each captured response header")
 	agentBinary := flags.String("agent-binary", "", "Edge Agent binary to hash")
 	var expectedHeaders headerFlags
+	var requestHeaders headerFlags
+	var captureHeaders stringFlags
 	flags.Var(&expectedHeaders, "expected-header", "required response header Name=Value (repeatable)")
+	flags.Var(&requestHeaders, "header", "request header Name=Value (repeatable)")
+	flags.Var(&captureHeaders, "capture-header", "response header to count in the report (repeatable)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -84,6 +106,9 @@ func run(args []string) error {
 	if *warmup == 0 {
 		*warmup = defaultWarmup
 	}
+	if *skipWarmup {
+		*warmup = 0
+	}
 	if *duration == 0 {
 		*duration = defaultDuration
 	}
@@ -97,7 +122,10 @@ func run(args []string) error {
 		Suite: selectedSuite, Protocol: agentbench.Protocol(*protocol), Scenario: *scenario, URL: *targetURL, Host: *host,
 		Concurrency: *concurrency, Duration: *duration, Warmup: *warmup, Repeats: *repeats, RequestTimeout: *timeout,
 		ExpectedStatus: *expectedStatus, ExpectedSHA256: strings.TrimSpace(*expectedHash), ExpectedHeaders: expectedHeaders,
-		InsecureSkipVerify: *insecure, NewConnection: *newConnection, AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, SampleInterval: time.Second,
+		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
+		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, SampleInterval: time.Second,
+		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
+		MaxCapturedValues: *maxCapturedValues,
 	})
 	if err != nil {
 		return err

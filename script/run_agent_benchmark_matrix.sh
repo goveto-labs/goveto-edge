@@ -5,6 +5,9 @@ set -uo pipefail
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 readonly COMPOSE_FILE="$REPO_ROOT/deploy/benchmark/compose.yaml"
+readonly COMPOSE_26C_FILE="$REPO_ROOT/deploy/benchmark/compose.26c.yaml"
+readonly COMPOSE_26C_AGENT2_FILE="$REPO_ROOT/deploy/benchmark/compose.26c-agent2.yaml"
+readonly COMPOSE_26C_AGENT4_FILE="$REPO_ROOT/deploy/benchmark/compose.26c-agent4.yaml"
 readonly COMPOSE_PROJECT="goveto-edge-benchmark"
 readonly STATE_DIR="$REPO_ROOT/deploy/benchmark/state"
 readonly RESULTS_ROOT="$REPO_ROOT/deploy/benchmark/results"
@@ -18,6 +21,10 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)"
 reuse_environment=false
 cleanup=false
 dry_run=false
+warmup=""
+duration=""
+repeats=""
+runner="default"
 
 usage() {
   cat <<'EOF'
@@ -31,6 +38,11 @@ Options:
   --connection-modes "reuse new"     Reused or new connection modes
   --run-id <name>                     Result directory name
   --full-origin                       Use all payload sizes and both connection modes
+  --quick                             Screen with 1s warmup, 5s measurement, 1 repeat
+  --warmup <duration>                 Override suite warmup (for example 10s)
+  --duration <duration>               Override suite measurement duration
+  --repeats <count>                   Override suite repetitions
+  --runner <name>                     default, 26c-agent2, 26c-agent4, or 26c-agent8
   --reuse-environment                 Keep existing benchmark volumes and credentials
   --cleanup                           Stop containers after the matrix finishes
   --dry-run                           Print the matrix without running Docker
@@ -55,6 +67,11 @@ while (($# > 0)); do
     --connection-modes) connection_modes="${2:-}"; shift 2 ;;
     --run-id) run_id="${2:-}"; shift 2 ;;
     --full-origin) sizes="1024 16384 1048576"; connection_modes="reuse new"; shift ;;
+    --quick) suite="pr"; warmup="1s"; duration="5s"; repeats="1"; shift ;;
+    --warmup) warmup="${2:-}"; shift 2 ;;
+    --duration) duration="${2:-}"; shift 2 ;;
+    --repeats) repeats="${2:-}"; shift 2 ;;
+    --runner) runner="${2:-}"; shift 2 ;;
     --reuse-environment) reuse_environment=true; shift ;;
     --cleanup) cleanup=true; shift ;;
     --dry-run) dry_run=true; shift ;;
@@ -64,6 +81,8 @@ while (($# > 0)); do
 done
 
 case "$suite" in pr|nightly|capacity|soak) ;; *) die "invalid suite: $suite" ;; esac
+[[ "$runner" == "26c" ]] && runner="26c-agent8"
+case "$runner" in default|26c-agent2|26c-agent4|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "run-id may contain only letters, numbers, dot, underscore, and hyphen"
 
 for protocol in $protocols; do
@@ -79,9 +98,16 @@ done
 for mode in $connection_modes; do
   case "$mode" in reuse|new) ;; *) die "invalid connection mode: $mode" ;; esac
 done
+if [[ -n "$repeats" && ! "$repeats" =~ ^[1-9][0-9]*$ ]]; then die "repeats must be positive"; fi
 
 compose() {
-  docker compose -p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE" "$@"
+	local args=(-p "$COMPOSE_PROJECT" -f "$COMPOSE_FILE")
+	case "$runner" in
+		26c-agent2) args+=(-f "$COMPOSE_26C_AGENT2_FILE") ;;
+		26c-agent4) args+=(-f "$COMPOSE_26C_AGENT4_FILE") ;;
+		26c-agent8) args+=(-f "$COMPOSE_26C_FILE") ;;
+	esac
+	docker compose "${args[@]}" "$@"
 }
 
 sha256_zeros() {
@@ -128,6 +154,9 @@ command -v go >/dev/null 2>&1 || die "go is required to generate benchmark PKI"
 docker_cpus="$(docker info --format '{{.NCPU}}' 2>/dev/null)"
 [[ "$docker_cpus" =~ ^[0-9]+$ ]] || die "cannot determine Docker CPU count"
 ((docker_cpus >= 6)) || die "benchmark cpuset requires at least 6 CPUs; Docker reports $docker_cpus"
+if [[ "$runner" == 26c-* ]]; then
+  ((docker_cpus >= 26)) || die "26c runner requires at least 26 CPUs; Docker reports $docker_cpus"
+fi
 
 result_dir="$RESULTS_ROOT/$run_id"
 mkdir -p "$result_dir"
@@ -139,12 +168,13 @@ if ! $reuse_environment; then
   compose down --volumes --remove-orphans >/dev/null 2>&1 || true
   (cd "$REPO_ROOT" && go run ./cmd/agent-bench-pki --output "$STATE_DIR")
 else
-  [[ -s "$STATE_DIR/identity.json" && -s "$STATE_DIR/initial-task.json" ]] || \
-    die "--reuse-environment requires existing state; run once without it"
+	[[ -s "$STATE_DIR/identity.json" && -s "$STATE_DIR/initial-tasks.json" ]] || \
+		die "--reuse-environment requires existing state; run once without it"
 fi
 
 echo "Building and starting benchmark services..."
-compose up -d --build origin redis gateway agent
+compose --profile run build origin origin2 gateway agent load
+compose up -d --no-build origin origin2 redis gateway agent
 
 if $cleanup; then
   trap 'compose down --remove-orphans >/dev/null 2>&1 || true' EXIT
@@ -195,6 +225,9 @@ for protocol in $protocols; do
           --agent-metrics-url http://agent:9900/metrics
           --output "$container_output"
         )
+		[[ -n "$warmup" ]] && args+=(--warmup "$warmup")
+		[[ -n "$duration" ]] && args+=(--duration "$duration")
+		[[ -n "$repeats" ]] && args+=(--repeats "$repeats")
         if [[ "$mode" == "new" ]]; then args+=(--new-connection); fi
 
         echo "[$((completed + 1))/$case_count] $case_name"

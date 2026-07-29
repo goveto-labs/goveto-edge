@@ -3,7 +3,16 @@ services:
     build:
       context: ../..
       dockerfile: deploy/benchmark/Dockerfile
-    command: ["agent-bench-origin", "--listen", ":8080"]
+    command: ["agent-bench-origin", "--listen", ":8080", "--id", "origin-1", "--fail-prefix", "/failover"]
+    user: "0:0"
+    cpuset: "4"
+    networks: [benchmark]
+
+  origin2:
+    build:
+      context: ../..
+      dockerfile: deploy/benchmark/Dockerfile
+    command: ["agent-bench-origin", "--listen", ":8080", "--id", "origin-2"]
     user: "0:0"
     cpuset: "4"
     networks: [benchmark]
@@ -18,12 +27,13 @@ services:
     build:
       context: ../..
       dockerfile: deploy/benchmark/Dockerfile
-    command: ["agent-bench-gateway", "--listen", ":8443", "--task", "/state/initial-task.json"]
+    command: ["agent-bench-gateway", "--listen", ":8443", "--task", "/state/initial-tasks.json"]
     user: "0:0"
     cpuset: "5"
     volumes:
       - ./state/certs:/certs:ro
       - ./state/initial-task.json:/state/initial-task.json:ro
+      - ./state/initial-tasks.json:/state/initial-tasks.json:ro
     networks: [benchmark]
 
   agent:
@@ -46,7 +56,7 @@ services:
       - "18080:8080/tcp"
       - "18444:8444/tcp"
       - "18444:8444/udp"
-    depends_on: [origin, gateway, redis]
+    depends_on: [origin, origin2, gateway, redis]
     networks: [benchmark]
 
   load:

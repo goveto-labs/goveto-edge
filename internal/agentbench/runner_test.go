@@ -41,6 +41,28 @@ func TestExecuteRequestRejectsProtocolMismatch(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestAddsHeadersAndUniqueQuery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		if request.Header.Get("Range") != "bytes=0-1023" || request.URL.Query().Get("_bench") != "1" {
+			t.Fatalf("request headers=%v query=%q", request.Header, request.URL.RawQuery)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Proto: "HTTP/1.1", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok")), Request: request}, nil
+	})}
+	result := executeRequest(t.Context(), client, Config{URL: "https://benchmark.example.test/asset?fixed=yes", Protocol: ProtocolH1, ExpectedStatus: http.StatusOK, RequestHeaders: map[string]string{"Range": "bytes=0-1023"}, UniqueQuery: true})
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+}
+
+func TestCounterDeltaHandlesReset(t *testing.T) {
+	if got := counterDelta(15, 10); got != 5 {
+		t.Fatalf("counterDelta()=%d, want 5", got)
+	}
+	if got := counterDelta(3, 10); got != 3 {
+		t.Fatalf("counterDelta() after reset=%d, want 3", got)
+	}
+}
+
 func TestRunStateMetrics(t *testing.T) {
 	state := &runState{protocols: make(map[string]uint64)}
 	state.record(requestResult{latency: time.Millisecond, ttfb: 500 * time.Microsecond, bytes: 1024, protocol: "HTTP/3.0"})

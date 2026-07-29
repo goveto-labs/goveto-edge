@@ -74,6 +74,34 @@ func ValidateRuns(runs []Run, loadCPUPercentMax float64) Validity {
 	return validity
 }
 
+func ValidateResourceExpectations(validity Validity, runs []Run, config Config) Validity {
+	for _, run := range runs {
+		checks := []struct {
+			name    string
+			actual  uint64
+			minimum uint64
+		}{
+			{"cache hits", run.Resources.CacheHitsDelta, config.MinCacheHits},
+			{"cache misses", run.Resources.CacheMissesDelta, config.MinCacheMisses},
+			{"cache evictions", run.Resources.CacheEvictionsDelta, config.MinCacheEvictions},
+		}
+		for _, check := range checks {
+			if check.minimum > 0 && check.actual < check.minimum {
+				validity.Reasons = append(validity.Reasons, fmt.Sprintf("run %d had %d %s, want at least %d", run.Index, check.actual, check.name, check.minimum))
+			}
+		}
+		if config.MaxCapturedValues > 0 {
+			for name, values := range run.Metrics.ResponseHeaders {
+				if len(values) > config.MaxCapturedValues {
+					validity.Reasons = append(validity.Reasons, fmt.Sprintf("run %d captured %d distinct %s values, want at most %d", run.Index, len(values), name, config.MaxCapturedValues))
+				}
+			}
+		}
+	}
+	validity.Valid = len(validity.Reasons) == 0
+	return validity
+}
+
 func Compare(current, baseline Report) BaselineDecision {
 	decision := BaselineDecision{Passed: true}
 	if current.Platform.Architecture != baseline.Platform.Architecture {

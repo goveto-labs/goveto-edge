@@ -40,6 +40,7 @@ type runState struct {
 	handshakes []time.Duration
 	ttfb       []time.Duration
 	protocols  map[string]uint64
+	headers    map[string]map[string]uint64
 	errors     []string
 }
 
@@ -56,6 +57,9 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			Concurrency: config.Concurrency, DurationMS: config.Duration.Milliseconds(), WarmupMS: config.Warmup.Milliseconds(),
 			Repeats: config.Repeats, NewConnection: config.NewConnection, ExpectedStatus: config.ExpectedStatus,
 			ExpectedSHA256: config.ExpectedSHA256, ExpectedHeaders: config.ExpectedHeaders,
+			RequestHeaders: config.RequestHeaders, CaptureHeaders: config.CaptureHeaders, UniqueQuery: config.UniqueQuery,
+			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
+			MaxCapturedValues: config.MaxCapturedValues,
 		},
 	}
 	var loadCPUMax float64
@@ -72,6 +76,7 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 	}
 	report.Summary = Summarize(report.Runs)
 	report.Validity = ValidateRuns(report.Runs, loadCPUMax)
+	report.Validity = ValidateResourceExpectations(report.Validity, report.Runs, config)
 	return report, nil
 }
 
@@ -82,14 +87,15 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	}
 	defer closeTransport()
 	client := &http.Client{Transport: transport, Timeout: config.RequestTimeout}
+	var requestSequence atomic.Uint64
 
 	if config.Warmup > 0 {
 		warmContext, cancel := context.WithTimeout(ctx, config.Warmup)
-		runWorkers(warmContext, config, client, nil)
+		runWorkers(warmContext, config, client, nil, &requestSequence)
 		cancel()
 	}
 
-	state := &runState{protocols: make(map[string]uint64)}
+	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64)}
 	started := time.Now().UTC()
 	measureContext, cancel := context.WithTimeout(ctx, config.Duration)
 	defer cancel()
@@ -101,14 +107,14 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		defer close(samplesDone)
 		samples, resources, loadCPUMax = sampleResources(measureContext, config.AgentPID, config.AgentMetricsURL, config.SampleInterval, state)
 	}()
-	runWorkers(measureContext, config, client, state)
+	runWorkers(measureContext, config, client, state, &requestSequence)
 	<-samplesDone
 	elapsed := time.Since(started)
 	metrics, failures := state.metrics(elapsed)
 	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures}, loadCPUMax, nil
 }
 
-func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, state *runState) {
+func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
 	var workers sync.WaitGroup
 	for range config.Concurrency {
 		workers.Add(1)
@@ -128,7 +134,7 @@ func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, s
 					client = &http.Client{Transport: transport, Timeout: config.RequestTimeout}
 					closeClient = closeTransport
 				}
-				result := executeRequest(ctx, client, config)
+				result := executeRequest(ctx, client, config, sequence)
 				closeClient()
 				if state != nil && !(ctx.Err() != nil && (errors.Is(result.err, context.DeadlineExceeded) || errors.Is(result.err, context.Canceled))) {
 					state.record(result)
@@ -145,10 +151,11 @@ type requestResult struct {
 	ttfb      time.Duration
 	bytes     uint64
 	protocol  string
+	headers   map[string]string
 	err       error
 }
 
-func executeRequest(ctx context.Context, client *http.Client, config Config) requestResult {
+func executeRequest(ctx context.Context, client *http.Client, config Config, sequences ...*atomic.Uint64) requestResult {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, config.URL, nil)
 	if err != nil {
 		return requestResult{err: err}
@@ -157,6 +164,18 @@ func executeRequest(ctx context.Context, client *http.Client, config Config) req
 		request.Host = config.Host
 	}
 	request.Header.Set("Accept-Encoding", "identity")
+	for name, value := range config.RequestHeaders {
+		request.Header.Set(name, value)
+	}
+	if config.UniqueQuery {
+		sequence := uint64(1)
+		if len(sequences) > 0 && sequences[0] != nil {
+			sequence = sequences[0].Add(1)
+		}
+		query := request.URL.Query()
+		query.Set("_bench", fmt.Sprintf("%d", sequence))
+		request.URL.RawQuery = query.Encode()
+	}
 	var tlsStarted, wroteRequest time.Time
 	var handshake, ttfb time.Duration
 	trace := &httptrace.ClientTrace{
@@ -187,7 +206,10 @@ func executeRequest(ctx context.Context, client *http.Client, config Config) req
 		destination = digest
 	}
 	written, readErr := io.Copy(destination, response.Body)
-	result := requestResult{latency: time.Since(started), handshake: handshake, ttfb: ttfb, bytes: uint64(max(written, 0)), protocol: response.Proto}
+	result := requestResult{latency: time.Since(started), handshake: handshake, ttfb: ttfb, bytes: uint64(max(written, 0)), protocol: response.Proto, headers: make(map[string]string, len(config.CaptureHeaders))}
+	for _, name := range config.CaptureHeaders {
+		result.headers[http.CanonicalHeaderKey(name)] = response.Header.Get(name)
+	}
 	if readErr != nil {
 		result.err = fmt.Errorf("read response: %w", readErr)
 		return result
@@ -258,6 +280,9 @@ func validateConfig(config *Config) error {
 	if config.ExpectedHeaders == nil {
 		config.ExpectedHeaders = map[string]string{}
 	}
+	if config.RequestHeaders == nil {
+		config.RequestHeaders = map[string]string{}
+	}
 	if config.Suite == "" {
 		config.Suite = SuitePR
 	}
@@ -303,6 +328,12 @@ func (state *runState) record(result requestResult) {
 		state.ttfb = append(state.ttfb, result.ttfb)
 	}
 	state.protocols[result.protocol]++
+	for name, value := range result.headers {
+		if state.headers[name] == nil {
+			state.headers[name] = make(map[string]uint64)
+		}
+		state.headers[name][value]++
+	}
 	state.mu.Unlock()
 }
 
@@ -320,7 +351,7 @@ func (state *runState) metrics(elapsed time.Duration) (Metrics, []string) {
 	defer state.mu.Unlock()
 	seconds := elapsed.Seconds()
 	requests, successes, failures := state.requests.Load(), state.successes.Load(), state.failures.Load()
-	result := Metrics{Requests: requests, Successes: successes, Failures: failures, Bytes: state.bytes.Load()}
+	result := Metrics{Requests: requests, Successes: successes, Failures: failures, Bytes: state.bytes.Load(), ResponseHeaders: state.headers}
 	if seconds > 0 {
 		result.RPS = float64(requests) / seconds
 		result.BytesPerSecond = float64(result.Bytes) / seconds
@@ -361,6 +392,13 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 	var loadCPUMax float64
 	var previousRequests, previousTotalAlloc uint64
 	metricsClient := &http.Client{Timeout: min(interval, 2*time.Second)}
+	var cacheBaseline telemetrySample
+	var hasCacheBaseline bool
+	if metricsURL != "" {
+		var err error
+		cacheBaseline, err = fetchTelemetry(ctx, metricsClient, metricsURL)
+		hasCacheBaseline = err == nil
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -413,11 +451,23 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					summary.QueueBytesMax = max(summary.QueueBytesMax, point.QueueBytes)
 					summary.QueueRecordsMax = max(summary.QueueRecordsMax, point.QueueRecords)
 					summary.DroppedLogsMax = max(summary.DroppedLogsMax, point.DroppedLogs)
+					if hasCacheBaseline {
+						summary.CacheHitsDelta = counterDelta(telemetry.CacheHits, cacheBaseline.CacheHits)
+						summary.CacheMissesDelta = counterDelta(telemetry.CacheMisses, cacheBaseline.CacheMisses)
+						summary.CacheEvictionsDelta = counterDelta(telemetry.CacheEvictions, cacheBaseline.CacheEvictions)
+					}
 				}
 			}
 			points = append(points, point)
 		}
 	}
+}
+
+func counterDelta(current, baseline uint64) uint64 {
+	if current < baseline {
+		return current
+	}
+	return current - baseline
 }
 
 type telemetrySample struct {

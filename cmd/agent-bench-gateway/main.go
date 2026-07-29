@@ -22,7 +22,7 @@ import (
 type gateway struct {
 	ackDelay   time.Duration
 	rejectLogs bool
-	task       *edgeprotocol.AgentTask
+	tasks      []edgeprotocol.AgentTask
 }
 
 func (gateway *gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
@@ -36,8 +36,8 @@ func (gateway *gateway) Connect(stream edgeprotocol.ManagementConnectServer) err
 	if err := stream.Send(&edgeprotocol.ServerMessage{Welcome: &edgeprotocol.ServerWelcome{HeartbeatSeconds: 10, MaxInflightTasks: 16, RotateBeforeHours: 168, MaxLogBatchRecords: 2000, MaxLogBatchBytes: 4 << 20}}); err != nil {
 		return err
 	}
-	if gateway.task != nil {
-		if err := stream.Send(&edgeprotocol.ServerMessage{Task: gateway.task}); err != nil {
+	for index := range gateway.tasks {
+		if err := stream.Send(&edgeprotocol.ServerMessage{Task: &gateway.tasks[index]}); err != nil {
 			return err
 		}
 	}
@@ -96,19 +96,26 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	var task *edgeprotocol.AgentTask
+	var tasks []edgeprotocol.AgentTask
 	if *taskPath != "" {
 		data, readErr := os.ReadFile(*taskPath)
 		if readErr != nil {
 			log.Fatal(readErr)
 		}
-		task = new(edgeprotocol.AgentTask)
-		if decodeErr := json.Unmarshal(data, task); decodeErr != nil {
-			log.Fatal(decodeErr)
+		if len(data) > 0 && data[0] == '[' {
+			if decodeErr := json.Unmarshal(data, &tasks); decodeErr != nil {
+				log.Fatal(decodeErr)
+			}
+		} else {
+			var task edgeprotocol.AgentTask
+			if decodeErr := json.Unmarshal(data, &task); decodeErr != nil {
+				log.Fatal(decodeErr)
+			}
+			tasks = append(tasks, task)
 		}
 	}
 	server := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)), grpc.ForceServerCodec(edgeprotocol.JSONCodec{}))
-	edgeprotocol.RegisterManagementServer(server, &gateway{ackDelay: *ackDelay, rejectLogs: *rejectLogs, task: task})
+	edgeprotocol.RegisterManagementServer(server, &gateway{ackDelay: *ackDelay, rejectLogs: *rejectLogs, tasks: tasks})
 	log.Printf("mock mTLS gateway listening on %s", *listenAddress)
 	log.Fatal(server.Serve(listener))
 }

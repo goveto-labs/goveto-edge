@@ -35,11 +35,18 @@ type Config struct {
 	ExpectedStatus     int
 	ExpectedSHA256     string
 	ExpectedHeaders    map[string]string
+	RequestHeaders     map[string]string
+	CaptureHeaders     []string
 	InsecureSkipVerify bool
 	NewConnection      bool
+	UniqueQuery        bool
 	AgentPID           int32
 	AgentMetricsURL    string
 	SampleInterval     time.Duration
+	MinCacheHits       uint64
+	MinCacheMisses     uint64
+	MinCacheEvictions  uint64
+	MaxCapturedValues  int
 }
 
 type Report struct {
@@ -67,18 +74,25 @@ type Platform struct {
 }
 
 type Scenario struct {
-	Suite           Suite             `json:"suite"`
-	Name            string            `json:"name"`
-	Protocol        Protocol          `json:"protocol"`
-	URL             string            `json:"url"`
-	Concurrency     int               `json:"concurrency"`
-	DurationMS      int64             `json:"duration_ms"`
-	WarmupMS        int64             `json:"warmup_ms"`
-	Repeats         int               `json:"repeats"`
-	NewConnection   bool              `json:"new_connection"`
-	ExpectedStatus  int               `json:"expected_status"`
-	ExpectedSHA256  string            `json:"expected_sha256,omitempty"`
-	ExpectedHeaders map[string]string `json:"expected_headers,omitempty"`
+	Suite             Suite             `json:"suite"`
+	Name              string            `json:"name"`
+	Protocol          Protocol          `json:"protocol"`
+	URL               string            `json:"url"`
+	Concurrency       int               `json:"concurrency"`
+	DurationMS        int64             `json:"duration_ms"`
+	WarmupMS          int64             `json:"warmup_ms"`
+	Repeats           int               `json:"repeats"`
+	NewConnection     bool              `json:"new_connection"`
+	ExpectedStatus    int               `json:"expected_status"`
+	ExpectedSHA256    string            `json:"expected_sha256,omitempty"`
+	ExpectedHeaders   map[string]string `json:"expected_headers,omitempty"`
+	RequestHeaders    map[string]string `json:"request_headers,omitempty"`
+	CaptureHeaders    []string          `json:"capture_headers,omitempty"`
+	UniqueQuery       bool              `json:"unique_query,omitempty"`
+	MinCacheHits      uint64            `json:"min_cache_hits,omitempty"`
+	MinCacheMisses    uint64            `json:"min_cache_misses,omitempty"`
+	MinCacheEvictions uint64            `json:"min_cache_evictions,omitempty"`
+	MaxCapturedValues int               `json:"max_captured_values,omitempty"`
 }
 
 type Run struct {
@@ -91,35 +105,39 @@ type Run struct {
 }
 
 type Metrics struct {
-	Requests           uint64  `json:"requests"`
-	Successes          uint64  `json:"successes"`
-	Failures           uint64  `json:"failures"`
-	Bytes              uint64  `json:"bytes"`
-	RPS                float64 `json:"rps"`
-	BytesPerSecond     float64 `json:"bytes_per_second"`
-	SuccessRate        float64 `json:"success_rate"`
-	P50MS              float64 `json:"p50_ms"`
-	P95MS              float64 `json:"p95_ms"`
-	P99MS              float64 `json:"p99_ms"`
-	MaxMS              float64 `json:"max_ms"`
-	TLSHandshakeMS     float64 `json:"tls_handshake_p50_ms,omitempty"`
-	TTFBMS             float64 `json:"ttfb_p50_ms,omitempty"`
-	NegotiatedProtocol string  `json:"negotiated_protocol,omitempty"`
+	Requests           uint64                       `json:"requests"`
+	Successes          uint64                       `json:"successes"`
+	Failures           uint64                       `json:"failures"`
+	Bytes              uint64                       `json:"bytes"`
+	RPS                float64                      `json:"rps"`
+	BytesPerSecond     float64                      `json:"bytes_per_second"`
+	SuccessRate        float64                      `json:"success_rate"`
+	P50MS              float64                      `json:"p50_ms"`
+	P95MS              float64                      `json:"p95_ms"`
+	P99MS              float64                      `json:"p99_ms"`
+	MaxMS              float64                      `json:"max_ms"`
+	TLSHandshakeMS     float64                      `json:"tls_handshake_p50_ms,omitempty"`
+	TTFBMS             float64                      `json:"ttfb_p50_ms,omitempty"`
+	NegotiatedProtocol string                       `json:"negotiated_protocol,omitempty"`
+	ResponseHeaders    map[string]map[string]uint64 `json:"response_headers,omitempty"`
 }
 
 type ResourceSummary struct {
-	CPUPercentMax     float64 `json:"cpu_percent_max,omitempty"`
-	RSSBytesMax       uint64  `json:"rss_bytes_max,omitempty"`
-	FDsMax            int32   `json:"fds_max,omitempty"`
-	ConnectionsMax    int     `json:"connections_max,omitempty"`
-	ReadBytes         uint64  `json:"read_bytes,omitempty"`
-	WriteBytes        uint64  `json:"write_bytes,omitempty"`
-	HeapBytesMax      uint64  `json:"heap_bytes_max,omitempty"`
-	AllocationRateMax float64 `json:"allocation_bytes_per_second_max,omitempty"`
-	GoroutinesMax     int     `json:"goroutines_max,omitempty"`
-	QueueBytesMax     uint64  `json:"log_queue_bytes_max,omitempty"`
-	QueueRecordsMax   uint64  `json:"log_queue_records_max,omitempty"`
-	DroppedLogsMax    uint64  `json:"dropped_logs_max,omitempty"`
+	CPUPercentMax       float64 `json:"cpu_percent_max,omitempty"`
+	RSSBytesMax         uint64  `json:"rss_bytes_max,omitempty"`
+	FDsMax              int32   `json:"fds_max,omitempty"`
+	ConnectionsMax      int     `json:"connections_max,omitempty"`
+	ReadBytes           uint64  `json:"read_bytes,omitempty"`
+	WriteBytes          uint64  `json:"write_bytes,omitempty"`
+	HeapBytesMax        uint64  `json:"heap_bytes_max,omitempty"`
+	AllocationRateMax   float64 `json:"allocation_bytes_per_second_max,omitempty"`
+	GoroutinesMax       int     `json:"goroutines_max,omitempty"`
+	QueueBytesMax       uint64  `json:"log_queue_bytes_max,omitempty"`
+	QueueRecordsMax     uint64  `json:"log_queue_records_max,omitempty"`
+	DroppedLogsMax      uint64  `json:"dropped_logs_max,omitempty"`
+	CacheHitsDelta      uint64  `json:"cache_hits_delta,omitempty"`
+	CacheMissesDelta    uint64  `json:"cache_misses_delta,omitempty"`
+	CacheEvictionsDelta uint64  `json:"cache_evictions_delta,omitempty"`
 }
 
 type TimeSeriesPoint struct {

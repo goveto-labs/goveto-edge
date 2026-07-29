@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"goveto-edge/internal/edgeagent"
 	"goveto-edge/internal/edgeprotocol"
+	cachepolicy "goveto-edge/internal/policy"
 )
 
 func main() {
@@ -35,7 +36,8 @@ func main() {
 	caCert, caKey, caPEM, _ := issueCA()
 	serverCert, serverKey := issueLeaf(caCert, caKey, "benchmark-gateway", []string{*serverName}, nil, true)
 	clientCert, clientKey := issueLeaf(caCert, caKey, *nodeID, nil, nil, false)
-	edgeCert, edgeKey := issueLeaf(caCert, caKey, "benchmark.example.test", []string{"benchmark.example.test"}, nil, true)
+	domains := []string{"benchmark.example.test", "cache.benchmark.example.test", "cache-alt.benchmark.example.test", "multi.benchmark.example.test", "resilient.benchmark.example.test", "limit.benchmark.example.test"}
+	edgeCert, edgeKey := issueLeaf(caCert, caKey, domains[0], domains, nil, true)
 	write(filepath.Join(*output, "certs", "ca.crt"), caPEM, 0600)
 	write(filepath.Join(*output, "certs", "server.crt"), serverCert, 0600)
 	write(filepath.Join(*output, "certs", "server.key"), serverKey, 0600)
@@ -43,16 +45,64 @@ func main() {
 	if err := edgeagent.WriteIdentity(filepath.Join(*output, "identity.json"), identity); err != nil {
 		log.Fatal(err)
 	}
-	site := edgeprotocol.SiteConfig{SiteID: "benchmark-site", Version: 1, Domains: []string{"benchmark.example.test"}, Listener: edgeprotocol.ListenerConfig{HTTPEnabled: true, HTTPPort: 8080, HTTPSEnabled: true, HTTPSPort: 8444, HTTP2Enabled: true, HTTP3Enabled: true, TLSMinVersion: "TLS1_3"}, Certificates: []edgeprotocol.CertificateConfig{{CertificatePEM: string(edgeCert), PrivateKeyPEM: string(edgeKey)}}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}}
-	payload, err := json.Marshal(site)
+	listener := edgeprotocol.ListenerConfig{HTTPEnabled: true, HTTPPort: 8080, HTTPSEnabled: true, HTTPSPort: 8444, HTTP2Enabled: true, HTTP3Enabled: true, TLSMinVersion: "TLS1_3"}
+	certificate := edgeprotocol.CertificateConfig{CertificatePEM: string(edgeCert), PrivateKeyPEM: string(edgeKey)}
+	originPolicy := edgeprotocol.DefaultOriginPolicy()
+	originPolicy.ActiveHealth.Enabled = false
+	originPolicy.PassiveHealth.Enabled = false
+	originPolicy.Retry = edgeprotocol.OriginRetryConfig{}
+	cache := cachepolicy.DefaultCachePolicy()
+	cache.Enabled = true
+	cache.TTL.DefaultSeconds = 3600
+	cache.Stale.IfErrorSeconds = 3600
+	cache.Stale.WhileRevalidateSeconds = 30
+	rateLimit := cachepolicy.DefaultRateLimitPolicy()
+	rateLimit.Enabled = true
+	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, StatusCode: 429}}
+	resilientPolicy := edgeprotocol.DefaultOriginPolicy()
+	resilientPolicy.ActiveHealth.Enabled = false
+
+	sites := []edgeprotocol.SiteConfig{
+		{SiteID: "benchmark-site", Version: 1, Domains: []string{domains[0]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy},
+		{SiteID: "benchmark-cache", Version: 1, Domains: domains[1:3], Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(cache)},
+		{SiteID: "benchmark-multi", Version: 1, Domains: []string{domains[3]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "round_robin", OriginPolicy: originPolicy},
+		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
+		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, RateLimit: asMap(rateLimit)},
+	}
+	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 8 << 20, MaxDiskUsagePercent: 90})}
+	for _, site := range sites {
+		tasks = append(tasks, task(edgeprotocol.TaskApplySiteConfig, site))
+	}
+	legacy, err := json.MarshalIndent(tasks[1], "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	task, err := json.MarshalIndent(edgeprotocol.AgentTask{ID: uuid.NewString(), Kind: edgeprotocol.TaskApplySiteConfig, Payload: payload}, "", "  ")
+	encodedTasks, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	write(filepath.Join(*output, "initial-task.json"), task, 0600)
+	write(filepath.Join(*output, "initial-task.json"), legacy, 0600)
+	write(filepath.Join(*output, "initial-tasks.json"), encodedTasks, 0600)
+}
+
+func task(kind string, value any) edgeprotocol.AgentTask {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return edgeprotocol.AgentTask{ID: uuid.NewString(), Kind: kind, Payload: payload}
+}
+
+func asMap(value any) map[string]any {
+	data, err := json.Marshal(value)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var result map[string]any
+	if err = json.Unmarshal(data, &result); err != nil {
+		log.Fatal(err)
+	}
+	return result
 }
 
 func issueCA() (*x509.Certificate, ed25519.PrivateKey, []byte, []byte) {

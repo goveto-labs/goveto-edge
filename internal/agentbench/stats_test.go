@@ -29,6 +29,13 @@ func TestValidateRunsRejectsVariationFailuresAndLoadSaturation(t *testing.T) {
 	}
 }
 
+func TestValidateResourceExpectations(t *testing.T) {
+	validity := ValidateResourceExpectations(Validity{Valid: true}, []Run{{Index: 1, Metrics: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Origin-Requests": {"1": 10, "2": 1}}}, Resources: ResourceSummary{CacheHitsDelta: 10, CacheMissesDelta: 2}}}, Config{MinCacheHits: 1, MinCacheMisses: 1, MinCacheEvictions: 1, MaxCapturedValues: 1})
+	if validity.Valid || len(validity.Reasons) != 2 {
+		t.Fatalf("validity=%+v", validity)
+	}
+}
+
 func TestCompareAppliesArchitectureAndRegressionGates(t *testing.T) {
 	baseline := Report{Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "hit", Protocol: ProtocolH2}, Summary: Metrics{RPS: 1000, P99MS: 10}}
 	current := baseline
