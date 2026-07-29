@@ -59,92 +59,56 @@ type NodeSnapshot struct {
 	RequestsPerMinute         uint64  `json:"requests_per_minute"`
 }
 
+const runtimeColumns = `minute, node_id::text, cpu_usage_percent, memory_used_bytes,
+	memory_total_bytes, load_1, load_5, load_15, connections, cache_used_bytes,
+	cache_directory, cache_entries, cache_hits, cache_misses, cache_stale_hits,
+	cache_evictions, cache_rejected_writes, cache_corruptions, cache_hit_rate,
+	cache_capacity_ratio, cache_alerts, disk_used_bytes, disk_total_bytes`
+
+func scanRuntime(row interface{ Scan(...any) error }, x *NodeRuntimePoint) error {
+	return row.Scan(&x.Bucket, &x.NodeID, &x.CPU, &x.MemoryUsed, &x.MemoryTotal,
+		&x.Load1, &x.Load5, &x.Load15, &x.Connections, &x.CacheUsed, &x.CacheDirectory,
+		&x.CacheEntries, &x.CacheHits, &x.CacheMisses, &x.CacheStaleHits, &x.CacheEvictions,
+		&x.CacheRejectedWrites, &x.CacheCorruptions, &x.CacheHitRate, &x.CacheCapacityRatio,
+		&x.CacheAlerts, &x.DiskUsed, &x.DiskTotal)
+}
+
 func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) ([]NodeSnapshot, error) {
-	q := `SELECT
-		minute,
-		toString(node_id),
-		cpu_usage_percent,
-		memory_used_bytes,
-		memory_total_bytes,
-		load_1,
-		load_5,
-		load_15,
-		connections,
-		cache_used_bytes,
-		cache_directory,
-		cache_entries, cache_hits, cache_misses, cache_stale_hits,
-		cache_evictions, cache_rejected_writes, cache_corruptions,
-		cache_hit_rate, cache_capacity_ratio, cache_alerts,
-		disk_used_bytes,
-		disk_total_bytes
-	FROM goveto.node_runtime_metrics_minute
-	WHERE cluster_id = ?`
+	ctx, cancel := s.queryContext(ctx)
+	defer cancel()
+	q := `SELECT DISTINCT ON (node_id) ` + runtimeColumns + `
+		FROM analytics.node_runtime_metrics_minute WHERE cluster_id = $1`
 	args := []any{cluster}
 	if nodeID != "" {
-		q += " AND node_id = ?"
+		q += " AND node_id = $2"
 		args = append(args, nodeID)
 	}
-	q += " ORDER BY node_id, minute DESC LIMIT 1 BY node_id"
+	q += " ORDER BY node_id, minute DESC"
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	byNode := map[string][]NodeRuntimePoint{}
-	order := []string{}
+	points := make([]NodeRuntimePoint, 0)
 	for rows.Next() {
-		var x NodeRuntimePoint
-		if err = rows.Scan(
-			&x.Bucket,
-			&x.NodeID,
-			&x.CPU,
-			&x.MemoryUsed,
-			&x.MemoryTotal,
-			&x.Load1,
-			&x.Load5,
-			&x.Load15,
-			&x.Connections,
-			&x.CacheUsed,
-			&x.CacheDirectory,
-			&x.CacheEntries,
-			&x.CacheHits,
-			&x.CacheMisses,
-			&x.CacheStaleHits,
-			&x.CacheEvictions,
-			&x.CacheRejectedWrites,
-			&x.CacheCorruptions,
-			&x.CacheHitRate,
-			&x.CacheCapacityRatio,
-			&x.CacheAlerts,
-			&x.DiskUsed,
-			&x.DiskTotal,
-		); err != nil {
+		var point NodeRuntimePoint
+		if err := scanRuntime(rows, &point); err != nil {
 			return nil, err
 		}
-		if _, ok := byNode[x.NodeID]; !ok {
-			order = append(order, x.NodeID)
-		}
-		byNode[x.NodeID] = append(byNode[x.NodeID], x)
+		points = append(points, point)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-
 	traffic, err := s.latestNodeTraffic(ctx, cluster, nodeID)
 	if err != nil {
 		return nil, err
 	}
-
 	now := time.Now().UTC()
-	out := make([]NodeSnapshot, 0, len(order))
-	for _, nodeID := range order {
-		points := byNode[nodeID]
-		snapshot := NodeSnapshot{
-			NodeRuntimePoint: points[0],
-			Online:           now.Sub(points[0].Bucket) <= 3*time.Minute,
-		}
-		if current, ok := traffic[nodeID]; ok {
+	out := make([]NodeSnapshot, 0, len(points))
+	for _, point := range points {
+		snapshot := NodeSnapshot{NodeRuntimePoint: point, Online: now.Sub(point.Bucket) <= 3*time.Minute}
+		if current, ok := traffic[point.NodeID]; ok {
 			snapshot.IngressBytesPerSecond = float64(current.IngressBytes) / 60
 			snapshot.EgressBytesPerSecond = float64(current.EgressBytes) / 60
 			snapshot.CacheEgressBytesPerSecond = float64(current.CacheEgressBytes) / 60
@@ -152,29 +116,21 @@ func (s *Store) LatestNodeRuntime(ctx context.Context, cluster, nodeID string) (
 		}
 		out = append(out, snapshot)
 	}
-
 	return out, nil
 }
 
 type nodeTrafficMinute struct {
-	Requests         uint64
-	IngressBytes     uint64
-	EgressBytes      uint64
-	CacheEgressBytes uint64
+	Requests, IngressBytes, EgressBytes, CacheEgressBytes uint64
 }
 
 func (s *Store) latestNodeTraffic(ctx context.Context, cluster, nodeID string) (map[string]nodeTrafficMinute, error) {
-	q := `SELECT
-		toString(node_id),
-		sum(requests),
-		sum(ingress_bytes),
-		sum(egress_bytes),
-		sum(cache_egress_bytes)
-	FROM goveto.node_traffic_metrics_minute
-	WHERE cluster_id = ? AND minute >= now() - INTERVAL 1 MINUTE`
+	q := `SELECT node_id::text, sum(requests)::bigint, sum(ingress_bytes)::bigint,
+		sum(egress_bytes)::bigint, sum(cache_egress_bytes)::bigint
+		FROM analytics.node_traffic_metrics_minute
+		WHERE cluster_id = $1 AND minute >= now() - INTERVAL '1 minute'`
 	args := []any{cluster}
 	if nodeID != "" {
-		q += " AND node_id = ?"
+		q += " AND node_id = $2"
 		args = append(args, nodeID)
 	}
 	q += " GROUP BY node_id"
@@ -183,274 +139,312 @@ func (s *Store) latestNodeTraffic(ctx context.Context, cluster, nodeID string) (
 		return nil, err
 	}
 	defer rows.Close()
-
 	out := map[string]nodeTrafficMinute{}
 	for rows.Next() {
-		var nodeID string
+		var id string
 		var current nodeTrafficMinute
-		if err := rows.Scan(&nodeID, &current.Requests, &current.IngressBytes, &current.EgressBytes, &current.CacheEgressBytes); err != nil {
+		if err := rows.Scan(&id, &current.Requests, &current.IngressBytes, &current.EgressBytes, &current.CacheEgressBytes); err != nil {
 			return nil, err
 		}
-		out[nodeID] = current
+		out[id] = current
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) TrafficSeries(ctx context.Context, cluster, site, nodeID, period string) ([]TrafficPoint, error) {
-	from := time.Now().UTC().Add(-24 * time.Hour)
-	q := `SELECT bucket, sum(requests), sum(ingress_bytes), sum(egress_bytes), sum(cache_egress_bytes)
-		FROM goveto.request_usage_hourly
-		WHERE cluster_id = ? AND bucket >= ?`
-	args := []any{cluster, from}
+	ctx, cancel := s.queryContext(ctx)
+	defer cancel()
+	now := time.Now().UTC()
+	from := now.Add(-24 * time.Hour)
+	fullStart, fullEnd := completeHourRange(from, now)
+	args := []any{cluster, from, fullStart, fullEnd, now}
+	filter := ""
 	if site != "" {
-		q += " AND site_id = ?"
+		filter += fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, site)
 	}
 	if nodeID != "" {
-		q += " AND node_id = ?"
+		filter += fmt.Sprintf(" AND node_id = $%d", len(args)+1)
 		args = append(args, nodeID)
 	}
-	q += " GROUP BY bucket ORDER BY bucket"
-
+	q := `SELECT bucket, sum(requests)::bigint, sum(ingress_bytes)::bigint,
+		sum(egress_bytes)::bigint, sum(cache_egress_bytes)::bigint FROM (
+		SELECT time_bucket(INTERVAL '1 hour', event_time) AS bucket, count(*)::bigint AS requests,
+			sum(request_header_bytes + request_body_bytes)::bigint AS ingress_bytes,
+			sum(response_header_bytes + response_body_bytes)::bigint AS egress_bytes,
+			COALESCE(sum(response_header_bytes + response_body_bytes) FILTER (WHERE upper(cache_status) = 'HIT'), 0)::bigint AS cache_egress_bytes
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $2 AND event_time < $3` + filter + ` GROUP BY 1
+		UNION ALL
+		SELECT bucket, requests, ingress_bytes, egress_bytes, cache_egress_bytes
+		FROM analytics.request_usage_hourly
+		WHERE cluster_id = $1 AND bucket >= $3 AND bucket < $4` + filter + `
+		UNION ALL
+		SELECT time_bucket(INTERVAL '1 hour', event_time), count(*)::bigint,
+			sum(request_header_bytes + request_body_bytes)::bigint,
+			sum(response_header_bytes + response_body_bytes)::bigint,
+			COALESCE(sum(response_header_bytes + response_body_bytes) FILTER (WHERE upper(cache_status) = 'HIT'), 0)::bigint
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $4 AND event_time < $5` + filter + ` GROUP BY 1
+	) totals GROUP BY bucket ORDER BY bucket`
 	if period == "30d" {
-		from = time.Now().UTC().AddDate(0, 0, -30)
-		today := time.Now().UTC().Truncate(24 * time.Hour)
-		siteDaily, siteHourly := "", ""
-		nodeDaily, nodeHourly := "", ""
+		from, today := utcDayRange(now, 30)
 		args = []any{cluster, from, today}
-		if site != "" {
-			siteDaily = " AND site_id = ?"
-			args = append(args, site)
-		}
-		if nodeID != "" {
-			nodeDaily = " AND node_id = ?"
-			args = append(args, nodeID)
-		}
-		args = append(args, cluster, today)
-		if site != "" {
-			siteHourly = " AND site_id = ?"
-			args = append(args, site)
-		}
-		if nodeID != "" {
-			nodeHourly = " AND node_id = ?"
-			args = append(args, nodeID)
-		}
-		q = fmt.Sprintf(`SELECT bucket,
-			sum(requests), sum(ingress_bytes), sum(egress_bytes), sum(cache_egress_bytes)
-		FROM (
-			SELECT toDateTime(bucket, 'UTC') AS bucket, requests, ingress_bytes, egress_bytes, cache_egress_bytes
-			FROM goveto.request_usage_daily
-			WHERE cluster_id = ? AND bucket >= toDate(?) AND bucket < toDate(?)%s%s
+		dailyFilter := analyticsDimensions(&args, site, nodeID)
+		args = append(args, cluster, today, now)
+		hourlyFilter := analyticsDimensions(&args, site, nodeID)
+		q = `SELECT bucket, sum(requests)::bigint, sum(ingress_bytes)::bigint,
+			sum(egress_bytes)::bigint, sum(cache_egress_bytes)::bigint FROM (
+			SELECT bucket, requests, ingress_bytes, egress_bytes, cache_egress_bytes
+			FROM analytics.request_usage_daily WHERE cluster_id = $1 AND bucket >= $2 AND bucket < $3` + dailyFilter + `
 			UNION ALL
-			SELECT toStartOfDay(bucket) AS bucket, requests, ingress_bytes, egress_bytes, cache_egress_bytes
-			FROM goveto.request_usage_hourly
-			WHERE cluster_id = ? AND bucket >= ?%s%s
-		)
-		GROUP BY bucket ORDER BY bucket`, siteDaily, nodeDaily, siteHourly, nodeHourly)
+			SELECT time_bucket(INTERVAL '1 day', bucket), requests, ingress_bytes, egress_bytes, cache_egress_bytes
+			FROM analytics.request_usage_hourly WHERE cluster_id = $` + fmt.Sprint(4+dimensionCount(site, nodeID)) +
+			` AND bucket >= $` + fmt.Sprint(5+dimensionCount(site, nodeID)) + ` AND bucket < $` + fmt.Sprint(6+dimensionCount(site, nodeID)) + hourlyFilter + `
+		) totals GROUP BY bucket ORDER BY bucket`
 	}
-
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	out := []TrafficPoint{}
+	out := make([]TrafficPoint, 0)
 	for rows.Next() {
-		var x TrafficPoint
-		if err = rows.Scan(
-			&x.Bucket,
-			&x.Requests,
-			&x.IngressBytes,
-			&x.EgressBytes,
-			&x.CacheEgressBytes,
-		); err != nil {
+		var point TrafficPoint
+		if err := rows.Scan(&point.Bucket, &point.Requests, &point.IngressBytes, &point.EgressBytes, &point.CacheEgressBytes); err != nil {
 			return nil, err
 		}
-		out = append(out, x)
+		out = append(out, point)
 	}
-
 	return out, rows.Err()
 }
 
-var dimensions = map[string]string{
-	"extension":      "file_extension",
-	"file_extension": "file_extension",
-	"hostname":       "hostname",
-	"domain":         "hostname",
-	"referer":        "referer",
-	"status":         "status_code",
-	"method":         "method",
-	"path":           "path",
-	"ip":             "client_ip",
-	"node":           "node_id",
+func analyticsDimensions(args *[]any, site, nodeID string) string {
+	filter := ""
+	if site != "" {
+		filter += fmt.Sprintf(" AND site_id = $%d", len(*args)+1)
+		*args = append(*args, site)
+	}
+	if nodeID != "" {
+		filter += fmt.Sprintf(" AND node_id = $%d", len(*args)+1)
+		*args = append(*args, nodeID)
+	}
+	return filter
 }
 
-func (s *Store) Ranking(
-	ctx context.Context,
-	cluster, site, nodeID, period, dimension, sortBy string,
-	limit int,
-) ([]DistributionItem, error) {
+func dimensionCount(site, node string) int {
+	count := 0
+	if site != "" {
+		count++
+	}
+	if node != "" {
+		count++
+	}
+	return count
+}
+
+var dimensions = map[string]string{
+	"extension": "file_extension", "file_extension": "file_extension",
+	"hostname": "hostname", "domain": "hostname", "referer": "referer",
+	"status": "status_code::text", "method": "method", "path": "path",
+	"ip": "host(client_ip)", "node": "node_id::text",
+}
+
+func (s *Store) Ranking(ctx context.Context, cluster, site, nodeID, period, dimension, sortBy string, limit int) ([]DistributionItem, error) {
+	ctx, cancel := s.queryContext(ctx)
+	defer cancel()
 	if dimension == "domain" {
 		dimension = "hostname"
 	}
 	if dimension == "file_extension" {
 		dimension = "extension"
 	}
-
-	col, ok := dimensions[dimension]
+	column, ok := dimensions[dimension]
 	if !ok {
 		return nil, ErrInvalidDimension
+	}
+	if period == "30d" && dimension == "node" {
+		return s.rankingNode30d(ctx, cluster, site, sortBy, limit)
 	}
 	if period == "30d" {
 		return s.ranking30d(ctx, cluster, site, dimension, sortBy, limit)
 	}
-
+	if nodeID == "" {
+		return s.ranking24h(ctx, cluster, site, dimension, column, sortBy, limit)
+	}
 	from := time.Now().UTC().Add(-24 * time.Hour)
-	table := "goveto.web_request_logs"
-	timeCol := "event_time"
-	value := "toString(" + col + ")"
-	requests := "count()"
-	ingress := "sum(request_header_bytes+request_body_bytes)"
-	egress := "sum(response_header_bytes+response_body_bytes)"
-
-	q := fmt.Sprintf(
-		`SELECT %s, %s, %s, %s
-		 FROM %s
-		 WHERE cluster_id = ? AND %s >= ?`,
-		value, requests, ingress, egress, table, timeCol,
-	)
+	q := fmt.Sprintf(`SELECT %s AS value, count(*)::bigint,
+		sum(request_header_bytes + request_body_bytes)::bigint,
+		sum(response_header_bytes + response_body_bytes)::bigint
+		FROM analytics.web_request_logs WHERE cluster_id = $1 AND event_time >= $2`, column)
 	args := []any{cluster, from}
-
 	if site != "" {
-		q += " AND site_id = ?"
+		q += fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, site)
 	}
 	if nodeID != "" {
-		q += " AND node_id = ?"
+		q += fmt.Sprintf(" AND node_id = $%d", len(args)+1)
 		args = append(args, nodeID)
 	}
-
 	q += " GROUP BY 1 ORDER BY "
 	if sortBy == "traffic" {
-		q += "(" + ingress + ")+ (" + egress + ") DESC"
+		q += "(sum(request_header_bytes + request_body_bytes) + sum(response_header_bytes + response_body_bytes)) DESC"
 	} else {
-		q += requests + " DESC"
+		q += "count(*) DESC"
 	}
-	q += " LIMIT ?"
+	q += fmt.Sprintf(" LIMIT $%d", len(args)+1)
 	args = append(args, limit)
-
-	rows, err := s.db.Query(ctx, q, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	out := []DistributionItem{}
-	for rows.Next() {
-		var x DistributionItem
-		if err = rows.Scan(&x.Value, &x.Requests, &x.IngressBytes, &x.EgressBytes); err != nil {
-			return nil, err
-		}
-		out = append(out, x)
-	}
-
-	return out, rows.Err()
+	return s.scanRanking(ctx, q, args)
 }
 
-func (s *Store) ranking30d(
-	ctx context.Context,
-	cluster, site, dimension, sortBy string,
-	limit int,
-) ([]DistributionItem, error) {
+func (s *Store) ranking24h(ctx context.Context, cluster, site, dimension, rawColumn, sortBy string, limit int) ([]DistributionItem, error) {
 	now := time.Now().UTC()
-	from := now.AddDate(0, 0, -30)
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	dailyTable, currentTable := "goveto.request_high_cardinality_daily", ""
-	dailyValue, currentValue := "value", "value"
-	dimensionValue := ""
-
-	switch dimension {
-	case "node":
-		dailyTable = "goveto.request_usage_daily"
-		currentTable = "goveto.request_usage_hourly"
-		dailyValue, currentValue = "toString(node_id)", "toString(node_id)"
-	case "extension", "status", "method":
-		dailyTable = "goveto.request_breakdown_daily"
-		currentTable = "goveto.request_breakdown_hourly"
-		dimensionValue = map[string]string{
-			"extension": "file_extension",
-			"status":    "status_code",
-			"method":    "method",
-		}[dimension]
-	case "hostname":
-		currentTable = "goveto.request_hostname_hourly"
-		currentValue = "hostname"
-		dimensionValue = "hostname"
-	case "referer":
-		currentTable = "goveto.request_referer_hourly"
-		currentValue = "referer"
-		dimensionValue = "referer"
-	case "path":
-		currentTable = "goveto.request_path_hourly"
-		currentValue = "path"
-		dimensionValue = "path"
-	case "ip":
-		currentTable = "goveto.request_ip_hourly"
-		currentValue = "toString(client_ip)"
-		dimensionValue = "client_ip"
-	default:
+	from := now.Add(-24 * time.Hour)
+	fullStart, fullEnd := completeHourRange(from, now)
+	view := map[string]string{
+		"extension": "request_extension_hourly", "status": "request_status_hourly",
+		"method": "request_method_hourly", "hostname": "request_hostname_hourly",
+		"referer": "request_referer_hourly", "path": "request_path_hourly",
+		"ip": "request_client_ip_hourly", "node": "request_usage_hourly",
+	}[dimension]
+	if view == "" {
 		return nil, ErrInvalidDimension
 	}
-
-	dailyFilters, currentFilters := "", ""
-	args := []any{cluster, from, today}
+	aggregateValue := "value"
+	if dimension == "node" {
+		aggregateValue = "node_id::text"
+	} else if dimension == "ip" {
+		aggregateValue = "host(value)"
+	} else if dimension == "status" {
+		aggregateValue = "value::text"
+	}
+	args := []any{cluster, from, fullStart, fullEnd, now}
+	siteFilter := ""
 	if site != "" {
-		dailyFilters += " AND site_id = ?"
+		siteFilter = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
 		args = append(args, site)
 	}
-	if dimensionValue != "" && dailyTable != "goveto.request_usage_daily" {
-		dailyFilters += " AND dimension = ?"
-		args = append(args, dimensionValue)
-	}
-	args = append(args, cluster, today)
-	if site != "" {
-		currentFilters += " AND site_id = ?"
-		args = append(args, site)
-	}
-	if dimensionValue != "" && currentTable == "goveto.request_breakdown_hourly" {
-		currentFilters += " AND dimension = ?"
-		args = append(args, dimensionValue)
-	}
-
-	q := fmt.Sprintf(`SELECT value, sum(requests), sum(ingress_bytes), sum(egress_bytes)
-		FROM (
-			SELECT %s AS value, requests, ingress_bytes, egress_bytes
-			FROM %s
-			WHERE cluster_id = ? AND bucket >= ? AND bucket < ?%s
-			UNION ALL
-			SELECT %s AS value, requests, ingress_bytes, egress_bytes
-			FROM %s
-			WHERE cluster_id = ? AND bucket >= ?%s
-		)
-		GROUP BY value ORDER BY `,
-		dailyValue, dailyTable, dailyFilters,
-		currentValue, currentTable, currentFilters,
-	)
+	q := fmt.Sprintf(`SELECT value, sum(requests)::bigint, sum(ingress_bytes)::bigint,
+		sum(egress_bytes)::bigint FROM (
+		SELECT %s AS value, count(*)::bigint AS requests,
+			sum(request_header_bytes + request_body_bytes)::bigint AS ingress_bytes,
+			sum(response_header_bytes + response_body_bytes)::bigint AS egress_bytes
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $2 AND event_time < $3%s GROUP BY 1
+		UNION ALL
+		SELECT %s AS value, requests, ingress_bytes, egress_bytes
+		FROM analytics.%s
+		WHERE cluster_id = $1 AND bucket >= $3 AND bucket < $4%s
+		UNION ALL
+		SELECT %s AS value, count(*)::bigint,
+			sum(request_header_bytes + request_body_bytes)::bigint,
+			sum(response_header_bytes + response_body_bytes)::bigint
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $4 AND event_time < $5%s GROUP BY 1
+	) ranking GROUP BY value ORDER BY `,
+		rawColumn, siteFilter, aggregateValue, view, siteFilter, rawColumn, siteFilter)
 	if sortBy == "traffic" {
-		q += "(sum(ingress_bytes) + sum(egress_bytes)) DESC"
+		q += "sum(ingress_bytes + egress_bytes) DESC"
 	} else {
 		q += "sum(requests) DESC"
 	}
-	q += " LIMIT ?"
+	q += fmt.Sprintf(" LIMIT $%d", len(args)+1)
 	args = append(args, limit)
+	return s.scanRanking(ctx, q, args)
+}
 
+func (s *Store) rankingNode30d(ctx context.Context, cluster, site, sortBy string, limit int) ([]DistributionItem, error) {
+	now := time.Now().UTC()
+	from, today := utcDayRange(now, 30)
+	args := []any{cluster, from, today}
+	dailySite := ""
+	if site != "" {
+		dailySite = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
+		args = append(args, site)
+	}
+	args = append(args, cluster, today, now)
+	hourlySite := ""
+	if site != "" {
+		hourlySite = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
+		args = append(args, site)
+	}
+	base := 4
+	if site != "" {
+		base++
+	}
+	q := fmt.Sprintf(`SELECT value, sum(requests)::bigint, sum(ingress_bytes)::bigint,
+		sum(egress_bytes)::bigint FROM (
+		SELECT node_id::text AS value, requests, ingress_bytes, egress_bytes
+		FROM analytics.request_usage_daily
+		WHERE cluster_id = $1 AND bucket >= $2 AND bucket < $3%s
+		UNION ALL
+		SELECT node_id::text AS value, requests, ingress_bytes, egress_bytes
+		FROM analytics.request_usage_hourly
+		WHERE cluster_id = $%d AND bucket >= $%d AND bucket < $%d%s
+	) ranking GROUP BY value ORDER BY `, dailySite, base, base+1, base+2, hourlySite)
+	if sortBy == "traffic" {
+		q += "sum(ingress_bytes + egress_bytes) DESC"
+	} else {
+		q += "sum(requests) DESC"
+	}
+	q += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	return s.scanRanking(ctx, q, args)
+}
+
+func (s *Store) ranking30d(ctx context.Context, cluster, site, dimension, sortBy string, limit int) ([]DistributionItem, error) {
+	view := map[string]string{"extension": "extension", "status": "status", "method": "method", "hostname": "hostname", "referer": "referer", "path": "path", "ip": "client_ip"}[dimension]
+	if view == "" {
+		return nil, ErrInvalidDimension
+	}
+	value := "value"
+	if dimension == "ip" {
+		value = "host(value)"
+	} else if dimension == "status" {
+		value = "value::text"
+	}
+	now := time.Now().UTC()
+	from, today := utcDayRange(now, 30)
+	args := []any{cluster, from, today}
+	dailySite := ""
+	if site != "" {
+		dailySite = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
+		args = append(args, site)
+	}
+	args = append(args, cluster, today, now)
+	hourlySite := ""
+	if site != "" {
+		hourlySite = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
+		args = append(args, site)
+	}
+	base := 4
+	if site != "" {
+		base++
+	}
+	q := fmt.Sprintf(`SELECT value, sum(requests)::bigint, sum(ingress_bytes)::bigint, sum(egress_bytes)::bigint FROM (
+		SELECT %s AS value, requests, ingress_bytes, egress_bytes FROM analytics.request_%s_daily
+		WHERE cluster_id = $1 AND bucket >= $2 AND bucket < $3%s
+		UNION ALL
+		SELECT %s AS value, requests, ingress_bytes, egress_bytes FROM analytics.request_%s_hourly
+		WHERE cluster_id = $%d AND bucket >= $%d AND bucket < $%d%s
+	) ranking GROUP BY value ORDER BY `, value, view, dailySite, value, view, base, base+1, base+2, hourlySite)
+	if sortBy == "traffic" {
+		q += "sum(ingress_bytes + egress_bytes) DESC"
+	} else {
+		q += "sum(requests) DESC"
+	}
+	q += fmt.Sprintf(" LIMIT $%d", len(args)+1)
+	args = append(args, limit)
+	return s.scanRanking(ctx, q, args)
+}
+
+func (s *Store) scanRanking(ctx context.Context, q string, args []any) ([]DistributionItem, error) {
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []DistributionItem{}
+	out := make([]DistributionItem, 0)
 	for rows.Next() {
 		var item DistributionItem
 		if err := rows.Scan(&item.Value, &item.Requests, &item.IngressBytes, &item.EgressBytes); err != nil {
@@ -462,88 +456,45 @@ func (s *Store) ranking30d(
 }
 
 func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string) ([]NodeRuntimePoint, error) {
-	interval := "toStartOfFiveMinutes(minute)"
+	ctx, cancel := s.queryContext(ctx)
+	defer cancel()
+	bucket := "time_bucket(INTERVAL '5 minutes', minute)"
 	from := time.Now().UTC().Add(-12 * time.Hour)
-
 	if period == "24h" {
 		from = time.Now().UTC().Add(-24 * time.Hour)
-	} else if period == "30d" {
-		interval = "toStartOfHour(minute)"
+	}
+	if period == "30d" {
+		bucket = "time_bucket(INTERVAL '1 hour', minute)"
 		from = time.Now().UTC().AddDate(0, 0, -30)
 	}
-
-	q := `SELECT ` + interval + `,
-		toString(node_id),
-		toFloat32(avg(cpu_usage_percent)),
-		toUInt64(avg(memory_used_bytes)),
-		toUInt64(avg(memory_total_bytes)),
-		toFloat32(avg(load_1)),
-		toFloat32(avg(load_5)),
-		toFloat32(avg(load_15)),
-		toUInt64(avg(connections)),
-		toUInt64(avg(cache_used_bytes)),
-		argMax(cache_directory, minute),
-		toUInt64(argMax(cache_entries, minute)),
-		toUInt64(argMax(cache_hits, minute)),
-		toUInt64(argMax(cache_misses, minute)),
-		toUInt64(argMax(cache_stale_hits, minute)),
-		toUInt64(argMax(cache_evictions, minute)),
-		toUInt64(argMax(cache_rejected_writes, minute)),
-		toUInt64(argMax(cache_corruptions, minute)),
-		toFloat32(argMax(cache_hit_rate, minute)),
-		toFloat32(avg(cache_capacity_ratio)),
-		argMax(cache_alerts, minute),
-		toUInt64(avg(disk_used_bytes)),
-		toUInt64(avg(disk_total_bytes))
-	FROM goveto.node_runtime_metrics_minute
-	WHERE cluster_id = ? AND minute >= ?`
+	q := `SELECT ` + bucket + `, node_id::text, avg(cpu_usage_percent)::real,
+		avg(memory_used_bytes)::bigint, avg(memory_total_bytes)::bigint, avg(load_1)::real,
+		avg(load_5)::real, avg(load_15)::real, avg(connections)::bigint,
+		avg(cache_used_bytes)::bigint, last(cache_directory, minute), last(cache_entries, minute)::bigint,
+		last(cache_hits, minute)::bigint, last(cache_misses, minute)::bigint,
+		last(cache_stale_hits, minute)::bigint, last(cache_evictions, minute)::bigint,
+		last(cache_rejected_writes, minute)::bigint, last(cache_corruptions, minute)::bigint,
+		last(cache_hit_rate, minute)::real, avg(cache_capacity_ratio)::real,
+		last(cache_alerts, minute), avg(disk_used_bytes)::bigint, avg(disk_total_bytes)::bigint
+		FROM analytics.node_runtime_metrics_minute WHERE cluster_id = $1 AND minute >= $2`
 	args := []any{cluster, from}
-
 	if nodeID != "" {
-		q += " AND node_id = ?"
+		q += " AND node_id = $3"
 		args = append(args, nodeID)
 	}
-
 	q += " GROUP BY 1, 2 ORDER BY 1, 2"
-
 	rows, err := s.db.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
-	out := []NodeRuntimePoint{}
+	out := make([]NodeRuntimePoint, 0)
 	for rows.Next() {
-		var x NodeRuntimePoint
-		if err = rows.Scan(
-			&x.Bucket,
-			&x.NodeID,
-			&x.CPU,
-			&x.MemoryUsed,
-			&x.MemoryTotal,
-			&x.Load1,
-			&x.Load5,
-			&x.Load15,
-			&x.Connections,
-			&x.CacheUsed,
-			&x.CacheDirectory,
-			&x.CacheEntries,
-			&x.CacheHits,
-			&x.CacheMisses,
-			&x.CacheStaleHits,
-			&x.CacheEvictions,
-			&x.CacheRejectedWrites,
-			&x.CacheCorruptions,
-			&x.CacheHitRate,
-			&x.CacheCapacityRatio,
-			&x.CacheAlerts,
-			&x.DiskUsed,
-			&x.DiskTotal,
-		); err != nil {
+		var point NodeRuntimePoint
+		if err := scanRuntime(rows, &point); err != nil {
 			return nil, err
 		}
-		out = append(out, x)
+		out = append(out, point)
 	}
-
 	return out, rows.Err()
 }

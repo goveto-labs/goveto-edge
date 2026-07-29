@@ -1,12 +1,15 @@
-import { Button, Input, Label } from '@heroui/react';
-import { CheckCircle2, Globe, Loader2 } from 'lucide-react';
+import { Button, Input } from '@heroui/react';
+import { Globe, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, initializationApi } from '@/api';
+import { FormError, FormField } from '@/components/FormField.tsx';
 import { useInitialization } from '@/hooks/useInitialization.tsx';
+import { useSystemTheme } from '@/hooks/useSystemTheme.ts';
 
 export default function Init() {
+    useSystemTheme();
     const navigate = useNavigate();
     const { complete } = useInitialization();
     const [name, setName] = useState('');
@@ -43,10 +46,10 @@ export default function Init() {
     };
 
     return (
-        <div className='grid min-h-screen'>
-            <main className='relative flex flex-col justify-center bg-background px-6 py-12 sm:px-10 lg:px-16'>
+        <div className='grid h-[100%] bg-background text-foreground'>
+            <main className='relative flex flex-col justify-center overflow-hidden bg-background px-6 py-12 sm:px-10 lg:px-16'>
                 <div className='mx-auto w-full max-w-[380px]'>
-                    <div className='mb-10 flex items-center gap-2.5'>
+                    <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
                             <Globe className='h-4 w-4' />
                         </div>
@@ -62,29 +65,21 @@ export default function Init() {
                         </p>
                     </div>
 
-                    {error && (
-                        <div
-                            className='mb-5 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground'
-                            role='alert'
-                        >
-                            {error}
-                        </div>
-                    )}
+                    {error && <FormError className='mb-5' message={error} />}
 
                     <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='init-name'>Administrator name</Label>
+                        <FormField htmlFor='init-name' label='Administrator name' required>
                             <Input
                                 autoFocus
+                                autoComplete='name'
                                 id='init-name'
                                 placeholder='Your name'
                                 required
                                 value={name}
                                 onChange={(event) => setName(event.target.value)}
                             />
-                        </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='init-email'>Email</Label>
+                        </FormField>
+                        <FormField htmlFor='init-email' label='Email' required>
                             <Input
                                 autoComplete='email'
                                 id='init-email'
@@ -94,35 +89,40 @@ export default function Init() {
                                 value={email}
                                 onChange={(event) => setEmail(event.target.value)}
                             />
-                        </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='init-password'>Password</Label>
+                        </FormField>
+                        <FormField
+                            hint='Use at least 10 characters for the administrator password.'
+                            htmlFor='init-password'
+                            label='Password'
+                            required
+                        >
                             <Input
                                 autoComplete='new-password'
                                 id='init-password'
                                 minLength={10}
+                                placeholder='••••••••••'
                                 required
                                 type='password'
                                 value={password}
                                 onChange={(event) => setPassword(event.target.value)}
                             />
-                        </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='init-confirm-password'>Confirm password</Label>
+                        </FormField>
+                        <FormField
+                            htmlFor='init-confirm-password'
+                            label='Confirm password'
+                            required
+                        >
                             <Input
                                 autoComplete='new-password'
                                 id='init-confirm-password'
                                 minLength={10}
+                                placeholder='••••••••••'
                                 required
                                 type='password'
                                 value={confirmPassword}
                                 onChange={(event) => setConfirmPassword(event.target.value)}
                             />
-                        </div>
-                        <p className='flex items-center gap-2 text-xs text-muted'>
-                            <CheckCircle2 className='h-3.5 w-3.5 text-success' />
-                            Use at least 10 characters for the administrator password.
-                        </p>
+                        </FormField>
                         <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
                             {loading ? (
                                 <span className='flex items-center justify-center gap-2'>

@@ -9,13 +9,14 @@ import (
 
 	"github.com/labstack/echo/v5"
 
+	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/httpapi/types"
 )
 
-func Register(e *echo.Echo, db *sql.DB) {
+func Register(e *echo.Echo, db *sql.DB, analyticsStore ...*analytics.Store) {
 	group := e.Group("/health")
 	group.GET("/live", live)
-	group.GET("/ready", ready(db))
+	group.GET("/ready", ready(db, analyticsStore...))
 }
 
 type statusResponse struct {
@@ -32,12 +33,17 @@ func live(c *echo.Context) error {
 // @summary Readiness
 // @description Readiness probe; checks database connectivity.
 // @Tags health
-func ready(db *sql.DB) echo.HandlerFunc {
+func ready(db *sql.DB, stores ...*analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx, cancel := context.WithTimeout(c.Request().Context(), time.Second)
 		defer cancel()
 		if err := db.PingContext(ctx); err != nil {
 			return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
+		}
+		if len(stores) > 0 && stores[0] != nil {
+			if err := stores[0].Ready(ctx); err != nil {
+				return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
+			}
 		}
 		return types.JSON(c, http.StatusOK, statusResponse{Status: "ok"})
 	}

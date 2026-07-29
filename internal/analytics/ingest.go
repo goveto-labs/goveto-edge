@@ -144,6 +144,10 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 
 		event, e := ParseAccess(r.Payload, clusterID, nodeID, siteID)
 		if e == nil {
+			if !accessLogHasTimestamp(r.Payload) && !r.CreatedAt.IsZero() {
+				event.EventTime = r.CreatedAt.UTC()
+			}
+			event.SourceLogID = r.ID
 			event.ConfigVersion = r.ConfigVersion
 			events = append(events, event)
 		}
@@ -154,11 +158,19 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 			return err
 		}
 	}
-	if err := i.store.Insert(ctx, events); err != nil {
+	inserted, err := i.store.Insert(ctx, events)
+	if err != nil {
 		return err
 	}
-	i.store.publish(events)
+	i.store.publish(inserted)
 	return nil
+}
+
+func accessLogHasTimestamp(payload []byte) bool {
+	var record struct {
+		Timestamp float64 `json:"ts"`
+	}
+	return json.Unmarshal(payload, &record) == nil && record.Timestamp != 0
 }
 
 func (i *Ingest) resolveSites(

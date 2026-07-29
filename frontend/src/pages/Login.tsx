@@ -1,12 +1,13 @@
 import { Button, Input, InputOTP, useOverlayState } from '@heroui/react';
 import { Globe, Loader2, ShieldCheck } from 'lucide-react';
-import { useLayoutEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { ApiError } from '@/api';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
+import { useSystemTheme } from '@/hooks/useSystemTheme.ts';
 
 function isTotpRequired(err: unknown): boolean {
     return (
@@ -16,26 +17,8 @@ function isTotpRequired(err: unknown): boolean {
     );
 }
 
-function useLoginSystemTheme() {
-    useLayoutEffect(() => {
-        const root = document.documentElement;
-        const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
-        const previousTheme = root.getAttribute('data-theme');
-        const applyTheme = () =>
-            root.setAttribute('data-theme', colorScheme.matches ? 'dark' : 'light');
-
-        applyTheme();
-        colorScheme.addEventListener('change', applyTheme);
-        return () => {
-            colorScheme.removeEventListener('change', applyTheme);
-            if (previousTheme) root.setAttribute('data-theme', previousTheme);
-            else root.removeAttribute('data-theme');
-        };
-    }, []);
-}
-
 export default function Login() {
-    useLoginSystemTheme();
+    useSystemTheme();
     const navigate = useNavigate();
     const { login } = useAuth();
     const otpModal = useOverlayState();

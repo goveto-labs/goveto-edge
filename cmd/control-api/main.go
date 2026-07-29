@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	clickhouseschema "goveto-edge/configs/clickhouse"
+	analyticsschema "goveto-edge/configs/analytics"
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
@@ -92,61 +92,49 @@ func main() {
 		os.Exit(1)
 	}
 
-	var analyticsStore *analytics.Store
-	var analyticsIngest *analytics.Ingest
-	if cfg.ClickHouseDSN != "" {
-		clickhouseConn, clickhouseErr := storage.OpenClickHouse(ctx, cfg.ClickHouseDSN)
-		if clickhouseErr != nil {
-			slog.Error("connect ClickHouse", "error", clickhouseErr)
+	analyticsPool, err := storage.OpenAnalyticsPostgreSQL(ctx, cfg.AnalyticsDatabaseURL, int32(cfg.AnalyticsDBMaxConns))
+	if err != nil {
+		slog.Error("connect analytics database", "error", err)
+		os.Exit(1)
+	}
+	defer analyticsPool.Close()
+	analyticsSchemaCtx, cancelAnalyticsSchema := context.WithTimeout(ctx, 5*time.Minute)
+	migrationCount, err := storage.InitAnalyticsSchema(analyticsSchemaCtx, analyticsPool, analyticsschema.FS)
+	cancelAnalyticsSchema()
+	if err != nil {
+		slog.Error("initialize analytics schema", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("analytics schema is up to date", "migrations_applied", migrationCount)
+	analyticsStore := analytics.NewStore(analyticsPool, cfg.AnalyticsQueryTimeout)
+	if err = analyticsStore.ConfigureRawRetention(ctx, cfg.AnalyticsRawRetentionDays); err != nil {
+		slog.Error("configure analytics retention", "error", err)
+		os.Exit(1)
+	}
+	analyticsIngest := analytics.NewIngestWithConcurrency(orm, analyticsStore, cfg.AnalyticsIngestConcurrency)
+	if cfg.AnalyticsArchiveS3Endpoint != "" {
+		archiveStore, archiveErr := analytics.NewS3ObjectStore(analytics.S3Options{
+			Endpoint:     cfg.AnalyticsArchiveS3Endpoint,
+			Bucket:       cfg.AnalyticsArchiveS3Bucket,
+			Region:       cfg.AnalyticsArchiveS3Region,
+			AccessKey:    cfg.AnalyticsArchiveS3AccessKey,
+			SecretKey:    cfg.AnalyticsArchiveS3SecretKey,
+			SessionToken: cfg.AnalyticsArchiveS3SessionToken,
+		})
+		if archiveErr != nil {
+			slog.Error("configure S3 analytics archive", "error", archiveErr)
 			os.Exit(1)
 		}
-		defer clickhouseConn.Close()
-
-		clickhouseSchemaCtx, cancelClickHouseSchema := context.WithTimeout(ctx, 5*time.Minute)
-		statementCount, clickhouseErr := storage.InitClickHouseSchema(clickhouseSchemaCtx, clickhouseConn, clickhouseschema.FS)
-		cancelClickHouseSchema()
-		if clickhouseErr != nil {
-			slog.Error("initialize ClickHouse schema", "error", clickhouseErr)
-			os.Exit(1)
-		}
-		slog.Info("ClickHouse schema is up to date", "statements", statementCount)
-
-		analyticsStore = analytics.NewStore(clickhouseConn)
-		if clickhouseErr = analyticsStore.ConfigureRawRetention(ctx, cfg.AnalyticsRawRetentionDays); clickhouseErr != nil {
-			slog.Error("configure analytics retention", "error", clickhouseErr)
-			os.Exit(1)
-		}
-		analyticsIngest = analytics.NewIngestWithConcurrency(
-			orm, analyticsStore, cfg.AnalyticsIngestConcurrency,
-		)
-		if cfg.AnalyticsArchiveS3Endpoint != "" {
-			archiveStore, archiveErr := analytics.NewS3ObjectStore(analytics.S3Options{
-				Endpoint:     cfg.AnalyticsArchiveS3Endpoint,
-				Bucket:       cfg.AnalyticsArchiveS3Bucket,
-				Region:       cfg.AnalyticsArchiveS3Region,
-				AccessKey:    cfg.AnalyticsArchiveS3AccessKey,
-				SecretKey:    cfg.AnalyticsArchiveS3SecretKey,
-				SessionToken: cfg.AnalyticsArchiveS3SessionToken,
-			})
-			if archiveErr != nil {
-				slog.Error("configure S3 analytics archive", "error", archiveErr)
-				os.Exit(1)
-			}
-			analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(archiveStore, "access-logs"))
-		} else if cfg.AnalyticsArchiveDir != "" {
-			analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(
-				analytics.NewFileObjectStore(cfg.AnalyticsArchiveDir), "access-logs",
-			))
-		}
-		go analytics.NewDailyRollup(analyticsStore, clickhouseschema.FS).Run(ctx)
+		analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(archiveStore, "access-logs"))
+	} else if cfg.AnalyticsArchiveDir != "" {
+		analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(
+			analytics.NewFileObjectStore(cfg.AnalyticsArchiveDir), "access-logs",
+		))
 	}
 
 	var publishService *publisher.Service
 	dnsService := dnssync.New(orm, credentialCipher)
-	var consumeAgentLogs edgecontrol.LogConsumer
-	if analyticsIngest != nil {
-		consumeAgentLogs = analyticsIngest.Consume
-	}
+	var consumeAgentLogs edgecontrol.LogConsumer = analyticsIngest.Consume
 	onNodeStatusChange := func(callbackCtx context.Context, clusterID string) {
 		callbackCtx = context.WithoutCancel(callbackCtx)
 		go func() {

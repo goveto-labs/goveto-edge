@@ -34,12 +34,13 @@ export function FormField({
 
 interface FormErrorProps {
     message: string;
+    className?: string;
 }
 
-export function FormError({ message }: FormErrorProps) {
+export function FormError({ message, className = '' }: FormErrorProps) {
     return (
         <div
-            className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground'
+            className={`rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground ${className}`}
             role='alert'
         >
             {message}

@@ -49,6 +49,59 @@ func TestLoadFromEnvironment(t *testing.T) {
 	}
 }
 
+func TestAnalyticsDatabaseDefaults(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("ANALYTICS_DATABASE_URL", "")
+	t.Setenv("ANALYTICS_DB_MAX_CONNS", "")
+	t.Setenv("ANALYTICS_QUERY_TIMEOUT", "")
+	t.Setenv("CLICKHOUSE_DSN", "clickhouse://ignored")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AnalyticsDatabaseURL != cfg.DatabaseURL || cfg.AnalyticsDBMaxConns != 16 || cfg.AnalyticsQueryTimeout != 5*time.Second {
+		t.Fatalf("unexpected analytics defaults: %#v", cfg)
+	}
+}
+
+func TestAnalyticsDatabaseOverrides(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/control")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("ANALYTICS_DATABASE_URL", "postgresql://localhost/analytics")
+	t.Setenv("ANALYTICS_DB_MAX_CONNS", "32")
+	t.Setenv("ANALYTICS_QUERY_TIMEOUT", "2500ms")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AnalyticsDatabaseURL != "postgresql://localhost/analytics" || cfg.AnalyticsDBMaxConns != 32 || cfg.AnalyticsQueryTimeout != 2500*time.Millisecond {
+		t.Fatalf("unexpected analytics overrides: %#v", cfg)
+	}
+}
+
+func TestAnalyticsDatabaseRejectsInvalidLimits(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	t.Setenv("ANALYTICS_DB_MAX_CONNS", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("zero analytics connection limit was accepted")
+	}
+	t.Setenv("ANALYTICS_DB_MAX_CONNS", "16")
+	t.Setenv("ANALYTICS_QUERY_TIMEOUT", "0s")
+	if _, err := Load(); err == nil {
+		t.Fatal("zero analytics query timeout was accepted")
+	}
+}
+
 func TestGeoIPConfigurationDefaultsAndProductionOptIn(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")

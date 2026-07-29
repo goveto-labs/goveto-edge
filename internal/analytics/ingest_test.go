@@ -2,6 +2,15 @@ package analytics
 
 import "testing"
 
+func TestAccessLogHasTimestamp(t *testing.T) {
+	if !accessLogHasTimestamp([]byte(`{"ts":1753783200.25}`)) {
+		t.Fatal("valid access-log timestamp was not detected")
+	}
+	if accessLogHasTimestamp([]byte(`{"status":200}`)) || accessLogHasTimestamp([]byte(`not-json`)) {
+		t.Fatal("missing access-log timestamp was detected")
+	}
+}
+
 func TestDecodeOriginHealth(t *testing.T) {
 	metric, ok := decodeOriginHealth([]byte(`{
 		"minute":"2026-07-25T12:00:00Z","site_id":"site-1","origin_address":"origin:443",

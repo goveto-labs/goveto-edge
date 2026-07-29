@@ -1,2 +1,2 @@
-// Package analytics provides ClickHouse-backed queries and reporting.
+// Package analytics provides TimescaleDB-backed ingestion and reporting.
 package analytics

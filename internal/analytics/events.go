@@ -9,6 +9,7 @@ import (
 // byte counts but never request or response body content.
 type WebRequestLog struct {
 	EventTime           time.Time
+	SourceLogID         uint64
 	RequestID           string
 	ClusterID           string
 	NodeID              string

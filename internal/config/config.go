@@ -36,7 +36,9 @@ type Config struct {
 	ShutdownTimeout                time.Duration
 	DatabaseURL                    string
 	RedisURL                       string
-	ClickHouseDSN                  string
+	AnalyticsDatabaseURL           string
+	AnalyticsDBMaxConns            int
+	AnalyticsQueryTimeout          time.Duration
 	AnalyticsIngestConcurrency     int
 	AnalyticsRawRetentionDays      int
 	AnalyticsArchiveDir            string
@@ -114,6 +116,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	analyticsDBMaxConns, err := envInt("ANALYTICS_DB_MAX_CONNS", 16)
+	if err != nil {
+		return Config{}, err
+	}
+	analyticsQueryTimeout, err := envDuration("ANALYTICS_QUERY_TIMEOUT", 5*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
 
 	appEnv := envString("APP_ENV", "development")
 	geoIPPollInterval, err := envDuration("GEOIP_DATABASE_POLL_INTERVAL", 30*time.Second)
@@ -147,7 +157,9 @@ func Load() (Config, error) {
 		ShutdownTimeout:                shutdownTimeout,
 		DatabaseURL:                    os.Getenv("DATABASE_URL"),
 		RedisURL:                       os.Getenv("REDIS_URL"),
-		ClickHouseDSN:                  os.Getenv("CLICKHOUSE_DSN"),
+		AnalyticsDatabaseURL:           strings.TrimSpace(os.Getenv("ANALYTICS_DATABASE_URL")),
+		AnalyticsDBMaxConns:            analyticsDBMaxConns,
+		AnalyticsQueryTimeout:          analyticsQueryTimeout,
 		AnalyticsIngestConcurrency:     analyticsIngestConcurrency,
 		AnalyticsRawRetentionDays:      analyticsRawRetentionDays,
 		AnalyticsArchiveDir:            strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_DIR")),
@@ -172,6 +184,9 @@ func Load() (Config, error) {
 	if cfg.DatabaseURL == "" {
 		return Config{}, errors.New("DATABASE_URL is required")
 	}
+	if cfg.AnalyticsDatabaseURL == "" {
+		cfg.AnalyticsDatabaseURL = cfg.DatabaseURL
+	}
 	if cfg.RedisURL == "" {
 		return Config{}, errors.New("REDIS_URL is required")
 	}
@@ -192,6 +207,12 @@ func Load() (Config, error) {
 	}
 	if cfg.AnalyticsRawRetentionDays < 1 || cfg.AnalyticsRawRetentionDays > 3650 {
 		return Config{}, errors.New("ANALYTICS_RAW_RETENTION_DAYS must be between 1 and 3650")
+	}
+	if cfg.AnalyticsDBMaxConns < 1 || cfg.AnalyticsDBMaxConns > 1024 {
+		return Config{}, errors.New("ANALYTICS_DB_MAX_CONNS must be between 1 and 1024")
+	}
+	if cfg.AnalyticsQueryTimeout <= 0 {
+		return Config{}, errors.New("ANALYTICS_QUERY_TIMEOUT must be positive")
 	}
 	if cfg.GeoIPDatabasePollInterval <= 0 {
 		return Config{}, errors.New("GEOIP_DATABASE_POLL_INTERVAL must be positive")

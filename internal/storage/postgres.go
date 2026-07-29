@@ -1,4 +1,4 @@
-// Package storage contains PostgreSQL, Redis, and ClickHouse adapters.
+// Package storage contains PostgreSQL, TimescaleDB, and Redis adapters.
 package storage
 
 import (

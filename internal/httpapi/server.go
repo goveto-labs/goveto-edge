@@ -70,8 +70,12 @@ func New(
 
 	captchaVerifier := captcha.New()
 	limiter := httpsecurity.NewRateLimiter(redisClient)
+	var analyticsData *analytics.Store
+	if len(analyticsStore) > 0 {
+		analyticsData = analyticsStore[0]
+	}
 
-	health.Register(e, db)
+	health.Register(e, db, analyticsData)
 	initialization.Register(e, orm, settingStore, limiter)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier, limiter)
 	clusters.Register(e, orm, sessions)
@@ -81,10 +85,6 @@ func New(
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	jobsapi.Register(e, orm, publishService)
-	var analyticsData *analytics.Store
-	if len(analyticsStore) > 0 {
-		analyticsData = analyticsStore[0]
-	}
 	sites.Register(e, orm, publishService, analyticsData, redisClient)
 
 	if analyticsData != nil {
