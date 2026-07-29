@@ -6,13 +6,11 @@ import type {
     DeliveryPolicy,
     DistributionItem,
     MonitoringOverview,
-    NodeRequestLog,
     SecurityPolicy,
     SiteDetails,
     SiteListenerConfig,
     SiteOrigin,
     TrafficPoint,
-    WAFRuleStat,
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
@@ -28,7 +26,6 @@ import {
     HardDrive,
     LockKeyhole,
     Plus,
-    RefreshCw,
     Rocket,
     Route,
     Save,
@@ -67,6 +64,7 @@ import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { CacheOperations } from '@/pages/PurgeJobs.tsx';
+import { SiteAccessLogsView } from '@/pages/SitesAccessLogs.tsx';
 import { defaultDeliveryPolicy, normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
@@ -347,12 +345,8 @@ export default function SiteDetail() {
     const [paths, setPaths] = useState<DistributionItem[]>([]);
     const [ipsRequests, setIpsRequests] = useState<DistributionItem[]>([]);
     const [ipsTraffic, setIpsTraffic] = useState<DistributionItem[]>([]);
-    const [logs, setLogs] = useState<NodeRequestLog[]>([]);
-    const [wafStats, setWAFStats] = useState<WAFRuleStat[]>([]);
-    const [logQuery, setLogQuery] = useState('');
     const [loading, setLoading] = useState(true);
     const [monitoringLoading, setMonitoringLoading] = useState(false);
-    const [logsLoading, setLogsLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [publishingSite, setPublishingSite] = useState(false);
     const [error, setError] = useState('');
@@ -483,26 +477,6 @@ export default function SiteDetail() {
         }
     }, [analytics, clusterId, period, siteId]);
 
-    const loadLogs = useCallback(async () => {
-        if (!clusterId || !siteId) return;
-        setLogsLoading(true);
-        try {
-            const to = new Date();
-            const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
-            const [entries, stats] = await Promise.all([
-                analytics.siteLogs(siteId, { page_size: 100 }),
-                analytics.wafStats(siteId, from.toISOString(), to.toISOString(), 100),
-            ]);
-            setLogs(entries.items);
-            setWAFStats(stats);
-            setError('');
-        } catch (loadError) {
-            setError(loadError instanceof ApiError ? loadError.message : 'Failed to load logs');
-        } finally {
-            setLogsLoading(false);
-        }
-    }, [analytics, clusterId, siteId]);
-
     useEffect(() => {
         void loadBase();
     }, [loadBase]);
@@ -521,7 +495,6 @@ export default function SiteDetail() {
     }, [api, loadOverview, siteId]);
 
     useAutoRefresh(loadSiteOverview, tab === 'overview' && Boolean(clusterId && siteId));
-    useAutoRefresh(loadLogs, tab === 'logs' && Boolean(clusterId && siteId));
 
     useEffect(() => {
         if (!siteId || detailPath === canonicalDetailPath) return;
@@ -651,11 +624,6 @@ export default function SiteDetail() {
         bucket: point.bucket,
         values: { requests: point.requests },
     }));
-    const filteredLogs = logs.filter((entry) =>
-        `${entry.hostname} ${entry.method} ${entry.path} ${entry.status_code} ${entry.cache_status} ${entry.request_id} ${entry.waf_action ?? ''} ${entry.waf_rule_id ?? ''} ${entry.waf_source ?? ''}`
-            .toLowerCase()
-            .includes(logQuery.toLowerCase())
-    );
     const certificateOptions = useMemo(
         () =>
             certificates.map((certificate) => ({
@@ -667,17 +635,10 @@ export default function SiteDetail() {
             })),
         [certificates]
     );
-    const enteringDataTab =
-        previousDetailPathRef.current !== detailPath && (tab === 'overview' || tab === 'logs');
+    const enteringDataTab = previousDetailPathRef.current !== detailPath && tab === 'overview';
     const tabContentLoading =
         enteringDataTab ||
-        (tab === 'overview'
-            ? monitoringLoading
-            : tab === 'logs'
-              ? logsLoading
-              : tab === 'settings'
-                ? saving
-                : false);
+        (tab === 'overview' ? monitoringLoading : tab === 'settings' ? saving : false);
 
     if (!clusterId) return <FormError message='Select a cluster to view this site.' />;
 
@@ -920,176 +881,7 @@ export default function SiteDetail() {
                                     </div>
                                 </div>
                             )}
-                            {tab === 'logs' && (
-                                <ContentCard noPadding>
-                                    <div className='flex flex-col gap-3 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
-                                        <div>
-                                            <h2 className='text-sm font-semibold'>Request logs</h2>
-                                            <p className='mt-1 text-xs text-muted'>
-                                                Latest 300 requests for this site.
-                                            </p>
-                                        </div>
-                                        <div className='flex gap-2'>
-                                            <Input
-                                                aria-label='Filter request logs'
-                                                placeholder='Filter host, path, status...'
-                                                value={logQuery}
-                                                variant='secondary'
-                                                onChange={(event) =>
-                                                    setLogQuery(event.target.value)
-                                                }
-                                            />
-                                            <Button
-                                                isDisabled={logsLoading}
-                                                variant='secondary'
-                                                onPress={() => void loadLogs()}
-                                            >
-                                                <RefreshCw className='mr-1.5 h-4 w-4' />
-                                                Refresh
-                                            </Button>
-                                        </div>
-                                    </div>
-                                    {wafStats.length > 0 && (
-                                        <div className='border-b border-border'>
-                                            <div className='px-4 py-3'>
-                                                <h3 className='text-sm font-semibold'>
-                                                    WAF activity, last 24 hours
-                                                </h3>
-                                            </div>
-                                            <div className='overflow-x-auto'>
-                                                <table className='w-full min-w-[760px] text-left text-sm'>
-                                                    <thead className='bg-surface-secondary/50 text-xs text-muted'>
-                                                        <tr>
-                                                            <th className='px-4 py-2.5'>Rule</th>
-                                                            <th className='px-4 py-2.5'>Action</th>
-                                                            <th className='px-4 py-2.5'>Source</th>
-                                                            <th className='px-4 py-2.5'>
-                                                                Requests
-                                                            </th>
-                                                            <th className='px-4 py-2.5'>
-                                                                Unique IPs
-                                                            </th>
-                                                            <th className='px-4 py-2.5'>
-                                                                Last seen
-                                                            </th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody className='divide-y divide-border'>
-                                                        {wafStats.map((item) => (
-                                                            <tr
-                                                                key={`${item.rule_id}-${item.action}-${item.source}-${item.match}`}
-                                                            >
-                                                                <td className='px-4 py-2.5 font-mono text-xs'>
-                                                                    {item.rule_id}
-                                                                </td>
-                                                                <td className='px-4 py-2.5'>
-                                                                    {item.action}
-                                                                </td>
-                                                                <td className='px-4 py-2.5 text-muted'>
-                                                                    {item.source}
-                                                                </td>
-                                                                <td className='px-4 py-2.5'>
-                                                                    {item.requests.toLocaleString()}
-                                                                </td>
-                                                                <td className='px-4 py-2.5'>
-                                                                    {item.unique_ips.toLocaleString()}
-                                                                </td>
-                                                                <td className='whitespace-nowrap px-4 py-2.5 text-muted'>
-                                                                    {new Date(
-                                                                        item.last_seen
-                                                                    ).toLocaleString()}
-                                                                </td>
-                                                            </tr>
-                                                        ))}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        </div>
-                                    )}
-                                    <div className='overflow-x-auto'>
-                                        <table className='w-full min-w-[1120px] text-left text-sm'>
-                                            <thead className='bg-surface-secondary/50 text-xs text-muted'>
-                                                <tr>
-                                                    <th className='px-4 py-3'>Time</th>
-                                                    <th className='px-4 py-3'>Request</th>
-                                                    <th className='px-4 py-3'>Status</th>
-                                                    <th className='px-4 py-3'>Cache</th>
-                                                    <th className='px-4 py-3'>Security</th>
-                                                    <th className='px-4 py-3'>Upstream</th>
-                                                    <th className='px-4 py-3'>Duration</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody className='divide-y divide-border'>
-                                                {filteredLogs.map((entry) => (
-                                                    <tr
-                                                        key={`${entry.event_time}-${entry.request_id}`}
-                                                    >
-                                                        <td className='whitespace-nowrap px-4 py-3 text-muted'>
-                                                            {new Date(
-                                                                entry.event_time
-                                                            ).toLocaleString()}
-                                                        </td>
-                                                        <td className='max-w-md px-4 py-3'>
-                                                            <div className='font-medium'>
-                                                                {entry.method} {entry.hostname}
-                                                            </div>
-                                                            <div className='truncate font-mono text-xs text-muted'>
-                                                                {entry.path}
-                                                            </div>
-                                                            <div className='truncate font-mono text-xs text-muted'>
-                                                                {entry.request_id}
-                                                            </div>
-                                                        </td>
-                                                        <td className='px-4 py-3 font-mono'>
-                                                            {entry.status_code}
-                                                        </td>
-                                                        <td className='px-4 py-3'>
-                                                            {entry.cache_status || '-'}
-                                                        </td>
-                                                        <td className='px-4 py-3'>
-                                                            {entry.waf_action ? (
-                                                                <div>
-                                                                    <div className='font-medium'>
-                                                                        {entry.waf_action}
-                                                                    </div>
-                                                                    <div className='font-mono text-xs text-muted'>
-                                                                        {entry.waf_rule_id}
-                                                                    </div>
-                                                                    <div className='text-xs text-muted'>
-                                                                        {entry.waf_source}
-                                                                        {entry.waf_match
-                                                                            ? ` / ${entry.waf_match}`
-                                                                            : ''}
-                                                                    </div>
-                                                                </div>
-                                                            ) : (
-                                                                '-'
-                                                            )}
-                                                        </td>
-                                                        <td className='px-4 py-3 font-mono text-xs'>
-                                                            {entry.upstream_address || '-'}
-                                                        </td>
-                                                        <td className='px-4 py-3'>
-                                                            {(entry.duration_us / 1000).toFixed(1)}{' '}
-                                                            ms
-                                                        </td>
-                                                    </tr>
-                                                ))}
-                                                {filteredLogs.length === 0 && (
-                                                    <tr>
-                                                        <td
-                                                            className='px-4 py-12 text-center text-muted'
-                                                            colSpan={7}
-                                                        >
-                                                            No matching request logs.
-                                                        </td>
-                                                    </tr>
-                                                )}
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </ContentCard>
-                            )}
+                            {tab === 'logs' && <SiteAccessLogsView embeddedSiteId={siteId} />}
                             {tab === 'settings' && (
                                 <div className='grid gap-6 lg:grid-cols-[200px_1fr]'>
                                     <nav className='flex flex-col gap-1 lg:sticky lg:top-0 lg:self-start'>

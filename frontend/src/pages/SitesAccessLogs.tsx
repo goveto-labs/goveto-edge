@@ -182,7 +182,11 @@ function RequestDetails({ entry }: { entry: NodeRequestLog }) {
     );
 }
 
-export default function SitesAccessLogs() {
+interface SitesAccessLogsProps {
+    embeddedSiteId?: string;
+}
+
+export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
     const { clusterId } = useCluster();
     const sites = useMemo(() => sitesApi(clusterId), [clusterId]);
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
@@ -198,6 +202,7 @@ export default function SitesAccessLogs() {
     const [selected, setSelected] = useState<NodeRequestLog | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+    const activeSiteId = embeddedSiteId || siteId;
 
     useEffect(() => {
         const timer = window.setTimeout(() => {
@@ -208,7 +213,7 @@ export default function SitesAccessLogs() {
     }, [query]);
 
     const loadSites = useCallback(async () => {
-        if (!clusterId) return;
+        if (!clusterId || embeddedSiteId) return;
         try {
             const items = await sites.list();
             setSiteItems(items);
@@ -218,18 +223,18 @@ export default function SitesAccessLogs() {
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
         }
-    }, [clusterId, sites]);
+    }, [clusterId, embeddedSiteId, sites]);
 
     const loadLogs = useCallback(async () => {
         const sequence = ++requestSequence.current;
-        if (!clusterId || !siteId) {
+        if (!clusterId || !activeSiteId) {
             setLogs([]);
             setTotal(0);
             return;
         }
         setLoading(true);
         try {
-            const result = await analytics.siteLogs(siteId, {
+            const result = await analytics.siteLogs(activeSiteId, {
                 page,
                 page_size: pageSize,
                 query: search || undefined,
@@ -251,10 +256,10 @@ export default function SitesAccessLogs() {
         } finally {
             if (sequence === requestSequence.current) setLoading(false);
         }
-    }, [analytics, clusterId, page, pageSize, search, siteId]);
+    }, [activeSiteId, analytics, clusterId, page, pageSize, search]);
 
-    useAutoRefresh(loadSites, Boolean(clusterId));
-    useAutoRefresh(loadLogs, Boolean(clusterId && siteId));
+    useAutoRefresh(loadSites, Boolean(clusterId && !embeddedSiteId));
+    useAutoRefresh(loadLogs, Boolean(clusterId && activeSiteId));
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -273,10 +278,12 @@ export default function SitesAccessLogs() {
 
     return (
         <div className='space-y-5'>
-            <PageHeader
-                subtitle='Inspect requests, client location, delivery behavior, and security decisions.'
-                title='Site access logs'
-            />
+            {!embeddedSiteId && (
+                <PageHeader
+                    subtitle='Inspect requests, client location, delivery behavior, and security decisions.'
+                    title='Site access logs'
+                />
+            )}
 
             {error && (
                 <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
@@ -285,27 +292,35 @@ export default function SitesAccessLogs() {
             )}
 
             <ContentCard allowOverflow>
-                <div className='grid gap-3 md:grid-cols-2 md:items-end lg:grid-cols-[minmax(220px,1fr)_minmax(260px,1.4fr)_140px_auto]'>
-                    <SelectField
-                        className='w-full'
-                        id='site-log-site'
-                        label='Site'
-                        options={
-                            siteItems.length === 0
-                                ? [{ id: '', label: 'No sites available' }]
-                                : siteItems.map((site) => ({
-                                      id: site.id,
-                                      label: `${site.name} (${site.domains?.[0] || site.id})`,
-                                  }))
-                        }
-                        placeholder='Select a site'
-                        value={siteId}
-                        variant='secondary'
-                        onChange={(value) => {
-                            setSiteId(value);
-                            setPage(1);
-                        }}
-                    />
+                <div
+                    className={`grid gap-3 md:grid-cols-2 md:items-end ${
+                        embeddedSiteId
+                            ? 'lg:grid-cols-[minmax(260px,1fr)_140px_auto]'
+                            : 'lg:grid-cols-[minmax(220px,1fr)_minmax(260px,1.4fr)_140px_auto]'
+                    }`}
+                >
+                    {!embeddedSiteId && (
+                        <SelectField
+                            className='w-full'
+                            id='site-log-site'
+                            label='Site'
+                            options={
+                                siteItems.length === 0
+                                    ? [{ id: '', label: 'No sites available' }]
+                                    : siteItems.map((site) => ({
+                                          id: site.id,
+                                          label: `${site.name} (${site.domains?.[0] || site.id})`,
+                                      }))
+                            }
+                            placeholder='Select a site'
+                            value={siteId}
+                            variant='secondary'
+                            onChange={(value) => {
+                                setSiteId(value);
+                                setPage(1);
+                            }}
+                        />
+                    )}
                     <FormField htmlFor='access-log-search' label='Search requests'>
                         <Input
                             id='access-log-search'
@@ -330,7 +345,7 @@ export default function SitesAccessLogs() {
                         }}
                     />
                     <Button
-                        isDisabled={loading || !siteId}
+                        isDisabled={loading || !activeSiteId}
                         variant='secondary'
                         onPress={() => void loadLogs()}
                     >
@@ -345,7 +360,7 @@ export default function SitesAccessLogs() {
                 className='[&_td]:py-2.5 [&_th]:tracking-normal'
                 empty={logs.length === 0}
                 emptyDescription='Requests received by the selected site will appear here.'
-                emptyTitle={siteId ? 'No matching access logs' : 'Select a site'}
+                emptyTitle={activeSiteId ? 'No matching access logs' : 'Select a site'}
                 loading={loading}
                 title={`${total.toLocaleString()} requests`}
             >
@@ -500,4 +515,8 @@ export default function SitesAccessLogs() {
             </DialogShell>
         </div>
     );
+}
+
+export default function SitesAccessLogs() {
+    return <SiteAccessLogsView />;
 }
