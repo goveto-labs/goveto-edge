@@ -288,11 +288,14 @@ func agentInstallScript(privileged string) string {
 %sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
 %sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
 %sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
+echo 'net.core.rmem_max=7500000' | %stee /etc/sysctl.d/99-udp-buffers.conf >/dev/null
+echo 'net.core.wmem_max=7500000' | %stee -a /etc/sysctl.d/99-udp-buffers.conf >/dev/null
+%ssysctl -p /etc/sysctl.d/99-udp-buffers.conf
 %ssystemctl daemon-reload
 %ssystemctl enable goveto-edge-agent
 %ssystemctl restart goveto-edge-agent
 %ssystemctl is-active --quiet goveto-edge-agent
-`, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged)
+`, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged)
 }
 
 func (w *InstallWorker) collectAndStoreHardwareProfile(
