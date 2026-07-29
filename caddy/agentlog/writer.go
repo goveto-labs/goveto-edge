@@ -7,12 +7,13 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 )
 
 type Sink interface {
-	WriteCaddyLog(siteID string, configVersion uint64, payload []byte) error
+	WriteCaddyLog(siteID string, configVersion uint64, receivedAt time.Time, payload []byte) error
 }
 
 var state struct {
@@ -62,7 +63,7 @@ func (w *queueWriter) Write(data []byte) (int, error) {
 		if len(line) == 0 {
 			continue
 		}
-		if err := w.sink.WriteCaddyLog(w.siteID, w.configVersion, append([]byte(nil), line...)); err != nil {
+		if err := w.sink.WriteCaddyLog(w.siteID, w.configVersion, time.Now().UTC(), append([]byte(nil), line...)); err != nil {
 			return 0, fmt.Errorf("buffer caddy log: %w", err)
 		}
 	}

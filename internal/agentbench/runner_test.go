@@ -1,6 +1,7 @@
 package agentbench
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
@@ -8,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	quic "github.com/quic-go/quic-go"
+	"github.com/quic-go/quic-go/http3"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -60,6 +64,22 @@ func TestCounterDeltaHandlesReset(t *testing.T) {
 	}
 	if got := counterDelta(3, 10); got != 3 {
 		t.Fatalf("counterDelta() after reset=%d, want 3", got)
+	}
+}
+
+func TestIgnoreMeasurementCancellationRecognizesOnlyLocalH3Cancellation(t *testing.T) {
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+	local := &quic.StreamError{ErrorCode: quic.StreamErrorCode(http3.ErrCodeRequestCanceled)}
+	if !ignoreMeasurementCancellation(ended, local) {
+		t.Fatal("local H3 cancellation after measurement was counted")
+	}
+	remote := &quic.StreamError{ErrorCode: quic.StreamErrorCode(http3.ErrCodeRequestCanceled), Remote: true}
+	if ignoreMeasurementCancellation(ended, remote) {
+		t.Fatal("remote H3 cancellation was ignored")
+	}
+	if ignoreMeasurementCancellation(t.Context(), local) {
+		t.Fatal("H3 cancellation during measurement was ignored")
 	}
 }
 

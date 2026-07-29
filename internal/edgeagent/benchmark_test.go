@@ -1,10 +1,12 @@
 package edgeagent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func BenchmarkRenderCaddyConfig(b *testing.B) {
@@ -44,6 +46,80 @@ func BenchmarkLogQueue(b *testing.B) {
 			if _, err := queue.Append(LogRecord{Type: "access", Payload: payload}); err != nil {
 				b.Fatal(err)
 			}
+		}
+	})
+	b.Run("AppendBatch512", func(b *testing.B) {
+		queue, err := OpenLogQueue(filepath.Join(b.TempDir(), "append-batch.db"), 1<<40)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer queue.Close()
+		records := make([]LogRecord, 512)
+		for index := range records {
+			records[index] = LogRecord{Type: "access", Payload: payload}
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if _, err := queue.AppendBatch(records); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+	b.Run("EnqueueAccess", func(b *testing.B) {
+		queue, err := OpenLogQueue(filepath.Join(b.TempDir(), "enqueue.db"), 1<<40)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 0}, defaultAccessLogConfig()); err != nil {
+			b.Fatal(err)
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(worker *testing.PB) {
+			for worker.Next() {
+				queue.EnqueueAccess(LogRecord{Type: "access", Payload: payload})
+			}
+		})
+		b.StopTimer()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := queue.ShutdownAccess(shutdownContext); err != nil {
+			b.Fatal(err)
+		}
+		if err := queue.Close(); err != nil {
+			b.Fatal(err)
+		}
+	})
+	b.Run("AccessPipeline", func(b *testing.B) {
+		queue, err := OpenLogQueue(filepath.Join(b.TempDir(), "pipeline.db"), 1<<40)
+		if err != nil {
+			b.Fatal(err)
+		}
+		policy := LogPolicy{SampleRate: 1, RedactQuery: true, AnonymizeIP: true, RedactedHeaders: map[string]struct{}{"authorization": {}}}
+		if err := queue.StartAccessPipeline(policy, defaultAccessLogConfig()); err != nil {
+			b.Fatal(err)
+		}
+		accessPayload := json.RawMessage(`{"request":{"uri":"/asset?token=secret","client_ip":"192.0.2.129","headers":{"Authorization":["secret"]}},"status":200}`)
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			queue.EnqueueAccess(LogRecord{Type: "access", Payload: accessPayload})
+		}
+		b.StopTimer()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := queue.ShutdownAccess(shutdownContext); err != nil {
+			b.Fatal(err)
+		}
+		stats, err := queue.Stats()
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.ReportMetric(stats.AverageBatchSize, "records/batch")
+		b.ReportMetric(float64(stats.MemoryDroppedRecords), "dropped")
+		if err := queue.Close(); err != nil {
+			b.Fatal(err)
 		}
 	})
 	b.Run("Batch1000", func(b *testing.B) {

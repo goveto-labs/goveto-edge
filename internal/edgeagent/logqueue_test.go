@@ -1,8 +1,13 @@
 package edgeagent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -248,5 +253,303 @@ func TestLogQueueCountsCapacityDrops(t *testing.T) {
 	}
 	if stats.DroppedRecords == 0 {
 		t.Fatalf("expected capacity eviction count: %#v", stats)
+	}
+}
+
+func TestLogQueueAppendBatchUsesContinuousIDsAndOneNotification(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	records := []LogRecord{
+		{Type: "a", Payload: json.RawMessage(`{"n":1}`)},
+		{Type: "b", Payload: json.RawMessage(`{"n":2}`)},
+		{Type: "c", Payload: json.RawMessage(`{"n":3}`)},
+	}
+	ids, err := queue.AppendBatch(records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 3 || ids[1] != ids[0]+1 || ids[2] != ids[1]+1 {
+		t.Fatalf("non-contiguous IDs: %v", ids)
+	}
+	select {
+	case <-queue.Wait():
+	case <-time.After(time.Second):
+		t.Fatal("batch did not notify waiters")
+	}
+	select {
+	case <-queue.Wait():
+		t.Fatal("batch emitted more than one notification")
+	default:
+	}
+}
+
+func TestLogQueueAppendBatchIsAtomic(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	_, err = queue.AppendBatch([]LogRecord{
+		{Type: "valid", Payload: json.RawMessage(`{"ok":true}`)},
+		{Type: "invalid", Payload: json.RawMessage(`{`)},
+	})
+	if err == nil {
+		t.Fatal("invalid record did not fail the batch")
+	}
+	batch, err := queue.Batch(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 0 {
+		t.Fatalf("failed batch was partially committed: %#v", batch)
+	}
+	id, err := queue.Append(LogRecord{Type: "next", Payload: json.RawMessage(`{"ok":true}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != 1 {
+		t.Fatalf("failed transaction consumed sequence IDs: got %d", id)
+	}
+}
+
+func TestAccessPipelineDropsNewestAtRecordLimitAndFlushes(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1024, BufferRecords: 2, BatchBytes: 1024, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for index, payload := range []json.RawMessage{json.RawMessage(`{"n":1}`), json.RawMessage(`{"n":2}`), json.RawMessage(`{"n":3}`)} {
+		enqueued := queue.EnqueueAccess(LogRecord{Type: "access", Payload: payload})
+		if enqueued != (index < 2) {
+			t.Fatalf("enqueue %d=%t", index, enqueued)
+		}
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MemoryBufferRecords != 2 || stats.MemoryDroppedRecords != 1 || stats.DroppedRecords != 1 {
+		t.Fatalf("unexpected buffered stats: %#v", stats)
+	}
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	batch, err := queue.Batch(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch) != 2 || string(batch[0].Payload) != `{"n":1}` || string(batch[1].Payload) != `{"n":2}` {
+		t.Fatalf("newest record was not dropped: %#v", batch)
+	}
+}
+
+func TestAccessPipelineEnforcesByteLimit(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	payload := json.RawMessage(`{"padding":"xxxxxxxx"}`)
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: uint64(len(payload)*2 - 1), BufferRecords: 10, BatchBytes: 1024, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !queue.EnqueueAccess(LogRecord{Type: "access", Payload: payload}) {
+		t.Fatal("first record was rejected")
+	}
+	if queue.EnqueueAccess(LogRecord{Type: "access", Payload: payload}) {
+		t.Fatal("record exceeding the byte limit was accepted")
+	}
+}
+
+func TestAccessPipelineRetriesFailedBatch(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1024, BufferRecords: 10, BatchBytes: 1024, BatchRecords: 2, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var attempts atomic.Int32
+	queue.accessMu.Lock()
+	queue.accessPersistOverride = func(records []LogRecord) ([]uint64, error) {
+		if attempts.Add(1) < 3 {
+			return nil, errors.New("temporary write failure")
+		}
+		return queue.AppendBatch(records)
+	}
+	queue.accessMu.Unlock()
+	queue.EnqueueAccess(LogRecord{Type: "access", Payload: json.RawMessage(`{"n":1}`)})
+	queue.EnqueueAccess(LogRecord{Type: "access", Payload: json.RawMessage(`{"n":2}`)})
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if attempts.Load() != 3 || stats.CommittedBatches != 1 || stats.CommittedRecords != 2 || stats.LastPersistError != "temporary write failure" {
+		t.Fatalf("unexpected retry stats: attempts=%d stats=%#v", attempts.Load(), stats)
+	}
+}
+
+func TestAccessPipelineShutdownTimeoutReportsRemainingRecords(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1024, BufferRecords: 10, BatchBytes: 1024, BatchRecords: 1, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	queue.accessMu.Lock()
+	queue.accessPersistOverride = func([]LogRecord) ([]uint64, error) { return nil, errors.New("disk unavailable") }
+	queue.accessMu.Unlock()
+	queue.EnqueueAccess(LogRecord{Type: "access", Payload: json.RawMessage(`{"ok":true}`)})
+	shutdownContext, cancel := context.WithTimeout(t.Context(), 25*time.Millisecond)
+	defer cancel()
+	err = queue.ShutdownAccess(shutdownContext)
+	if err == nil || !strings.Contains(err.Error(), "remaining records=1") {
+		t.Fatalf("unexpected shutdown error: %v", err)
+	}
+	stats, statsErr := queue.Stats()
+	if statsErr != nil {
+		t.Fatal(statsErr)
+	}
+	if stats.MemoryBufferRecords != 1 || stats.LastPersistError != "disk unavailable" {
+		t.Fatalf("unexpected timeout stats: %#v", stats)
+	}
+}
+
+func TestAccessPipelineRedactsBeforePersistence(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	policy := LogPolicy{SampleRate: 1, RedactQuery: true, AnonymizeIP: true, RedactedHeaders: map[string]struct{}{"authorization": {}}}
+	if err := queue.StartAccessPipeline(policy, AccessLogConfig{
+		BufferBytes: 4096, BufferRecords: 10, BatchBytes: 4096, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"request":{"uri":"/account?token=secret","client_ip":"192.0.2.129","headers":{"Authorization":["Bearer secret"]}},"status":200}`)
+	if !queue.EnqueueAccess(LogRecord{Type: "access", Payload: raw}) {
+		t.Fatal("access record was not enqueued")
+	}
+	before, err := queue.Batch(10)
+	if err != nil || len(before) != 0 {
+		t.Fatalf("raw access record reached durable queue before worker flush: %#v, %v", before, err)
+	}
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	after, err := queue.Batch(10)
+	if err != nil || len(after) != 1 {
+		t.Fatalf("unexpected persisted records: %#v, %v", after, err)
+	}
+	for _, secret := range []string{"token=secret", "192.0.2.129", "Bearer secret"} {
+		if strings.Contains(string(after[0].Payload), secret) {
+			t.Fatalf("persisted access record contains %q: %s", secret, after[0].Payload)
+		}
+	}
+}
+
+func TestAccessPipelineConcurrentEnqueue(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1 << 20, BufferRecords: 2000, BatchBytes: 4096, BatchRecords: 32, FlushInterval: time.Millisecond,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var workers sync.WaitGroup
+	var rejected atomic.Uint64
+	for worker := range 8 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range 100 {
+				payload, _ := json.Marshal(map[string]int{"worker": worker, "index": index})
+				if !queue.EnqueueAccess(LogRecord{Type: "access", Payload: payload}) {
+					rejected.Add(1)
+				}
+			}
+		}()
+	}
+	workers.Wait()
+	shutdownContext, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Load() != 0 || stats.Records != 800 || stats.MemoryBufferRecords != 0 || stats.AverageBatchSize < 16 {
+		t.Fatalf("concurrent enqueue lost records: rejected=%d stats=%#v", rejected.Load(), stats)
+	}
+}
+
+func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err := queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1024, BufferRecords: 10, BatchBytes: 1024, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sink := agentLogSink{queue: queue}
+	if err := sink.WriteCaddyLog("site-a", 42, time.Now().UTC(), json.RawMessage(`{"message":"not decoded on request path"}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := sink.WriteCaddyLog("", 0, time.Now().UTC(), json.RawMessage(`{"request":{},"status":200}`)); err != nil {
+		t.Fatal(err)
+	}
+	before, err := queue.Batch(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(before) != 1 || before[0].Type != "caddy" {
+		t.Fatalf("default Caddy log was not synchronously persisted: %#v", before)
+	}
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	after, err := queue.Batch(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != 2 || after[1].Type != "access" || after[1].SiteID != "site-a" || after[1].ConfigVersion != 42 {
+		t.Fatalf("site log was not asynchronously classified as access: %#v", after)
 	}
 }

@@ -28,7 +28,18 @@ func serveBenchmarkMetrics(ctx context.Context, address string, queue *LogQueue,
 		if queueErr == nil {
 			payload["log_queue_bytes"] = queueStats.Bytes
 			payload["log_queue_records"] = queueStats.Records
+			payload["log_buffer_bytes"] = queueStats.MemoryBufferBytes
+			payload["log_buffer_records"] = queueStats.MemoryBufferRecords
 			payload["dropped_logs"] = queueStats.DroppedRecords
+			payload["memory_dropped_logs"] = queueStats.MemoryDroppedRecords
+			payload["disk_dropped_logs"] = queueStats.DiskDroppedRecords
+			payload["committed_log_batches"] = queueStats.CommittedBatches
+			payload["committed_log_records"] = queueStats.CommittedRecords
+			payload["average_log_batch_size"] = queueStats.AverageBatchSize
+			payload["last_log_persist_error"] = queueStats.LastPersistError
+			if !queueStats.LastPersistSuccess.IsZero() {
+				payload["last_log_persist_success"] = queueStats.LastPersistSuccess
+			}
 		} else {
 			payload["queue_error"] = queueErr.Error()
 		}

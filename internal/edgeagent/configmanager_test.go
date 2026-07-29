@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/caddy/v2"
 
@@ -23,7 +24,7 @@ import (
 
 type nopLogSink struct{}
 
-func (nopLogSink) WriteCaddyLog(string, uint64, []byte) error { return nil }
+func (nopLogSink) WriteCaddyLog(string, uint64, time.Time, []byte) error { return nil }
 
 func ensureAgentLogSink(t *testing.T) {
 	t.Helper()

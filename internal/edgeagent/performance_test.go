@@ -19,6 +19,9 @@ import (
 )
 
 func TestAgentPerformanceTarget(t *testing.T) {
+	if raceEnabled {
+		t.Skip("throughput thresholds are not meaningful with race instrumentation")
+	}
 	ensureAgentLogSink(t)
 	var originRequests atomic.Int64
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

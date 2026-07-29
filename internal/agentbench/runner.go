@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	quic "github.com/quic-go/quic-go"
 	"github.com/quic-go/quic-go/http3"
 	"github.com/shirou/gopsutil/v4/process"
 	"golang.org/x/net/http2"
@@ -96,18 +97,29 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	}
 
 	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64)}
-	started := time.Now().UTC()
-	measureContext, cancel := context.WithTimeout(ctx, config.Duration)
-	defer cancel()
+	measureContext, cancelSampling := context.WithCancel(ctx)
+	defer cancelSampling()
 	samplesDone := make(chan struct{})
+	samplesReady := make(chan struct{})
 	var samples []TimeSeriesPoint
 	var resources ResourceSummary
 	var loadCPUMax float64
 	go func() {
 		defer close(samplesDone)
-		samples, resources, loadCPUMax = sampleResources(measureContext, config.AgentPID, config.AgentMetricsURL, config.SampleInterval, state)
+		samples, resources, loadCPUMax = sampleResources(measureContext, config.AgentPID, config.AgentMetricsURL, config.SampleInterval, state, samplesReady)
 	}()
-	runWorkers(measureContext, config, client, state, &requestSequence)
+	select {
+	case <-samplesReady:
+	case <-ctx.Done():
+		cancelSampling()
+		<-samplesDone
+		return Run{}, 0, ctx.Err()
+	}
+	started := time.Now().UTC()
+	workerContext, cancelWorkers := context.WithTimeout(measureContext, config.Duration)
+	runWorkers(workerContext, config, client, state, &requestSequence)
+	cancelWorkers()
+	cancelSampling()
 	<-samplesDone
 	elapsed := time.Since(started)
 	metrics, failures := state.metrics(elapsed)
@@ -136,13 +148,24 @@ func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, s
 				}
 				result := executeRequest(ctx, client, config, sequence)
 				closeClient()
-				if state != nil && !(ctx.Err() != nil && (errors.Is(result.err, context.DeadlineExceeded) || errors.Is(result.err, context.Canceled))) {
+				if state != nil && !ignoreMeasurementCancellation(ctx, result.err) {
 					state.record(result)
 				}
 			}
 		}()
 	}
 	workers.Wait()
+}
+
+func ignoreMeasurementCancellation(ctx context.Context, err error) bool {
+	if ctx.Err() == nil || err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	var streamError *quic.StreamError
+	return errors.As(err, &streamError) && !streamError.Remote && streamError.ErrorCode == quic.StreamErrorCode(http3.ErrCodeRequestCanceled)
 }
 
 type requestResult struct {
@@ -242,7 +265,7 @@ func newTransport(config Config) (http.RoundTripper, func(), error) {
 		transport := &http.Transport{TLSClientConfig: tlsConfig, ForceAttemptHTTP2: false, MaxIdleConns: config.Concurrency * 2, MaxIdleConnsPerHost: config.Concurrency * 2, DisableCompression: true}
 		return transport, transport.CloseIdleConnections, nil
 	case ProtocolH2:
-		transport := &http2.Transport{TLSClientConfig: tlsConfig, DisableCompression: true, StrictMaxConcurrentStreams: true}
+		transport := &http2.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
 		return transport, func() { transport.CloseIdleConnections() }, nil
 	case ProtocolH3:
 		transport := &http3.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
@@ -376,13 +399,8 @@ func (state *runState) metrics(elapsed time.Duration) (Metrics, []string) {
 
 func durationMS(value time.Duration) float64 { return float64(value) / float64(time.Millisecond) }
 
-func sampleResources(ctx context.Context, pid int32, metricsURL string, interval time.Duration, state *runState) ([]TimeSeriesPoint, ResourceSummary, float64) {
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+func sampleResources(ctx context.Context, pid int32, metricsURL string, interval time.Duration, state *runState, ready chan<- struct{}) ([]TimeSeriesPoint, ResourceSummary, float64) {
 	loadProcess, _ := process.NewProcess(int32(os.Getpid()))
-	if loadProcess != nil {
-		_, _ = loadProcess.CPUPercent()
-	}
 	var target *process.Process
 	if pid > 0 {
 		target, _ = process.NewProcess(pid)
@@ -390,15 +408,44 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 	var points []TimeSeriesPoint
 	var summary ResourceSummary
 	var loadCPUMax float64
-	var previousRequests, previousTotalAlloc uint64
+	var previousRequests uint64
 	metricsClient := &http.Client{Timeout: min(interval, 2*time.Second)}
-	var cacheBaseline telemetrySample
-	var hasCacheBaseline bool
+	var baselineAt time.Time
+	var previousTargetCPU float64
+	var hasTargetCPU bool
+	var ioBaselineRead, ioBaselineWrite uint64
+	var hasIOBaseline bool
+	var telemetryBaseline telemetrySample
+	var previousTelemetry telemetrySample
+	var previousTelemetryAt time.Time
+	var hasTelemetryBaseline bool
 	if metricsURL != "" {
 		var err error
-		cacheBaseline, err = fetchTelemetry(ctx, metricsClient, metricsURL)
-		hasCacheBaseline = err == nil
+		telemetryBaseline, err = fetchTelemetry(ctx, metricsClient, metricsURL)
+		hasTelemetryBaseline = err == nil
+		if hasTelemetryBaseline {
+			previousTelemetry = telemetryBaseline
+		}
 	}
+	baselineAt = time.Now()
+	previousTelemetryAt = baselineAt
+	if target != nil {
+		if times, err := target.Times(); err == nil {
+			previousTargetCPU = times.User + times.System
+			hasTargetCPU = true
+		}
+		if counters, err := target.IOCounters(); err == nil {
+			ioBaselineRead = counters.ReadBytes
+			ioBaselineWrite = counters.WriteBytes
+			hasIOBaseline = true
+		}
+	}
+	if loadProcess != nil {
+		_, _ = loadProcess.CPUPercent()
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	close(ready)
 	for {
 		select {
 		case <-ctx.Done():
@@ -413,7 +460,17 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 				}
 			}
 			if target != nil {
-				point.CPUPercent, _ = target.CPUPercent()
+				if times, err := target.Times(); err == nil {
+					sampledAt := time.Now()
+					currentCPU := times.User + times.System
+					elapsed := sampledAt.Sub(baselineAt).Seconds()
+					if hasTargetCPU && elapsed > 0 && currentCPU >= previousTargetCPU {
+						point.CPUPercent = (currentCPU - previousTargetCPU) / elapsed * 100
+					}
+					previousTargetCPU = currentCPU
+					hasTargetCPU = true
+					baselineAt = sampledAt
+				}
 				if memory, err := target.MemoryInfo(); err == nil {
 					point.RSSBytes = memory.RSS
 				}
@@ -422,8 +479,10 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					point.Connections = len(connections)
 				}
 				if counters, err := target.IOCounters(); err == nil {
-					summary.ReadBytes = counters.ReadBytes
-					summary.WriteBytes = counters.WriteBytes
+					if hasIOBaseline {
+						summary.ReadBytes = counterDelta(counters.ReadBytes, ioBaselineRead)
+						summary.WriteBytes = counterDelta(counters.WriteBytes, ioBaselineWrite)
+					}
 				}
 				summary.CPUPercentMax = max(summary.CPUPercentMax, point.CPUPercent)
 				summary.RSSBytesMax = max(summary.RSSBytesMax, point.RSSBytes)
@@ -437,25 +496,48 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					point.Goroutines = telemetry.Goroutines
 					point.QueueBytes = telemetry.QueueBytes
 					point.QueueRecords = telemetry.QueueRecords
-					point.DroppedLogs = telemetry.DroppedLogs
-					point.CacheHits = telemetry.CacheHits
-					point.CacheMisses = telemetry.CacheMisses
-					point.CacheEvictions = telemetry.CacheEvictions
-					if previousTotalAlloc > 0 && telemetry.TotalAlloc >= previousTotalAlloc {
-						point.AllocationRate = float64(telemetry.TotalAlloc-previousTotalAlloc) / interval.Seconds()
+					point.BufferBytes = telemetry.BufferBytes
+					point.BufferRecords = telemetry.BufferRecords
+					point.AverageBatchSize = telemetry.AverageBatchSize
+					point.LastPersistError = telemetry.LastPersistError
+					if !telemetry.LastPersistSuccess.IsZero() {
+						lastSuccess := telemetry.LastPersistSuccess
+						point.LastPersistSuccess = &lastSuccess
 					}
-					previousTotalAlloc = telemetry.TotalAlloc
+					if hasTelemetryBaseline {
+						point.DroppedLogs = counterDelta(telemetry.DroppedLogs, telemetryBaseline.DroppedLogs)
+						point.MemoryDroppedLogs = counterDelta(telemetry.MemoryDroppedLogs, telemetryBaseline.MemoryDroppedLogs)
+						point.DiskDroppedLogs = counterDelta(telemetry.DiskDroppedLogs, telemetryBaseline.DiskDroppedLogs)
+						point.CommittedBatches = counterDelta(telemetry.CommittedBatches, telemetryBaseline.CommittedBatches)
+						point.CommittedRecords = counterDelta(telemetry.CommittedRecords, telemetryBaseline.CommittedRecords)
+						point.CacheHits = counterDelta(telemetry.CacheHits, telemetryBaseline.CacheHits)
+						point.CacheMisses = counterDelta(telemetry.CacheMisses, telemetryBaseline.CacheMisses)
+						point.CacheEvictions = counterDelta(telemetry.CacheEvictions, telemetryBaseline.CacheEvictions)
+					}
+					allocationElapsed := time.Since(previousTelemetryAt).Seconds()
+					if hasTelemetryBaseline && allocationElapsed > 0 && telemetry.TotalAlloc >= previousTelemetry.TotalAlloc {
+						point.AllocationRate = float64(telemetry.TotalAlloc-previousTelemetry.TotalAlloc) / allocationElapsed
+					}
+					previousTelemetry = telemetry
+					previousTelemetryAt = time.Now()
 					summary.HeapBytesMax = max(summary.HeapBytesMax, point.HeapBytes)
 					summary.AllocationRateMax = max(summary.AllocationRateMax, point.AllocationRate)
 					summary.GoroutinesMax = max(summary.GoroutinesMax, point.Goroutines)
 					summary.QueueBytesMax = max(summary.QueueBytesMax, point.QueueBytes)
 					summary.QueueRecordsMax = max(summary.QueueRecordsMax, point.QueueRecords)
 					summary.DroppedLogsMax = max(summary.DroppedLogsMax, point.DroppedLogs)
-					if hasCacheBaseline {
-						summary.CacheHitsDelta = counterDelta(telemetry.CacheHits, cacheBaseline.CacheHits)
-						summary.CacheMissesDelta = counterDelta(telemetry.CacheMisses, cacheBaseline.CacheMisses)
-						summary.CacheEvictionsDelta = counterDelta(telemetry.CacheEvictions, cacheBaseline.CacheEvictions)
-					}
+					summary.BufferBytesMax = max(summary.BufferBytesMax, point.BufferBytes)
+					summary.BufferRecordsMax = max(summary.BufferRecordsMax, point.BufferRecords)
+					summary.MemoryDroppedLogsDelta = point.MemoryDroppedLogs
+					summary.DiskDroppedLogsDelta = point.DiskDroppedLogs
+					summary.CommittedBatchesDelta = point.CommittedBatches
+					summary.CommittedRecordsDelta = point.CommittedRecords
+					summary.AverageBatchSize = point.AverageBatchSize
+					summary.LastPersistError = point.LastPersistError
+					summary.LastPersistSuccess = point.LastPersistSuccess
+					summary.CacheHitsDelta = point.CacheHits
+					summary.CacheMissesDelta = point.CacheMisses
+					summary.CacheEvictionsDelta = point.CacheEvictions
 				}
 			}
 			points = append(points, point)
@@ -471,16 +553,25 @@ func counterDelta(current, baseline uint64) uint64 {
 }
 
 type telemetrySample struct {
-	HeapBytes      uint64 `json:"heap_bytes"`
-	TotalAlloc     uint64 `json:"total_alloc_bytes"`
-	GCCount        uint32 `json:"gc_count"`
-	Goroutines     int    `json:"goroutines"`
-	QueueBytes     uint64 `json:"log_queue_bytes"`
-	QueueRecords   uint64 `json:"log_queue_records"`
-	DroppedLogs    uint64 `json:"dropped_logs"`
-	CacheHits      uint64 `json:"cache_hits"`
-	CacheMisses    uint64 `json:"cache_misses"`
-	CacheEvictions uint64 `json:"cache_evictions"`
+	HeapBytes          uint64    `json:"heap_bytes"`
+	TotalAlloc         uint64    `json:"total_alloc_bytes"`
+	GCCount            uint32    `json:"gc_count"`
+	Goroutines         int       `json:"goroutines"`
+	QueueBytes         uint64    `json:"log_queue_bytes"`
+	QueueRecords       uint64    `json:"log_queue_records"`
+	BufferBytes        uint64    `json:"log_buffer_bytes"`
+	BufferRecords      uint64    `json:"log_buffer_records"`
+	DroppedLogs        uint64    `json:"dropped_logs"`
+	MemoryDroppedLogs  uint64    `json:"memory_dropped_logs"`
+	DiskDroppedLogs    uint64    `json:"disk_dropped_logs"`
+	CommittedBatches   uint64    `json:"committed_log_batches"`
+	CommittedRecords   uint64    `json:"committed_log_records"`
+	AverageBatchSize   float64   `json:"average_log_batch_size"`
+	LastPersistError   string    `json:"last_log_persist_error"`
+	LastPersistSuccess time.Time `json:"last_log_persist_success,omitempty"`
+	CacheHits          uint64    `json:"cache_hits"`
+	CacheMisses        uint64    `json:"cache_misses"`
+	CacheEvictions     uint64    `json:"cache_evictions"`
 }
 
 func fetchTelemetry(ctx context.Context, client *http.Client, url string) (telemetrySample, error) {

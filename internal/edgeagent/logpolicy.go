@@ -49,35 +49,67 @@ func (p LogPolicy) Apply(payload []byte) ([]byte, bool) {
 	if !p.RedactQuery && !p.AnonymizeIP && len(p.RedactedHeaders) == 0 {
 		return payload, true
 	}
-	var event map[string]any
+	var event map[string]json.RawMessage
 	if json.Unmarshal(payload, &event) != nil {
 		return payload, true
 	}
-	request, _ := event["request"].(map[string]any)
-	if request == nil {
+	var request map[string]json.RawMessage
+	if rawRequest, ok := event["request"]; ok && json.Unmarshal(rawRequest, &request) != nil {
 		return payload, true
 	}
+	changed := false
 	if p.RedactQuery {
-		if rawURI, ok := request["uri"].(string); ok {
-			if parsed, err := url.ParseRequestURI(rawURI); err == nil {
+		if rawURI, ok := request["uri"]; ok {
+			var uri string
+			if json.Unmarshal(rawURI, &uri) != nil {
+				uri = ""
+			}
+			if parsed, err := url.ParseRequestURI(uri); err == nil {
 				parsed.RawQuery = ""
 				parsed.ForceQuery = false
-				request["uri"] = parsed.RequestURI()
+				redactedURI, _ := json.Marshal(parsed.RequestURI())
+				request["uri"] = redactedURI
+				changed = changed || uri != parsed.RequestURI()
 			}
 		}
 	}
 	if p.AnonymizeIP {
 		for _, field := range []string{"client_ip", "remote_ip"} {
-			if value, ok := request[field].(string); ok {
-				request[field] = anonymizeIP(value)
+			if rawValue, ok := request[field]; ok {
+				var value string
+				if json.Unmarshal(rawValue, &value) == nil {
+					anonymized := anonymizeIP(value)
+					if anonymized != value {
+						request[field], _ = json.Marshal(anonymized)
+						changed = true
+					}
+				}
 			}
 		}
 	}
-	if headers, ok := request["headers"].(map[string]any); ok {
-		redactHeaders(headers, p.RedactedHeaders)
+	if rawHeaders, ok := request["headers"]; ok {
+		redacted, headerChanged := redactHeaders(rawHeaders, p.RedactedHeaders)
+		if headerChanged {
+			request["headers"] = redacted
+			changed = true
+		}
 	}
-	if headers, ok := event["resp_headers"].(map[string]any); ok {
-		redactHeaders(headers, p.RedactedHeaders)
+	if rawHeaders, ok := event["resp_headers"]; ok {
+		redacted, headerChanged := redactHeaders(rawHeaders, p.RedactedHeaders)
+		if headerChanged {
+			event["resp_headers"] = redacted
+			changed = true
+		}
+	}
+	if !changed {
+		return payload, true
+	}
+	if request != nil {
+		redactedRequest, err := json.Marshal(request)
+		if err != nil {
+			return payload, true
+		}
+		event["request"] = redactedRequest
 	}
 	redacted, err := json.Marshal(event)
 	if err != nil {
@@ -109,10 +141,24 @@ func anonymizeIP(value string) string {
 	return netip.PrefixFrom(ip, bits).Masked().Addr().String()
 }
 
-func redactHeaders(headers map[string]any, redacted map[string]struct{}) {
+func redactHeaders(payload json.RawMessage, redacted map[string]struct{}) (json.RawMessage, bool) {
+	var headers map[string]json.RawMessage
+	if json.Unmarshal(payload, &headers) != nil {
+		return payload, false
+	}
+	changed := false
 	for name := range headers {
 		if _, ok := redacted[strings.ToLower(name)]; ok {
-			headers[name] = []any{"[REDACTED]"}
+			headers[name] = json.RawMessage(`["[REDACTED]"]`)
+			changed = true
 		}
 	}
+	if !changed {
+		return payload, false
+	}
+	result, err := json.Marshal(headers)
+	if err != nil {
+		return payload, false
+	}
+	return result, true
 }

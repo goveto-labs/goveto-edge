@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"time"
 )
 
 func ReadReport(path string) (Report, error) {
@@ -121,7 +122,7 @@ func writeCSV(path string, report Report) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-	if err := writer.Write([]string{"run", "at", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "allocation_bytes_per_second", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions"}); err != nil {
+	if err := writer.Write([]string{"run", "at", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "allocation_bytes_per_second", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions", "log_buffer_bytes", "log_buffer_records", "memory_dropped_logs", "disk_dropped_logs", "committed_log_batches", "committed_log_records", "average_log_batch_size", "last_log_persist_error", "last_log_persist_success"}); err != nil {
 		return err
 	}
 	for _, run := range report.Runs {
@@ -132,6 +133,9 @@ func writeCSV(path string, report Report) error {
 				strconv.FormatUint(point.HeapBytes, 10), formatFloat(point.AllocationRate), strconv.FormatUint(uint64(point.GCCount), 10), strconv.Itoa(point.Goroutines),
 				strconv.FormatUint(point.QueueBytes, 10), strconv.FormatUint(point.QueueRecords, 10), strconv.FormatUint(point.DroppedLogs, 10),
 				strconv.FormatUint(point.CacheHits, 10), strconv.FormatUint(point.CacheMisses, 10), strconv.FormatUint(point.CacheEvictions, 10),
+				strconv.FormatUint(point.BufferBytes, 10), strconv.FormatUint(point.BufferRecords, 10), strconv.FormatUint(point.MemoryDroppedLogs, 10),
+				strconv.FormatUint(point.DiskDroppedLogs, 10), strconv.FormatUint(point.CommittedBatches, 10), strconv.FormatUint(point.CommittedRecords, 10),
+				formatFloat(point.AverageBatchSize), point.LastPersistError, formatOptionalTime(point.LastPersistSuccess),
 			}
 			if err := writer.Write(record); err != nil {
 				return err
@@ -142,3 +146,10 @@ func writeCSV(path string, report Report) error {
 }
 
 func formatFloat(value float64) string { return strconv.FormatFloat(value, 'f', 4, 64) }
+
+func formatOptionalTime(value *time.Time) string {
+	if value == nil || value.IsZero() {
+		return ""
+	}
+	return value.Format(time.RFC3339Nano)
+}

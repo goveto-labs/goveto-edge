@@ -3,12 +3,13 @@ package edgeagent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
+	"time"
 
 	"goveto-edge/caddy/agentlog"
 )
@@ -21,6 +22,8 @@ type Agent struct {
 	nodeConfigs  *NodeConfigStore
 	logs         *LogQueue
 	geoIP        *GeoIPStore
+	stopOnce     sync.Once
+	stopErr      error
 }
 
 func New() *Agent {
@@ -48,15 +51,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("open log queue: %w", err)
 	}
-	if benchmarkListen := os.Getenv("EDGE_AGENT_BENCHMARK_LISTEN"); benchmarkListen != "" {
-		go serveBenchmarkMetrics(ctx, benchmarkListen, a.logs, a.nodeConfigs)
+	if err := a.logs.StartAccessPipeline(logPolicyFromEnv(), accessLogConfigFromEnv()); err != nil {
+		_ = a.logs.Close()
+		return fmt.Errorf("start access log pipeline: %w", err)
 	}
-	agentlog.SetSink(agentLogSink{queue: a.logs, policy: logPolicyFromEnv()})
+	agentlog.SetSink(agentLogSink{queue: a.logs})
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
-		return fmt.Errorf("apply node cache config: %w", err)
+		return errors.Join(fmt.Errorf("apply node cache config: %w", err), a.Stop())
 	}
 	if err := a.configs.Restore(); err != nil && !errors.Is(err, ErrGeoIPUnavailable) {
-		return fmt.Errorf("restore site configs: %w", err)
+		return errors.Join(fmt.Errorf("restore site configs: %w", err), a.Stop())
+	}
+	if benchmarkListen := os.Getenv("EDGE_AGENT_BENCHMARK_LISTEN"); benchmarkListen != "" {
+		go serveBenchmarkMetrics(ctx, benchmarkListen, a.logs, a.nodeConfigs)
 	}
 	go collectMetrics(ctx, a.logs, a.nodeConfigs)
 	channelErrors := make(chan error, 1)
@@ -78,13 +85,29 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) Stop() error {
+	a.stopOnce.Do(func() {
+		a.stopErr = a.stop()
+	})
+	return a.stopErr
+}
+
+func (a *Agent) stop() error {
+	var result error
 	if err := a.configs.Stop(); err != nil {
-		return fmt.Errorf("stop caddy: %w", err)
+		result = errors.Join(result, fmt.Errorf("stop caddy: %w", err))
 	}
+	agentlog.SetSink(nil)
 	if a.logs != nil {
-		return a.logs.Close()
+		flushContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := a.logs.ShutdownAccess(flushContext); err != nil {
+			result = errors.Join(result, err)
+		}
+		cancel()
+		if err := a.logs.Close(); err != nil {
+			result = errors.Join(result, fmt.Errorf("close log queue: %w", err))
+		}
 	}
-	return nil
+	return result
 }
 
 func (a *Agent) AppendLog(record LogRecord) (uint64, error) {
@@ -124,27 +147,45 @@ func envBool(key string, fallback bool) bool {
 	return parsed
 }
 
-type agentLogSink struct {
-	queue  *LogQueue
-	policy LogPolicy
+func envInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	parsed, err := strconv.Atoi(value)
+	if value == "" || err != nil || parsed <= 0 {
+		return fallback
+	}
+	return parsed
 }
 
-func (s agentLogSink) WriteCaddyLog(siteID string, configVersion uint64, payload []byte) error {
-	recordType := "caddy"
-	var access struct {
-		Request json.RawMessage `json:"request"`
-		Status  int             `json:"status"`
+func envDuration(key string, fallback time.Duration) time.Duration {
+	value := os.Getenv(key)
+	parsed, err := time.ParseDuration(value)
+	if value == "" || err != nil || parsed <= 0 {
+		return fallback
 	}
-	if json.Unmarshal(payload, &access) == nil && len(access.Request) > 0 && access.Status > 0 {
-		recordType = "access"
-		var keep bool
-		payload, keep = s.policy.Apply(payload)
-		if !keep {
-			return nil
-		}
+	return parsed
+}
+
+func accessLogConfigFromEnv() AccessLogConfig {
+	return AccessLogConfig{
+		BufferBytes:   envUint64("EDGE_AGENT_LOG_BUFFER_BYTES", defaultAccessLogBufferBytes),
+		BufferRecords: envInt("EDGE_AGENT_LOG_BUFFER_RECORDS", defaultAccessLogBufferRecords),
+		BatchBytes:    envUint64("EDGE_AGENT_LOG_BATCH_BYTES", defaultAccessLogBatchBytes),
+		BatchRecords:  envInt("EDGE_AGENT_LOG_BATCH_RECORDS", defaultAccessLogBatchRecords),
+		FlushInterval: envDuration("EDGE_AGENT_LOG_FLUSH_INTERVAL", defaultAccessLogFlushInterval),
 	}
-	_, err := s.queue.Append(LogRecord{
-		Type: recordType, SiteID: siteID, ConfigVersion: configVersion, Payload: payload,
-	})
+}
+
+type agentLogSink struct {
+	queue *LogQueue
+}
+
+func (s agentLogSink) WriteCaddyLog(siteID string, configVersion uint64, receivedAt time.Time, payload []byte) error {
+	record := LogRecord{Type: "caddy", SiteID: siteID, ConfigVersion: configVersion, CreatedAt: receivedAt, Payload: payload}
+	if siteID != "" {
+		record.Type = "access"
+		s.queue.EnqueueAccess(record)
+		return nil
+	}
+	_, err := s.queue.Append(record)
 	return err
 }

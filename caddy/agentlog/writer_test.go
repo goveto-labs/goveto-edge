@@ -1,15 +1,19 @@
 package agentlog
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 type recordingSink struct {
 	siteID        string
 	configVersion uint64
 	payload       []byte
+	receivedAt    time.Time
 }
 
-func (s *recordingSink) WriteCaddyLog(siteID string, configVersion uint64, payload []byte) error {
-	s.siteID, s.configVersion, s.payload = siteID, configVersion, payload
+func (s *recordingSink) WriteCaddyLog(siteID string, configVersion uint64, receivedAt time.Time, payload []byte) error {
+	s.siteID, s.configVersion, s.receivedAt, s.payload = siteID, configVersion, receivedAt, payload
 	return nil
 }
 
@@ -29,7 +33,7 @@ func TestWriterKeepsSiteMetadataIsolated(t *testing.T) {
 	if _, err := writer.Write([]byte("{\"status\":200}\n")); err != nil {
 		t.Fatal(err)
 	}
-	if sink.siteID != "site-a" || sink.configVersion != 42 || len(sink.payload) == 0 {
+	if sink.siteID != "site-a" || sink.configVersion != 42 || sink.receivedAt.IsZero() || len(sink.payload) == 0 {
 		t.Fatalf("unexpected sink metadata: %#v", sink)
 	}
 }

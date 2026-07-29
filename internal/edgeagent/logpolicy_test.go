@@ -57,3 +57,34 @@ func TestDefaultLogPolicyRedactsForwardedClientAddresses(t *testing.T) {
 		}
 	}
 }
+
+func TestLogPolicyPreservesUnknownFieldsAndRedactsHeadersCaseInsensitively(t *testing.T) {
+	policy := LogPolicy{SampleRate: 1, RedactedHeaders: map[string]struct{}{"authorization": {}, "set-cookie": {}}}
+	payload := []byte(`{"unknown":{"nested":[1,{"keep":"exact"}]},"request":{"uri":"/","headers":{"aUtHoRiZaTiOn":["secret"],"X-Keep":["yes"]}},"resp_headers":{"SET-cookie":["private"],"X-Other":["value"]},"status":200}`)
+	redacted, keep := policy.Apply(payload)
+	if !keep {
+		t.Fatal("record was sampled out")
+	}
+	var original, result map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &original); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(redacted, &result); err != nil {
+		t.Fatal(err)
+	}
+	if string(original["unknown"]) != string(result["unknown"]) {
+		t.Fatalf("unknown field changed: before=%s after=%s", original["unknown"], result["unknown"])
+	}
+	text := string(redacted)
+	if strings.Contains(text, "secret") || strings.Contains(text, "private") || !strings.Contains(text, "X-Keep") || !strings.Contains(text, "X-Other") {
+		t.Fatalf("unexpected header redaction: %s", redacted)
+	}
+}
+
+func TestLogPolicyKeepsMalformedPayload(t *testing.T) {
+	payload := []byte(`{"request":`)
+	redacted, keep := (LogPolicy{SampleRate: 1, RedactQuery: true}).Apply(payload)
+	if !keep || string(redacted) != string(payload) {
+		t.Fatalf("malformed payload changed: keep=%t payload=%q", keep, redacted)
+	}
+}

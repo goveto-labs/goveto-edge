@@ -1,9 +1,12 @@
 package edgeagent
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -23,15 +26,43 @@ type LogQueue struct {
 	db       *bolt.DB
 	notify   chan struct{}
 	maxBytes uint64
+
+	accessMu              sync.Mutex
+	accessBuffer          []LogRecord
+	accessBufferBytes     uint64
+	accessConfig          AccessLogConfig
+	accessPolicy          LogPolicy
+	accessSignal          chan struct{}
+	accessShutdown        chan struct{}
+	accessDone            chan struct{}
+	accessCancel          context.CancelFunc
+	accessShutdownOnce    sync.Once
+	accessStarted         bool
+	accessAccepting       bool
+	accessMemoryDropped   uint64
+	accessBatches         uint64
+	accessRecords         uint64
+	accessLastError       string
+	accessLastSuccess     time.Time
+	accessPersistOverride func([]LogRecord) ([]uint64, error)
 }
 
 type LogQueueStats struct {
-	MaxBytes       uint64
-	Bytes          uint64
-	Records        uint64
-	DroppedRecords uint64
-	OldestID       uint64
-	NewestID       uint64
+	MaxBytes             uint64
+	Bytes                uint64
+	Records              uint64
+	DroppedRecords       uint64
+	DiskDroppedRecords   uint64
+	MemoryBufferBytes    uint64
+	MemoryBufferRecords  uint64
+	MemoryDroppedRecords uint64
+	CommittedBatches     uint64
+	CommittedRecords     uint64
+	AverageBatchSize     float64
+	LastPersistError     string
+	LastPersistSuccess   time.Time
+	OldestID             uint64
+	NewestID             uint64
 }
 
 func OpenLogQueue(path string, maxBytes ...uint64) (*LogQueue, error) {
@@ -58,71 +89,88 @@ func OpenLogQueue(path string, maxBytes ...uint64) (*LogQueue, error) {
 }
 
 func (q *LogQueue) Append(record LogRecord) (uint64, error) {
-	if len(record.Payload) == 0 {
-		return 0, errors.New("log payload is empty")
+	ids, err := q.AppendBatch([]LogRecord{record})
+	if err != nil {
+		return 0, err
 	}
-	if record.CreatedAt.IsZero() {
-		record.CreatedAt = time.Now().UTC()
+	return ids[0], nil
+}
+
+// AppendBatch durably commits all records in one transaction and emits one wakeup.
+func (q *LogQueue) AppendBatch(records []LogRecord) ([]uint64, error) {
+	if len(records) == 0 {
+		return nil, nil
 	}
-	var id uint64
-	var oversized bool
+	prepared := append([]LogRecord(nil), records...)
+	now := time.Now().UTC()
+	for index := range prepared {
+		if len(prepared[index].Payload) == 0 {
+			return nil, fmt.Errorf("log record %d: log payload is empty", index)
+		}
+		if prepared[index].CreatedAt.IsZero() {
+			prepared[index].CreatedAt = now
+		}
+	}
+
+	ids := make([]uint64, len(prepared))
 	err := q.db.Update(func(tx *bolt.Tx) error {
 		bucket := tx.Bucket(logsBucket)
-		sequence, err := bucket.NextSequence()
-		if err != nil {
-			return err
-		}
-		id = sequence
-		record.ID = id
-		data, err := json.Marshal(record)
-		if err != nil {
-			return err
-		}
 		meta := tx.Bucket(metaBucket)
-		if uint64(len(data)) > q.maxBytes {
-			dropped := readUint64(meta.Get(droppedRecordsKey)) + 1
-			if err := meta.Put(droppedRecordsKey, uint64Key(dropped)); err != nil {
-				return err
+		firstID := bucket.Sequence() + 1
+		encoded := make([][]byte, len(prepared))
+		for index := range prepared {
+			ids[index] = firstID + uint64(index)
+			prepared[index].ID = ids[index]
+			data, err := json.Marshal(prepared[index])
+			if err != nil {
+				return fmt.Errorf("marshal log record %d: %w", index, err)
 			}
-			oversized = true
-			return nil
+			if uint64(len(data)) > q.maxBytes {
+				return ErrLogRecordTooLarge
+			}
+			encoded[index] = data
 		}
-		total := readUint64(meta.Get(totalBytesKey))
-		cursor := bucket.Cursor()
-		for total+uint64(len(data)) > q.maxBytes {
-			key, value := cursor.First()
-			if key == nil {
-				break
-			}
-			if err := cursor.Delete(); err != nil {
-				return err
-			}
-			dropped := readUint64(meta.Get(droppedRecordsKey)) + 1
-			if err := meta.Put(droppedRecordsKey, uint64Key(dropped)); err != nil {
-				return err
-			}
-			if uint64(len(value)) <= total {
-				total -= uint64(len(value))
-			} else {
-				total = 0
-			}
-		}
-		if err := bucket.Put(uint64Key(id), data); err != nil {
+		if err := bucket.SetSequence(firstID + uint64(len(prepared)) - 1); err != nil {
 			return err
 		}
-		total += uint64(len(data))
+
+		total := readUint64(meta.Get(totalBytesKey))
+		dropped := readUint64(meta.Get(droppedRecordsKey))
+		for index, data := range encoded {
+			cursor := bucket.Cursor()
+			for total+uint64(len(data)) > q.maxBytes {
+				key, value := cursor.First()
+				if key == nil {
+					break
+				}
+				if err := cursor.Delete(); err != nil {
+					return err
+				}
+				dropped++
+				if uint64(len(value)) <= total {
+					total -= uint64(len(value))
+				} else {
+					total = 0
+				}
+			}
+			if err := bucket.Put(uint64Key(ids[index]), data); err != nil {
+				return err
+			}
+			total += uint64(len(data))
+		}
+		if err := meta.Put(droppedRecordsKey, uint64Key(dropped)); err != nil {
+			return err
+		}
 		return meta.Put(totalBytesKey, uint64Key(total))
 	})
-	if err == nil && oversized {
-		return 0, ErrLogRecordTooLarge
+	if err != nil {
+		return nil, err
 	}
-	if err == nil {
-		select {
-		case q.notify <- struct{}{}:
-		default:
-		}
+	select {
+	case q.notify <- struct{}{}:
+	default:
 	}
-	return id, err
+	return ids, nil
 }
 
 func (q *LogQueue) Batch(limit int) ([]LogRecord, error) {
@@ -209,7 +257,19 @@ func (q *LogQueue) Ack(through uint64) error {
 	})
 }
 func (q *LogQueue) Wait() <-chan struct{} { return q.notify }
-func (q *LogQueue) Close() error          { return q.db.Close() }
+
+func (q *LogQueue) Close() error {
+	var flushErr error
+	q.accessMu.Lock()
+	started := q.accessStarted
+	q.accessMu.Unlock()
+	if started {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		flushErr = q.ShutdownAccess(ctx)
+		cancel()
+	}
+	return errors.Join(flushErr, q.db.Close())
+}
 
 func (q *LogQueue) Stats() (LogQueueStats, error) {
 	stats := LogQueueStats{MaxBytes: q.maxBytes}
@@ -217,7 +277,7 @@ func (q *LogQueue) Stats() (LogQueueStats, error) {
 		bucket := tx.Bucket(logsBucket)
 		meta := tx.Bucket(metaBucket)
 		stats.Bytes = readUint64(meta.Get(totalBytesKey))
-		stats.DroppedRecords = readUint64(meta.Get(droppedRecordsKey))
+		stats.DiskDroppedRecords = readUint64(meta.Get(droppedRecordsKey))
 		stats.Records = uint64(bucket.Stats().KeyN)
 		first, _ := bucket.Cursor().First()
 		last, _ := bucket.Cursor().Last()
@@ -229,6 +289,19 @@ func (q *LogQueue) Stats() (LogQueueStats, error) {
 		}
 		return nil
 	})
+	q.accessMu.Lock()
+	stats.MemoryBufferBytes = q.accessBufferBytes
+	stats.MemoryBufferRecords = uint64(len(q.accessBuffer))
+	stats.MemoryDroppedRecords = q.accessMemoryDropped
+	stats.CommittedBatches = q.accessBatches
+	stats.CommittedRecords = q.accessRecords
+	if q.accessBatches > 0 {
+		stats.AverageBatchSize = float64(q.accessRecords) / float64(q.accessBatches)
+	}
+	stats.LastPersistError = q.accessLastError
+	stats.LastPersistSuccess = q.accessLastSuccess
+	q.accessMu.Unlock()
+	stats.DroppedRecords = stats.DiskDroppedRecords + stats.MemoryDroppedRecords
 	return stats, err
 }
 func uint64Key(value uint64) []byte {
