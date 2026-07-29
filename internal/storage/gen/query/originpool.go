@@ -35,7 +35,6 @@ type OriginPoolQuery struct {
 	ClusterId  originPoolClusterIdField
 	Name       originPoolNameField
 	Scheduler  originPoolSchedulerField
-	HealthUri  originPoolHealthUriField
 	Timeout    originPoolTimeoutField
 	Headers    originPoolHeadersField
 	Governance originPoolGovernanceField
@@ -51,7 +50,6 @@ const OriginPoolIdColumn = "id"
 const OriginPoolClusterIdColumn = "cluster_id"
 const OriginPoolNameColumn = "name"
 const OriginPoolSchedulerColumn = "scheduler"
-const OriginPoolHealthUriColumn = "health_uri"
 const OriginPoolTimeoutColumn = "timeout"
 const OriginPoolHeadersColumn = "headers"
 const OriginPoolGovernanceColumn = "governance"
@@ -64,7 +62,6 @@ var OriginPool = OriginPoolQuery{
 	ClusterId:  originPoolClusterIdField{},
 	Name:       originPoolNameField{},
 	Scheduler:  originPoolSchedulerField{},
-	HealthUri:  originPoolHealthUriField{},
 	Timeout:    originPoolTimeoutField{},
 	Headers:    originPoolHeadersField{},
 	Governance: originPoolGovernanceField{},
@@ -406,67 +403,6 @@ func (originPoolSchedulerField) Asc() OriginPoolOrderByClause {
 // Desc returns a descending order clause for this field.
 func (originPoolSchedulerField) Desc() OriginPoolOrderByClause {
 	return OriginPoolOrderByClause{Field: "scheduler", Direction: "DESC"}
-}
-
-// HealthUriField provides query operations for the healthUri field.
-type originPoolHealthUriField struct{}
-
-// Equals creates an equality condition.
-func (originPoolHealthUriField) Equals(v string) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (originPoolHealthUriField) Not(v string) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (originPoolHealthUriField) In(vals ...string) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (originPoolHealthUriField) NotIn(vals ...string) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "NOT IN", Value: iVals}
-}
-
-// Contains creates a LIKE '%v%' condition.
-func (originPoolHealthUriField) Contains(v string) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (originPoolHealthUriField) StartsWith(v string) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (originPoolHealthUriField) EndsWith(v string) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "health_uri", Operator: "ENDS_WITH", Value: v}
-}
-
-// Set creates a set operation for create/update.
-func (originPoolHealthUriField) Set(v string) OriginPoolSetClause {
-	return OriginPoolSetClause{Field: "health_uri", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (originPoolHealthUriField) Asc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "health_uri", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (originPoolHealthUriField) Desc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "health_uri", Direction: "DESC"}
 }
 
 // TimeoutField provides query operations for the timeout field.
@@ -820,7 +756,6 @@ type OriginPoolCreateInput struct {
 	ClusterId  string
 	Name       string
 	Scheduler  string
-	HealthUri  string
 	Timeout    int
 	Headers    json.RawMessage
 	Governance json.RawMessage
@@ -833,7 +768,7 @@ type OriginPoolCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d OriginPoolCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.HealthUri, d.Timeout, d.Headers, d.Governance, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.Timeout, d.Headers, d.Governance, d.CreatedAt, d.UpdatedAt}
 }
 
 // OriginPoolCreateNestedInput supports nested creates and connects.

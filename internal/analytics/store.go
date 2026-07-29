@@ -63,6 +63,8 @@ var continuousAggregateRefreshPolicies = []continuousAggregateRefreshPolicy{
 	{view: "analytics.request_referer_hourly", endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 	{view: "analytics.request_path_hourly", endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 	{view: "analytics.request_client_ip_hourly", endOffset: "5 minutes", scheduleInterval: "5 minutes"},
+	{view: "analytics.request_country_hourly", endOffset: "5 minutes", scheduleInterval: "5 minutes"},
+	{view: "analytics.request_region_hourly", endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 	{view: "analytics.request_usage_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
 	{view: "analytics.request_method_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
 	{view: "analytics.request_status_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
@@ -71,6 +73,8 @@ var continuousAggregateRefreshPolicies = []continuousAggregateRefreshPolicy{
 	{view: "analytics.request_referer_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
 	{view: "analytics.request_path_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
 	{view: "analytics.request_client_ip_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
+	{view: "analytics.request_country_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
+	{view: "analytics.request_region_daily", endOffset: "1 hour", scheduleInterval: "1 hour"},
 	{view: "analytics.node_traffic_metrics_minute", endOffset: "1 minute", scheduleInterval: "1 minute"},
 }
 
@@ -132,7 +136,7 @@ var webRequestLogColumns = []string{
 	"event_time", "source_log_id", "request_id", "cluster_id", "node_id", "site_id", "config_version",
 	"hostname", "method", "scheme", "protocol", "path", "query_string", "client_ip", "status_code",
 	"request_header_bytes", "request_body_bytes", "response_header_bytes", "response_body_bytes", "duration_us",
-	"upstream_address", "upstream_status", "cache_status", "content_type", "file_extension", "referer",
+	"upstream_address", "upstream_status", "handler_error", "cache_status", "content_type", "file_extension", "referer",
 	"user_agent", "country", "region", "waf_action", "waf_rule_id", "waf_source", "waf_match", "waf_tags",
 }
 
@@ -155,7 +159,7 @@ func (s *Store) insert(ctx context.Context, events []WebRequestLog) ([]WebReques
 			e.EventTime, e.SourceLogID, e.RequestID, e.ClusterID, e.NodeID, e.SiteID, e.ConfigVersion,
 			e.Hostname, e.Method, e.Scheme, e.Protocol, e.Path, e.QueryString, e.ClientIP, e.StatusCode,
 			e.RequestHeaderBytes, e.RequestBodyBytes, e.ResponseHeaderBytes, e.ResponseBodyBytes,
-			e.Duration.Microseconds(), e.UpstreamAddress, e.UpstreamStatus, e.CacheStatus, e.ContentType,
+			e.Duration.Microseconds(), e.UpstreamAddress, e.UpstreamStatus, e.HandlerError, e.CacheStatus, e.ContentType,
 			e.FileExtension, e.Referer, e.UserAgent, e.Country, e.Region, e.WAFAction, e.WAFRuleID,
 			e.WAFSource, e.WAFMatch, e.WAFTags,
 		})

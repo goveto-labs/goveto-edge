@@ -247,7 +247,7 @@ var dimensions = map[string]string{
 	"extension": "file_extension", "file_extension": "file_extension",
 	"hostname": "hostname", "domain": "hostname", "referer": "referer",
 	"status": "status_code::text", "method": "method", "path": "path",
-	"ip": "host(client_ip)", "node": "node_id::text",
+	"ip": "host(client_ip)", "country": "country", "region": "region", "node": "node_id::text",
 }
 
 func (s *Store) Ranking(ctx context.Context, cluster, site, nodeID, period, dimension, sortBy string, limit int) ([]DistributionItem, error) {
@@ -305,7 +305,8 @@ func (s *Store) ranking24h(ctx context.Context, cluster, site, dimension, rawCol
 		"extension": "request_extension_hourly", "status": "request_status_hourly",
 		"method": "request_method_hourly", "hostname": "request_hostname_hourly",
 		"referer": "request_referer_hourly", "path": "request_path_hourly",
-		"ip": "request_client_ip_hourly", "node": "request_usage_hourly",
+		"ip": "request_client_ip_hourly", "country": "request_country_hourly",
+		"region": "request_region_hourly", "node": "request_usage_hourly",
 	}[dimension]
 	if view == "" {
 		return nil, ErrInvalidDimension
@@ -393,7 +394,7 @@ func (s *Store) rankingNode30d(ctx context.Context, cluster, site, sortBy string
 }
 
 func (s *Store) ranking30d(ctx context.Context, cluster, site, dimension, sortBy string, limit int) ([]DistributionItem, error) {
-	view := map[string]string{"extension": "extension", "status": "status", "method": "method", "hostname": "hostname", "referer": "referer", "path": "path", "ip": "client_ip"}[dimension]
+	view := map[string]string{"extension": "extension", "status": "status", "method": "method", "hostname": "hostname", "referer": "referer", "path": "path", "ip": "client_ip", "country": "country", "region": "region"}[dimension]
 	if view == "" {
 		return nil, ErrInvalidDimension
 	}

@@ -592,7 +592,6 @@ query.PostAuthorIdColumn
   - `Clusterid` (String)
   - `Name` (String)
   - `Scheduler` (String)
-  - `Healthuri` (String)
   - `Timeout` (Int)
   - `Headers` (Json)
   - `Governance` (Json)

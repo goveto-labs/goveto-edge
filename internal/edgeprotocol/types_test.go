@@ -89,21 +89,24 @@ func TestSiteConfigValidateMixedOrigins(t *testing.T) {
 
 func TestDecodeOriginPolicyMergesLegacyColumnsAndGovernance(t *testing.T) {
 	governance := json.RawMessage(`{
-		"health_uri":"/ignored","timeout_ms":1,
+		"timeout_ms":1,
 		"active_health":{"enabled":true,"method":"HEAD","expected_status":204,"fails":4},
 		"passive_health":{"enabled":true,"max_fails":5},
 		"transport":{"ip_version":"ipv4","tls_server_name":"origin.internal"},
 		"retry":{"retries":4,"try_duration_ms":8000,"try_interval_ms":400}
 	}`)
-	policy, err := DecodeOriginPolicy(governance, json.RawMessage(`{"X-Origin":"pool"}`), "/ready", 12000)
+	policy, err := DecodeOriginPolicy(governance, json.RawMessage(`{"X-Origin":"pool"}`), 12000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.HealthURI != "/ready" || policy.TimeoutMS != 12000 || policy.Headers["X-Origin"][0] != "pool" {
+	if policy.TimeoutMS != 12000 || policy.Headers["X-Origin"][0] != "pool" {
 		t.Fatalf("legacy columns did not override governance: %#v", policy)
 	}
 	if policy.ActiveHealth.Method != "HEAD" || policy.ActiveHealth.ExpectedStatus != 204 || policy.ActiveHealth.Fails != 4 {
 		t.Fatalf("active health policy lost: %#v", policy.ActiveHealth)
+	}
+	if policy.ActiveHealth.Enabled {
+		t.Fatal("decoded active health probing must be disabled")
 	}
 	if policy.ActiveHealth.IntervalMS != 30000 || policy.PassiveHealth.FailDurationMS != 30000 {
 		t.Fatalf("missing governance defaults: %#v", policy)
@@ -128,6 +131,32 @@ func TestValidateOriginPolicyRejectsUnsafeValues(t *testing.T) {
 	policy.Headers = map[string][]string{"Bad Header": {"value"}}
 	if err := ValidateOriginPolicy(policy); err == nil {
 		t.Fatal("invalid origin header was accepted")
+	}
+}
+
+func TestDefaultOriginPolicyUsesRequestDrivenTransportHealth(t *testing.T) {
+	policy := DefaultOriginPolicy()
+	if policy.ActiveHealth.Enabled {
+		t.Fatal("active origin probing must be disabled by default")
+	}
+	if !policy.PassiveHealth.Enabled {
+		t.Fatal("passive transport failure health must remain enabled")
+	}
+	if len(policy.PassiveHealth.UnhealthyStatus) != 0 || policy.PassiveHealth.UnhealthyLatencyMS != 0 {
+		t.Fatalf("HTTP responses must not trip health: %#v", policy.PassiveHealth)
+	}
+}
+
+func TestNormalizeOriginPolicyDropsResponseBasedHealthFailures(t *testing.T) {
+	policy := DefaultOriginPolicy()
+	policy.ActiveHealth.Enabled = true
+	policy.PassiveHealth.UnhealthyStatus = []int{404, 500, 503}
+	policy.PassiveHealth.UnhealthyLatencyMS = 2500
+	policy.PassiveHealth.UnhealthyRequestCount = 64
+	policy = NormalizeOriginPolicy(policy)
+	if policy.ActiveHealth.Enabled || len(policy.PassiveHealth.UnhealthyStatus) != 0 ||
+		policy.PassiveHealth.UnhealthyLatencyMS != 0 || policy.PassiveHealth.UnhealthyRequestCount != 0 {
+		t.Fatalf("non-transport health survived normalization: %#v", policy)
 	}
 }
 

@@ -64,6 +64,60 @@ func TestSelectionPolicyKeepsBackupIdleWhilePrimaryAvailable(t *testing.T) {
 	}
 }
 
+func TestSelectionPolicyUsesAvailableBackup(t *testing.T) {
+	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{
+		{Dial: "primary:80", Priority: 0},
+		{Dial: "backup:80", Priority: 10},
+	}}
+	policy.available = func(upstream *reverseproxy.Upstream) bool { return upstream.Dial == "backup:80" }
+	if err := policy.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	pool := reverseproxy.UpstreamPool{
+		{Dial: "primary:80", Host: new(reverseproxy.Host)},
+		{Dial: "backup:80", Host: new(reverseproxy.Host)},
+	}
+	request := httptest.NewRequest("GET", "http://site.test/", nil)
+	if selected := policy.Select(pool, request, nil); selected == nil || selected.Dial != "backup:80" {
+		t.Fatalf("selected %#v, want available backup", selected)
+	}
+}
+
+func TestSelectionPolicyStillUsesSingleUnavailableOrigin(t *testing.T) {
+	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{{Dial: "origin:80"}}}
+	policy.available = func(*reverseproxy.Upstream) bool { return false }
+	if err := policy.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	pool := reverseproxy.UpstreamPool{{Dial: "origin:80", Host: new(reverseproxy.Host)}}
+	request := httptest.NewRequest("GET", "http://site.test/", nil)
+	if selected := policy.Select(pool, request, nil); selected == nil || selected.Dial != "origin:80" {
+		t.Fatalf("selected %#v, want configured origin", selected)
+	}
+}
+
+func TestSelectionPolicyFallsBackToLowestPriorityWhenAllUnavailable(t *testing.T) {
+	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{
+		{Dial: "primary-a:80", Priority: 0},
+		{Dial: "primary-b:80", Priority: 0},
+		{Dial: "backup:80", Priority: 10},
+	}}
+	policy.available = func(*reverseproxy.Upstream) bool { return false }
+	if err := policy.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	pool := reverseproxy.UpstreamPool{
+		{Dial: "primary-a:80", Host: new(reverseproxy.Host)},
+		{Dial: "primary-b:80", Host: new(reverseproxy.Host)},
+		{Dial: "backup:80", Host: new(reverseproxy.Host)},
+	}
+	request := httptest.NewRequest("GET", "http://site.test/", nil)
+	selected := policy.Select(pool, request, nil)
+	if selected == nil || selected.Dial == "backup:80" {
+		t.Fatalf("selected %#v, want an unavailable primary", selected)
+	}
+}
+
 func TestOriginMetricsSnapshotReportsLatencyAndErrorRate(t *testing.T) {
 	ResetMetrics()
 	t.Cleanup(ResetMetrics)

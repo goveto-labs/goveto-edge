@@ -50,7 +50,7 @@ func TestAgentHTTPSOriginUsesSNIPrivateCAAndMTLS(t *testing.T) {
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "https", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			HealthURI: "/", TimeoutMS: 2000,
+			TimeoutMS: 2000,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Transport: edgeprotocol.OriginTransportConfig{
@@ -78,10 +78,12 @@ func TestAgentHTTPSOriginUsesSNIPrivateCAAndMTLS(t *testing.T) {
 	}
 }
 
-func TestAgentActiveHealthFailsOverToBackup(t *testing.T) {
+func TestAgentDoesNotProbeOrigins(t *testing.T) {
 	ensureAgentLogSink(t)
+	var healthRequests atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/ready" {
+			healthRequests.Add(1)
 			http.Error(w, "not ready", http.StatusServiceUnavailable)
 			return
 		}
@@ -90,6 +92,7 @@ func TestAgentActiveHealthFailsOverToBackup(t *testing.T) {
 	defer primary.Close()
 	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/ready" {
+			healthRequests.Add(1)
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -98,7 +101,7 @@ func TestAgentActiveHealthFailsOverToBackup(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		HealthURI: "/ready", TimeoutMS: 2000,
+		TimeoutMS: 2000,
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
 			Enabled: true, Method: http.MethodHead, ExpectedStatus: http.StatusNoContent,
 			IntervalMS: 20, TimeoutMS: 100, Passes: 1, Fails: 1,
@@ -107,69 +110,57 @@ func TestAgentActiveHealthFailsOverToBackup(t *testing.T) {
 	})
 	defer manager.Stop()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		body, _ := requestOriginSite(t, port)
-		if body == "backup" {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("active health check did not fail over, last response %q", body)
-		}
-		time.Sleep(20 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
+	if body, _ := requestOriginSite(t, port); body != "primary" {
+		t.Fatalf("user request unexpectedly failed over: body=%q", body)
+	}
+	if healthRequests.Load() != 0 {
+		t.Fatalf("origins received %d active health probes", healthRequests.Load())
 	}
 }
 
-func TestAgentPassiveCircuitBreakerRecoversPrimary(t *testing.T) {
+func TestAgentHTTPResponsesDoNotTripPassiveHealth(t *testing.T) {
 	ensureAgentLogSink(t)
 	origingovernance.ResetMetrics()
 	t.Cleanup(origingovernance.ResetMetrics)
 	var primaryHits atomic.Int64
+	var backupHits atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		primaryHits.Add(1)
-		http.Error(w, "failed", http.StatusServiceUnavailable)
+		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	defer primary.Close()
 	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backupHits.Add(1)
 		_, _ = w.Write([]byte("backup"))
 	}))
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		HealthURI: "/ready", TimeoutMS: 2000,
+		TimeoutMS: 2000,
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 200, MaxFails: 1, UnhealthyStatus: []int{503},
 		},
-		Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 10},
 	})
 	defer manager.Stop()
 
-	if body, status := requestOriginSite(t, port); body != "backup" || status != http.StatusOK {
-		t.Fatalf("passive failover response status=%d body=%q", status, body)
-	}
-	if primaryHits.Load() != 1 {
-		t.Fatalf("primary hits after trip = %d", primaryHits.Load())
+	for range 2 {
+		if _, status := requestOriginSite(t, port); status != http.StatusNotFound {
+			t.Fatalf("origin 404 was changed to status %d", status)
+		}
 	}
 	metrics := map[string]origingovernance.Metric{}
 	for _, metric := range origingovernance.SnapshotAndReset() {
 		metrics[metric.OriginAddress] = metric
 	}
 	primaryMetric := metrics[primary.Listener.Addr().String()]
-	backupMetric := metrics[backup.Listener.Addr().String()]
-	if primaryMetric.Requests != 1 || primaryMetric.Errors != 1 || backupMetric.Requests != 1 || backupMetric.Errors != 0 {
-		t.Fatalf("retry metrics were attributed incorrectly: primary=%#v backup=%#v", primaryMetric, backupMetric)
-	}
-	if body, _ := requestOriginSite(t, port); body != "backup" || primaryHits.Load() != 1 {
-		t.Fatalf("open circuit did not bypass primary: body=%q hits=%d", body, primaryHits.Load())
-	}
-	time.Sleep(250 * time.Millisecond)
-	if body, _ := requestOriginSite(t, port); body != "backup" || primaryHits.Load() != 2 {
-		t.Fatalf("primary was not retried after recovery window: body=%q hits=%d", body, primaryHits.Load())
+	if primaryMetric.Requests != 2 || primaryMetric.Errors != 0 || primaryHits.Load() != 2 || backupHits.Load() != 0 {
+		t.Fatalf("HTTP response affected health: metric=%#v primary_hits=%d backup_hits=%d", primaryMetric, primaryHits.Load(), backupHits.Load())
 	}
 }
 
-func TestAgentRemovesSlowOrigin(t *testing.T) {
+func TestAgentDoesNotRemoveSlowOrigin(t *testing.T) {
 	ensureAgentLogSink(t)
 	var primaryHits atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -184,7 +175,7 @@ func TestAgentRemovesSlowOrigin(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		HealthURI: "/ready", TimeoutMS: 2000,
+		TimeoutMS: 2000,
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 500, MaxFails: 1, UnhealthyLatencyMS: 20,
@@ -195,8 +186,37 @@ func TestAgentRemovesSlowOrigin(t *testing.T) {
 	if body, _ := requestOriginSite(t, port); body != "primary" {
 		t.Fatalf("first slow response = %q", body)
 	}
-	if body, _ := requestOriginSite(t, port); body != "backup" || primaryHits.Load() != 1 {
-		t.Fatalf("slow primary was not removed: body=%q hits=%d", body, primaryHits.Load())
+	if body, _ := requestOriginSite(t, port); body != "primary" || primaryHits.Load() != 2 {
+		t.Fatalf("slow primary was removed: body=%q hits=%d", body, primaryHits.Load())
+	}
+}
+
+func TestAgentTransportFailureFailsOverToBackup(t *testing.T) {
+	ensureAgentLogSink(t)
+	primary := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("backup"))
+	}))
+	defer backup.Close()
+
+	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
+		TimeoutMS: 2000,
+		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+			Enabled: true, FailDurationMS: 500, MaxFails: 1,
+		},
+		Transport: edgeprotocol.OriginTransportConfig{
+			DialTimeoutMS: 100, ResponseHeaderTimeoutMS: 500, IPVersion: "any",
+		},
+		Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 10},
+	})
+	defer manager.Stop()
+
+	if body, status := requestOriginSite(t, port); body != "backup" || status != http.StatusOK {
+		t.Fatalf("transport failure did not fail over: status=%d body=%q", status, body)
+	}
+	if body, status := requestOriginSite(t, port); body != "backup" || status != http.StatusOK {
+		t.Fatalf("failed origin was not temporarily bypassed: status=%d body=%q", status, body)
 	}
 }
 
@@ -215,7 +235,7 @@ func TestAgentEnforcesTotalOriginTimeout(t *testing.T) {
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "http", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			HealthURI: "/", TimeoutMS: 50,
+			TimeoutMS: 50,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Retry:         edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 100, TryIntervalMS: 10},

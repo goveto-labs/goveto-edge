@@ -319,7 +319,7 @@ func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (site
 	if err != nil || pool == nil {
 		return siteBundle{}, err
 	}
-	policy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.HealthUri, pool.Timeout)
+	policy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.Timeout)
 	if err != nil {
 		return siteBundle{}, err
 	}
@@ -411,7 +411,7 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 	err = db.Tx(ctx, func(tx *client.Client) error {
 		if _, createErr := tx.OriginPool.Create().Set(
 			query.OriginPool.Id.Set(poolID), query.OriginPool.ClusterId.Set(clusterID), query.OriginPool.Name.Set(bundle.Name),
-			query.OriginPool.HealthUri.Set(bundle.OriginPolicy.HealthURI), query.OriginPool.Timeout.Set(bundle.OriginPolicy.TimeoutMS),
+			query.OriginPool.Timeout.Set(bundle.OriginPolicy.TimeoutMS),
 			query.OriginPool.Headers.Set(headers), query.OriginPool.Governance.Set(governance),
 		).Do(ctx); createErr != nil {
 			return createErr

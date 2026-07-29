@@ -261,20 +261,45 @@ export interface NodeInstallationInfo {
 
 export interface NodeRequestLog {
     event_time: string;
+    source_log_id: number;
     request_id: string;
+    node_id: string;
     config_version: number;
     hostname: string;
     method: string;
+    scheme: string;
+    protocol: string;
     path: string;
+    query_string: string;
+    client_ip: string;
+    country?: string;
+    region?: string;
     status_code: number;
+    request_header_bytes: number;
+    request_body_bytes: number;
+    response_header_bytes: number;
+    response_body_bytes: number;
     duration_us: number;
     upstream_address: string;
+    upstream_status: number;
+    handler_error?: string;
     cache_status: string;
+    content_type: string;
+    file_extension: string;
+    referer: string;
+    user_agent: string;
     waf_action?: string;
     waf_rule_id?: string;
     waf_source?: string;
     waf_match?: string;
     waf_tags?: string;
+}
+
+export interface RequestLogPage {
+    items: NodeRequestLog[];
+    page: number;
+    page_size: number;
+    total: number;
 }
 
 export interface WAFRuleStat {

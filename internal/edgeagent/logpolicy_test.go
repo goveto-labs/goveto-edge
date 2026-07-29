@@ -43,6 +43,12 @@ func TestLogPolicySamplingIsStable(t *testing.T) {
 	}
 }
 
+func TestAnonymizeIPUnmapsIPv4MappedAddress(t *testing.T) {
+	if got := anonymizeIP("::ffff:192.168.4.23"); got != "192.168.4.0" {
+		t.Fatalf("anonymized mapped IPv4 = %q", got)
+	}
+}
+
 func TestDefaultLogPolicyRedactsForwardedClientAddresses(t *testing.T) {
 	t.Setenv("EDGE_AGENT_LOG_REDACT_HEADERS", "")
 	policy := logPolicyFromEnv()

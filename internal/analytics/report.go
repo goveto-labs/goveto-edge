@@ -3,6 +3,7 @@ package analytics
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -74,33 +75,77 @@ func (s *Store) LatestSiteRates(ctx context.Context, cluster string) ([]SiteRate
 }
 
 type NodeRequestLog struct {
-	EventTime       time.Time `json:"event_time"`
-	RequestID       string    `json:"request_id"`
-	ConfigVersion   uint64    `json:"config_version"`
-	Hostname        string    `json:"hostname"`
-	Method          string    `json:"method"`
-	Path            string    `json:"path"`
-	StatusCode      uint16    `json:"status_code"`
-	DurationUS      uint64    `json:"duration_us"`
-	UpstreamAddress string    `json:"upstream_address"`
-	CacheStatus     string    `json:"cache_status"`
-	WAFAction       string    `json:"waf_action,omitempty"`
-	WAFRuleID       string    `json:"waf_rule_id,omitempty"`
-	WAFSource       string    `json:"waf_source,omitempty"`
-	WAFMatch        string    `json:"waf_match,omitempty"`
-	WAFTags         string    `json:"waf_tags,omitempty"`
+	EventTime           time.Time `json:"event_time"`
+	SourceLogID         uint64    `json:"source_log_id"`
+	RequestID           string    `json:"request_id"`
+	NodeID              string    `json:"node_id"`
+	ConfigVersion       uint64    `json:"config_version"`
+	Hostname            string    `json:"hostname"`
+	Method              string    `json:"method"`
+	Scheme              string    `json:"scheme"`
+	Protocol            string    `json:"protocol"`
+	Path                string    `json:"path"`
+	QueryString         string    `json:"query_string"`
+	ClientIP            string    `json:"client_ip"`
+	Country             string    `json:"country,omitempty"`
+	Region              string    `json:"region,omitempty"`
+	StatusCode          uint16    `json:"status_code"`
+	RequestHeaderBytes  uint64    `json:"request_header_bytes"`
+	RequestBodyBytes    uint64    `json:"request_body_bytes"`
+	ResponseHeaderBytes uint64    `json:"response_header_bytes"`
+	ResponseBodyBytes   uint64    `json:"response_body_bytes"`
+	DurationUS          uint64    `json:"duration_us"`
+	UpstreamAddress     string    `json:"upstream_address"`
+	UpstreamStatus      uint16    `json:"upstream_status"`
+	HandlerError        string    `json:"handler_error,omitempty"`
+	CacheStatus         string    `json:"cache_status"`
+	ContentType         string    `json:"content_type"`
+	FileExtension       string    `json:"file_extension"`
+	Referer             string    `json:"referer"`
+	UserAgent           string    `json:"user_agent"`
+	WAFAction           string    `json:"waf_action,omitempty"`
+	WAFRuleID           string    `json:"waf_rule_id,omitempty"`
+	WAFSource           string    `json:"waf_source,omitempty"`
+	WAFMatch            string    `json:"waf_match,omitempty"`
+	WAFTags             string    `json:"waf_tags,omitempty"`
+}
+
+type RequestLogPage struct {
+	Items    []NodeRequestLog `json:"items"`
+	Page     int              `json:"page"`
+	PageSize int              `json:"page_size"`
+	Total    int64            `json:"total"`
+}
+
+const requestLogColumns = `event_time, source_log_id, request_id, node_id::text, config_version,
+	hostname, method, scheme, protocol, path, query_string, host(client_ip), country, region,
+	status_code, request_header_bytes, request_body_bytes, response_header_bytes, response_body_bytes,
+	duration_us, upstream_address, upstream_status, handler_error, cache_status, content_type, file_extension,
+	referer, user_agent, waf_action, waf_rule_id, waf_source, waf_match, waf_tags`
+
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanRequestLog(row rowScanner, item *NodeRequestLog) error {
+	return row.Scan(
+		&item.EventTime, &item.SourceLogID, &item.RequestID, &item.NodeID, &item.ConfigVersion,
+		&item.Hostname, &item.Method, &item.Scheme, &item.Protocol, &item.Path, &item.QueryString,
+		&item.ClientIP, &item.Country, &item.Region, &item.StatusCode, &item.RequestHeaderBytes,
+		&item.RequestBodyBytes, &item.ResponseHeaderBytes, &item.ResponseBodyBytes, &item.DurationUS,
+		&item.UpstreamAddress, &item.UpstreamStatus, &item.HandlerError, &item.CacheStatus, &item.ContentType,
+		&item.FileExtension, &item.Referer, &item.UserAgent, &item.WAFAction, &item.WAFRuleID,
+		&item.WAFSource, &item.WAFMatch, &item.WAFTags,
+	)
 }
 
 func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, limit int) ([]NodeRequestLog, error) {
 	ctx, cancel := s.queryContext(ctx)
 	defer cancel()
-	rows, err := s.db.Query(ctx, `SELECT
-		event_time, request_id, config_version, hostname, method, path, status_code,
-		duration_us, upstream_address, cache_status,
-		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
+	rows, err := s.db.Query(ctx, `SELECT `+requestLogColumns+`
 	FROM analytics.web_request_logs
 	WHERE cluster_id = $1 AND node_id = $2
-	ORDER BY event_time DESC
+	ORDER BY event_time DESC, source_log_id DESC
 	LIMIT $3`, clusterID, nodeID, limit)
 	if err != nil {
 		return nil, err
@@ -109,7 +154,7 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.ConfigVersion, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
+		if err := scanRequestLog(rows, &item); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -117,30 +162,42 @@ func (s *Store) NodeRequestLogs(ctx context.Context, clusterID, nodeID string, l
 	return items, rows.Err()
 }
 
-func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID string, limit int) ([]NodeRequestLog, error) {
+func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID, search string, page, pageSize int) (RequestLogPage, error) {
 	ctx, cancel := s.queryContext(ctx)
 	defer cancel()
-	rows, err := s.db.Query(ctx, `SELECT
-		event_time, request_id, config_version, hostname, method, path, status_code,
-		duration_us, upstream_address, cache_status,
-		waf_action, waf_rule_id, waf_source, waf_match, waf_tags
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 100 {
+		pageSize = 25
+	}
+	search = strings.TrimSpace(search)
+	filter := `cluster_id = $1 AND site_id = $2 AND ($3 = '' OR concat_ws(' ',
+		request_id, hostname, method, path, query_string, status_code::text, host(client_ip),
+		cache_status, upstream_address, referer, user_agent, waf_action, waf_rule_id, waf_source
+	) ILIKE '%' || $3 || '%')`
+	result := RequestLogPage{Items: make([]NodeRequestLog, 0, pageSize), Page: page, PageSize: pageSize}
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM analytics.web_request_logs WHERE `+filter,
+		clusterID, siteID, search).Scan(&result.Total); err != nil {
+		return RequestLogPage{}, err
+	}
+	rows, err := s.db.Query(ctx, `SELECT `+requestLogColumns+`
 	FROM analytics.web_request_logs
-	WHERE cluster_id = $1 AND site_id = $2
-	ORDER BY event_time DESC
-	LIMIT $3`, clusterID, siteID, limit)
+	WHERE `+filter+`
+	ORDER BY event_time DESC, node_id, source_log_id DESC
+	LIMIT $4 OFFSET $5`, clusterID, siteID, search, pageSize, (page-1)*pageSize)
 	if err != nil {
-		return nil, err
+		return RequestLogPage{}, err
 	}
 	defer rows.Close()
-	items := make([]NodeRequestLog, 0, limit)
 	for rows.Next() {
 		var item NodeRequestLog
-		if err := rows.Scan(&item.EventTime, &item.RequestID, &item.ConfigVersion, &item.Hostname, &item.Method, &item.Path, &item.StatusCode, &item.DurationUS, &item.UpstreamAddress, &item.CacheStatus, &item.WAFAction, &item.WAFRuleID, &item.WAFSource, &item.WAFMatch, &item.WAFTags); err != nil {
-			return nil, err
+		if err := scanRequestLog(rows, &item); err != nil {
+			return RequestLogPage{}, err
 		}
-		items = append(items, item)
+		result.Items = append(result.Items, item)
 	}
-	return items, rows.Err()
+	return result, rows.Err()
 }
 
 type WAFRuleStat struct {

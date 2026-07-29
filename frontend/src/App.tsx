@@ -18,7 +18,6 @@ import Jobs from '@/pages/Jobs.tsx';
 import Login from '@/pages/Login.tsx';
 import NodeDetail from '@/pages/NodeDetail.tsx';
 import Nodes from '@/pages/Nodes.tsx';
-import PublishJobs from '@/pages/PublishJobs.tsx';
 import PurgeJobs from '@/pages/PurgeJobs.tsx';
 import Register from '@/pages/Register.tsx';
 import Settings from '@/pages/Settings.tsx';
@@ -61,7 +60,6 @@ export default function App() {
                                     <Route element={<SiteDetail />} path='/sites/:siteId/*' />
                                     <Route element={<DNS />} path='/dns' />
                                     <Route element={<Certificates />} path='/certificates' />
-                                    <Route element={<PublishJobs />} path='/publish' />
                                     <Route element={<Jobs />} path='/jobs' />
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />

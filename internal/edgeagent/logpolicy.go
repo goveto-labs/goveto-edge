@@ -134,6 +134,7 @@ func anonymizeIP(value string) string {
 	if err != nil {
 		return value
 	}
+	ip = ip.Unmap()
 	bits := 48
 	if ip.Is4() {
 		bits = 24

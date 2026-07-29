@@ -158,7 +158,11 @@ func parsePrefixes(values []string) ([]netip.Prefix, error) {
 }
 
 func parseAddress(value string) (netip.Addr, error) {
-	return netip.ParseAddr(strings.Trim(strings.TrimSpace(value), "[]"))
+	address, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(value), "[]"))
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	return address.Unmap(), nil
 }
 
 func remoteHost(value string) string {

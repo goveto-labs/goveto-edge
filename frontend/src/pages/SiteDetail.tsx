@@ -490,10 +490,10 @@ export default function SiteDetail() {
             const to = new Date();
             const from = new Date(to.getTime() - 24 * 60 * 60 * 1000);
             const [entries, stats] = await Promise.all([
-                analytics.siteLogs(siteId, 300),
+                analytics.siteLogs(siteId, { page_size: 100 }),
                 analytics.wafStats(siteId, from.toISOString(), to.toISOString(), 100),
             ]);
-            setLogs(entries);
+            setLogs(entries.items);
             setWAFStats(stats);
             setError('');
         } catch (loadError) {

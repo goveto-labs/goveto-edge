@@ -23,6 +23,7 @@ CREATE TABLE analytics.web_request_logs (
     duration_us bigint NOT NULL,
     upstream_address text NOT NULL DEFAULT '',
     upstream_status smallint NOT NULL,
+    handler_error text NOT NULL DEFAULT '',
     cache_status text NOT NULL DEFAULT '',
     content_type text NOT NULL DEFAULT '',
     file_extension text NOT NULL DEFAULT '',
@@ -148,7 +149,8 @@ BEGIN
     FOR item IN SELECT * FROM (VALUES
         ('method', 'method'), ('status', 'status_code'),
         ('extension', 'file_extension'), ('hostname', 'hostname'),
-        ('referer', 'referer'), ('path', 'path'), ('client_ip', 'client_ip')
+        ('referer', 'referer'), ('path', 'path'), ('client_ip', 'client_ip'),
+        ('country', 'country'), ('region', 'region')
     ) AS dimensions(name, expression)
     LOOP
         EXECUTE format(
@@ -186,14 +188,16 @@ BEGIN
     FOREACH view_name IN ARRAY ARRAY[
         'request_usage_hourly', 'request_method_hourly', 'request_status_hourly',
         'request_extension_hourly', 'request_hostname_hourly', 'request_referer_hourly',
-        'request_path_hourly', 'request_client_ip_hourly'
+        'request_path_hourly', 'request_client_ip_hourly', 'request_country_hourly',
+        'request_region_hourly'
     ] LOOP
         PERFORM add_retention_policy(('analytics.' || view_name)::regclass, INTERVAL '48 hours', if_not_exists => TRUE);
     END LOOP;
     FOREACH view_name IN ARRAY ARRAY[
         'request_usage_daily', 'request_method_daily', 'request_status_daily',
         'request_extension_daily', 'request_hostname_daily', 'request_referer_daily',
-        'request_path_daily', 'request_client_ip_daily'
+        'request_path_daily', 'request_client_ip_daily', 'request_country_daily',
+        'request_region_daily'
     ] LOOP
         PERFORM add_retention_policy(('analytics.' || view_name)::regclass, INTERVAL '31 days', if_not_exists => TRUE);
     END LOOP;

@@ -52,3 +52,13 @@ func TestCompileAccessRejectsGeoRestrictionsWithoutDatabase(t *testing.T) {
 		t.Fatal("GeoIP restriction without a database was accepted")
 	}
 }
+
+func TestParseAddressUnmapsIPv4MappedAddress(t *testing.T) {
+	address, err := parseAddress("::ffff:192.168.4.23")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := address.String(); got != "192.168.4.23" {
+		t.Fatalf("parsed mapped IPv4 = %q", got)
+	}
+}

@@ -20,9 +20,12 @@ type Ingest struct {
 	store      *Store
 	concurrent chan struct{}
 	archive    LogArchive
+	geoIP      *geoIPEnricher
 }
 
 func (i *Ingest) SetArchive(archive LogArchive) { i.archive = archive }
+
+func (i *Ingest) ConfigureGeoIP(path string) { i.geoIP = newGeoIPEnricher(path) }
 
 func NewIngest(db *client.Client, _ *node.CredentialCipher, s *Store) *Ingest {
 	return NewIngestWithConcurrency(db, s, 4)
@@ -158,6 +161,7 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 			return err
 		}
 	}
+	i.geoIP.enrich(events)
 	inserted, err := i.store.Insert(ctx, events)
 	if err != nil {
 		return err

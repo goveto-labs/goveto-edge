@@ -472,7 +472,6 @@ type OriginPool struct {
 	ClusterId  string           `db:"cluster_id" json:"clusterId"`
 	Name       string           `db:"name" json:"name"`
 	Scheduler  string           `db:"scheduler" json:"scheduler"`
-	HealthUri  string           `db:"health_uri" json:"healthUri"`
 	Timeout    int              `db:"timeout" json:"timeout"`
 	Headers    json.RawMessage  `db:"headers" json:"headers"`
 	Governance json.RawMessage  `db:"governance" json:"governance"`

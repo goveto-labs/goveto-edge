@@ -5,6 +5,7 @@ import type {
     NodeRequestLog,
     NodeRuntimeResponse,
     NodeSnapshot,
+    RequestLogPage,
     Summary,
     TopItem,
     TrafficResponse,
@@ -99,9 +100,15 @@ export const analyticsApi = (clusterId: string) => ({
         get<NodeRequestLog[]>(
             clusterPath(clusterId, `/analytics/nodes/logs${buildQuery({ node_id: nodeId, limit })}`)
         ),
-    siteLogs: (siteId: string, limit = 100) =>
-        get<NodeRequestLog[]>(
-            clusterPath(clusterId, `/analytics/sites/logs${buildQuery({ site_id: siteId, limit })}`)
+    siteLogs: (
+        siteId: string,
+        params: { page?: number; page_size?: number; query?: string } = {}
+    ) =>
+        get<RequestLogPage>(
+            clusterPath(
+                clusterId,
+                `/analytics/sites/logs${buildQuery({ site_id: siteId, ...params })}`
+            )
         ),
     wafStats: (siteId: string, from: string, to: string, limit = 100) =>
         get<WAFRuleStat[]>(

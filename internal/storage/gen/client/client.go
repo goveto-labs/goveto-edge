@@ -27780,7 +27780,7 @@ func (a OriginBackendActions) GroupBy(ctx context.Context, fields []string, opts
 
 func quotedOriginPoolTable(c *Client) string { return c.quoteIdentifier("origin_pools") }
 func quotedOriginPoolColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "governance", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "scheduler", "timeout", "headers", "governance", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -27796,8 +27796,6 @@ func quoteOriginPoolField(c *Client, field string) (string, error) {
 	case "name":
 		return c.quoteIdentifier(field), nil
 	case "scheduler":
-		return c.quoteIdentifier(field), nil
-	case "health_uri":
 		return c.quoteIdentifier(field), nil
 	case "timeout":
 		return c.quoteIdentifier(field), nil
@@ -28018,14 +28016,14 @@ func (b OriginPoolCreateManyBuilder) DoReturning(ctx context.Context) ([]model.O
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "governance", "created_at", "updated_at"})
+		q, args := b.action.buildOriginPoolCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "scheduler", "timeout", "headers", "governance", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.OriginPool
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("OriginPool.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -28052,7 +28050,7 @@ func (b OriginPoolCreateManyBuilder) DoReturningValues(ctx context.Context) ([]m
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "governance", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "scheduler", "timeout", "headers", "governance", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -28304,7 +28302,7 @@ func (a OriginPoolActions) FindMany(ctx context.Context, opts ...query.OriginPoo
 	var results []model.OriginPool
 	for rows.Next() {
 		var item model.OriginPool
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -28336,7 +28334,7 @@ func (a OriginPoolActions) FindUnique(ctx context.Context, where query.OriginPoo
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.OriginPool
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -28367,7 +28365,7 @@ func (a OriginPoolActions) CreateOne(ctx context.Context, sets ...query.OriginPo
 		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -28386,7 +28384,7 @@ func (a OriginPoolActions) CreateMany(ctx context.Context, data []query.OriginPo
 }
 
 func (a OriginPoolActions) buildOriginPoolCreateManySQL(data []query.OriginPoolCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "scheduler", "health_uri", "timeout", "headers", "governance", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "scheduler", "timeout", "headers", "governance", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -28459,7 +28457,7 @@ func (a OriginPoolActions) UpdateOne(ctx context.Context, where query.OriginPool
 		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -28564,7 +28562,7 @@ func (a OriginPoolActions) UpsertOne(ctx context.Context, where query.OriginPool
 		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("OriginPool.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -28588,7 +28586,7 @@ func (a OriginPoolActions) DeleteOne(ctx context.Context, where query.OriginPool
 		q += " RETURNING " + quotedOriginPoolColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.OriginPool
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.HealthUri, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Scheduler, &item.Timeout, &item.Headers, &item.Governance, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

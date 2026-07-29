@@ -74,7 +74,6 @@ type OriginConfig struct {
 }
 
 type OriginPolicyConfig struct {
-	HealthURI     string                    `json:"health_uri,omitempty"`
 	TimeoutMS     int                       `json:"timeout_ms,omitempty"`
 	Headers       map[string][]string       `json:"headers,omitempty"`
 	ActiveHealth  OriginActiveHealthConfig  `json:"active_health"`
@@ -128,15 +127,13 @@ type OriginRetryConfig struct {
 
 func DefaultOriginPolicy() OriginPolicyConfig {
 	return OriginPolicyConfig{
-		HealthURI: "/health",
 		TimeoutMS: 10000,
 		ActiveHealth: OriginActiveHealthConfig{
-			Enabled: true, Method: "GET", ExpectedStatus: 200,
+			Enabled: false, Method: "GET", ExpectedStatus: 200,
 			IntervalMS: 30000, TimeoutMS: 5000, Passes: 1, Fails: 2,
 		},
 		PassiveHealth: OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 30000, MaxFails: 3,
-			UnhealthyStatus: []int{429, 500, 502, 503, 504}, UnhealthyLatencyMS: 10000,
 		},
 		Transport: OriginTransportConfig{
 			DialTimeoutMS: 3000, TLSHandshakeTimeoutMS: 5000,
@@ -146,14 +143,13 @@ func DefaultOriginPolicy() OriginPolicyConfig {
 	}
 }
 
-func DecodeOriginPolicy(governance, headers json.RawMessage, healthURI string, timeoutMS int) (OriginPolicyConfig, error) {
+func DecodeOriginPolicy(governance, headers json.RawMessage, timeoutMS int) (OriginPolicyConfig, error) {
 	policy := DefaultOriginPolicy()
 	if len(governance) > 0 && string(governance) != "null" {
 		if err := json.Unmarshal(governance, &policy); err != nil {
 			return OriginPolicyConfig{}, fmt.Errorf("decode origin governance: %w", err)
 		}
 	}
-	policy.HealthURI = healthURI
 	policy.TimeoutMS = timeoutMS
 	if len(headers) > 0 && string(headers) != "null" {
 		var values map[string]any
@@ -249,9 +245,6 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 		defaults.Retry = OriginRetryConfig{}
 		return defaults
 	}
-	if policy.HealthURI == "" {
-		policy.HealthURI = defaults.HealthURI
-	}
 	if policy.TimeoutMS == 0 {
 		policy.TimeoutMS = defaults.TimeoutMS
 	}
@@ -273,18 +266,19 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 	if policy.ActiveHealth.Fails == 0 {
 		policy.ActiveHealth.Fails = defaults.ActiveHealth.Fails
 	}
+	// Origin availability is learned from real proxied requests only.
+	policy.ActiveHealth.Enabled = false
 	if policy.PassiveHealth.FailDurationMS == 0 {
 		policy.PassiveHealth.FailDurationMS = defaults.PassiveHealth.FailDurationMS
 	}
 	if policy.PassiveHealth.MaxFails == 0 {
 		policy.PassiveHealth.MaxFails = defaults.PassiveHealth.MaxFails
 	}
-	if len(policy.PassiveHealth.UnhealthyStatus) == 0 {
-		policy.PassiveHealth.UnhealthyStatus = defaults.PassiveHealth.UnhealthyStatus
-	}
-	if policy.PassiveHealth.UnhealthyLatencyMS == 0 {
-		policy.PassiveHealth.UnhealthyLatencyMS = defaults.PassiveHealth.UnhealthyLatencyMS
-	}
+	// An HTTP response proves that the origin was reachable. Only transport
+	// failures from real proxied requests are allowed to trip passive health.
+	policy.PassiveHealth.UnhealthyStatus = nil
+	policy.PassiveHealth.UnhealthyLatencyMS = 0
+	policy.PassiveHealth.UnhealthyRequestCount = 0
 	if policy.Transport.DialTimeoutMS == 0 {
 		policy.Transport.DialTimeoutMS = defaults.Transport.DialTimeoutMS
 	}
@@ -304,9 +298,6 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 }
 
 func ValidateOriginPolicy(policy OriginPolicyConfig) error {
-	if !strings.HasPrefix(policy.HealthURI, "/") {
-		return errors.New("origin health_uri must start with /")
-	}
 	if policy.TimeoutMS < 1 || policy.ActiveHealth.IntervalMS < 0 || policy.ActiveHealth.TimeoutMS < 0 ||
 		policy.PassiveHealth.FailDurationMS < 0 || policy.PassiveHealth.UnhealthyLatencyMS < 0 ||
 		policy.Transport.DialTimeoutMS < 0 || policy.Transport.TLSHandshakeTimeoutMS < 0 ||

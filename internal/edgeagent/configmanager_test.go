@@ -353,7 +353,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 		{Protocol: "https", Address: "[2001:db8::2]:443", HostHeader: "backup.internal", Weight: 2, Priority: 10},
 	}
 	config.OriginPolicy = edgeprotocol.OriginPolicyConfig{
-		HealthURI: "/ready?deep=1", TimeoutMS: 17000,
+		TimeoutMS: 17000,
 		Headers: map[string][]string{"X-Origin-Token": {"secret"}},
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
 			Enabled: true, Method: "HEAD", Host: "health.internal",
@@ -379,9 +379,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 	raw := string(encoded)
 	for _, expected := range []string{
 		`"dial":"tcp6/[2001:db8::1]:443"`, `"weight":7`, `"priority":10`,
-		`"uri":"/ready?deep=1"`, `"method":"HEAD"`, `"Host":["health.internal"]`,
-		`"expect_status":204`, `"expect_body":"ready"`, `"passes":3`, `"fails":4`,
-		`"max_fails":5`, `"unhealthy_status":[500,503]`, `"unhealthy_request_count":64`,
+		`"max_fails":5`,
 		`"dial_timeout":1100000000`, `"handshake_timeout":2200000000`,
 		`"response_header_timeout":3300000000`, `"read_timeout":4400000000`, `"write_timeout":5500000000`,
 		`"server_name":"tls.internal"`, `"insecure_skip_verify":true`,
@@ -391,6 +389,11 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 	} {
 		if !strings.Contains(raw, expected) {
 			t.Fatalf("missing origin governance setting %s in %s", expected, raw)
+		}
+	}
+	for _, forbidden := range []string{`"active":`, `"unhealthy_status"`, `"unhealthy_latency"`, `"unhealthy_request_count"`} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("response- or probe-based health setting %s must not be rendered in %s", forbidden, raw)
 		}
 	}
 	if !strings.Contains(raw, `"method":["GET","HEAD","PUT","DELETE","OPTIONS","TRACE"]`) || strings.Contains(raw, `"method":["GET","HEAD","POST"`) {
@@ -426,7 +429,7 @@ func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
 			{Protocol: "http", Address: addresses[1], HostHeader: "two.internal", Weight: 1},
 		},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			HealthURI: "/", TimeoutMS: 2000,
+			TimeoutMS: 2000,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 		},

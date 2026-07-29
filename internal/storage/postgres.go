@@ -26,7 +26,29 @@ func InitSchema(ctx context.Context, db *sql.DB, schemaFS fs.FS, databaseURL str
 	if err := migrateLegacyNodeMemberships(ctx, db); err != nil {
 		return nil, err
 	}
+	if err := normalizeOriginHealthPolicies(ctx, db); err != nil {
+		return nil, err
+	}
 	return result, nil
+}
+
+func normalizeOriginHealthPolicies(ctx context.Context, db *sql.DB) error {
+	_, err := db.ExecContext(ctx, `UPDATE origin_pools
+		SET governance = (governance - 'health_uri') || jsonb_build_object(
+				'active_health', coalesce(governance->'active_health', '{}'::jsonb) || '{"enabled":false}'::jsonb,
+				'passive_health', coalesce(governance->'passive_health', '{}'::jsonb) ||
+					'{"unhealthy_status":[],"unhealthy_latency_ms":0,"unhealthy_request_count":0}'::jsonb
+			),
+			updated_at = now()
+		WHERE governance ? 'health_uri'
+			OR coalesce((governance->'active_health'->>'enabled')::boolean, false)
+			OR coalesce(governance->'passive_health'->'unhealthy_status', '[]'::jsonb) <> '[]'::jsonb
+			OR coalesce((governance->'passive_health'->>'unhealthy_latency_ms')::integer, 0) <> 0
+			OR coalesce((governance->'passive_health'->>'unhealthy_request_count')::integer, 0) <> 0`)
+	if err != nil {
+		return fmt.Errorf("normalize origin health policies: %w", err)
+	}
+	return nil
 }
 
 func migrateLegacyNodeMemberships(ctx context.Context, db *sql.DB) error {

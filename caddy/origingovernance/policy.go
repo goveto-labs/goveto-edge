@@ -25,8 +25,9 @@ type SelectionPolicy struct {
 	Scheduler string    `json:"scheduler,omitempty"`
 	Backends  []Backend `json:"backends"`
 
-	index  atomic.Uint64
-	byDial map[string]Backend
+	index     atomic.Uint64
+	byDial    map[string]Backend
+	available func(*reverseproxy.Upstream) bool
 }
 
 func init() { caddy.RegisterModule(SelectionPolicy{}) }
@@ -48,6 +49,9 @@ func (p *SelectionPolicy) Provision(caddy.Context) error {
 		return fmt.Errorf("unsupported scheduler %q", p.Scheduler)
 	}
 	p.byDial = make(map[string]Backend, len(p.Backends))
+	if p.available == nil {
+		p.available = func(upstream *reverseproxy.Upstream) bool { return upstream.Available() }
+	}
 	for _, backend := range p.Backends {
 		if backend.Dial == "" || backend.Priority < 0 || backend.Weight < 0 {
 			return fmt.Errorf("invalid origin backend %#v", backend)
@@ -61,25 +65,11 @@ func (p *SelectionPolicy) Provision(caddy.Context) error {
 }
 
 func (p *SelectionPolicy) Select(pool reverseproxy.UpstreamPool, request *http.Request, _ http.ResponseWriter) *reverseproxy.Upstream {
-	lowestPriority := int(^uint(0) >> 1)
-	candidates := make([]*reverseproxy.Upstream, 0, len(pool))
-	for _, upstream := range pool {
-		backend, ok := p.byDial[upstream.Dial]
-		if !ok {
-			backend = Backend{Dial: upstream.Dial, Weight: 1}
-		}
-		available := upstream.Available()
-		trackUpstream(p.SiteID, backend.Dial, upstream)
-		if !available {
-			continue
-		}
-		if backend.Priority < lowestPriority {
-			lowestPriority = backend.Priority
-			candidates = candidates[:0]
-		}
-		if backend.Priority == lowestPriority {
-			candidates = append(candidates, upstream)
-		}
+	candidates := p.candidates(pool, true)
+	if len(candidates) == 0 {
+		// Health state should cause failover when a backup exists, but it must
+		// never make every configured origin ineligible.
+		candidates = p.candidates(pool, false)
 	}
 	if len(candidates) == 0 {
 		return nil
@@ -96,6 +86,30 @@ func (p *SelectionPolicy) Select(pool reverseproxy.UpstreamPool, request *http.R
 		replacer.Set("goveto.origin.host", host)
 	}
 	return selected
+}
+
+func (p *SelectionPolicy) candidates(pool reverseproxy.UpstreamPool, requireAvailable bool) reverseproxy.UpstreamPool {
+	lowestPriority := int(^uint(0) >> 1)
+	candidates := make([]*reverseproxy.Upstream, 0, len(pool))
+	for _, upstream := range pool {
+		backend, ok := p.byDial[upstream.Dial]
+		if !ok {
+			backend = Backend{Dial: upstream.Dial, Weight: 1}
+		}
+		available := p.available(upstream)
+		trackUpstream(p.SiteID, backend.Dial, upstream)
+		if requireAvailable && !available {
+			continue
+		}
+		if backend.Priority < lowestPriority {
+			lowestPriority = backend.Priority
+			candidates = candidates[:0]
+		}
+		if backend.Priority == lowestPriority {
+			candidates = append(candidates, upstream)
+		}
+	}
+	return candidates
 }
 
 func (p *SelectionPolicy) choose(candidates reverseproxy.UpstreamPool, request *http.Request) *reverseproxy.Upstream {

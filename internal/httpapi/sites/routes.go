@@ -247,7 +247,6 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 					query.OriginPool.Id.Set(poolID),
 					query.OriginPool.ClusterId.Set(c.Param("cluster_id")),
 					query.OriginPool.Name.Set(input.Name),
-					query.OriginPool.HealthUri.Set(originPolicy.HealthURI),
 					query.OriginPool.Timeout.Set(originPolicy.TimeoutMS),
 					query.OriginPool.Headers.Set(headers),
 					query.OriginPool.Governance.Set(governance),

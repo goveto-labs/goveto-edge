@@ -317,13 +317,24 @@ func deliveryErrorRoutes(site SiteConfig, policy deliverypolicy.DeliveryPolicy) 
 				"host":       site.Domains,
 				"expression": "{http.error.status_code} in [" + strings.Join(statuses, ",") + "]",
 			}},
-			"handle": []any{map[string]any{
-				"handler": "static_response", "status_code": "{http.error.status_code}", "body": page.Body,
-				"headers": map[string][]string{"Content-Type": {page.ContentType}},
-			}}, "terminal": true,
+			"handle": []any{
+				handlerErrorLogAppender(),
+				map[string]any{
+					"handler": "static_response", "status_code": "{http.error.status_code}", "body": page.Body,
+					"headers": map[string][]string{"Content-Type": {page.ContentType}},
+				},
+			}, "terminal": true,
 		})
 	}
 	return routes
+}
+
+func logAppender(key, value string) map[string]any {
+	return map[string]any{"handler": "log_append", "key": key, "value": value}
+}
+
+func handlerErrorLogAppender() map[string]any {
+	return logAppender("handler_error", "{http.error.message}")
 }
 
 func cloneDeliveryMap(source map[string]any) map[string]any {

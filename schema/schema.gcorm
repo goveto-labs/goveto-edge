@@ -695,7 +695,6 @@ model OriginPool {
   clusterId  String          @map("cluster_id")
   name       String
   scheduler  String          @default("round_robin")
-  healthUri  String          @default("/health") @map("health_uri")
   timeout    Int             @default(10000)
   headers    Json
   governance Json            @default("{}")

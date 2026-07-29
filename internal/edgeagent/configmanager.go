@@ -361,6 +361,15 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			routes = append(routes, deliveryPreludeRoutes(site, deliveryPolicy)...)
 			errorRoutes = append(errorRoutes, deliveryErrorRoutes(site, deliveryPolicy)...)
 		}
+		errorRoutes = append(errorRoutes, map[string]any{
+			"@id":   "site_" + id + "_error_fallback",
+			"match": []any{map[string]any{"host": site.Domains}},
+			"handle": []any{
+				handlerErrorLogAppender(),
+				map[string]any{"handler": "static_response", "status_code": "{http.error.status_code}"},
+			},
+			"terminal": true,
+		})
 
 		if listener.RedirectHTTPToHTTPS {
 			routes = append(routes, map[string]any{
@@ -384,7 +393,10 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			})
 		}
 
-		handlers := make([]any, 0, 6)
+		handlers := []any{
+			logAppender("upstream_address", "{goveto.origin.address}"),
+			logAppender("upstream_status", "{http.reverse_proxy.status_code}"),
+		}
 		wafPolicy, wafConfigured, err := decodeWAFPolicy(site.WAF)
 		if err != nil {
 			return nil, fmt.Errorf("site %s WAF policy: %w", id, err)
@@ -490,27 +502,10 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			},
 		}
 		healthChecks := map[string]any{}
-		if originPolicy.ActiveHealth.Enabled {
-			healthHeaders := cloneHeaders(originPolicy.ActiveHealth.Headers)
-			if originPolicy.ActiveHealth.Host != "" {
-				healthHeaders["Host"] = []string{originPolicy.ActiveHealth.Host}
-			}
-			healthChecks["active"] = map[string]any{
-				"uri": originPolicy.HealthURI, "method": strings.ToUpper(originPolicy.ActiveHealth.Method),
-				"headers": healthHeaders, "expect_status": originPolicy.ActiveHealth.ExpectedStatus,
-				"expect_body": originPolicy.ActiveHealth.ExpectedBody,
-				"interval":    durationMS(originPolicy.ActiveHealth.IntervalMS),
-				"timeout":     durationMS(originPolicy.ActiveHealth.TimeoutMS),
-				"passes":      originPolicy.ActiveHealth.Passes, "fails": originPolicy.ActiveHealth.Fails,
-			}
-		}
 		if originPolicy.PassiveHealth.Enabled {
 			healthChecks["passive"] = map[string]any{
-				"fail_duration":           durationMS(originPolicy.PassiveHealth.FailDurationMS),
-				"max_fails":               originPolicy.PassiveHealth.MaxFails,
-				"unhealthy_status":        originPolicy.PassiveHealth.UnhealthyStatus,
-				"unhealthy_latency":       durationMS(originPolicy.PassiveHealth.UnhealthyLatencyMS),
-				"unhealthy_request_count": originPolicy.PassiveHealth.UnhealthyRequestCount,
+				"fail_duration": durationMS(originPolicy.PassiveHealth.FailDurationMS),
+				"max_fails":     originPolicy.PassiveHealth.MaxFails,
 			}
 		}
 		if len(healthChecks) > 0 {

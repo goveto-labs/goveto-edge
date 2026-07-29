@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type caddyAccess struct {
@@ -22,11 +23,14 @@ type caddyAccess struct {
 		URI      string      `json:"uri"`
 		Headers  http.Header `json:"headers"`
 	} `json:"request"`
-	BytesRead   uint64      `json:"bytes_read"`
-	Duration    float64     `json:"duration"`
-	Size        uint64      `json:"size"`
-	Status      uint16      `json:"status"`
-	RespHeaders http.Header `json:"resp_headers"`
+	BytesRead       uint64      `json:"bytes_read"`
+	Duration        float64     `json:"duration"`
+	Size            uint64      `json:"size"`
+	Status          uint16      `json:"status"`
+	UpstreamAddress string      `json:"upstream_address"`
+	UpstreamStatus  uint16      `json:"upstream_status"`
+	HandlerError    string      `json:"handler_error"`
+	RespHeaders     http.Header `json:"resp_headers"`
 }
 
 func ParseAccess(payload []byte, clusterID, nodeID, siteID string) (WebRequestLog, error) {
@@ -53,9 +57,8 @@ func ParseAccess(payload []byte, clusterID, nodeID, siteID string) (WebRequestLo
 	ip, _ := netip.ParseAddr(strings.Trim(ipText, "[]"))
 	if !ip.IsValid() {
 		ip = netip.IPv6Unspecified()
-	}
-	if ip.Is4() {
-		ip = netip.AddrFrom16(ip.As16())
+	} else {
+		ip = ip.Unmap()
 	}
 
 	cacheStatus := raw.RespHeaders.Get("X-Cache")
@@ -87,6 +90,9 @@ func ParseAccess(payload []byte, clusterID, nodeID, siteID string) (WebRequestLo
 		ResponseHeaderBytes: headerBytes(raw.RespHeaders),
 		ResponseBodyBytes:   raw.Size,
 		Duration:            time.Duration(raw.Duration * float64(time.Second)),
+		UpstreamAddress:     raw.UpstreamAddress,
+		UpstreamStatus:      raw.UpstreamStatus,
+		HandlerError:        normalizeHandlerError(raw.HandlerError),
 		CacheStatus:         normalizeCache(cacheStatus),
 		ContentType:         raw.RespHeaders.Get("Content-Type"),
 		FileExtension:       strings.TrimPrefix(strings.ToLower(filepath.Ext(u.Path)), "."),
@@ -98,6 +104,19 @@ func ParseAccess(payload []byte, clusterID, nodeID, siteID string) (WebRequestLo
 		WAFMatch:            headerValue(raw.RespHeaders, "X-Goveto-WAF-Match"),
 		WAFTags:             headerValue(raw.RespHeaders, "X-Goveto-WAF-Tag"),
 	}, nil
+}
+
+func normalizeHandlerError(value string) string {
+	value = strings.TrimSpace(value)
+	const maxBytes = 2048
+	if len(value) <= maxBytes {
+		return value
+	}
+	value = value[:maxBytes]
+	for !utf8.ValidString(value) {
+		value = value[:len(value)-1]
+	}
+	return value
 }
 
 func headerValue(headers http.Header, name string) string {

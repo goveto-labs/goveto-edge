@@ -8010,8 +8010,6 @@ components:
                         type: array
                         items:
                             type: string
-                health_uri:
-                    type: string
                 passive_health:
                     $ref: '#/components/schemas/edgeprotocol_OriginPassiveHealthConfig'
                 retry:
@@ -9170,8 +9168,6 @@ components:
                     type: object
                 headers:
                     type: object
-                healthUri:
-                    type: string
                 id:
                     type: string
                 name:

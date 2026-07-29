@@ -69,7 +69,7 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 	if pool == nil {
 		return siteDetails{}, echo.NewHTTPError(http.StatusInternalServerError, "origin pool not found")
 	}
-	originPolicy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.HealthUri, pool.Timeout)
+	originPolicy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.Timeout)
 	if err != nil {
 		return siteDetails{}, err
 	}
@@ -237,7 +237,6 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 				governance, _ := json.Marshal(originPolicy)
 				headers, _ := json.Marshal(originPolicy.Headers)
 				poolSets = append(poolSets,
-					query.OriginPool.HealthUri.Set(originPolicy.HealthURI),
 					query.OriginPool.Timeout.Set(originPolicy.TimeoutMS),
 					query.OriginPool.Headers.Set(headers),
 					query.OriginPool.Governance.Set(governance),

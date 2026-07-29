@@ -72,7 +72,7 @@ func (t *HTTPTransport) RoundTrip(request *http.Request) (*http.Response, error)
 	}
 	if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
 		if address, found := replacer.GetString("goveto.origin.address"); found && address != "" {
-			failed := err != nil || (response != nil && response.StatusCode >= http.StatusInternalServerError)
+			failed := err != nil
 			observe(t.SiteID, address, time.Since(start), failed)
 		}
 	}

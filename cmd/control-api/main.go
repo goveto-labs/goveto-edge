@@ -134,6 +134,7 @@ func main() {
 		os.Exit(1)
 	}
 	analyticsIngest := analytics.NewIngestWithConcurrency(orm, analyticsStore, cfg.AnalyticsIngestConcurrency)
+	analyticsIngest.ConfigureGeoIP(cfg.GeoIPDatabasePath)
 	if cfg.AnalyticsArchiveS3Endpoint != "" {
 		archiveStore, archiveErr := analytics.NewS3ObjectStore(analytics.S3Options{
 			Endpoint:     cfg.AnalyticsArchiveS3Endpoint,

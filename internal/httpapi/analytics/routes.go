@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v5"
@@ -110,11 +111,21 @@ func siteLogs(s *analytics.Store) echo.HandlerFunc {
 		if siteID == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "site_id is required")
 		}
-		limit := 100
-		if value, err := strconv.Atoi(c.QueryParam("limit")); err == nil && value > 0 && value <= 500 {
-			limit = value
+		page := 1
+		if value, err := strconv.Atoi(c.QueryParam("page")); err == nil && value > 0 {
+			page = value
 		}
-		items, err := s.SiteRequestLogs(c.Request().Context(), c.Param("cluster_id"), siteID, limit)
+		pageSize := 25
+		if value, err := strconv.Atoi(c.QueryParam("page_size")); err == nil && value > 0 && value <= 100 {
+			pageSize = value
+		}
+		search := strings.TrimSpace(c.QueryParam("query"))
+		if len(search) > 256 {
+			return echo.NewHTTPError(http.StatusBadRequest, "query must be at most 256 characters")
+		}
+		items, err := s.SiteRequestLogs(
+			c.Request().Context(), c.Param("cluster_id"), siteID, search, page, pageSize,
+		)
 		if err != nil {
 			return err
 		}

@@ -30,6 +30,7 @@ type WebRequestLog struct {
 	Duration            time.Duration
 	UpstreamAddress     string
 	UpstreamStatus      uint16
+	HandlerError        string
 	CacheStatus         string
 	ContentType         string
 	FileExtension       string
