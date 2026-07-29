@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -87,8 +88,40 @@ func TestRunStateMetrics(t *testing.T) {
 	state := &runState{protocols: make(map[string]uint64)}
 	state.record(requestResult{latency: time.Millisecond, ttfb: 500 * time.Microsecond, bytes: 1024, protocol: "HTTP/3.0"})
 	state.record(requestResult{latency: 3 * time.Millisecond, ttfb: time.Millisecond, bytes: 1024, protocol: "HTTP/3.0"})
-	metrics, failures := state.metrics(time.Second)
+	metrics, failures, errorCounts := state.metrics(time.Second)
 	if len(failures) != 0 || metrics.RPS != 2 || metrics.P50MS != 1 || metrics.P99MS != 3 || metrics.NegotiatedProtocol != "HTTP/3.0" {
 		t.Fatalf("metrics=%+v failures=%v", metrics, failures)
+	}
+	if len(errorCounts) != 0 {
+		t.Fatalf("error counts=%v", errorCounts)
+	}
+}
+
+func TestRunWorkersDrainsInflightRequestAfterDispatchDeadline(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		time.Sleep(25 * time.Millisecond)
+		if request.Context().Err() != nil {
+			return nil, request.Context().Err()
+		}
+		return &http.Response{StatusCode: http.StatusOK, Proto: "HTTP/1.1", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok")), Request: request}, nil
+	})}
+	dispatchContext, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64)}
+	runWorkersWithRequestContext(dispatchContext, t.Context(), Config{URL: "https://benchmark.example.test", Protocol: ProtocolH1, ExpectedStatus: http.StatusOK, Concurrency: 1}, client, state, nil)
+	metrics, failures, _ := state.metrics(10 * time.Millisecond)
+	if metrics.Successes != 1 || metrics.Failures != 0 || len(failures) != 0 {
+		t.Fatalf("metrics=%+v failures=%v", metrics, failures)
+	}
+}
+
+func TestRunStateClassifiesAllFailuresBeyondSamples(t *testing.T) {
+	state := &runState{}
+	for range 25 {
+		state.recordFailure(errors.New("status 502, want 200"))
+	}
+	metrics, samples, counts := state.metrics(time.Second)
+	if metrics.Failures != 25 || len(samples) != 20 || counts["http_5xx"] != 25 {
+		t.Fatalf("metrics=%+v samples=%d counts=%v", metrics, len(samples), counts)
 	}
 }

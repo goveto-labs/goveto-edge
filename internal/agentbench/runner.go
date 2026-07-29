@@ -32,17 +32,18 @@ type closeRoundTripper interface {
 }
 
 type runState struct {
-	requests   atomic.Uint64
-	successes  atomic.Uint64
-	failures   atomic.Uint64
-	bytes      atomic.Uint64
-	mu         sync.Mutex
-	latencies  []time.Duration
-	handshakes []time.Duration
-	ttfb       []time.Duration
-	protocols  map[string]uint64
-	headers    map[string]map[string]uint64
-	errors     []string
+	requests    atomic.Uint64
+	successes   atomic.Uint64
+	failures    atomic.Uint64
+	bytes       atomic.Uint64
+	mu          sync.Mutex
+	latencies   []time.Duration
+	handshakes  []time.Duration
+	ttfb        []time.Duration
+	protocols   map[string]uint64
+	headers     map[string]map[string]uint64
+	errors      []string
+	errorCounts map[string]uint64
 }
 
 func RunBenchmark(ctx context.Context, config Config) (Report, error) {
@@ -60,7 +61,7 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			ExpectedSHA256: config.ExpectedSHA256, ExpectedHeaders: config.ExpectedHeaders,
 			RequestHeaders: config.RequestHeaders, CaptureHeaders: config.CaptureHeaders, UniqueQuery: config.UniqueQuery,
 			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
-			MaxCapturedValues: config.MaxCapturedValues,
+			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
 		},
 	}
 	var loadCPUMax float64
@@ -76,7 +77,8 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 		}
 	}
 	report.Summary = Summarize(report.Runs)
-	report.Validity = ValidateRuns(report.Runs, loadCPUMax)
+	report.ErrorCounts = aggregateErrorCounts(report.Runs)
+	report.Validity = ValidateRuns(report.Runs, loadCPUMax, config.MaxLoadCPUPercent)
 	report.Validity = ValidateResourceExpectations(report.Validity, report.Runs, config)
 	return report, nil
 }
@@ -96,7 +98,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		cancel()
 	}
 
-	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64)}
+	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64), errorCounts: make(map[string]uint64)}
 	measureContext, cancelSampling := context.WithCancel(ctx)
 	defer cancelSampling()
 	samplesDone := make(chan struct{})
@@ -116,23 +118,28 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		return Run{}, 0, ctx.Err()
 	}
 	started := time.Now().UTC()
-	workerContext, cancelWorkers := context.WithTimeout(measureContext, config.Duration)
-	runWorkers(workerContext, config, client, state, &requestSequence)
-	cancelWorkers()
+	dispatchContext, stopDispatch := context.WithTimeout(measureContext, config.Duration)
+	// Stop dispatching at the measurement boundary, but allow requests already in
+	// flight to complete under the normal per-request timeout.
+	runWorkersWithRequestContext(dispatchContext, measureContext, config, client, state, &requestSequence)
+	stopDispatch()
 	cancelSampling()
 	<-samplesDone
-	elapsed := time.Since(started)
-	metrics, failures := state.metrics(elapsed)
-	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures}, loadCPUMax, nil
+	metrics, failures, errorCounts := state.metrics(config.Duration)
+	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures, ErrorCounts: errorCounts}, loadCPUMax, nil
 }
 
 func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
+	runWorkersWithRequestContext(ctx, ctx, config, sharedClient, state, sequence)
+}
+
+func runWorkersWithRequestContext(dispatchContext, requestContext context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
 	var workers sync.WaitGroup
 	for range config.Concurrency {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			for ctx.Err() == nil {
+			for dispatchContext.Err() == nil {
 				client := sharedClient
 				closeClient := func() {}
 				if config.NewConnection {
@@ -146,9 +153,9 @@ func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, s
 					client = &http.Client{Transport: transport, Timeout: config.RequestTimeout}
 					closeClient = closeTransport
 				}
-				result := executeRequest(ctx, client, config, sequence)
+				result := executeRequest(requestContext, client, config, sequence)
 				closeClient()
-				if state != nil && !ignoreMeasurementCancellation(ctx, result.err) {
+				if state != nil && !ignoreMeasurementCancellation(requestContext, result.err) {
 					state.record(result)
 				}
 			}
@@ -297,6 +304,9 @@ func validateConfig(config *Config) error {
 	if config.SampleInterval <= 0 {
 		config.SampleInterval = time.Second
 	}
+	if config.MaxLoadCPUPercent <= 0 {
+		config.MaxLoadCPUPercent = 85
+	}
 	if config.ExpectedStatus == 0 {
 		config.ExpectedStatus = http.StatusOK
 	}
@@ -363,13 +373,17 @@ func (state *runState) record(result requestResult) {
 func (state *runState) recordFailure(err error) {
 	state.failures.Add(1)
 	state.mu.Lock()
+	if state.errorCounts == nil {
+		state.errorCounts = make(map[string]uint64)
+	}
+	state.errorCounts[classifyFailure(err)]++
 	if len(state.errors) < 20 {
 		state.errors = append(state.errors, err.Error())
 	}
 	state.mu.Unlock()
 }
 
-func (state *runState) metrics(elapsed time.Duration) (Metrics, []string) {
+func (state *runState) metrics(elapsed time.Duration) (Metrics, []string, map[string]uint64) {
 	state.mu.Lock()
 	defer state.mu.Unlock()
 	seconds := elapsed.Seconds()
@@ -394,7 +408,63 @@ func (state *runState) metrics(elapsed time.Duration) (Metrics, []string) {
 	}
 	sort.Strings(protocols)
 	result.NegotiatedProtocol = strings.Join(protocols, ",")
-	return result, append([]string(nil), state.errors...)
+	return result, append([]string(nil), state.errors...), cloneCounts(state.errorCounts)
+}
+
+func classifyFailure(err error) string {
+	if err == nil {
+		return "unknown"
+	}
+	var streamError *quic.StreamError
+	if errors.As(err, &streamError) && !streamError.Remote && streamError.ErrorCode == quic.StreamErrorCode(http3.ErrCodeRequestCanceled) {
+		return "h3_local_cancel"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "i/o timeout") {
+		return "timeout"
+	}
+	message := err.Error()
+	switch {
+	case strings.HasPrefix(message, "status 5"):
+		return "http_5xx"
+	case strings.HasPrefix(message, "status "):
+		return "http_status"
+	case strings.HasPrefix(message, "negotiated "):
+		return "protocol_mismatch"
+	case strings.Contains(message, "SHA-256 mismatch"):
+		return "body_integrity"
+	case strings.HasPrefix(message, "header "):
+		return "header_mismatch"
+	case strings.HasPrefix(message, "read response:"):
+		return "response_read"
+	case strings.Contains(message, "dial "):
+		return "dial"
+	default:
+		return "transport"
+	}
+}
+
+func aggregateErrorCounts(runs []Run) map[string]uint64 {
+	counts := make(map[string]uint64)
+	for _, run := range runs {
+		for class, count := range run.ErrorCounts {
+			counts[class] += count
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	return counts
+}
+
+func cloneCounts(values map[string]uint64) map[string]uint64 {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[string]uint64, len(values))
+	for key, value := range values {
+		result[key] = value
+	}
+	return result
 }
 
 func durationMS(value time.Duration) float64 { return float64(value) / float64(time.Millisecond) }

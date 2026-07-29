@@ -47,6 +47,7 @@ type Config struct {
 	MinCacheMisses     uint64
 	MinCacheEvictions  uint64
 	MaxCapturedValues  int
+	MaxLoadCPUPercent  float64
 }
 
 type Report struct {
@@ -59,6 +60,7 @@ type Report struct {
 	Runs          []Run             `json:"runs"`
 	Summary       Metrics           `json:"summary"`
 	Validity      Validity          `json:"validity"`
+	ErrorCounts   map[string]uint64 `json:"error_counts,omitempty"`
 	Baseline      *BaselineDecision `json:"baseline,omitempty"`
 }
 
@@ -93,15 +95,17 @@ type Scenario struct {
 	MinCacheMisses    uint64            `json:"min_cache_misses,omitempty"`
 	MinCacheEvictions uint64            `json:"min_cache_evictions,omitempty"`
 	MaxCapturedValues int               `json:"max_captured_values,omitempty"`
+	MaxLoadCPUPercent float64           `json:"max_load_cpu_percent,omitempty"`
 }
 
 type Run struct {
-	Index     int               `json:"index"`
-	StartedAt time.Time         `json:"started_at"`
-	Metrics   Metrics           `json:"metrics"`
-	Resources ResourceSummary   `json:"resources,omitempty"`
-	Samples   []TimeSeriesPoint `json:"samples,omitempty"`
-	Errors    []string          `json:"errors,omitempty"`
+	Index       int               `json:"index"`
+	StartedAt   time.Time         `json:"started_at"`
+	Metrics     Metrics           `json:"metrics"`
+	Resources   ResourceSummary   `json:"resources,omitempty"`
+	Samples     []TimeSeriesPoint `json:"samples,omitempty"`
+	Errors      []string          `json:"errors,omitempty"`
+	ErrorCounts map[string]uint64 `json:"error_counts,omitempty"`
 }
 
 type Metrics struct {
@@ -179,11 +183,21 @@ type TimeSeriesPoint struct {
 	CacheEvictions     uint64     `json:"cache_evictions,omitempty"`
 }
 
+type ResultStatus string
+
+const (
+	ResultPass          ResultStatus = "PASS"
+	ResultProductFail   ResultStatus = "PRODUCT_FAIL"
+	ResultLoadSaturated ResultStatus = "LOAD_SATURATED"
+	ResultEnvInvalid    ResultStatus = "ENV_INVALID"
+)
+
 type Validity struct {
-	Valid             bool     `json:"valid"`
-	Reasons           []string `json:"reasons,omitempty"`
-	RPSCoefficientVar float64  `json:"rps_coefficient_of_variation"`
-	LoadCPUPercentMax float64  `json:"load_cpu_percent_max,omitempty"`
+	Valid             bool         `json:"valid"`
+	Status            ResultStatus `json:"status"`
+	Reasons           []string     `json:"reasons,omitempty"`
+	RPSCoefficientVar float64      `json:"rps_coefficient_of_variation"`
+	LoadCPUPercentMax float64      `json:"load_cpu_percent_max,omitempty"`
 }
 
 type BaselineDecision struct {

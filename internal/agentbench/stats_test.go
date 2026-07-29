@@ -20,12 +20,22 @@ func TestPercentileUsesNearestRank(t *testing.T) {
 
 func TestValidateRunsRejectsVariationFailuresAndLoadSaturation(t *testing.T) {
 	runs := []Run{{Index: 1, Metrics: Metrics{RPS: 100}}, {Index: 2, Metrics: Metrics{RPS: 120, Failures: 1}}}
-	validity := ValidateRuns(runs, 90)
+	validity := ValidateRuns(runs, 90, 85)
 	if validity.Valid {
 		t.Fatal("invalid runs were accepted")
 	}
 	if len(validity.Reasons) != 3 {
 		t.Fatalf("reasons=%v, want failure, variation, and CPU", validity.Reasons)
+	}
+	if validity.Status != ResultProductFail {
+		t.Fatalf("status=%s", validity.Status)
+	}
+}
+
+func TestValidateRunsSeparatesLoadSaturationFromProductFailure(t *testing.T) {
+	validity := ValidateRuns([]Run{{Index: 1, Metrics: Metrics{RPS: 100}}}, 90, 85)
+	if validity.Valid || validity.Status != ResultLoadSaturated {
+		t.Fatalf("validity=%+v", validity)
 	}
 }
 

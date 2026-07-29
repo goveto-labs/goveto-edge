@@ -54,27 +54,33 @@ func Summarize(runs []Run) Metrics {
 	return result
 }
 
-func ValidateRuns(runs []Run, loadCPUPercentMax float64) Validity {
-	validity := Validity{Valid: true, LoadCPUPercentMax: loadCPUPercentMax}
+func ValidateRuns(runs []Run, loadCPUPercentMax, maxLoadCPUPercent float64) Validity {
+	validity := Validity{Valid: true, Status: ResultPass, LoadCPUPercentMax: loadCPUPercentMax}
 	rps := make([]float64, 0, len(runs))
 	for _, run := range runs {
 		rps = append(rps, run.Metrics.RPS)
 		if run.Metrics.Failures > 0 {
-			validity.Reasons = append(validity.Reasons, fmt.Sprintf("run %d had %d failed requests", run.Index, run.Metrics.Failures))
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %d failed requests", run.Index, run.Metrics.Failures))
 		}
 	}
 	validity.RPSCoefficientVar = CoefficientOfVariation(rps)
 	if validity.RPSCoefficientVar > 0.05 {
-		validity.Reasons = append(validity.Reasons, fmt.Sprintf("RPS coefficient of variation %.2f%% exceeds 5%%", validity.RPSCoefficientVar*100))
+		validity.addReason(ResultEnvInvalid, fmt.Sprintf("RPS coefficient of variation %.2f%% exceeds 5%%", validity.RPSCoefficientVar*100))
 	}
-	if loadCPUPercentMax > 85 {
-		validity.Reasons = append(validity.Reasons, fmt.Sprintf("load generator CPU %.2f%% exceeds 85%%", loadCPUPercentMax))
+	if maxLoadCPUPercent <= 0 {
+		maxLoadCPUPercent = 85
+	}
+	if loadCPUPercentMax > maxLoadCPUPercent {
+		validity.addReason(ResultLoadSaturated, fmt.Sprintf("load generator CPU %.2f%% exceeds %.2f%%", loadCPUPercentMax, maxLoadCPUPercent))
 	}
 	validity.Valid = len(validity.Reasons) == 0
 	return validity
 }
 
 func ValidateResourceExpectations(validity Validity, runs []Run, config Config) Validity {
+	if validity.Status == "" {
+		validity.Status = ResultPass
+	}
 	for _, run := range runs {
 		checks := []struct {
 			name    string
@@ -87,19 +93,39 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		}
 		for _, check := range checks {
 			if check.minimum > 0 && check.actual < check.minimum {
-				validity.Reasons = append(validity.Reasons, fmt.Sprintf("run %d had %d %s, want at least %d", run.Index, check.actual, check.name, check.minimum))
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %d %s, want at least %d", run.Index, check.actual, check.name, check.minimum))
 			}
 		}
 		if config.MaxCapturedValues > 0 {
 			for name, values := range run.Metrics.ResponseHeaders {
 				if len(values) > config.MaxCapturedValues {
-					validity.Reasons = append(validity.Reasons, fmt.Sprintf("run %d captured %d distinct %s values, want at most %d", run.Index, len(values), name, config.MaxCapturedValues))
+					validity.addReason(ResultProductFail, fmt.Sprintf("run %d captured %d distinct %s values, want at most %d", run.Index, len(values), name, config.MaxCapturedValues))
 				}
 			}
 		}
 	}
 	validity.Valid = len(validity.Reasons) == 0
 	return validity
+}
+
+func (validity *Validity) addReason(status ResultStatus, reason string) {
+	validity.Reasons = append(validity.Reasons, reason)
+	if resultStatusPriority(status) > resultStatusPriority(validity.Status) {
+		validity.Status = status
+	}
+}
+
+func resultStatusPriority(status ResultStatus) int {
+	switch status {
+	case ResultProductFail:
+		return 3
+	case ResultEnvInvalid:
+		return 2
+	case ResultLoadSaturated:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func Compare(current, baseline Report) BaselineDecision {

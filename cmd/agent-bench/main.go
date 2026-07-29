@@ -86,6 +86,7 @@ func run(args []string) error {
 	minCacheEvictions := flags.Uint64("min-cache-evictions", 0, "minimum cache eviction delta required in every run")
 	maxCapturedValues := flags.Int("max-captured-values", 0, "maximum distinct values allowed for each captured response header")
 	agentBinary := flags.String("agent-binary", "", "Edge Agent binary to hash")
+	maxLoadCPU := flags.Float64("max-load-cpu", 85, "maximum load generator CPU percent before marking the result saturated")
 	var expectedHeaders headerFlags
 	var requestHeaders headerFlags
 	var captureHeaders stringFlags
@@ -126,6 +127,7 @@ func run(args []string) error {
 		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
 		MaxCapturedValues: *maxCapturedValues,
+		MaxLoadCPUPercent: *maxLoadCPU,
 	})
 	if err != nil {
 		return err
@@ -145,7 +147,7 @@ func run(args []string) error {
 	if err := agentbench.WriteArtifacts(*output, report); err != nil {
 		return fmt.Errorf("write artifacts: %w", err)
 	}
-	fmt.Printf("RPS %.2f, p99 %.2f ms, success %.4f%%; artifacts: %s\n", report.Summary.RPS, report.Summary.P99MS, report.Summary.SuccessRate*100, *output)
+	fmt.Printf("Status %s, RPS %.2f, p99 %.2f ms, success %.4f%%; artifacts: %s\n", report.Validity.Status, report.Summary.RPS, report.Summary.P99MS, report.Summary.SuccessRate*100, *output)
 	if !report.Validity.Valid {
 		return errors.New("benchmark result is invalid: " + strings.Join(report.Validity.Reasons, "; "))
 	}
@@ -162,7 +164,7 @@ func suiteDefaults(suite agentbench.Suite) (time.Duration, time.Duration, int) {
 	case agentbench.SuiteNightly:
 		return 10 * time.Second, 30 * time.Second, 3
 	case agentbench.SuiteCapacity:
-		return 30 * time.Second, 120 * time.Second, 5
+		return 30 * time.Second, 120 * time.Second, 3
 	case agentbench.SuiteSoak:
 		return 30 * time.Second, 6 * time.Hour, 1
 	default:

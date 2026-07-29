@@ -10,7 +10,7 @@ import (
 
 func TestWriteArtifactsAndReadReport(t *testing.T) {
 	directory := t.TempDir()
-	report := Report{SchemaVersion: SchemaVersion, Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "origin", Protocol: ProtocolH1}, Summary: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Cache": {"HIT": 10}}}, Validity: Validity{Valid: true}, Runs: []Run{{Index: 1, Resources: ResourceSummary{CacheHitsDelta: 10}, Samples: []TimeSeriesPoint{{At: time.Now(), Requests: 10, RPS: 10}}}}}
+	report := Report{SchemaVersion: SchemaVersion, Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "origin", Protocol: ProtocolH1}, Summary: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Cache": {"HIT": 10}}}, Validity: Validity{Valid: false, Status: ResultProductFail, Reasons: []string{"request failed"}}, ErrorCounts: map[string]uint64{"http_5xx": 2}, Runs: []Run{{Index: 1, Resources: ResourceSummary{CacheHitsDelta: 10}, Samples: []TimeSeriesPoint{{At: time.Now(), Requests: 10, RPS: 10}}}}}
 	if err := WriteArtifacts(directory, report); err != nil {
 		t.Fatal(err)
 	}
@@ -27,7 +27,7 @@ func TestWriteArtifactsAndReadReport(t *testing.T) {
 		}
 	}
 	summary, err := os.ReadFile(filepath.Join(directory, "summary.md"))
-	if err != nil || !strings.Contains(string(summary), "Captured response headers") || !strings.Contains(string(summary), "Cache activity") {
+	if err != nil || !strings.Contains(string(summary), "Captured response headers") || !strings.Contains(string(summary), "Cache activity") || !strings.Contains(string(summary), "PRODUCT_FAIL") || !strings.Contains(string(summary), "http_5xx") {
 		t.Fatalf("summary=%q err=%v", summary, err)
 	}
 }

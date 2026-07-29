@@ -60,20 +60,29 @@ func writeMarkdown(path string, report Report) error {
 		return err
 	}
 	defer file.Close()
-	validity := "valid"
-	if !report.Validity.Valid {
-		validity = "invalid"
+	status := report.Validity.Status
+	if status == "" {
+		status = ResultPass
+		if !report.Validity.Valid {
+			status = ResultEnvInvalid
+		}
 	}
 	_, err = fmt.Fprintf(file, "# Edge Agent benchmark\n\n- Scenario: `%s`\n- Protocol: `%s` (`%s`)\n- Platform: `%s/%s`\n- Result: **%s**\n\n| RPS | Success | p50 | p95 | p99 | Max | Bandwidth |\n|---:|---:|---:|---:|---:|---:|---:|\n| %.2f | %.4f%% | %.2f ms | %.2f ms | %.2f ms | %.2f ms | %.2f MiB/s |\n",
-		report.Scenario.Name, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, validity,
+		report.Scenario.Name, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, status,
 		report.Summary.RPS, report.Summary.SuccessRate*100, report.Summary.P50MS, report.Summary.P95MS, report.Summary.P99MS, report.Summary.MaxMS, report.Summary.BytesPerSecond/(1<<20))
 	if err != nil {
 		return err
 	}
 	if len(report.Validity.Reasons) > 0 {
-		_, _ = io.WriteString(file, "\n## Invalid reasons\n\n")
+		_, _ = io.WriteString(file, "\n## Result reasons\n\n")
 		for _, reason := range report.Validity.Reasons {
 			_, _ = fmt.Fprintf(file, "- %s\n", reason)
+		}
+	}
+	if len(report.ErrorCounts) > 0 {
+		_, _ = io.WriteString(file, "\n## Error counts\n\n| Class | Count |\n|---|---:|\n")
+		for _, class := range sortedKeys(report.ErrorCounts) {
+			_, _ = fmt.Fprintf(file, "| %s | %d |\n", class, report.ErrorCounts[class])
 		}
 	}
 	if len(report.Summary.ResponseHeaders) > 0 {

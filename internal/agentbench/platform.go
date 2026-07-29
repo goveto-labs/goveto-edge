@@ -13,6 +13,8 @@ import (
 	"github.com/shirou/gopsutil/v4/host"
 )
 
+var buildCommit string
+
 func CollectPlatform() Platform {
 	platform := Platform{OS: runtime.GOOS, Architecture: runtime.GOARCH, GoVersion: runtime.Version(), CPUCount: runtime.NumCPU()}
 	if info, err := cpu.Info(); err == nil && len(info) > 0 {
@@ -27,6 +29,9 @@ func CollectPlatform() Platform {
 }
 
 func GitCommit() string {
+	if strings.TrimSpace(buildCommit) != "" && buildCommit != "unknown" {
+		return strings.TrimSpace(buildCommit)
+	}
 	output, err := exec.Command("git", "rev-parse", "HEAD").Output()
 	if err != nil {
 		return ""
