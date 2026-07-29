@@ -64,11 +64,13 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cacheDirectory, "cached-response"), []byte("12345"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	appendMetrics(queue, NodeConfig{
+	if err := appendMetrics(queue, NodeConfig{
 		CacheDirectory:      cacheDirectory,
 		AutoMaxSize:         true,
 		MaxDiskUsagePercent: 80,
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	batch, err := queue.Batch(10)
 	if err != nil {
 		t.Fatal(err)

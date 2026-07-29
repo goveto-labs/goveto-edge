@@ -9,6 +9,7 @@ import { ApiError, purgeApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
@@ -214,19 +215,21 @@ export function CacheOperations({
                     title='Cache operations'
                 >
                     {!fixedSite && (
-                        <select
-                            aria-label='Site'
-                            className='w-full min-w-0 rounded-lg border border-border bg-surface px-3 py-2 text-sm sm:min-w-64'
+                        <SelectField
+                            ariaLabel='Site'
+                            className='w-full min-w-0 sm:min-w-64'
+                            options={
+                                siteItems.length === 0
+                                    ? [{ id: '', label: 'No sites available' }]
+                                    : siteItems.map((site) => ({
+                                          id: site.id,
+                                          label: `${site.name} (${site.domains?.[0] || site.id})`,
+                                      }))
+                            }
+                            placeholder='Select a site'
                             value={siteId}
-                            onChange={(event) => handleSiteChange(event.target.value)}
-                        >
-                            {siteItems.length === 0 && <option value=''>No sites available</option>}
-                            {siteItems.map((site) => (
-                                <option key={site.id} value={site.id}>
-                                    {site.name} ({site.domains?.[0] || site.id})
-                                </option>
-                            ))}
-                        </select>
+                            onChange={handleSiteChange}
+                        />
                     )}
                 </PageHeader>
             )}

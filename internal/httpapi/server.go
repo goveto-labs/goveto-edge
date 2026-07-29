@@ -14,6 +14,7 @@ import (
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
+	"goveto-edge/internal/httpapi/adminsettings"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
@@ -49,6 +50,7 @@ func New(
 	dnsService *dnssync.Service,
 	redisClient *redis.Client,
 	securityOptions httpsecurity.Options,
+	restartControlPlane func(),
 	analyticsStore ...*analytics.Store,
 ) *echo.Echo {
 	e := echo.New()
@@ -78,6 +80,7 @@ func New(
 	health.Register(e, db, analyticsData)
 	initialization.Register(e, orm, settingStore, limiter)
 	authapi.Register(e, orm, sessions, settingStore, captchaVerifier, limiter)
+	adminsettings.Register(e, settingStore, restartControlPlane)
 	clusters.Register(e, orm, sessions)
 	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, credentialCipher, dnsService)

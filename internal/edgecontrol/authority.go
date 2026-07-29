@@ -42,7 +42,7 @@ type Authority struct {
 func NewAuthority(cipher *node.CredentialCipher, gatewayAddress string) (*Authority, error) {
 	host, _, err := net.SplitHostPort(gatewayAddress)
 	if err != nil || strings.TrimSpace(host) == "" {
-		return nil, fmt.Errorf("AGENT_GATEWAY_PUBLIC_ADDRESS must be host:port: %w", err)
+		return nil, fmt.Errorf("agent gateway public address must be host:port: %w", err)
 	}
 
 	caKey := ed25519.NewKeyFromSeed(cipher.Derive("goveto-edge/agent-mtls/ca/v1")[:ed25519.SeedSize])

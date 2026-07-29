@@ -1,6 +1,7 @@
 export type { DNSDiscoveryRequest, UpdateDNSConfig } from './dns.ts';
 export type * from './types.ts';
 
+export { adminSettingsApi } from './adminSettings.ts';
 export { analyticsApi } from './analytics.ts';
 export { authApi } from './auth.ts';
 export { certificatesApi } from './certificates.ts';

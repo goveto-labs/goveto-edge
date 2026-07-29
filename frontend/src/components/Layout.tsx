@@ -6,7 +6,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageTransition } from '@/components/PageTransition.tsx';
-import { ClusterPicker, nav, Sidebar } from '@/components/Sidebar.tsx';
+import { ClusterPicker, navigationFor, Sidebar } from '@/components/Sidebar.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -25,13 +25,13 @@ function Greeting() {
     );
 }
 
-function PageTitle({ pathname }: { pathname: string }) {
+function PageTitle({ pathname, isInstanceOwner }: { pathname: string; isInstanceOwner: boolean }) {
     const item = useMemo(
         () =>
-            nav
+            navigationFor(isInstanceOwner)
                 .flatMap((entry) => [entry, ...(entry.children ?? [])])
                 .find((n) => n.path === pathname),
-        [pathname]
+        [isInstanceOwner, pathname]
     );
     const title = item?.label ?? 'Dashboard';
 
@@ -128,7 +128,10 @@ export function Layout() {
                             <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
                                 <span className='text-xs font-bold'>G</span>
                             </div>
-                            <PageTitle pathname={location.pathname} />
+                            <PageTitle
+                                isInstanceOwner={Boolean(user?.is_instance_owner)}
+                                pathname={location.pathname}
+                            />
                         </div>
 
                         <div className='hidden md:block'>
@@ -190,7 +193,8 @@ export function Layout() {
                         {clustersReady &&
                             !clusterId &&
                             !requiresCluster &&
-                            location.pathname !== '/' && (
+                            location.pathname !== '/' &&
+                            !location.pathname.startsWith('/settings/') && (
                                 <Alert className='mb-6' status='warning'>
                                     <Alert.Indicator />
                                     <Alert.Content>

@@ -27,6 +27,7 @@ import { useRef } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormField } from '@/components/FormField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 
@@ -40,9 +41,6 @@ interface Props {
 type RewriteRule = DeliveryPolicy['rewrites'][number];
 type RedirectRule = DeliveryPolicy['redirects'][number];
 type ErrorPage = DeliveryPolicy['error_pages'][number];
-
-const selectClass =
-    'h-10 rounded-lg border border-border bg-surface-secondary px-3 text-sm text-foreground outline-none transition-colors focus:border-primary focus:ring-2 focus:ring-primary/20';
 
 function splitLines(value: string) {
     return value
@@ -164,20 +162,21 @@ function HeaderEditor({
                     className='grid gap-2 rounded-lg border border-border/70 bg-surface-secondary/20 p-3 sm:grid-cols-[104px_1fr_1.4fr_32px]'
                     key={keyAt(index)}
                 >
-                    <select
-                        aria-label={`${label} operation ${index + 1}`}
-                        className={selectClass}
+                    <SelectField
+                        ariaLabel={`${label} operation ${index + 1}`}
+                        options={[
+                            { id: 'SET', label: 'Set' },
+                            { id: 'ADD', label: 'Add' },
+                            { id: 'DELETE', label: 'Delete' },
+                        ]}
                         value={rule.operation}
-                        onChange={(event) =>
+                        variant='secondary'
+                        onChange={(value) =>
                             update(index, {
-                                operation: event.target.value as HeaderRule['operation'],
+                                operation: value as HeaderRule['operation'],
                             })
                         }
-                    >
-                        <option value='SET'>Set</option>
-                        <option value='ADD'>Add</option>
-                        <option value='DELETE'>Delete</option>
-                    </select>
+                    />
                     <Input
                         aria-label={`${label} name ${index + 1}`}
                         placeholder='X-Header-Name'
@@ -323,25 +322,24 @@ function URLRulesEditor({
                                 )
                             }
                         />
-                        <select
-                            aria-label={`Redirect status ${index + 1}`}
-                            className={selectClass}
-                            value={rule.status}
-                            onChange={(event) =>
+                        <SelectField
+                            ariaLabel={`Redirect status ${index + 1}`}
+                            options={[301, 302, 307, 308].map((status) => ({
+                                id: String(status),
+                                label: String(status),
+                            }))}
+                            value={String(rule.status)}
+                            variant='secondary'
+                            onChange={(value) =>
                                 onRedirectsChange(
                                     redirects.map((item, current) =>
                                         current === index
-                                            ? { ...item, status: Number(event.target.value) }
+                                            ? { ...item, status: Number(value) }
                                             : item
                                     )
                                 )
                             }
-                        >
-                            <option value={301}>301</option>
-                            <option value={302}>302</option>
-                            <option value={307}>307</option>
-                            <option value={308}>308</option>
-                        </select>
+                        />
                         <RemoveButton
                             label={`Remove redirect ${index + 1}`}
                             onPress={() =>
@@ -370,20 +368,21 @@ function OriginEditor({
 }) {
     return (
         <div className='grid gap-2 rounded-lg bg-surface p-3 sm:grid-cols-[92px_1.2fr_1fr_82px_32px]'>
-            <select
-                aria-label={`Origin protocol ${index + 1}`}
-                className={selectClass}
+            <SelectField
+                ariaLabel={`Origin protocol ${index + 1}`}
+                options={[
+                    { id: 'http', label: 'HTTP' },
+                    { id: 'https', label: 'HTTPS' },
+                ]}
                 value={origin.protocol}
-                onChange={(event) =>
+                variant='secondary'
+                onChange={(value) =>
                     onChange({
                         ...origin,
-                        protocol: event.target.value as DeliveryOrigin['protocol'],
+                        protocol: value as DeliveryOrigin['protocol'],
                     })
                 }
-            >
-                <option value='http'>HTTP</option>
-                <option value='https'>HTTPS</option>
-            </select>
+            />
             <Input
                 aria-label={`Origin address ${index + 1}`}
                 placeholder='api.internal:443'
@@ -477,23 +476,29 @@ function OriginPoolsEditor({
                             />
                         </FormField>
                         <FormField label='Load balancing'>
-                            <select
-                                className={`${selectClass} w-full`}
+                            <SelectField
+                                ariaLabel={`Origin pool ${poolIndex + 1} load balancing`}
+                                className='w-full'
+                                options={[
+                                    { id: 'round_robin', label: 'Round robin' },
+                                    {
+                                        id: 'weighted_round_robin',
+                                        label: 'Weighted round robin',
+                                    },
+                                    { id: 'first', label: 'First available' },
+                                    { id: 'random', label: 'Random' },
+                                    { id: 'least_conn', label: 'Least connections' },
+                                    { id: 'ip_hash', label: 'Client IP hash' },
+                                ]}
                                 value={pool.scheduler || 'round_robin'}
-                                onChange={(event) =>
+                                variant='secondary'
+                                onChange={(value) =>
                                     updatePool(poolIndex, {
                                         ...pool,
-                                        scheduler: event.target.value,
+                                        scheduler: value,
                                     })
                                 }
-                            >
-                                <option value='round_robin'>Round robin</option>
-                                <option value='weighted_round_robin'>Weighted round robin</option>
-                                <option value='first'>First available</option>
-                                <option value='random'>Random</option>
-                                <option value='least_conn'>Least connections</option>
-                                <option value='ip_hash'>Client IP hash</option>
-                            </select>
+                            />
                         </FormField>
                         <div className='pt-6'>
                             <RemoveButton
@@ -593,19 +598,16 @@ function SplitsEditor({
                         variant='secondary'
                         onChange={(event) => update(index, { name: event.target.value })}
                     />
-                    <select
-                        aria-label={`Split pool ${index + 1}`}
-                        className={selectClass}
+                    <SelectField
+                        ariaLabel={`Split pool ${index + 1}`}
+                        options={[
+                            { id: '', label: 'Select pool' },
+                            ...poolNames.map((name) => ({ id: name, label: name })),
+                        ]}
                         value={split.pool}
-                        onChange={(event) => update(index, { pool: event.target.value })}
-                    >
-                        <option value=''>Select pool</option>
-                        {poolNames.map((name) => (
-                            <option key={name} value={name}>
-                                {name}
-                            </option>
-                        ))}
-                    </select>
+                        variant='secondary'
+                        onChange={(value) => update(index, { pool: value })}
+                    />
                     <Input
                         aria-label={`Split header ${index + 1}`}
                         placeholder='Header name'

@@ -6,6 +6,7 @@ import { useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormField } from '@/components/FormField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 
 interface SiteCompressionSettingsProps {
@@ -190,16 +191,18 @@ function ContentLengthInput({
                     onChange(Math.round(Number(event.target.value) * sizeUnitFactors[unit]))
                 }
             />
-            <select
-                aria-label={`${id} unit`}
-                className='w-24 shrink-0 rounded-lg border border-border bg-surface-secondary px-3 text-sm'
+            <SelectField
+                ariaLabel={`${id} unit`}
+                className='w-24 shrink-0'
+                options={[
+                    { id: 'B', label: 'B' },
+                    { id: 'KB', label: 'KB' },
+                    { id: 'MB', label: 'MB' },
+                ]}
                 value={unit}
-                onChange={(event) => setUnit(event.target.value as SizeUnit)}
-            >
-                <option value='B'>B</option>
-                <option value='KB'>KB</option>
-                <option value='MB'>MB</option>
-            </select>
+                variant='secondary'
+                onChange={(value) => setUnit(value as SizeUnit)}
+            />
         </div>
     );
 }

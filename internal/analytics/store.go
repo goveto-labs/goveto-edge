@@ -259,6 +259,7 @@ func (s *Store) InsertOriginHealth(ctx context.Context, m OriginHealthMetric) er
 }
 
 func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
+	m = normalizeRuntimeMetric(m)
 	_, err := s.db.Exec(ctx, `INSERT INTO analytics.node_runtime_metrics_minute (
 		minute, cluster_id, node_id, cpu_usage_percent, memory_used_bytes, memory_total_bytes,
 		load_1, load_5, load_15, connections, cache_used_bytes, cache_directory,
@@ -283,4 +284,13 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		m.CacheMisses, m.CacheStaleHits, m.CacheEvictions, m.CacheRejectedWrites, m.CacheCorruptions,
 		m.CacheHitRate, m.CacheCapacityRatio, m.CacheAlerts, m.DiskUsed, m.DiskTotal)
 	return err
+}
+
+func normalizeRuntimeMetric(metric NodeRuntimeMetric) NodeRuntimeMetric {
+	if metric.CacheAlerts == nil {
+		// Legacy agents predate cache alerts. A nil slice is encoded by pgx as
+		// SQL NULL, but this analytics column is intentionally NOT NULL.
+		metric.CacheAlerts = []string{}
+	}
+	return metric
 }

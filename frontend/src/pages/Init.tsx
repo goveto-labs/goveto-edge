@@ -14,6 +14,7 @@ export default function Init() {
     const { complete } = useInitialization();
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
+    const [agentGatewayPublicAddress, setAgentGatewayPublicAddress] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState('');
@@ -29,7 +30,12 @@ export default function Init() {
 
         setLoading(true);
         try {
-            await initializationApi.initialize({ name, email, password });
+            await initializationApi.initialize({
+                name,
+                email,
+                password,
+                agent_gateway_public_address: agentGatewayPublicAddress,
+            });
             complete();
             navigate('/login', { replace: true });
         } catch (err) {
@@ -47,8 +53,8 @@ export default function Init() {
 
     return (
         <div className='grid h-[100%] bg-background text-foreground'>
-            <main className='relative flex flex-col justify-center overflow-hidden bg-background px-6 py-12 sm:px-10 lg:px-16'>
-                <div className='mx-auto w-full max-w-[380px]'>
+            <main className='relative flex flex-col overflow-y-auto bg-background px-6 py-12 sm:px-10 lg:px-16'>
+                <div className='mx-auto my-auto w-full max-w-[460px]'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
                             <Globe className='h-4 w-4' />
@@ -121,6 +127,25 @@ export default function Init() {
                                 type='password'
                                 value={confirmPassword}
                                 onChange={(event) => setConfirmPassword(event.target.value)}
+                            />
+                        </FormField>
+                        <FormField
+                            hint='Use the hostname or public IP edge nodes can reach, followed by the gateway port. Do not include http://, https://, or a path.'
+                            htmlFor='init-agent-gateway-address'
+                            label='Agent gateway public address'
+                            required
+                        >
+                            <Input
+                                autoCapitalize='none'
+                                autoComplete='off'
+                                id='init-agent-gateway-address'
+                                placeholder='edge.example.com:8443'
+                                required
+                                spellCheck={false}
+                                value={agentGatewayPublicAddress}
+                                onChange={(event) =>
+                                    setAgentGatewayPublicAddress(event.target.value)
+                                }
                             />
                         </FormField>
                         <Button fullWidth isDisabled={loading} type='submit' variant='primary'>

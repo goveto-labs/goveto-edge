@@ -57,6 +57,7 @@ import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
@@ -1139,29 +1140,24 @@ export default function SiteDetail() {
                                                                     : 'Transferring clears node publish state and republishes in the target cluster.'
                                                             }
                                                         >
-                                                            <select
-                                                                className='w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                                                disabled={
+                                                            <SelectField
+                                                                ariaLabel='Cluster'
+                                                                className='w-full'
+                                                                isDisabled={
                                                                     !canManage ||
                                                                     site.certificate_count > 0
                                                                 }
                                                                 id='site-cluster'
+                                                                options={clusters.map(
+                                                                    (cluster) => ({
+                                                                        id: cluster.id,
+                                                                        label: cluster.name,
+                                                                    })
+                                                                )}
                                                                 value={targetCluster}
-                                                                onChange={(event) =>
-                                                                    setTargetCluster(
-                                                                        event.target.value
-                                                                    )
-                                                                }
-                                                            >
-                                                                {clusters.map((cluster) => (
-                                                                    <option
-                                                                        key={cluster.id}
-                                                                        value={cluster.id}
-                                                                    >
-                                                                        {cluster.name}
-                                                                    </option>
-                                                                ))}
-                                                            </select>
+                                                                variant='secondary'
+                                                                onChange={setTargetCluster}
+                                                            />
                                                         </FormField>
                                                         <div className='flex justify-end border-t border-border pt-4'>
                                                             <Button
@@ -1432,28 +1428,31 @@ export default function SiteDetail() {
                                                             htmlFor='tls-min'
                                                             label='Minimum TLS version'
                                                         >
-                                                            <select
-                                                                className='w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                                            <SelectField
+                                                                ariaLabel='Minimum TLS version'
                                                                 id='tls-min'
+                                                                options={[
+                                                                    {
+                                                                        id: 'TLS1_2',
+                                                                        label: 'TLS 1.2',
+                                                                    },
+                                                                    {
+                                                                        id: 'TLS1_3',
+                                                                        label: 'TLS 1.3',
+                                                                    },
+                                                                ]}
                                                                 value={
                                                                     listener.tls_min_version ??
                                                                     'TLS1_2'
                                                                 }
-                                                                onChange={(event) =>
+                                                                variant='secondary'
+                                                                onChange={(value) =>
                                                                     setListener({
                                                                         ...listener,
-                                                                        tls_min_version:
-                                                                            event.target.value,
+                                                                        tls_min_version: value,
                                                                     })
                                                                 }
-                                                            >
-                                                                <option value='TLS1_2'>
-                                                                    TLS 1.2
-                                                                </option>
-                                                                <option value='TLS1_3'>
-                                                                    TLS 1.3
-                                                                </option>
-                                                            </select>
+                                                            />
                                                         </FormField>
                                                         {[
                                                             ['HTTP/2', 'http2_enabled'],
@@ -1542,11 +1541,15 @@ export default function SiteDetail() {
                                                             className='grid gap-3 rounded-xl border border-border p-4 md:grid-cols-[110px_1fr_1fr_90px_auto]'
                                                             key={origin.draft_id}
                                                         >
-                                                            <select
-                                                                aria-label={`Origin ${index + 1} protocol`}
-                                                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                                            <SelectField
+                                                                ariaLabel={`Origin ${index + 1} protocol`}
+                                                                options={[
+                                                                    { id: 'HTTP', label: 'HTTP' },
+                                                                    { id: 'HTTPS', label: 'HTTPS' },
+                                                                ]}
                                                                 value={origin.protocol}
-                                                                onChange={(event) =>
+                                                                variant='secondary'
+                                                                onChange={(value) =>
                                                                     setOrigins(
                                                                         origins.map(
                                                                             (item, itemIndex) =>
@@ -1554,18 +1557,13 @@ export default function SiteDetail() {
                                                                                     ? {
                                                                                           ...item,
                                                                                           protocol:
-                                                                                              event
-                                                                                                  .target
-                                                                                                  .value as SiteOrigin['protocol'],
+                                                                                              value as SiteOrigin['protocol'],
                                                                                       }
                                                                                     : item
                                                                         )
                                                                     )
                                                                 }
-                                                            >
-                                                                <option>HTTP</option>
-                                                                <option>HTTPS</option>
-                                                            </select>
+                                                            />
                                                             <Input
                                                                 aria-label={`Origin ${index + 1} address`}
                                                                 placeholder='origin.example.com:443'

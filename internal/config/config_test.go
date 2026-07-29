@@ -35,7 +35,6 @@ func TestLoadFromEnvironment(t *testing.T) {
 	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
 	t.Setenv("HTTP_PORT", "9090")
 	t.Setenv("AGENT_GATEWAY_PORT", "9443")
-	t.Setenv("AGENT_GATEWAY_PUBLIC_ADDRESS", "control.example:9443")
 
 	cfg, err := Load()
 	if err != nil {
@@ -44,8 +43,8 @@ func TestLoadFromEnvironment(t *testing.T) {
 	if cfg.HTTPAddress() != "0.0.0.0:9090" {
 		t.Fatalf("unexpected HTTP address: %s", cfg.HTTPAddress())
 	}
-	if cfg.AgentGatewayAddress() != "0.0.0.0:9443" || cfg.AgentGatewayPublicAddress != "control.example:9443" {
-		t.Fatalf("unexpected agent gateway config: listen=%s public=%s", cfg.AgentGatewayAddress(), cfg.AgentGatewayPublicAddress)
+	if cfg.AgentGatewayAddress() != "0.0.0.0:9443" {
+		t.Fatalf("unexpected agent gateway address: %s", cfg.AgentGatewayAddress())
 	}
 }
 

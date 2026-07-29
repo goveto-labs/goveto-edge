@@ -17,6 +17,7 @@ import {
     type MultiAddOption,
     SearchableMultiAddField,
 } from '@/components/SearchableMultiAddField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { ValueListAddField } from '@/components/ValueListAddField.tsx';
 import { countryOptions } from '@/data/countries.ts';
@@ -273,12 +274,13 @@ function RuleRow({
     const needsValue = rule.operator !== 'EXISTS' && !needsValues;
     return (
         <div className='waf-rule-row grid gap-2 border-t border-border px-4 py-3 first:border-t-0'>
-            <select
-                aria-label='Request field'
-                className='min-w-0 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+            <SelectField
+                ariaLabel='Request field'
+                className='min-w-0'
+                options={fields.map(([value, label]) => ({ id: value, label }))}
                 value={rule.field}
-                onChange={(event) => {
-                    const field = event.target.value;
+                variant='secondary'
+                onChange={(field) => {
                     onChange({
                         ...rule,
                         field,
@@ -291,36 +293,24 @@ function RuleRow({
                                   : rule.operator,
                     });
                 }}
-            >
-                {fields.map(([value, label]) => (
-                    <option key={value} value={value}>
-                        {label}
-                    </option>
-                ))}
-            </select>
-            <select
-                aria-label='Match operator'
-                className='min-w-0 rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+            />
+            <SelectField
+                ariaLabel='Match operator'
+                className='min-w-0'
+                options={operators
+                    .filter(([value]) => value !== 'CIDR' || rule.field === 'CLIENT_IP')
+                    .map(([value, label]) => ({ id: value, label }))}
                 value={rule.operator}
-                onChange={(event) =>
+                variant='secondary'
+                onChange={(value) =>
                     onChange({
                         ...rule,
-                        operator: event.target.value,
-                        value: event.target.value === 'EXISTS' ? undefined : rule.value,
-                        values: ['IN', 'CIDR'].includes(event.target.value)
-                            ? rule.values
-                            : undefined,
+                        operator: value,
+                        value: value === 'EXISTS' ? undefined : rule.value,
+                        values: ['IN', 'CIDR'].includes(value) ? rule.values : undefined,
                     })
                 }
-            >
-                {operators
-                    .filter(([value]) => value !== 'CIDR' || rule.field === 'CLIENT_IP')
-                    .map(([value, label]) => (
-                        <option key={value} value={value}>
-                            {label}
-                        </option>
-                    ))}
-            </select>
+            />
             {needsName ? (
                 <Input
                     aria-label='Field name'
@@ -411,38 +401,38 @@ function ConditionGroups({
                     Leave conditions empty to protect every request.
                 </p>
                 {groups.length > 1 && (
-                    <select
-                        aria-label='Condition group operator'
-                        className='rounded-md border border-border bg-surface px-2 py-1 text-xs'
+                    <SelectField
+                        ariaLabel='Condition group operator'
+                        className='min-w-32'
+                        options={[
+                            { id: 'AND', label: 'All groups' },
+                            { id: 'OR', label: 'Any group' },
+                        ]}
                         value={groupOperator}
-                        onChange={(event) => onChange(groups, event.target.value)}
-                    >
-                        <option value='AND'>All groups</option>
-                        <option value='OR'>Any group</option>
-                    </select>
+                        onChange={(value) => onChange(groups, value)}
+                    />
                 )}
             </div>
             {groups.map((group, groupIndex) => (
                 <div className='overflow-hidden rounded-xl border border-border/70' key={group.id}>
                     <div className='flex flex-wrap items-center justify-between gap-2 bg-surface-secondary/25 px-4 py-2.5'>
-                        <select
-                            aria-label={`Condition group ${groupIndex + 1} operator`}
-                            className='rounded-md border border-border bg-surface px-2 py-1 text-xs'
+                        <SelectField
+                            ariaLabel={`Condition group ${groupIndex + 1} operator`}
+                            className='min-w-28'
+                            options={[
+                                { id: 'AND', label: 'All rules' },
+                                { id: 'OR', label: 'Any rule' },
+                            ]}
                             value={group.operator}
-                            onChange={(event) =>
+                            onChange={(value) =>
                                 onChange(
                                     groups.map((item, index) =>
-                                        index === groupIndex
-                                            ? { ...item, operator: event.target.value }
-                                            : item
+                                        index === groupIndex ? { ...item, operator: value } : item
                                     ),
                                     groupOperator
                                 )
                             }
-                        >
-                            <option value='AND'>All rules</option>
-                            <option value='OR'>Any rule</option>
-                        </select>
+                        />
                         <Button
                             isIconOnly
                             aria-label={`Remove condition group ${groupIndex + 1}`}
@@ -538,29 +528,30 @@ function ResponseEditor({
     const custom = response.type !== 'DEFAULT';
     return (
         <div className='grid gap-3 lg:grid-cols-[220px_minmax(0,1fr)]'>
-            <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                <span>Response content</span>
-                <select
-                    className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+            <div>
+                <SelectField
+                    label='Response content'
+                    options={[
+                        { id: 'DEFAULT', label: 'Default WAF page' },
+                        { id: 'HTML', label: 'Custom HTML' },
+                        { id: 'TEXT', label: 'Plain text' },
+                        { id: 'JSON', label: 'JSON' },
+                    ]}
                     value={response.type}
-                    onChange={(event) =>
+                    variant='secondary'
+                    onChange={(value) =>
                         onChange({
-                            type: event.target.value as WAFResponse['type'],
-                            body: event.target.value === 'DEFAULT' ? undefined : response.body,
+                            type: value as WAFResponse['type'],
+                            body: value === 'DEFAULT' ? undefined : response.body,
                         })
                     }
-                >
-                    <option value='DEFAULT'>Default WAF page</option>
-                    <option value='HTML'>Custom HTML</option>
-                    <option value='TEXT'>Plain text</option>
-                    <option value='JSON'>JSON</option>
-                </select>
-                <span className='text-xs font-normal leading-5 text-muted'>
+                />
+                <span className='mt-1.5 block text-xs font-normal leading-5 text-muted'>
                     {response.type === 'DEFAULT'
                         ? 'Uses the embedded Goveto Edge block page.'
                         : 'Maximum response body size is 128 KiB.'}
                 </span>
-            </label>
+            </div>
             {custom ? (
                 <label className='flex flex-col gap-1.5 text-sm font-medium'>
                     <span>{response.type === 'HTML' ? 'HTML document' : 'Response body'}</span>
@@ -660,22 +651,19 @@ function WAFActionEditor({
                         value={group.redirect_url ?? ''}
                         onChange={(value) => onChange({ ...group, redirect_url: value })}
                     />
-                    <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                        <span>Redirect status</span>
-                        <select
-                            className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                            value={group.redirect_status ?? 302}
-                            onChange={(event) =>
-                                onChange({ ...group, redirect_status: Number(event.target.value) })
-                            }
-                        >
-                            <option value={301}>301 Permanent</option>
-                            <option value={302}>302 Temporary</option>
-                            <option value={303}>303 See other</option>
-                            <option value={307}>307 Preserve method</option>
-                            <option value={308}>308 Permanent, preserve method</option>
-                        </select>
-                    </label>
+                    <SelectField
+                        label='Redirect status'
+                        options={[
+                            { id: '301', label: '301 Permanent' },
+                            { id: '302', label: '302 Temporary' },
+                            { id: '303', label: '303 See other' },
+                            { id: '307', label: '307 Preserve method' },
+                            { id: '308', label: '308 Permanent, preserve method' },
+                        ]}
+                        value={String(group.redirect_status ?? 302)}
+                        variant='secondary'
+                        onChange={(value) => onChange({ ...group, redirect_status: Number(value) })}
+                    />
                 </div>
             )}
             {group.action === 'TAG' && (
@@ -785,22 +773,21 @@ export function SiteSecuritySettings({
 
             <div className='space-y-6 p-5'>
                 <div className='grid gap-4 md:grid-cols-3'>
-                    <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                        <span>Operating mode</span>
-                        <select
-                            className='w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                            value={policy.waf.mode}
-                            onChange={(event) =>
-                                onChange({
-                                    ...policy,
-                                    waf: { ...policy.waf, mode: event.target.value },
-                                })
-                            }
-                        >
-                            <option value='BLOCK'>Block matches</option>
-                            <option value='MONITOR'>Monitor only</option>
-                        </select>
-                    </label>
+                    <SelectField
+                        label='Operating mode'
+                        options={[
+                            { id: 'BLOCK', label: 'Block matches' },
+                            { id: 'MONITOR', label: 'Monitor only' },
+                        ]}
+                        value={policy.waf.mode}
+                        variant='secondary'
+                        onChange={(value) =>
+                            onChange({
+                                ...policy,
+                                waf: { ...policy.waf, mode: value },
+                            })
+                        }
+                    />
                     <LabeledInput
                         label='Default block status'
                         max={599}
@@ -982,20 +969,22 @@ export function SiteSecuritySettings({
                                                 Define which requests enter this group.
                                             </p>
                                         </div>
-                                        <select
-                                            aria-label='WAF group operator'
-                                            className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                        <SelectField
+                                            ariaLabel='WAF group operator'
+                                            className='min-w-40'
+                                            options={[
+                                                { id: 'AND', label: 'Match all rules' },
+                                                { id: 'OR', label: 'Match any rule' },
+                                            ]}
                                             value={group.operator}
-                                            onChange={(event) =>
+                                            variant='secondary'
+                                            onChange={(value) =>
                                                 updateWAFGroup(groupIndex, {
                                                     ...group,
-                                                    operator: event.target.value,
+                                                    operator: value,
                                                 })
                                             }
-                                        >
-                                            <option value='AND'>Match all rules</option>
-                                            <option value='OR'>Match any rule</option>
-                                        </select>
+                                        />
                                     </div>
                                     <div className='waf-rule-list border-t border-border'>
                                         {group.rules.map((rule, ruleIndex) => (
@@ -1186,22 +1175,21 @@ export function SiteSecuritySettings({
                     </div>
 
                     <div className='grid gap-4 md:grid-cols-3'>
-                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                            <span>Operating mode</span>
-                            <select
-                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                value={policy.access.mode}
-                                onChange={(event) =>
-                                    onChange({
-                                        ...policy,
-                                        access: { ...policy.access, mode: event.target.value },
-                                    })
-                                }
-                            >
-                                <option value='BLOCK'>Block violations</option>
-                                <option value='MONITOR'>Monitor only</option>
-                            </select>
-                        </label>
+                        <SelectField
+                            label='Operating mode'
+                            options={[
+                                { id: 'BLOCK', label: 'Block violations' },
+                                { id: 'MONITOR', label: 'Monitor only' },
+                            ]}
+                            value={policy.access.mode}
+                            variant='secondary'
+                            onChange={(value) =>
+                                onChange({
+                                    ...policy,
+                                    access: { ...policy.access, mode: value },
+                                })
+                            }
+                        />
                         <LabeledInput
                             label='Denied response status'
                             max={599}
@@ -1471,25 +1459,24 @@ export function SiteSecuritySettings({
                                 }
                             />
                         </div>
-                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                            <span>Redis failure policy</span>
-                            <select
-                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                value={policy.access.temporary_block_failure}
-                                onChange={(event) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            temporary_block_failure: event.target.value,
-                                        },
-                                    })
-                                }
-                            >
-                                <option value='OPEN'>Fail open</option>
-                                <option value='CLOSED'>Fail closed</option>
-                            </select>
-                        </label>
+                        <SelectField
+                            label='Redis failure policy'
+                            options={[
+                                { id: 'OPEN', label: 'Fail open' },
+                                { id: 'CLOSED', label: 'Fail closed' },
+                            ]}
+                            value={policy.access.temporary_block_failure}
+                            variant='secondary'
+                            onChange={(value) =>
+                                onChange({
+                                    ...policy,
+                                    access: {
+                                        ...policy.access,
+                                        temporary_block_failure: value,
+                                    },
+                                })
+                            }
+                        />
                     </div>
                 </div>
 
@@ -1519,45 +1506,43 @@ export function SiteSecuritySettings({
                         />
                     </div>
                     <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-2'>
-                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                            <span>Counter backend</span>
-                            <select
-                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                value={policy.rate_limit.backend}
-                                onChange={(event) =>
-                                    onChange({
-                                        ...policy,
-                                        rate_limit: {
-                                            ...policy.rate_limit,
-                                            backend: event.target.value,
-                                        },
-                                    })
-                                }
-                            >
-                                <option value='LOCAL'>Local node memory</option>
-                                <option value='REDIS'>Distributed Redis</option>
-                            </select>
-                        </label>
-                        <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                            <span>Redis failure policy</span>
-                            <select
-                                className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                value={policy.rate_limit.failure_mode}
-                                onChange={(event) =>
-                                    onChange({
-                                        ...policy,
-                                        rate_limit: {
-                                            ...policy.rate_limit,
-                                            failure_mode: event.target.value,
-                                        },
-                                    })
-                                }
-                            >
-                                <option value='OPEN'>Fail open</option>
-                                <option value='CLOSED'>Fail closed</option>
-                                <option value='LOCAL'>Fall back to local counters</option>
-                            </select>
-                        </label>
+                        <SelectField
+                            label='Counter backend'
+                            options={[
+                                { id: 'LOCAL', label: 'Local node memory' },
+                                { id: 'REDIS', label: 'Distributed Redis' },
+                            ]}
+                            value={policy.rate_limit.backend}
+                            variant='secondary'
+                            onChange={(value) =>
+                                onChange({
+                                    ...policy,
+                                    rate_limit: {
+                                        ...policy.rate_limit,
+                                        backend: value,
+                                    },
+                                })
+                            }
+                        />
+                        <SelectField
+                            label='Redis failure policy'
+                            options={[
+                                { id: 'OPEN', label: 'Fail open' },
+                                { id: 'CLOSED', label: 'Fail closed' },
+                                { id: 'LOCAL', label: 'Fall back to local counters' },
+                            ]}
+                            value={policy.rate_limit.failure_mode}
+                            variant='secondary'
+                            onChange={(value) =>
+                                onChange({
+                                    ...policy,
+                                    rate_limit: {
+                                        ...policy.rate_limit,
+                                        failure_mode: value,
+                                    },
+                                })
+                            }
+                        />
                     </div>
                     {policy.rate_limit.rules.map((rule, ruleIndex) => (
                         <div
@@ -1607,38 +1592,36 @@ export function SiteSecuritySettings({
                                 </Button>
                             </div>
                             <div className='grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4'>
-                                <label className='flex flex-col gap-1.5 text-sm font-medium'>
-                                    <span>Counter key</span>
-                                    <select
-                                        className='w-full rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
-                                        value={rule.key}
-                                        onChange={(event) =>
-                                            updateRateRules(
-                                                policy.rate_limit.rules.map((item, index) =>
-                                                    index === ruleIndex
-                                                        ? {
-                                                              ...item,
-                                                              key: event.target.value,
-                                                              key_name: [
-                                                                  'HEADER',
-                                                                  'COOKIE',
-                                                              ].includes(event.target.value)
-                                                                  ? item.key_name
-                                                                  : undefined,
-                                                          }
-                                                        : item
-                                                )
+                                <SelectField
+                                    label='Counter key'
+                                    options={[
+                                        { id: 'CLIENT_IP', label: 'Client IP' },
+                                        { id: 'CLIENT_IP_PATH', label: 'Client IP and path' },
+                                        { id: 'PATH', label: 'Path' },
+                                        { id: 'HEADER', label: 'Header value' },
+                                        { id: 'COOKIE', label: 'Cookie value' },
+                                        { id: 'GLOBAL', label: 'Entire site' },
+                                    ]}
+                                    value={rule.key}
+                                    variant='secondary'
+                                    onChange={(value) =>
+                                        updateRateRules(
+                                            policy.rate_limit.rules.map((item, index) =>
+                                                index === ruleIndex
+                                                    ? {
+                                                          ...item,
+                                                          key: value,
+                                                          key_name: ['HEADER', 'COOKIE'].includes(
+                                                              value
+                                                          )
+                                                              ? item.key_name
+                                                              : undefined,
+                                                      }
+                                                    : item
                                             )
-                                        }
-                                    >
-                                        <option value='CLIENT_IP'>Client IP</option>
-                                        <option value='CLIENT_IP_PATH'>Client IP and path</option>
-                                        <option value='PATH'>Path</option>
-                                        <option value='HEADER'>Header value</option>
-                                        <option value='COOKIE'>Cookie value</option>
-                                        <option value='GLOBAL'>Entire site</option>
-                                    </select>
-                                </label>
+                                        )
+                                    }
+                                />
                                 {['HEADER', 'COOKIE'].includes(rule.key) && (
                                     <LabeledInput
                                         label={

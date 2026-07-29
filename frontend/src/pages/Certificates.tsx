@@ -1,6 +1,6 @@
 import type { Certificate } from '@/api';
 
-import { Button, Input, Label, ListBox, Select, TextArea, useOverlayState } from '@heroui/react';
+import { Button, Input, TextArea, useOverlayState } from '@heroui/react';
 import { Plus, RefreshCw, RotateCw, Send, ShieldCheck, Trash2, Upload, Zap } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
@@ -10,6 +10,7 @@ import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
@@ -433,24 +434,16 @@ export default function Certificates() {
                                 />
                             </FormField>
                         </div>
-                        <Select
+                        <SelectField
+                            label='Challenge'
+                            options={[
+                                { id: 'HTTP_01', label: 'HTTP-01' },
+                                { id: 'DNS_01', label: 'DNS-01' },
+                            ]}
                             value={challengeType}
                             variant='secondary'
-                            onChange={(key) =>
-                                setChallengeType(String(key) as 'HTTP_01' | 'DNS_01')
-                            }
-                        >
-                            <Label>Challenge</Label>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    <ListBox.Item id='HTTP_01'>HTTP-01</ListBox.Item>
-                                    <ListBox.Item id='DNS_01'>DNS-01</ListBox.Item>
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
+                            onChange={(value) => setChallengeType(value as 'HTTP_01' | 'DNS_01')}
+                        />
                         <FormField htmlFor='renew-days' label='Renew before expiry'>
                             <Input
                                 id='renew-days'

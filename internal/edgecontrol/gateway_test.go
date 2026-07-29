@@ -25,6 +25,40 @@ func TestGatewayRegistersGzipAndKeepsLegacyLogAck(t *testing.T) {
 	}
 }
 
+func TestObserveAgentLogQueueTracksBacklogAndDrain(t *testing.T) {
+	gateway := NewGateway(nil, nil, nil, nil, nil)
+	active := &session{
+		logQueue: agentLogQueueState{nonEmptySince: time.Now().Add(-2 * time.Minute)},
+	}
+	gateway.observeAgentLogQueue("node-1", active, edgeprotocol.AgentHeartbeat{
+		QueueRecords: 12,
+		QueueBytes:   4096,
+	})
+	if active.logQueue.lastWarning.IsZero() || active.logQueue.records != 12 || active.logQueue.bytes != 4096 {
+		t.Fatalf("backlog was not observed: %#v", active.logQueue)
+	}
+	gateway.observeAgentLogQueue("node-1", active, edgeprotocol.AgentHeartbeat{})
+	if !active.logQueue.nonEmptySince.IsZero() || !active.logQueue.lastWarning.IsZero() {
+		t.Fatalf("drained queue state was not reset: %#v", active.logQueue)
+	}
+}
+
+func TestDispatchTaskUsesSeparateTypedIdempotencyParameter(t *testing.T) {
+	if !strings.Contains(dispatchTaskSQL, "'PENDING', $6") {
+		t.Fatalf("dispatch SQL does not use a separate idempotency parameter: %s", dispatchTaskSQL)
+	}
+	if strings.Contains(dispatchTaskSQL, "'PENDING', $1") {
+		t.Fatalf("dispatch SQL reuses the UUID parameter for a text column: %s", dispatchTaskSQL)
+	}
+}
+
+func TestDispatchTaskStateAllowsPendingNullResult(t *testing.T) {
+	state := dispatchTaskState{Status: "PENDING"}
+	if state.Result != nil || state.Error != nil {
+		t.Fatalf("pending task state should allow null result and error: %#v", state)
+	}
+}
+
 func TestValidateLogBatch(t *testing.T) {
 	valid := edgeprotocol.AgentLogBatch{
 		FirstID: 10, Through: 11, Bytes: 100,

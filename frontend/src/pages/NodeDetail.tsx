@@ -1877,7 +1877,7 @@ export default function NodeDetail() {
                                     </div>
                                 </ContentCard>
 
-                                {installation && (
+                                {installation?.identity_available && (
                                     <details className='group overflow-hidden rounded-xl border border-border bg-surface'>
                                         <summary className='flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-surface-secondary/50 sm:px-6'>
                                             <div className='flex items-start gap-3'>

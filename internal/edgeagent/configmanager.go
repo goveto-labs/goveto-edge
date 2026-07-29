@@ -169,6 +169,9 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 	defer m.mu.Unlock()
 	versions := make(map[string]uint64, len(m.sites))
 	for id, site := range m.sites {
+		if site.Disabled {
+			continue
+		}
 		versions[id] = site.Version
 	}
 	return versions

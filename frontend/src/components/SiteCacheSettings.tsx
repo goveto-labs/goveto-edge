@@ -6,6 +6,7 @@ import { useRef, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormField } from '@/components/FormField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 
 type ConditionGroup = NonNullable<NonNullable<CachePolicy['conditions']>['groups']>[number];
@@ -365,24 +366,25 @@ export function SiteCacheSettings({ cache, saving, onChange, onSave }: SiteCache
                                     OR matches any group. AND requires every group.
                                 </div>
                             </div>
-                            <select
-                                aria-label='Cache condition group operator'
-                                className='rounded-lg border border-border bg-surface px-3 py-2 text-sm'
+                            <SelectField
+                                ariaLabel='Cache condition group operator'
+                                className='min-w-24'
+                                options={[
+                                    { id: 'OR', label: 'OR' },
+                                    { id: 'AND', label: 'AND' },
+                                ]}
                                 value={cache.conditions?.group_operator ?? 'OR'}
-                                onChange={(event) =>
+                                onChange={(value) =>
                                     onChange({
                                         ...cache,
                                         conditions: {
                                             ...cache.conditions,
-                                            group_operator: event.target.value,
+                                            group_operator: value,
                                             groups,
                                         },
                                     })
                                 }
-                            >
-                                <option value='OR'>OR</option>
-                                <option value='AND'>AND</option>
-                            </select>
+                            />
                         </div>
                         <div className='space-y-3'>
                             {groups.map((group, groupIndex) => (
@@ -395,26 +397,27 @@ export function SiteCacheSettings({ cache, saving, onChange, onSave }: SiteCache
                                             <span className='font-mono text-xs text-muted'>
                                                 Group {groupIndex + 1}
                                             </span>
-                                            <select
-                                                aria-label={`Group ${groupIndex + 1} operator`}
-                                                className='rounded-md border border-border bg-surface px-2 py-1 text-xs'
+                                            <SelectField
+                                                ariaLabel={`Group ${groupIndex + 1} operator`}
+                                                className='min-w-28'
+                                                options={[
+                                                    { id: 'OR', label: 'OR rules' },
+                                                    { id: 'AND', label: 'AND rules' },
+                                                ]}
                                                 value={group.operator ?? 'OR'}
-                                                onChange={(event) =>
+                                                onChange={(value) =>
                                                     updateGroups(
                                                         groups.map((item, index) =>
                                                             index === groupIndex
                                                                 ? {
                                                                       ...item,
-                                                                      operator: event.target.value,
+                                                                      operator: value,
                                                                   }
                                                                 : item
                                                         )
                                                     )
                                                 }
-                                            >
-                                                <option value='OR'>OR rules</option>
-                                                <option value='AND'>AND rules</option>
-                                            </select>
+                                            />
                                         </div>
                                         <Button
                                             isIconOnly
@@ -445,12 +448,14 @@ export function SiteCacheSettings({ cache, saving, onChange, onSave }: SiteCache
                                                 className='grid gap-3 px-4 py-3 md:grid-cols-[190px_minmax(0,1fr)_auto]'
                                                 key={ruleKeyAt(groupIndex, ruleIndex)}
                                             >
-                                                <select
-                                                    aria-label={`Rule ${ruleIndex + 1} type`}
-                                                    className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                                                <SelectField
+                                                    ariaLabel={`Rule ${ruleIndex + 1} type`}
+                                                    options={Object.entries(ruleLabels).map(
+                                                        ([value, label]) => ({ id: value, label })
+                                                    )}
                                                     value={rule.type ?? 'ALL'}
-                                                    onChange={(event) => {
-                                                        const type = event.target.value;
+                                                    variant='secondary'
+                                                    onChange={(type) => {
                                                         if (type === 'ALL') {
                                                             updateGroups([
                                                                 {
@@ -466,15 +471,7 @@ export function SiteCacheSettings({ cache, saving, onChange, onSave }: SiteCache
                                                             values: [],
                                                         });
                                                     }}
-                                                >
-                                                    {Object.entries(ruleLabels).map(
-                                                        ([value, label]) => (
-                                                            <option key={value} value={value}>
-                                                                {label}
-                                                            </option>
-                                                        )
-                                                    )}
-                                                </select>
+                                                />
                                                 {rule.type === 'ALL' ? (
                                                     <div className='flex items-center rounded-lg bg-surface-secondary/40 px-3 text-sm text-muted'>
                                                         Every request is cacheable.

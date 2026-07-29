@@ -80,7 +80,8 @@ func (c *channelClient) runSession(ctx context.Context) error {
 		return err
 	}
 	if err := stream.Send(&edgeprotocol.ClientMessage{Hello: &edgeprotocol.AgentHello{
-		NodeID: c.identity.NodeID, CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(), GeoIP: c.geoIPStatus(),
+		NodeID: c.identity.NodeID, AgentVersion: currentAgentVersion(), CacheConfig: c.nodeConfigs.Get(),
+		SiteVersions: c.configs.SiteVersions(), GeoIP: c.geoIPStatus(),
 	}}); err != nil {
 		return err
 	}

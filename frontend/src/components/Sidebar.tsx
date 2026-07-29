@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 
-import { Avatar, Button, ListBox, Select, Tooltip } from '@heroui/react';
+import { Avatar, Button, Tooltip } from '@heroui/react';
 import {
     BarChart3,
     Cloud,
@@ -14,11 +14,14 @@ import {
     LogOut,
     Rocket,
     Server,
+    Settings,
     ShieldCheck,
+    ShieldCog,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 
 import { NavItem } from '@/components/NavItem.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -29,7 +32,7 @@ interface NavItemConfig {
     children?: NavItemConfig[];
 }
 
-export const nav: NavItemConfig[] = [
+const nav: NavItemConfig[] = [
     { path: '/', label: 'Overview', icon: LayoutDashboard },
     {
         path: '/nodes',
@@ -53,6 +56,23 @@ export const nav: NavItemConfig[] = [
     { path: '/jobs', label: 'Jobs', icon: ListTodo },
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
+
+function settingsNav(isInstanceOwner: boolean): NavItemConfig {
+    const children: NavItemConfig[] = [{ path: '/settings', label: 'Security', icon: ShieldCheck }];
+    if (isInstanceOwner) {
+        children.push({ path: '/settings/admin', label: 'Admin settings', icon: ShieldCog });
+    }
+    return {
+        path: '/settings',
+        label: 'Settings',
+        icon: Settings,
+        children,
+    };
+}
+
+export function navigationFor(isInstanceOwner: boolean) {
+    return [...nav, settingsNav(isInstanceOwner)];
+}
 
 interface SidebarProps {
     collapsed?: boolean;
@@ -96,15 +116,18 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
 
 function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
     const location = useLocation();
+    const { user } = useAuth();
+    const visibleNav = navigationFor(Boolean(user?.is_instance_owner));
 
     return (
         <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>
-            {nav.map((item) => {
-                const activeChild = item.children?.find(
-                    (child) =>
-                        location.pathname === child.path ||
-                        location.pathname.startsWith(`${child.path}/`)
-                );
+            {visibleNav.map((item) => {
+                const activeChild =
+                    item.children?.find((child) => location.pathname === child.path) ??
+                    item.children
+                        ?.filter((child) => child.path !== item.path)
+                        .sort((left, right) => right.path.length - left.path.length)
+                        .find((child) => location.pathname.startsWith(`${child.path}/`));
                 const active =
                     location.pathname === item.path ||
                     (item.path !== '/' &&
@@ -210,26 +233,16 @@ export function ClusterPicker() {
     const { clusterId, clusters, loading, setClusterId } = useCluster();
 
     return (
-        <Select
-            aria-label='Current cluster'
+        <SelectField
+            ariaLabel='Current cluster'
             className='w-full'
+            isDisabled={loading || clusters.length === 0}
+            options={clusters.map((cluster) => ({ id: cluster.id, label: cluster.name }))}
+            placeholder={loading ? 'Loading clusters…' : 'Select a cluster'}
             value={clusterId}
-            onChange={(key) => {
-                if (key) void setClusterId(String(key));
+            onChange={(value) => {
+                if (value) void setClusterId(value);
             }}
-        >
-            <Select.Trigger>
-                <Select.Value>{loading ? 'Loading clusters…' : undefined}</Select.Value>
-            </Select.Trigger>
-            <Select.Popover>
-                <ListBox>
-                    {clusters.map((cluster) => (
-                        <ListBox.Item id={cluster.id} key={cluster.id} textValue={cluster.name}>
-                            {cluster.name}
-                        </ListBox.Item>
-                    ))}
-                </ListBox>
-            </Select.Popover>
-        </Select>
+        />
     );
 }

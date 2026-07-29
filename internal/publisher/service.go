@@ -328,7 +328,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		return publishOutcome(
 			model.JobStatusFAILED,
 			results,
-			errors.New("all nodes rejected the configuration"),
+			allTargetsRejectedError(failed),
 			false,
 		)
 	}
@@ -426,6 +426,29 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 	// An agent rejection is a business failure. Retrying the same immutable
 	// version would repeat side effects and collide with the rollback version.
 	return publishOutcome(model.JobStatusFAILED, results, publishErr, false)
+}
+
+func allTargetsRejectedError(results []targetResult) error {
+	const maxDetails = 3
+	details := make([]string, 0, min(len(results), maxDetails))
+	for index, result := range results {
+		if index == maxDetails {
+			break
+		}
+		reason := result.Error
+		if reason == "" {
+			reason = "unknown error"
+		}
+		details = append(details, fmt.Sprintf("node %s: %s", result.NodeID, reason))
+	}
+	message := "all nodes rejected the configuration"
+	if len(details) > 0 {
+		message += ": " + strings.Join(details, "; ")
+	}
+	if len(results) > maxDetails {
+		message += fmt.Sprintf("; and %d more", len(results)-maxDetails)
+	}
+	return errors.New(message)
 }
 
 func (s *Service) recordRollback(

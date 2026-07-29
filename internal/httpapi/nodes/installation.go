@@ -1,6 +1,7 @@
 package nodes
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -29,12 +30,28 @@ WantedBy=multi-user.target
 `
 
 type installationInfo struct {
-	NodeID        string           `json:"node_id"`
-	Status        model.NodeStatus `json:"status"`
-	InstallError  *string          `json:"install_error,omitempty"`
-	IdentityJSON  string           `json:"identity_json"`
-	ServiceUnit   string           `json:"service_unit"`
-	Architectures []string         `json:"architectures"`
+	NodeID            string           `json:"node_id"`
+	Status            model.NodeStatus `json:"status"`
+	InstallError      *string          `json:"install_error,omitempty"`
+	IdentityJSON      string           `json:"identity_json,omitempty"`
+	IdentityAvailable bool             `json:"identity_available"`
+	ServiceUnit       string           `json:"service_unit"`
+	Architectures     []string         `json:"architectures"`
+}
+
+func loadBootstrapIdentity(ctx context.Context, db *client.Client, cipher *node.CredentialCipher, nodeID string) (string, bool, error) {
+	credential, err := db.NodeCredential.FindUnique(ctx, query.NodeCredential.NodeId.Equals(nodeID))
+	if err != nil {
+		return "", false, err
+	}
+	if credential == nil || credential.BootstrapIdentityEncrypted == nil {
+		return "", false, nil
+	}
+	identityJSON, err := cipher.Decrypt(*credential.BootstrapIdentityEncrypted)
+	if err != nil {
+		return "", false, err
+	}
+	return identityJSON, true, nil
 }
 
 func installationCredential(ctx *echo.Context, db *client.Client, cipher *node.CredentialCipher) (*model.Node, string, error) {
@@ -42,34 +59,39 @@ func installationCredential(ctx *echo.Context, db *client.Client, cipher *node.C
 	if err != nil {
 		return nil, "", err
 	}
-	credential, err := db.NodeCredential.FindUnique(ctx.Request().Context(), query.NodeCredential.NodeId.Equals(item.Id))
+	identityJSON, available, err := loadBootstrapIdentity(ctx.Request().Context(), db, cipher, item.Id)
 	if err != nil {
 		return nil, "", err
 	}
-	if credential == nil || credential.BootstrapIdentityEncrypted == nil {
+	if !available {
 		return nil, "", echo.NewHTTPError(http.StatusNotFound, "node bootstrap identity not found")
-	}
-	identityJSON, err := cipher.Decrypt(*credential.BootstrapIdentityEncrypted)
-	if err != nil {
-		return nil, "", err
 	}
 	return item, identityJSON, nil
 }
 
 func getInstallation(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		item, identityJSON, err := installationCredential(c, db, cipher)
+		ctx := c.Request().Context()
+		item, err := nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
+		if err != nil {
+			return err
+		}
+		identityJSON, identityAvailable, err := loadBootstrapIdentity(ctx, db, cipher, item.Id)
 		if err != nil {
 			return err
 		}
 		c.Response().Header().Set("Cache-Control", "no-store")
-		var identityValue any
-		_ = json.Unmarshal([]byte(identityJSON), &identityValue)
-		identity, _ := json.MarshalIndent(identityValue, "", "  ")
+		identity := ""
+		if identityAvailable {
+			var identityValue any
+			_ = json.Unmarshal([]byte(identityJSON), &identityValue)
+			formatted, _ := json.MarshalIndent(identityValue, "", "  ")
+			identity = string(formatted)
+		}
 		return c.JSON(http.StatusOK, map[string]any{"code": "ok", "data": installationInfo{
 			NodeID: item.Id, Status: item.Status, InstallError: item.InstallError,
-			IdentityJSON: string(identity), ServiceUnit: agentServiceUnit,
-			Architectures: []string{"amd64", "arm64"},
+			IdentityJSON: identity, IdentityAvailable: identityAvailable,
+			ServiceUnit: agentServiceUnit, Architectures: []string{"amd64", "arm64"},
 		}})
 	}
 }

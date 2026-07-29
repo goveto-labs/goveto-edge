@@ -1,6 +1,6 @@
 import type { Certificate, SiteOrigin } from '@/api';
 
-import { Button, Input, ListBox, Select } from '@heroui/react';
+import { Button, Input } from '@heroui/react';
 import { ArrowLeft, Globe2, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -12,6 +12,7 @@ import { FormError } from '@/components/FormField.tsx';
 import { FormRow } from '@/components/FormRow.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 type OriginFormItem = SiteOrigin & { localId: string };
@@ -245,39 +246,21 @@ export default function CreateSite() {
                                             </div>
                                             <div className='grid gap-4 md:grid-cols-2'>
                                                 <div className='flex gap-2'>
-                                                    <Select
-                                                        aria-label={`Origin ${index + 1} protocol`}
+                                                    <SelectField
+                                                        ariaLabel={`Origin ${index + 1} protocol`}
                                                         className='w-32 shrink-0'
+                                                        options={[
+                                                            { id: 'HTTP', label: 'HTTP' },
+                                                            { id: 'HTTPS', label: 'HTTPS' },
+                                                        ]}
                                                         value={origin.protocol}
                                                         variant='secondary'
-                                                        onChange={(key) =>
+                                                        onChange={(value) =>
                                                             updateOrigin(origin.localId, {
-                                                                protocol: String(key) as
-                                                                    | 'HTTP'
-                                                                    | 'HTTPS',
+                                                                protocol: value as 'HTTP' | 'HTTPS',
                                                             })
                                                         }
-                                                    >
-                                                        <Select.Trigger>
-                                                            <Select.Value />
-                                                        </Select.Trigger>
-                                                        <Select.Popover>
-                                                            <ListBox>
-                                                                <ListBox.Item
-                                                                    id='HTTP'
-                                                                    textValue='HTTP'
-                                                                >
-                                                                    HTTP
-                                                                </ListBox.Item>
-                                                                <ListBox.Item
-                                                                    id='HTTPS'
-                                                                    textValue='HTTPS'
-                                                                >
-                                                                    HTTPS
-                                                                </ListBox.Item>
-                                                            </ListBox>
-                                                        </Select.Popover>
-                                                    </Select>
+                                                    />
                                                     <Input
                                                         aria-label={`Origin ${index + 1} address`}
                                                         className='flex-1'

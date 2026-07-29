@@ -8,6 +8,7 @@ import { ApiError, analyticsApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 
@@ -86,23 +87,24 @@ export default function SitesAccessLogs() {
 
             <ContentCard>
                 <div className='flex flex-col gap-3 md:flex-row md:items-end'>
-                    <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-                        <label className='text-sm font-medium' htmlFor='site-log-site'>
-                            Site
-                        </label>
-                        <select
-                            className='rounded-lg border border-border bg-surface-secondary px-3 py-2 text-sm'
+                    <div className='min-w-0 flex-1'>
+                        <SelectField
+                            className='w-full'
                             id='site-log-site'
+                            label='Site'
+                            options={
+                                siteItems.length === 0
+                                    ? [{ id: '', label: 'No sites available' }]
+                                    : siteItems.map((site) => ({
+                                          id: site.id,
+                                          label: `${site.name} (${site.domains?.[0] || site.id})`,
+                                      }))
+                            }
+                            placeholder='Select a site'
                             value={siteId}
-                            onChange={(event) => setSiteId(event.target.value)}
-                        >
-                            {siteItems.length === 0 && <option value=''>No sites available</option>}
-                            {siteItems.map((site) => (
-                                <option key={site.id} value={site.id}>
-                                    {site.name} ({site.domains?.[0] || site.id})
-                                </option>
-                            ))}
-                        </select>
+                            variant='secondary'
+                            onChange={setSiteId}
+                        />
                     </div>
                     <Input
                         aria-label='Search access logs'

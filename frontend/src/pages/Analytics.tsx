@@ -14,6 +14,7 @@ import { ApiError, analyticsApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
@@ -365,18 +366,14 @@ export default function Analytics() {
             <ContentCard
                 allowOverflow
                 action={
-                    <select
-                        aria-label='Node trend selection'
-                        className='rounded-lg border border-border bg-surface px-3 py-2 text-sm'
+                    <SelectField
+                        ariaLabel='Node trend selection'
+                        className='min-w-48'
+                        options={nodes.map((node) => ({ id: node.id, label: node.name }))}
+                        placeholder='Select a node'
                         value={selectedNode}
-                        onChange={(event) => setSelectedNode(event.target.value)}
-                    >
-                        {nodes.map((node) => (
-                            <option key={node.id} value={node.id}>
-                                {node.name}
-                            </option>
-                        ))}
-                    </select>
+                        onChange={setSelectedNode}
+                    />
                 }
                 title='Node runtime trends (12h)'
             >

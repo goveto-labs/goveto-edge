@@ -284,18 +284,26 @@ WantedBy=multi-user.target
 
 func agentInstallScript(privileged string) string {
 	return fmt.Sprintf(`set -eu
-%sinstall -d -m 0700 /opt/goveto-edge/agent
-%sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
-%sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
-%sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
-echo 'net.core.rmem_max=7500000' | %stee /etc/sysctl.d/99-udp-buffers.conf >/dev/null
-echo 'net.core.wmem_max=7500000' | %stee -a /etc/sysctl.d/99-udp-buffers.conf >/dev/null
-%ssysctl -p /etc/sysctl.d/99-udp-buffers.conf
-%ssystemctl daemon-reload
-%ssystemctl enable goveto-edge-agent
-%ssystemctl restart goveto-edge-agent
-%ssystemctl is-active --quiet goveto-edge-agent
-`, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged, privileged)
+%[1]sinstall -d -m 0700 /opt/goveto-edge/agent
+%[1]sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
+%[1]sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent
+%[1]sinstall -m 0644 /tmp/goveto-edge-agent.service /etc/systemd/system/goveto-edge-agent.service
+if [ -e /proc/sys/net/core/rmem_max ] && [ -e /proc/sys/net/core/wmem_max ]; then
+	if %[1]ssysctl -w net.core.rmem_max=7500000 >/dev/null 2>&1 && %[1]ssysctl -w net.core.wmem_max=7500000 >/dev/null 2>&1; then
+		if ! { echo 'net.core.rmem_max=7500000' | %[1]stee /etc/sysctl.d/99-udp-buffers.conf >/dev/null && echo 'net.core.wmem_max=7500000' | %[1]stee -a /etc/sysctl.d/99-udp-buffers.conf >/dev/null; }; then
+			echo 'warning: UDP buffer settings applied but could not be persisted' >&2
+		fi
+	else
+		echo 'warning: unable to raise UDP buffer limits; continuing agent installation' >&2
+	fi
+else
+	echo 'warning: UDP buffer sysctl settings are unavailable; continuing agent installation' >&2
+fi
+%[1]ssystemctl daemon-reload
+%[1]ssystemctl enable goveto-edge-agent
+%[1]ssystemctl restart goveto-edge-agent
+%[1]ssystemctl is-active --quiet goveto-edge-agent
+`, privileged)
 }
 
 func (w *InstallWorker) collectAndStoreHardwareProfile(

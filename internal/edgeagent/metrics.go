@@ -3,6 +3,8 @@ package edgeagent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,8 +74,10 @@ func (s *NodeConfigStore) Get() NodeConfig { s.mu.RLock(); defer s.mu.RUnlock();
 func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigStore) {
 	// Warm CPU sampler so the first real sample is meaningful.
 	_, _ = cpu.Percent(0, false)
+	initialSample := time.NewTimer(time.Second)
 	metricsTicker := time.NewTicker(time.Minute)
 	cacheTicker := time.NewTicker(10 * time.Second)
+	defer initialSample.Stop()
 	defer metricsTicker.Stop()
 	defer cacheTicker.Stop()
 	enforceCacheLimit(configs.Get())
@@ -83,8 +87,14 @@ func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigSto
 			return
 		case <-cacheTicker.C:
 			enforceCacheLimit(configs.Get())
+		case <-initialSample.C:
+			if err := appendMetrics(queue, configs.Get()); err != nil {
+				slog.Warn("collect initial node runtime metrics", "error", err)
+			}
 		case <-metricsTicker.C:
-			appendMetrics(queue, configs.Get())
+			if err := appendMetrics(queue, configs.Get()); err != nil {
+				slog.Warn("collect node runtime metrics", "error", err)
+			}
 		}
 	}
 }
@@ -98,7 +108,7 @@ func enforceCacheLimit(config NodeConfig) {
 	)
 }
 
-func appendMetrics(queue *LogQueue, config NodeConfig) {
+func appendMetrics(queue *LogQueue, config NodeConfig) error {
 	cpuValues, cpuErr := cpu.Percent(0, false)
 	memory, _ := mem.VirtualMemory()
 	loads, _ := load.Avg()
@@ -147,9 +157,15 @@ func appendMetrics(queue *LogQueue, config NodeConfig) {
 	if connectionErr != nil {
 		payloadMap["connection_error"] = connectionErr.Error()
 	}
-	payload, _ := json.Marshal(payloadMap)
-	_, _ = queue.Append(LogRecord{Type: "node_runtime", Payload: payload})
+	payload, err := json.Marshal(payloadMap)
+	if err != nil {
+		return fmt.Errorf("encode node runtime metrics: %w", err)
+	}
+	if _, err := queue.Append(LogRecord{Type: "node_runtime", Payload: payload}); err != nil {
+		return fmt.Errorf("queue node runtime metrics: %w", err)
+	}
 	appendOriginMetrics(queue)
+	return nil
 }
 
 func cacheActivitySinceLast(path string, current cachefs.Statistics) cachefs.Statistics {

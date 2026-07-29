@@ -32,7 +32,6 @@ type Config struct {
 	HTTPTrustedProxies             []string
 	AgentGatewayHost               string
 	AgentGatewayPort               int
-	AgentGatewayPublicAddress      string
 	ShutdownTimeout                time.Duration
 	DatabaseURL                    string
 	RedisURL                       string
@@ -153,7 +152,6 @@ func Load() (Config, error) {
 		HTTPTrustedProxies:             trustedProxies,
 		AgentGatewayHost:               envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
 		AgentGatewayPort:               agentGatewayPort,
-		AgentGatewayPublicAddress:      envString("AGENT_GATEWAY_PUBLIC_ADDRESS", fmt.Sprintf("127.0.0.1:%d", agentGatewayPort)),
 		ShutdownTimeout:                shutdownTimeout,
 		DatabaseURL:                    os.Getenv("DATABASE_URL"),
 		RedisURL:                       os.Getenv("REDIS_URL"),

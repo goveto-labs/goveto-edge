@@ -3,6 +3,8 @@ import type { SSHCredential } from '@/api';
 import { Button } from '@heroui/react';
 import { Plus } from 'lucide-react';
 
+import { SelectField } from '@/components/SelectField.tsx';
+
 interface SSHCredentialSelectProps {
     credentials: SSHCredential[];
     id: string;
@@ -24,24 +26,23 @@ export function SSHCredentialSelect({
 }: SSHCredentialSelectProps) {
     return (
         <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
-            <select
-                aria-label='SSH credential'
-                className='h-10 min-w-0 flex-1 rounded-xl border border-border bg-surface-secondary px-3 text-sm outline-none focus:border-accent md:h-9'
-                disabled={credentials.length === 0}
+            <SelectField
+                ariaLabel='SSH credential'
+                className='min-w-0 flex-1'
                 id={id}
-                required
+                isDisabled={credentials.length === 0}
+                isRequired
+                options={credentials.map((credential) => ({
+                    id: credential.id,
+                    label: `${credential.name} · ${credential.username} · ${authTypeLabel(credential)}`,
+                }))}
+                placeholder={
+                    credentials.length === 0 ? 'No credentials available' : 'Select a credential'
+                }
                 value={value}
-                onChange={(event) => onChange(event.target.value)}
-            >
-                <option value=''>
-                    {credentials.length === 0 ? 'No credentials available' : 'Select a credential'}
-                </option>
-                {credentials.map((credential) => (
-                    <option key={credential.id} value={credential.id}>
-                        {credential.name} · {credential.username} · {authTypeLabel(credential)}
-                    </option>
-                ))}
-            </select>
+                variant='secondary'
+                onChange={onChange}
+            />
 
             {onAdd && (
                 <Button

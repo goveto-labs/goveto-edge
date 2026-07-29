@@ -6,7 +6,7 @@ import type {
     UpdateDNSConfig,
 } from '@/api';
 
-import { Button, Card, Input, Label, ListBox, Select, Spinner } from '@heroui/react';
+import { Button, Card, Input, Label, Spinner } from '@heroui/react';
 import { Globe2, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -14,6 +14,7 @@ import { ApiError, dnsApi } from '@/api';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
@@ -462,27 +463,17 @@ export default function DNS() {
             >
                 <form onSubmit={save}>
                     <div className='grid max-h-[70vh] gap-4 overflow-y-auto px-6 py-5 md:grid-cols-2'>
-                        <Select
+                        <SelectField
+                            label='Provider'
+                            options={[
+                                { id: 'ALIYUN', label: 'Aliyun DNS' },
+                                { id: 'CLOUDFLARE', label: 'Cloudflare' },
+                            ]}
                             variant='secondary'
                             isDisabled={!canEdit}
                             value={provider}
                             onChange={changeProvider}
-                        >
-                            <Label>Provider</Label>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    <ListBox.Item id='ALIYUN' textValue='Aliyun DNS'>
-                                        Aliyun DNS
-                                    </ListBox.Item>
-                                    <ListBox.Item id='CLOUDFLARE' textValue='Cloudflare'>
-                                        Cloudflare
-                                    </ListBox.Item>
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
+                        />
                         <div className='hidden md:block' />
                         {provider === 'ALIYUN' ? (
                             <>
@@ -550,30 +541,18 @@ export default function DNS() {
                                 Load zones
                             </Button>
                         </div>
-                        <Select
+                        <SelectField
+                            label='DNS zone'
+                            options={providerDomains.map((domain) => ({
+                                id: domain.name,
+                                label: domain.name,
+                            }))}
+                            placeholder='Select a DNS zone'
                             variant='secondary'
                             isDisabled={!canEdit || providerDomains.length === 0}
                             value={zone}
                             onChange={selectDomain}
-                        >
-                            <Label>DNS zone</Label>
-                            <Select.Trigger>
-                                <Select.Value />
-                            </Select.Trigger>
-                            <Select.Popover>
-                                <ListBox>
-                                    {providerDomains.map((domain) => (
-                                        <ListBox.Item
-                                            key={domain.name}
-                                            id={domain.name}
-                                            textValue={domain.name}
-                                        >
-                                            {domain.name}
-                                        </ListBox.Item>
-                                    ))}
-                                </ListBox>
-                            </Select.Popover>
-                        </Select>
+                        />
                         <div className='flex flex-col gap-1'>
                             <Label htmlFor='dns-hostname'>Cluster hostname</Label>
                             <Input

@@ -3916,6 +3916,8 @@ paths:
                                                     type: string
                                             identity_json:
                                                 type: string
+                                            identity_available:
+                                                type: boolean
                                             install_error:
                                                 type: string
                                             node_id:

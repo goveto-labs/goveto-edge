@@ -6,6 +6,7 @@ import { ApiLoadingProvider } from '@/hooks/useApiLoading.tsx';
 import { AuthProvider } from '@/hooks/useAuth.ts';
 import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
+import AdminSettings from '@/pages/AdminSettings.tsx';
 import Analytics from '@/pages/Analytics.tsx';
 import Certificates from '@/pages/Certificates.tsx';
 import CreateNode from '@/pages/CreateNode.tsx';
@@ -20,6 +21,7 @@ import Nodes from '@/pages/Nodes.tsx';
 import PublishJobs from '@/pages/PublishJobs.tsx';
 import PurgeJobs from '@/pages/PurgeJobs.tsx';
 import Register from '@/pages/Register.tsx';
+import Settings from '@/pages/Settings.tsx';
 import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
 import SitesAccessLogs from '@/pages/SitesAccessLogs.tsx';
@@ -63,6 +65,8 @@ export default function App() {
                                     <Route element={<Jobs />} path='/jobs' />
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />
+                                    <Route element={<Settings />} path='/settings' />
+                                    <Route element={<AdminSettings />} path='/settings/admin' />
                                 </Route>
                             </Routes>
                         </ClusterProvider>

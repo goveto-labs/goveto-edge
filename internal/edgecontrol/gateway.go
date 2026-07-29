@@ -46,6 +46,11 @@ const cancelAbandonedTaskSQL = `UPDATE agent_tasks SET status='CANCELLED',
 	lease_owner=NULL, lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
 	WHERE id=$1 AND status IN ('PENDING','RUNNING')`
 
+const dispatchTaskSQL = `INSERT INTO agent_tasks
+	(id, node_id, kind, payload, status, idempotency_key, timeout_at, created_at, updated_at)
+	VALUES ($1, $2, $3, $4, 'PENDING', $6,
+		NOW()+($5*INTERVAL '1 second'), NOW(), NOW())`
+
 const claimTasksSQL = `WITH picked AS (
 	SELECT t.id FROM agent_tasks t JOIN nodes n ON n.id = t.node_id
 	JOIN node_credentials c ON c.node_id = n.id
@@ -72,6 +77,12 @@ type ApplySiteResult struct {
 	Applied       bool   `json:"applied"`
 }
 
+type dispatchTaskState struct {
+	Status string           `db:"status"`
+	Result *json.RawMessage `db:"result_json"`
+	Error  *string          `db:"error"`
+}
+
 type Gateway struct {
 	sqlDB          *sql.DB
 	db             *client.Client
@@ -85,9 +96,18 @@ type Gateway struct {
 }
 
 type session struct {
-	cancel context.CancelFunc
-	wake   chan struct{}
-	owner  string
+	cancel   context.CancelFunc
+	wake     chan struct{}
+	owner    string
+	logQueue agentLogQueueState
+}
+
+type agentLogQueueState struct {
+	nonEmptySince time.Time
+	lastWarning   time.Time
+	records       uint64
+	bytes         uint64
+	dropped       uint64
 }
 
 type gatewayEvent struct {
@@ -165,7 +185,9 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 		g.releaseLeases(context.Background(), nodeID, current.owner)
 	}()
 
-	clusterID, wasOnline, err := g.recordHeartbeat(ctx, nodeID, first.Hello.CacheConfig)
+	clusterID, wasOnline, err := g.recordHeartbeat(
+		ctx, nodeID, first.Hello.CacheConfig, first.Hello.SiteVersions, first.Hello.AgentVersion,
+	)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
 	}
@@ -260,9 +282,12 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 				if err := g.authorize(ctx, nodeID, certificate); err != nil {
 					return status.Error(codes.PermissionDenied, err.Error())
 				}
-				if _, _, err := g.recordHeartbeat(ctx, nodeID, message.Heartbeat.CacheConfig); err != nil {
+				if _, _, err := g.recordHeartbeat(
+					ctx, nodeID, message.Heartbeat.CacheConfig, message.Heartbeat.SiteVersions, "",
+				); err != nil {
 					return status.Error(codes.Internal, err.Error())
 				}
+				g.observeAgentLogQueue(nodeID, current, *message.Heartbeat)
 				g.ensureGeoIPTask(ctx, nodeID, message.Heartbeat.GeoIP)
 			case message.TaskResult != nil:
 				delete(inflight, message.TaskResult.TaskID)
@@ -445,7 +470,13 @@ func (g *Gateway) authorize(ctx context.Context, nodeID string, certificate *x50
 	return nil
 }
 
-func (g *Gateway) recordHeartbeat(ctx context.Context, nodeID string, current edgeprotocol.NodeCacheConfig) (string, bool, error) {
+func (g *Gateway) recordHeartbeat(
+	ctx context.Context,
+	nodeID string,
+	current edgeprotocol.NodeCacheConfig,
+	siteVersions map[string]uint64,
+	agentVersion string,
+) (string, bool, error) {
 	type nodeState struct {
 		ClusterID string `db:"cluster_id"`
 		Status    string `db:"status"`
@@ -467,8 +498,9 @@ func (g *Gateway) recordHeartbeat(ctx context.Context, nodeID string, current ed
 			SELECT id, cluster_id, status FROM nodes
 			WHERE id = $1 AND status <> 'DISABLED' FOR UPDATE
 		)
-		UPDATE nodes n SET status = 'ONLINE', heartbeat_at = NOW(), install_error = NULL, updated_at = NOW()
-		FROM candidate c WHERE n.id = c.id RETURNING c.cluster_id, c.status`, nodeID)
+		UPDATE nodes n SET status = 'ONLINE', heartbeat_at = NOW(), install_error = NULL,
+			version = CASE WHEN $2 <> '' THEN $2 ELSE n.version END, updated_at = NOW()
+		FROM candidate c WHERE n.id = c.id RETURNING c.cluster_id, c.status`, nodeID, agentVersion)
 		if err != nil {
 			return err
 		}
@@ -486,7 +518,41 @@ func (g *Gateway) recordHeartbeat(ctx context.Context, nodeID string, current ed
 	if err := g.reconcileCacheConfig(ctx, nodeID, current); err != nil {
 		slog.Warn("reconcile cache config from heartbeat", "node_id", nodeID, "error", err)
 	}
+	if err := g.reconcileSiteVersions(ctx, nodeID, state.ClusterID, siteVersions); err != nil {
+		slog.Warn("reconcile site configs from heartbeat", "node_id", nodeID, "error", err)
+	}
 	return state.ClusterID, state.Status == "ONLINE", nil
+}
+
+func (g *Gateway) observeAgentLogQueue(nodeID string, current *session, heartbeat edgeprotocol.AgentHeartbeat) {
+	now := time.Now()
+	state := &current.logQueue
+	if heartbeat.DroppedLogs > state.dropped {
+		slog.Warn("agent dropped queued logs", "node_id", nodeID,
+			"dropped_total", heartbeat.DroppedLogs, "dropped_since_last", heartbeat.DroppedLogs-state.dropped)
+	}
+	state.dropped = heartbeat.DroppedLogs
+	state.records = heartbeat.QueueRecords
+	state.bytes = heartbeat.QueueBytes
+	if heartbeat.QueueRecords == 0 {
+		if !state.nonEmptySince.IsZero() && now.Sub(state.nonEmptySince) >= time.Minute {
+			slog.Info("agent log queue drained", "node_id", nodeID)
+		}
+		state.nonEmptySince = time.Time{}
+		state.lastWarning = time.Time{}
+		return
+	}
+	if state.nonEmptySince.IsZero() {
+		state.nonEmptySince = now
+		return
+	}
+	if now.Sub(state.nonEmptySince) >= time.Minute &&
+		(state.lastWarning.IsZero() || now.Sub(state.lastWarning) >= time.Minute) {
+		slog.Warn("agent log queue remains backlogged", "node_id", nodeID,
+			"queue_records", heartbeat.QueueRecords, "queue_bytes", heartbeat.QueueBytes,
+			"backlog_duration", now.Sub(state.nonEmptySince).Round(time.Second))
+		state.lastWarning = now
+	}
 }
 
 func (g *Gateway) reconcileCacheConfig(ctx context.Context, nodeID string, current edgeprotocol.NodeCacheConfig) error {
@@ -558,11 +624,8 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 		if len(rows) != 1 {
 			return errors.New("node is disabled, revoked, or unavailable")
 		}
-		_, err = tx.RawExec(ctx, `INSERT INTO agent_tasks
-			(id, node_id, kind, payload, status, idempotency_key, timeout_at, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, 'PENDING', $1,
-				NOW()+($5*INTERVAL '1 second'), NOW(), NOW())`,
-			taskID, nodeID, kind, encoded, agentTaskTimeout.Seconds())
+		_, err = tx.RawExec(ctx, dispatchTaskSQL,
+			taskID, nodeID, kind, encoded, agentTaskTimeout.Seconds(), taskID)
 		return err
 	})
 	if err != nil {
@@ -572,12 +635,7 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		type state struct {
-			Status string          `db:"status"`
-			Result json.RawMessage `db:"result_json"`
-			Error  *string         `db:"error"`
-		}
-		rows, queryErr := client.Raw[state](ctx, g.db, `SELECT status, result_json, error FROM agent_tasks WHERE id = $1`, taskID)
+		rows, queryErr := client.Raw[dispatchTaskState](ctx, g.db, `SELECT status, result_json, error FROM agent_tasks WHERE id = $1`, taskID)
 		if queryErr != nil {
 			if ctx.Err() != nil {
 				return g.cancelAbandonedTask(ctx, taskID)
@@ -587,8 +645,8 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 		if len(rows) == 1 {
 			switch rows[0].Status {
 			case "SUCCEEDED":
-				if result != nil && len(rows[0].Result) > 0 {
-					return json.Unmarshal(rows[0].Result, result)
+				if result != nil && rows[0].Result != nil && len(*rows[0].Result) > 0 {
+					return json.Unmarshal(*rows[0].Result, result)
 				}
 				return nil
 			case "FAILED", "DEAD_LETTER", "CANCELLED":

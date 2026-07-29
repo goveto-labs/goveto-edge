@@ -18,6 +18,7 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodDelete, "/api/v1/auth/sessions/:session_id", "auth.session.revoke", "session", "session_id"},
 	{http.MethodPost, "/api/v1/auth/sessions/revoke-others", "auth.session.revoke_others", "session", ""},
 	{http.MethodPost, "/api/v1/init", "system.initialize", "system", ""},
+	{http.MethodPut, "/api/v1/admin/settings", "system.settings.update", "dynamic_setting", ""},
 	{http.MethodPost, "/api/v1/clusters", "cluster.create", "cluster", ""},
 	{http.MethodPut, "/api/v1/session/cluster", "cluster.select", "cluster", ""},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/groups", "cluster_group.create", "cluster_group", ""},

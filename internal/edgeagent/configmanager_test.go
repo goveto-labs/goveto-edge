@@ -108,6 +108,30 @@ func TestApplySitePersistsAndRejectsStaleVersion(t *testing.T) {
 	_ = restored.Stop()
 }
 
+func TestSiteVersionsOmitsPersistedTombstones(t *testing.T) {
+	ensureAgentLogSink(t)
+	path := filepath.Join(t.TempDir(), "sites.json")
+	manager := NewConfigManager(path, ":"+strconv.Itoa(freePort(t)))
+	if err := manager.ApplySite(SiteConfig{SiteID: "deleted-site", Version: 9, Disabled: true}); err != nil {
+		t.Fatalf("apply tombstone: %v", err)
+	}
+	if versions := manager.SiteVersions(); len(versions) != 0 {
+		t.Fatalf("disabled site was reported as active: %#v", versions)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored map[string]SiteConfig
+	if err := json.Unmarshal(data, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if !stored["deleted-site"].Disabled || stored["deleted-site"].Version != 9 {
+		t.Fatalf("tombstone was not persisted: %#v", stored)
+	}
+	_ = manager.Stop()
+}
+
 func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	ensureAgentLogSink(t)
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

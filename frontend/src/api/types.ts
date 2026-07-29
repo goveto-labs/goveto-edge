@@ -6,6 +6,7 @@ export interface User {
     status: string;
     totp_enabled?: boolean;
     totp_required?: boolean;
+    is_instance_owner: boolean;
 }
 
 export interface LoginRequest {
@@ -25,6 +26,18 @@ export interface InitializeRequest {
     email: string;
     password: string;
     name: string;
+    agent_gateway_public_address: string;
+}
+
+export interface AdminSettings {
+    agent_gateway_public_address: string;
+    restart_required: boolean;
+    restarting: boolean;
+}
+
+export interface UpdateAdminSettings {
+    agent_gateway_public_address: string;
+    restart: boolean;
 }
 
 export interface InitializationStatus {
@@ -37,6 +50,21 @@ export interface RegistrationConfig {
         provider: string;
         site_key: string;
     };
+}
+
+export interface TOTPSetup {
+    secret: string;
+    uri: string;
+}
+
+export interface TOTPMutationRequest {
+    password: string;
+    code: string;
+    secret?: string;
+}
+
+export interface RecoveryCodesResponse {
+    recovery_codes: string[];
 }
 
 export interface DNSLine {
@@ -225,7 +253,8 @@ export interface NodeInstallationInfo {
     node_id: string;
     status: string;
     install_error?: string;
-    identity_json: string;
+    identity_json?: string;
+    identity_available: boolean;
     service_unit: string;
     architectures: string[];
 }

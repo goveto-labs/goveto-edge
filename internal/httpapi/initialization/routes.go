@@ -21,9 +21,10 @@ import (
 const initializationLockID = 691782413
 
 type request struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Name     string `json:"name"`
+	Email                     string `json:"email"`
+	Password                  string `json:"password"`
+	Name                      string `json:"name"`
+	AgentGatewayPublicAddress string `json:"agent_gateway_public_address"`
 }
 
 type statusResponse struct {
@@ -31,11 +32,12 @@ type statusResponse struct {
 }
 
 type userResponse struct {
-	ID     string           `json:"id"`
-	Email  string           `json:"email"`
-	Name   string           `json:"name"`
-	Role   model.UserRole   `json:"role"`
-	Status model.UserStatus `json:"status"`
+	ID              string           `json:"id"`
+	Email           string           `json:"email"`
+	Name            string           `json:"name"`
+	Role            model.UserRole   `json:"role"`
+	Status          model.UserStatus `json:"status"`
+	IsInstanceOwner bool             `json:"is_instance_owner"`
 }
 
 func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, limiter *httpsecurity.RateLimiter) {
@@ -71,6 +73,10 @@ func initialize(db *client.Client) echo.HandlerFunc {
 		audit.SetActor(c, "", input.Email)
 		if input.Email == "" || input.Name == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "email and name are required")
+		}
+		gatewayAddress, err := settings.ValidateAgentGatewayPublicAddress(input.AgentGatewayPublicAddress)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		if err := password.Validate(input.Password); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -108,6 +114,12 @@ func initialize(db *client.Client) echo.HandlerFunc {
 			if err != nil {
 				return err
 			}
+			if err := store.Set(ctx, settings.InstanceOwnerUserIDKey, administrator.Id, "User allowed to manage instance-level settings"); err != nil {
+				return err
+			}
+			if err := store.SetAgentGatewayPublicAddress(ctx, gatewayAddress); err != nil {
+				return err
+			}
 			return store.Set(ctx, settings.InstanceInitializedKey, true, "Whether initial instance setup has completed")
 		})
 		if err != nil {
@@ -116,7 +128,7 @@ func initialize(db *client.Client) echo.HandlerFunc {
 
 		response := userResponse{
 			ID: administrator.Id, Email: administrator.Email, Name: administrator.Name,
-			Role: administrator.Role, Status: administrator.Status,
+			Role: administrator.Role, Status: administrator.Status, IsInstanceOwner: true,
 		}
 		audit.SetActor(c, administrator.Id, administrator.Email)
 		audit.SetResourceID(c, administrator.Id)

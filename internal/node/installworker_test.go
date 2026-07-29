@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -75,16 +76,30 @@ func TestPrivilegedCommandPrefix(t *testing.T) {
 
 func TestAgentInstallScriptRestartsExistingService(t *testing.T) {
 	script := agentInstallScript("sudo ")
+	capabilityCheck := "if [ -e /proc/sys/net/core/rmem_max ] && [ -e /proc/sys/net/core/wmem_max ]; then"
+	applyRmem := "sudo sysctl -w net.core.rmem_max=7500000"
+	applyWmem := "sudo sysctl -w net.core.wmem_max=7500000"
 	rmem := "echo 'net.core.rmem_max=7500000' | sudo tee /etc/sysctl.d/99-udp-buffers.conf >/dev/null"
 	wmem := "echo 'net.core.wmem_max=7500000' | sudo tee -a /etc/sysctl.d/99-udp-buffers.conf >/dev/null"
-	apply := "sudo sysctl -p /etc/sysctl.d/99-udp-buffers.conf"
-	for _, command := range []string{rmem, wmem, apply} {
+	for _, command := range []string{capabilityCheck, applyRmem, applyWmem, rmem, wmem} {
 		if !strings.Contains(script, command) {
 			t.Fatalf("install script missing UDP buffer command %q: %s", command, script)
 		}
 	}
-	if strings.Index(script, rmem) > strings.Index(script, wmem) || strings.Index(script, wmem) > strings.Index(script, apply) {
+	if strings.Index(script, capabilityCheck) > strings.Index(script, applyRmem) ||
+		strings.Index(script, applyRmem) > strings.Index(script, applyWmem) ||
+		strings.Index(script, applyWmem) > strings.Index(script, rmem) ||
+		strings.Index(script, rmem) > strings.Index(script, wmem) {
 		t.Fatalf("install script configures UDP buffers in the wrong order: %s", script)
+	}
+	for _, warning := range []string{
+		"warning: UDP buffer sysctl settings are unavailable; continuing agent installation",
+		"warning: unable to raise UDP buffer limits; continuing agent installation",
+		"warning: UDP buffer settings applied but could not be persisted",
+	} {
+		if !strings.Contains(script, warning) {
+			t.Fatalf("install script missing non-fatal warning %q: %s", warning, script)
+		}
 	}
 	if !strings.Contains(script, "sudo systemctl enable goveto-edge-agent") {
 		t.Fatalf("install script does not enable service: %s", script)
@@ -98,8 +113,18 @@ func TestAgentInstallScriptRestartsExistingService(t *testing.T) {
 	if strings.Contains(script, "enable --now") {
 		t.Fatalf("install script still relies on enable --now: %s", script)
 	}
-	if strings.Index(script, apply) > strings.Index(script, "sudo systemctl restart goveto-edge-agent") {
+	if strings.Index(script, applyWmem) > strings.Index(script, "sudo systemctl restart goveto-edge-agent") {
 		t.Fatalf("install script applies UDP buffers after restarting the service: %s", script)
+	}
+}
+
+func TestAgentInstallScriptHasValidShellSyntax(t *testing.T) {
+	for _, privileged := range []string{"", "sudo "} {
+		cmd := exec.Command("sh", "-n")
+		cmd.Stdin = strings.NewReader(agentInstallScript(privileged))
+		if output, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("install script with prefix %q has invalid shell syntax: %v: %s", privileged, err, output)
+		}
 	}
 }
 

@@ -19,7 +19,7 @@ interface AuthContextValue {
     login: (payload: LoginRequest) => Promise<void>;
     register: (payload: RegisterRequest) => Promise<void>;
     logout: () => Promise<void>;
-    refresh: () => Promise<void>;
+    refresh: (silent?: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -29,8 +29,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
 
-    const refresh = useCallback(async () => {
-        setLoading(true);
+    const refresh = useCallback(async (silent = false) => {
+        if (!silent) setLoading(true);
         try {
             const me = await authApi.me();
             setUser(me);
@@ -42,7 +42,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setError(err instanceof Error ? err.message : 'Auth check failed');
             }
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     }, []);
 

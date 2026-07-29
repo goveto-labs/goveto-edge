@@ -26,8 +26,8 @@ export function DialogShell({
 }: DialogShellProps) {
     return (
         <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
-            <Modal.Backdrop className='dialog-shell-backdrop' isDismissable={isDismissable}>
-                <Modal.Container className='dialog-shell-container' placement='center' size={size}>
+            <Modal.Backdrop isDismissable={isDismissable}>
+                <Modal.Container placement='center' size={size}>
                     <Modal.Dialog className='overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl'>
                         <div className='flex items-start justify-between border-b border-border bg-surface-secondary/50 px-6 py-4'>
                             <div className='flex items-center gap-3'>

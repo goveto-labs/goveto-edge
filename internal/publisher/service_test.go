@@ -2,6 +2,7 @@ package publisher
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"goveto-edge/internal/edgeprotocol"
@@ -19,6 +20,22 @@ func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
 	}
 	if len(failed) != 1 || failed[0].NodeID != "b" || failed[0].Error != "timeout" {
 		t.Fatalf("unexpected failed results: %#v", failed)
+	}
+}
+
+func TestAllTargetsRejectedErrorIncludesNodeReasons(t *testing.T) {
+	err := allTargetsRejectedError([]targetResult{
+		{NodeID: "node-1", Error: "invalid config"},
+		{NodeID: "node-2"},
+	})
+	for _, fragment := range []string{
+		"all nodes rejected the configuration",
+		"node node-1: invalid config",
+		"node node-2: unknown error",
+	} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("aggregate rejection error missing %q: %v", fragment, err)
+		}
 	}
 }
 

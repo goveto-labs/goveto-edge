@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
+	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage"
 	"goveto-edge/schema"
 )
@@ -66,6 +68,26 @@ func main() {
 		slog.Info("database schema updated", "models", schemaResult.ModelCount, "changes", schemaResult.ChangeCount, "hash", schemaResult.SchemaHash)
 	}
 
+	settingStore := settings.New(orm, nil)
+	instanceInitialized, err := settingStore.Initialized(ctx)
+	if err != nil {
+		slog.Error("read instance initialization status", "error", err)
+		os.Exit(1)
+	}
+	agentGatewayPublicAddress, addressConfigured, err := settingStore.AgentGatewayPublicAddress(ctx)
+	if err != nil {
+		slog.Error("read agent gateway public address", "error", err)
+		os.Exit(1)
+	}
+	if !addressConfigured {
+		if instanceInitialized {
+			slog.Error("agent gateway public address is not configured; complete instance initialization")
+			os.Exit(1)
+		}
+		agentGatewayPublicAddress = net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.AgentGatewayPort))
+		slog.Warn("using temporary agent gateway address until instance initialization", "public_address", agentGatewayPublicAddress)
+	}
+
 	redisClient, err := storage.OpenRedis(ctx, cfg.RedisURL)
 	if err != nil {
 		slog.Error("connect redis", "error", err)
@@ -86,7 +108,7 @@ func main() {
 		slog.Error("initialize node credential encryption", "error", err)
 		os.Exit(1)
 	}
-	authority, err := edgecontrol.NewAuthority(credentialCipher, cfg.AgentGatewayPublicAddress)
+	authority, err := edgecontrol.NewAuthority(credentialCipher, agentGatewayPublicAddress)
 	if err != nil {
 		slog.Error("initialize agent certificate authority", "error", err)
 		os.Exit(1)
@@ -218,7 +240,7 @@ func main() {
 		}
 	}()
 	go func() {
-		slog.Info("agent mTLS gateway listening", "address", cfg.AgentGatewayAddress(), "public_address", cfg.AgentGatewayPublicAddress)
+		slog.Info("agent mTLS gateway listening", "address", cfg.AgentGatewayAddress(), "public_address", agentGatewayPublicAddress)
 		if serveErr := agentServer.Serve(agentListener); serveErr != nil && ctx.Err() == nil {
 			slog.Error("serve agent mTLS gateway", "error", serveErr)
 			stop()
@@ -244,6 +266,10 @@ func main() {
 				MaxBodyBytes: cfg.HTTPMaxBodyBytes, MaxUploadBytes: cfg.HTTPMaxUploadBytes,
 				MaxHeaderCount: 100, HSTS: strings.EqualFold(cfg.AppEnv, "production"),
 				IPExtractor: ipExtractor,
+			},
+			func() {
+				slog.Info("control plane restart requested after admin settings update")
+				stop()
 			},
 			analyticsStore,
 		),

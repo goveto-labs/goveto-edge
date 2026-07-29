@@ -8,6 +8,7 @@ import { ApiError, jobsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
@@ -225,30 +226,23 @@ export default function Jobs() {
                 aria-label='Background jobs'
                 action={
                     <div className='grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto'>
-                        <select
-                            aria-label='Job type'
-                            className='min-h-9 rounded-lg border border-border bg-surface px-3 text-sm'
+                        <SelectField
+                            ariaLabel='Job type'
+                            className='min-w-36'
+                            options={kinds.map((item) => ({
+                                id: item.value,
+                                label: item.label,
+                            }))}
                             value={kind}
-                            onChange={(event) => setKind(event.target.value as '' | ManagedJobKind)}
-                        >
-                            {kinds.map((item) => (
-                                <option key={item.value || 'all'} value={item.value}>
-                                    {item.label}
-                                </option>
-                            ))}
-                        </select>
-                        <select
-                            aria-label='Job status'
-                            className='min-h-9 rounded-lg border border-border bg-surface px-3 text-sm'
+                            onChange={(value) => setKind(value as '' | ManagedJobKind)}
+                        />
+                        <SelectField
+                            ariaLabel='Job status'
+                            className='min-w-36'
+                            options={statuses.map(([value, label]) => ({ id: value, label }))}
                             value={status}
-                            onChange={(event) => setStatus(event.target.value)}
-                        >
-                            {statuses.map(([value, label]) => (
-                                <option key={value || 'all'} value={value}>
-                                    {label}
-                                </option>
-                            ))}
-                        </select>
+                            onChange={setStatus}
+                        />
                     </div>
                 }
                 empty={jobs.length === 0}
