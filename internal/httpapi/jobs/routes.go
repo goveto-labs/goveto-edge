@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,10 @@ type Job struct {
 	ID                string           `db:"id" json:"id"`
 	Kind              string           `db:"kind" json:"kind"`
 	ResourceID        string           `db:"resource_id" json:"resource_id"`
+	ResourceType      string           `db:"resource_type" json:"resource_type"`
+	ResourceName      string           `db:"resource_name" json:"resource_name"`
+	ResourceHint      string           `db:"resource_hint" json:"resource_hint,omitempty"`
+	Operation         string           `db:"operation" json:"operation"`
 	Status            string           `db:"status" json:"status"`
 	Attempts          int              `db:"attempts" json:"attempts"`
 	MaxAttempts       int              `db:"max_attempts" json:"max_attempts"`
@@ -39,9 +44,25 @@ type Job struct {
 	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeout_at,omitempty"`
 	ResultJSON        *json.RawMessage `db:"result_json" json:"result_json,omitempty"`
 	CompensationJSON  *json.RawMessage `db:"compensation_json" json:"compensation_json,omitempty"`
+	InputJSON         *json.RawMessage `db:"input_json" json:"input_json,omitempty"`
 	Error             *string          `db:"error" json:"error,omitempty"`
 	CreatedAt         time.Time        `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time        `db:"updated_at" json:"updated_at"`
+}
+
+type JobPage struct {
+	Items    []Job `json:"items"`
+	Page     int   `json:"page"`
+	PageSize int   `json:"page_size"`
+	Total    int64 `json:"total"`
+}
+
+type listParams struct {
+	Status   string
+	Kind     string
+	Query    string
+	Page     int
+	PageSize int
 }
 
 type Execution struct {
@@ -70,6 +91,7 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
 	group := e.Group("/api/v1/clusters/:cluster_id/jobs", auth.RequireAuth, read)
 	group.GET("", list(db))
+	group.GET("/:kind/:job_id", detail(db))
 	group.GET("/:kind/:job_id/executions", executions(db))
 	group.POST("/:kind/:job_id/cancel", mutate(db, publishService, true))
 	group.POST("/:kind/:job_id/replay", mutate(db, publishService, false))
@@ -77,11 +99,31 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 
 func list(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		jobs, err := loadJobs(c.Request().Context(), db, c.Param("cluster_id"), c.QueryParam("status"), c.QueryParam("kind"))
+		params, err := parseListParams(c)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		jobs, err := loadJobs(c.Request().Context(), db, c.Param("cluster_id"), params)
 		if err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, jobs)
+	}
+}
+
+func detail(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		kind, err := parseKind(c.Param("kind"))
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		job, err := loadJobDetail(
+			c.Request().Context(), db, c.Param("cluster_id"), kind, c.Param("job_id"),
+		)
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, job)
 	}
 }
 
@@ -189,37 +231,174 @@ func loadMutationSnapshot(ctx context.Context, db *client.Client, kind jobqueue.
 	return &rows[0], nil
 }
 
-func loadJobs(ctx context.Context, db *client.Client, clusterID, status, kind string) ([]Job, error) {
-	rows, err := client.Raw[Job](ctx, db, `SELECT * FROM (
-		SELECT j.id, 'PUBLISH' AS kind, j.site_id AS resource_id, j.status::text, j.attempts,
+const jobListSourceSQL = `
+		SELECT j.id, 'PUBLISH' AS kind, j.site_id AS resource_id, 'SITE' AS resource_type,
+		s.name AS resource_name, COALESCE((SELECT MIN(d.hostname) FROM site_domains d WHERE d.site_id=j.site_id), '') AS resource_hint,
+		'VERSION ' || j.version::text AS operation, j.status::text, j.attempts,
 		j.max_attempts, j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at,
 		j.cancel_requested_at, j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
 		FROM publish_jobs j JOIN sites s ON s.id=j.site_id WHERE s.cluster_id=$1
-		UNION ALL SELECT j.id, 'PURGE', j.site_id, j.status::text, j.attempts, j.max_attempts,
+		UNION ALL SELECT j.id, 'PURGE', j.site_id, 'SITE', s.name,
+		COALESCE((SELECT MIN(d.hostname) FROM site_domains d WHERE d.site_id=j.site_id), ''),
+		j.type::text || COALESCE(' ' || NULLIF(j.value, ''), ''), j.status::text, j.attempts, j.max_attempts,
 		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
 		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
 		FROM purge_jobs j JOIN sites s ON s.id=j.site_id WHERE s.cluster_id=$1
-		UNION ALL SELECT j.id, 'INSTALL', j.node_id::text, j.status::text, j.attempts, j.max_attempts,
+		UNION ALL SELECT j.id, 'INSTALL', j.node_id::text, 'NODE', n.name,
+		COALESCE((SELECT MIN(a.address) FROM node_addresses a WHERE a.node_id=j.node_id), ''),
+		'INSTALL', j.status::text, j.attempts, j.max_attempts,
 		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
 		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
 		FROM install_jobs j JOIN nodes n ON n.id=j.node_id WHERE n.cluster_id=$1
-		UNION ALL SELECT j.id, 'DNS', j.cluster_id, j.status::text, j.attempts, j.max_attempts,
+		UNION ALL SELECT j.id, 'DNS', COALESCE(j.site_id, j.cluster_id),
+		CASE WHEN j.site_id IS NULL THEN 'CLUSTER' ELSE 'SITE' END,
+		COALESCE(s.name, c.name), COALESCE((SELECT MIN(d.hostname) FROM site_domains d WHERE d.site_id=j.site_id), c.primary_hostname, ''),
+		j.action::text, j.status::text, j.attempts, j.max_attempts,
 		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
 		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
-		FROM dns_sync_jobs j WHERE j.cluster_id=$1
-		UNION ALL SELECT j.id, 'CERTIFICATE', j.certificate_id, j.status::text, j.attempts, j.max_attempts,
+		FROM dns_sync_jobs j JOIN clusters c ON c.id=j.cluster_id LEFT JOIN sites s ON s.id=j.site_id WHERE j.cluster_id=$1
+		UNION ALL SELECT j.id, 'CERTIFICATE', j.certificate_id, 'CERTIFICATE', c.name,
+		COALESCE(c.domains_json->>0, ''), j.operation::text, j.status::text, j.attempts, j.max_attempts,
 		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
 		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
-		FROM certificate_jobs j JOIN certificates c ON c.id=j.certificate_id WHERE c.cluster_id=$1
-	) jobs WHERE ($2='' OR status=$2) AND ($3='' OR kind=$3) ORDER BY created_at DESC LIMIT 200`,
-		clusterID, strings.ToUpper(status), strings.ToUpper(kind))
+		FROM certificate_jobs j JOIN certificates c ON c.id=j.certificate_id WHERE c.cluster_id=$1`
+
+const jobListFilterSQL = `($2='' OR status=$2) AND ($3='' OR kind=$3) AND ($4='' OR concat_ws(' ',
+		id, resource_id, resource_type, resource_name, resource_hint, operation
+	) ILIKE '%' || $4 || '%')`
+
+func loadJobs(ctx context.Context, db *client.Client, clusterID string, params listParams) (JobPage, error) {
+	result := JobPage{Items: make([]Job, 0, params.PageSize), Page: params.Page, PageSize: params.PageSize}
+	type countRow struct {
+		Total int64 `db:"total"`
+	}
+	counts, err := client.Raw[countRow](ctx, db, `SELECT COUNT(*) AS total FROM (`+jobListSourceSQL+
+		`) jobs WHERE `+jobListFilterSQL, clusterID, params.Status, params.Kind, params.Query)
+	if err != nil {
+		return JobPage{}, err
+	}
+	if len(counts) != 0 {
+		result.Total = counts[0].Total
+	}
+	rows, err := client.Raw[Job](ctx, db, `SELECT * FROM (`+jobListSourceSQL+
+		`) jobs WHERE `+jobListFilterSQL+` ORDER BY created_at DESC, kind, id LIMIT $5 OFFSET $6`,
+		clusterID, params.Status, params.Kind, params.Query, params.PageSize, (params.Page-1)*params.PageSize)
+	if err != nil {
+		return JobPage{}, err
+	}
+	result.Items = append(result.Items, rows...)
+	return result, nil
+}
+
+func loadJobDetail(ctx context.Context, db *client.Client, clusterID string, kind jobqueue.Kind, id string) (*Job, error) {
+	rows, err := client.Raw[Job](ctx, db, `SELECT * FROM (
+		SELECT jobs.*, jsonb_build_object('version', j.version, 'targets', j.targets,
+			'target_resources', (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+				'id', target.value->>'node_id', 'name', n.name,
+				'address', (SELECT MIN(a.address) FROM node_addresses a WHERE a.node_id=n.id)
+			) ORDER BY n.name), '[]'::jsonb) FROM jsonb_array_elements(j.targets::jsonb) target
+			LEFT JOIN nodes n ON n.id::text=target.value->>'node_id'),
+			'config', cv.config_json) AS input_json
+		FROM (`+jobListSourceSQL+`) jobs
+		JOIN publish_jobs j ON jobs.kind='PUBLISH' AND j.id=jobs.id
+		LEFT JOIN config_versions cv ON cv.site_id=j.site_id AND cv.version=j.version
+		UNION ALL SELECT jobs.*, jsonb_build_object('type', j.type, 'value', j.value)
+		FROM (`+jobListSourceSQL+`) jobs JOIN purge_jobs j ON jobs.kind='PURGE' AND j.id=jobs.id
+		UNION ALL SELECT jobs.*, j.payload::jsonb
+		FROM (`+jobListSourceSQL+`) jobs JOIN install_jobs j ON jobs.kind='INSTALL' AND j.id=jobs.id
+		UNION ALL SELECT jobs.*, jsonb_build_object('action', j.action, 'site_id', j.site_id)
+		FROM (`+jobListSourceSQL+`) jobs JOIN dns_sync_jobs j ON jobs.kind='DNS' AND j.id=jobs.id
+		UNION ALL SELECT jobs.*, jsonb_build_object('operation', j.operation)
+		FROM (`+jobListSourceSQL+`) jobs JOIN certificate_jobs j ON jobs.kind='CERTIFICATE' AND j.id=jobs.id
+	) details WHERE kind=$2 AND id=$3`, clusterID, string(kind), id)
 	if err != nil {
 		return nil, err
 	}
-	if rows == nil {
-		rows = []Job{}
+	if len(rows) != 1 {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "job not found")
 	}
-	return rows, nil
+	if err = redactSensitiveInput(rows[0].InputJSON); err != nil {
+		return nil, fmt.Errorf("redact job input: %w", err)
+	}
+	return &rows[0], nil
+}
+
+func redactSensitiveInput(raw *json.RawMessage) error {
+	if raw == nil {
+		return nil
+	}
+	var value any
+	if err := json.Unmarshal(*raw, &value); err != nil {
+		return err
+	}
+	redactSensitiveValue(value)
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	*raw = encoded
+	return nil
+}
+
+func redactSensitiveValue(value any) {
+	switch current := value.(type) {
+	case map[string]any:
+		for key, item := range current {
+			normalized := strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+			if isSensitiveKey(normalized) {
+				current[key] = "[REDACTED]"
+				continue
+			}
+			redactSensitiveValue(item)
+		}
+	case []any:
+		for _, item := range current {
+			redactSensitiveValue(item)
+		}
+	}
+}
+
+func isSensitiveKey(key string) bool {
+	for _, fragment := range []string{
+		"private_key", "password", "passphrase", "secret", "token", "key_auth",
+		"api_key", "authorization", "cookie",
+	} {
+		if strings.Contains(key, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseListParams(c *echo.Context) (listParams, error) {
+	params := listParams{
+		Status: strings.ToUpper(strings.TrimSpace(c.QueryParam("status"))),
+		Kind:   strings.ToUpper(strings.TrimSpace(c.QueryParam("kind"))),
+		Query:  strings.TrimSpace(c.QueryParam("query")),
+		Page:   1, PageSize: 25,
+	}
+	if params.Kind != "" {
+		if _, err := parseKind(params.Kind); err != nil {
+			return listParams{}, err
+		}
+	}
+	if params.Status != "" {
+		switch params.Status {
+		case "PENDING", "RUNNING", "SUCCEEDED", "FAILED", "DEAD_LETTER", "CANCELLED":
+		default:
+			return listParams{}, errors.New("unknown job status")
+		}
+	}
+	if len(params.Query) > 256 {
+		return listParams{}, errors.New("query must be at most 256 characters")
+	}
+	if value, err := strconv.Atoi(c.QueryParam("page")); err == nil && value > 0 {
+		params.Page = value
+	}
+	if value, err := strconv.Atoi(c.QueryParam("page_size")); err == nil && value > 0 && value <= 100 {
+		params.PageSize = value
+	}
+	return params, nil
 }
 
 func requireJobInCluster(ctx context.Context, db *client.Client, clusterID string, kind jobqueue.Kind, id string) error {

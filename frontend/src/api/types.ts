@@ -753,6 +753,10 @@ export interface ManagedJob {
     id: string;
     kind: ManagedJobKind;
     resource_id: string;
+    resource_type: 'SITE' | 'NODE' | 'CLUSTER' | 'CERTIFICATE';
+    resource_name: string;
+    resource_hint?: string;
+    operation: string;
     status: string;
     attempts: number;
     max_attempts: number;
@@ -764,9 +768,17 @@ export interface ManagedJob {
     timeout_at?: string;
     result_json?: unknown;
     compensation_json?: unknown;
+    input_json?: unknown;
     error?: string;
     created_at: string;
     updated_at: string;
+}
+
+export interface ManagedJobPage {
+    items: ManagedJob[];
+    page: number;
+    page_size: number;
+    total: number;
 }
 
 export interface JobExecution {

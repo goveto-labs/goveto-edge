@@ -1,4 +1,4 @@
-import type { JobExecution, ManagedJob, ManagedJobKind } from './types.ts';
+import type { JobExecution, ManagedJob, ManagedJobKind, ManagedJobPage } from './types.ts';
 
 import { buildQuery, get, post } from './client.ts';
 
@@ -7,8 +7,17 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const jobsApi = (clusterId: string) => ({
-    list: (filters: { kind?: string; status?: string } = {}) =>
-        get<ManagedJob[]>(clusterPath(clusterId, `/jobs${buildQuery(filters)}`)),
+    list: (
+        filters: {
+            kind?: string;
+            status?: string;
+            query?: string;
+            page?: number;
+            page_size?: number;
+        } = {}
+    ) => get<ManagedJobPage>(clusterPath(clusterId, `/jobs${buildQuery(filters)}`)),
+    detail: (kind: ManagedJobKind, jobId: string) =>
+        get<ManagedJob>(clusterPath(clusterId, `/jobs/${kind}/${jobId}`)),
     executions: (kind: ManagedJobKind, jobId: string) =>
         get<JobExecution[]>(clusterPath(clusterId, `/jobs/${kind}/${jobId}/executions`)),
     cancel: (kind: ManagedJobKind, jobId: string) =>
