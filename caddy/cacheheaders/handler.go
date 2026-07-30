@@ -30,6 +30,10 @@ type Handler struct {
 var ErrIncompleteResponse = errors.New("upstream response ended before its declared content length")
 var errRangeProcessing = errors.New("cache range response processing failed")
 
+const maxPooledResponseBuffer = 16 << 20
+
+var responseBufferPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
 var requestLocks = struct {
 	sync.Mutex
 	values       map[string]*requestLock
@@ -79,7 +83,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 		expectedLength: -1, requestMethod: r.Method,
 	}
 	if h.ValidateUpstream {
-		buffer := new(bytes.Buffer)
+		buffer := responseBufferPool.Get().(*bytes.Buffer)
+		buffer.Reset()
+		defer releaseResponseBuffer(buffer)
 		recorder := caddyhttp.NewResponseRecorder(w, buffer, func(int, http.Header) bool { return true })
 		wrapped.ResponseWriterWrapper = &caddyhttp.ResponseWriterWrapper{ResponseWriter: recorder}
 		err := serveValidated(wrapped, r, next)
@@ -121,6 +127,14 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 		}
 	}
 	return nil
+}
+
+func releaseResponseBuffer(buffer *bytes.Buffer) {
+	if buffer.Cap() > maxPooledResponseBuffer {
+		return
+	}
+	buffer.Reset()
+	responseBufferPool.Put(buffer)
 }
 
 func serveDownstream(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) (err error) {

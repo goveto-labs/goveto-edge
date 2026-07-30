@@ -519,6 +519,13 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			"response_header_timeout": durationMS(originPolicy.Transport.ResponseHeaderTimeoutMS),
 			"read_timeout":            durationMS(originPolicy.Transport.ReadTimeoutMS),
 			"write_timeout":           durationMS(originPolicy.Transport.WriteTimeoutMS),
+			"keep_alive": map[string]any{
+				"max_idle_conns_per_host": originPolicy.Transport.KeepAliveMaxIdleConnsPerHost,
+				"idle_timeout":            durationMS(originPolicy.Transport.KeepAliveIdleTimeoutMS),
+			},
+		}
+		if originPolicy.Transport.MaxConnsPerHost > 0 {
+			transport["max_conns_per_host"] = originPolicy.Transport.MaxConnsPerHost
 		}
 		if strings.EqualFold(site.Origins[0].Protocol, "https") {
 			tlsConfig := map[string]any{

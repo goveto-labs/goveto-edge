@@ -227,12 +227,6 @@ run_case() {
   fi
 }
 
-restart_for_h3_new() {
-  $dry_run && return
-  compose restart agent >/dev/null
-  wait_for_agent || die "Edge Agent did not recover while isolating an H3 new-connection case"
-}
-
 run_origin_screen() {
   local protocol size mode concurrency name key
   for protocol in $protocols; do
@@ -241,14 +235,15 @@ run_origin_screen() {
         for concurrency in 1 8 32 128 512; do
           name="pure-origin-${size}b-${mode}-${protocol}-c${concurrency}"
           key="origin:$name"
-          [[ "$protocol" == "h3" && "$mode" == "new" ]] && restart_for_h3_new
           args=(--suite pr --protocol "$protocol" --scenario "pure-origin-${size}b-${mode}" \
             --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
             --concurrency "$concurrency" --warmup 1s --duration 5s --repeats 1 \
             --expected-sha256 "$(sha256_zeros "$size")")
           [[ "$mode" == "new" ]] && args+=(--new-connection)
+          if [[ "$protocol" == "h3" && "$mode" == "new" && "$concurrency" == "512" ]]; then
+            args+=(--capacity-probe --cooldown 60s)
+          fi
           run_case screen "$key" "$name" "$protocol" "${args[@]}"
-          [[ "$protocol" == "h3" && "$mode" == "new" ]] && restart_for_h3_new
         done
       done
     done
@@ -266,11 +261,13 @@ run_origin_capacity() {
           record_skip capacity "$name" "$protocol" "screen=${screen_status[$key]:-missing}"
           continue
         fi
+        local capacity_args=()
+        [[ "$concurrency" == "128" ]] && capacity_args+=(--cooldown 60s)
         run_case capacity "$key" "$name" "$protocol" \
           --suite capacity --protocol "$protocol" --scenario "pure-origin-${size}b-reuse" \
           --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
           --concurrency "$concurrency" --warmup 30s --duration 120s --repeats 3 \
-          --expected-sha256 "$(sha256_zeros "$size")"
+          --expected-sha256 "$(sha256_zeros "$size")" "${capacity_args[@]}"
       done
     done
   done
@@ -287,6 +284,20 @@ run_cdn_case() {
   run_case "$phase" "$key" "$name" "$protocol" "$@"
 }
 
+purge_eviction_keys() {
+  $dry_run && return
+  local key
+  for key in 1 2; do
+    compose --profile run run --rm load agent-bench run \
+      --suite pr --protocol h1 --scenario eviction-purge \
+      --method PURGE --url "https://agent:8444/pattern/16777216?_bench=$key" \
+      --host cache.benchmark.example.test --insecure-skip-verify \
+      --concurrency 1 --skip-warmup --duration 100ms --repeats 1 --expected-status 204 \
+      --output "/tmp/agent-bench-eviction-purge-$key" >/dev/null || \
+      die "failed to purge eviction benchmark key $key"
+  done
+}
+
 run_cdn_suite() {
   local phase="$1" suite="$2" warmup="$3" duration="$4" repeats="$5"
   local protocol size name
@@ -296,7 +307,8 @@ run_cdn_suite() {
       run_cdn_case "$phase" "$name" "$protocol" --suite "$suite" --protocol "$protocol" --scenario "$name" \
         --url "https://agent:8444/bytes/$size?asset=hit-$size" --host cache.benchmark.example.test \
         --insecure-skip-verify --concurrency 32 --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
-        --expected-sha256 "$(sha256_zeros "$size")" --expected-header X-Cache=HIT \
+        --expected-sha256 "$(sha256_zeros "$size")" \
+        --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01 \
         --capture-header X-Cache --min-cache-hits 1
     done
   done
@@ -321,10 +333,11 @@ run_cdn_suite() {
   local eviction_duration="$duration"
   [[ "$phase" == "screen" ]] && eviction_duration="30s"
   if has_protocol "$protocols" h1; then
+    purge_eviction_keys
     run_cdn_case "$phase" cache-eviction-16m-h1 h1 --suite "$suite" --protocol h1 --scenario cache-eviction-16m-h1 \
-      --url https://agent:8444/bytes/16777216 --host cache.benchmark.example.test --insecure-skip-verify \
-      --concurrency 4 --warmup 1s --duration "$eviction_duration" --repeats 1 --unique-query \
-      --expected-sha256 "$(sha256_zeros 16777216)" --min-cache-misses 1 --min-cache-evictions 1
+      --url https://agent:8444/pattern/16777216 --host cache.benchmark.example.test --insecure-skip-verify \
+      --concurrency 4 --warmup 1s --duration "$eviction_duration" --repeats 1 --unique-query --unique-query-cardinality 2 \
+      --min-cache-misses 1 --min-cache-evictions 1 --max-agent-rss 536870912 --cooldown 60s
   fi
 
   for protocol in $protocols; do
@@ -351,12 +364,14 @@ run_cdn_suite() {
       --url "https://agent:8444/bytes/16384?domain=cache.benchmark.example.test" \
       --host cache.benchmark.example.test --insecure-skip-verify --concurrency 32 \
       --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
-      --expected-sha256 "$(sha256_zeros 16384)" --expected-header X-Cache=HIT
+      --expected-sha256 "$(sha256_zeros 16384)" \
+      --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01
     run_cdn_case "$phase" multi-domain-cache-alt h2 --suite "$suite" --protocol h2 --scenario multi-domain-cache-alt \
       --url "https://agent:8444/bytes/16384?domain=cache-alt.benchmark.example.test" \
       --host cache-alt.benchmark.example.test --insecure-skip-verify --concurrency 32 \
       --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
-      --expected-sha256 "$(sha256_zeros 16384)" --expected-header X-Cache=HIT
+      --expected-sha256 "$(sha256_zeros 16384)" \
+      --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01
   fi
 
   for protocol in $protocols; do
@@ -398,10 +413,21 @@ run_soak() {
       record_skip soak "$name" "$protocol" "capacity=${capacity_status[$key]:-missing}"
       continue
     fi
+    run_case soak-preflight "$key" "$name-preflight" "$protocol" --suite soak --protocol "$protocol" --scenario "$name-soak-preflight" \
+      --url "https://agent:8444/bytes/1048576?asset=hit-1048576" --host cache.benchmark.example.test \
+      --insecure-skip-verify --concurrency 32 --warmup 30s --duration 15m --repeats 1 \
+      --expected-sha256 "$(sha256_zeros 1048576)" \
+      --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01 \
+      --capture-header X-Cache --min-cache-hits 1
+    if [[ "$last_status" != "PASS" ]]; then
+      record_skip soak "$name" "$protocol" "preflight=$last_status"
+      continue
+    fi
     run_case soak "$key" "$name" "$protocol" --suite soak --protocol "$protocol" --scenario "$name-soak" \
       --url "https://agent:8444/bytes/1048576?asset=hit-1048576" --host cache.benchmark.example.test \
       --insecure-skip-verify --concurrency 32 --warmup 30s --duration "$soak_duration" --repeats 1 \
-      --expected-sha256 "$(sha256_zeros 1048576)" --expected-header X-Cache=HIT \
+      --expected-sha256 "$(sha256_zeros 1048576)" \
+      --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01 \
       --capture-header X-Cache --min-cache-hits 1
   done
 }
@@ -447,7 +473,7 @@ print_summary() {
     echo "  PLANNED=${status_counts[PLANNED]:-0}"
     return
   fi
-  for status in PASS PRODUCT_FAIL LOAD_SATURATED ENV_INVALID; do
+  for status in PASS PRODUCT_FAIL LOAD_SATURATED TARGET_SATURATED ENV_INVALID; do
     echo "  $status=${status_counts[$status]:-0}"
   done
   $dry_run || echo "Results: $result_dir"

@@ -234,6 +234,7 @@ type provider struct {
 	evictions   atomic.Uint64
 	rejections  atomic.Uint64
 	corruptions atomic.Uint64
+	indexWrites atomic.Uint64
 	nextVersion uint64
 }
 
@@ -653,67 +654,51 @@ func (p *provider) ensureSpaceLocked(incoming uint64, configured limits) error {
 	if pruneErr != nil {
 		return pruneErr
 	}
-	if fits, err := p.canEverFit(incoming, configured); err != nil {
+	used, available, err := p.capacityAvailable(configured)
+	if err != nil {
 		return err
-	} else if !fits {
+	}
+	if incoming > available {
 		p.rejections.Add(1)
 		return ErrCapacity
 	}
-	for {
-		fits, err := p.fits(incoming, configured)
-		if err != nil {
-			return err
-		}
-		if fits {
-			return nil
-		}
-		if !p.evictOldest() {
-			p.rejections.Add(1)
-			return ErrCapacity
-		}
+	if used <= available-incoming {
+		return nil
 	}
+	required := used - (available - incoming)
+	freed, err := p.evictBytes(required)
+	if err != nil {
+		return err
+	}
+	if freed < required {
+		p.rejections.Add(1)
+		return ErrCapacity
+	}
+	return nil
 }
 
-func (p *provider) canEverFit(incoming uint64, configured limits) (bool, error) {
+func (p *provider) capacityAvailable(configured limits) (uint64, uint64, error) {
 	usage, err := p.diskUsage(p.path)
 	if err != nil {
-		return false, err
+		return 0, 0, err
 	}
 	cacheUsed, err := directorySize(p.path)
 	if err != nil {
-		return false, err
+		return 0, 0, err
 	}
 	target := usage.Total * uint64(normalizePercent(configured.maxDiskUsagePercent)) / 100
 	nonCacheUsed := uint64(0)
 	if usage.Used > cacheUsed {
 		nonCacheUsed = usage.Used - cacheUsed
 	}
-	diskFits := nonCacheUsed <= target && incoming <= target-nonCacheUsed
-	if configured.auto {
-		return diskFits, nil
+	if nonCacheUsed > target {
+		return cacheUsed, 0, nil
 	}
-	return diskFits && (configured.maxBytes == 0 || incoming <= configured.maxBytes), nil
-}
-
-func (p *provider) fits(incoming uint64, configured limits) (bool, error) {
-	usage, err := p.diskUsage(p.path)
-	if err != nil {
-		return false, err
+	available := target - nonCacheUsed
+	if !configured.auto && configured.maxBytes > 0 {
+		available = min(available, configured.maxBytes)
 	}
-	if !withinAutoLimit(usage.Total, usage.Used, incoming, configured.maxDiskUsagePercent) {
-		return false, nil
-	}
-	if configured.auto {
-		return true, nil
-	}
-	if configured.maxBytes == 0 {
-		return true, nil
-	}
-	used, err := directorySize(p.path)
-	if err != nil {
-		return false, err
-	}
-	return used <= configured.maxBytes && incoming <= configured.maxBytes-used, nil
+	return cacheUsed, available, nil
 }
 
 func withinAutoLimit(total, used, incoming uint64, percent int) bool {
@@ -722,52 +707,94 @@ func withinAutoLimit(total, used, incoming uint64, percent int) bool {
 }
 
 func (p *provider) evictOldest() bool {
+	freed, err := p.evictBytes(1)
+	return err == nil && freed > 0
+}
+
+type evictionCandidate struct {
+	key        string
+	path       string
+	size       uint64
+	lastAccess time.Time
+	orphan     bool
+}
+
+func (p *provider) evictBytes(required uint64) (uint64, error) {
+	if required == 0 {
+		return 0, nil
+	}
 	p.mu.Lock()
-	var victim string
-	var oldest time.Time
+	trackedPaths := make(map[string]struct{})
+	candidates := make([]evictionCandidate, 0)
 	for key, item := range p.items {
 		if !item.file {
 			continue
 		}
-		if victim == "" || item.lastAccess.Before(oldest) {
-			victim, oldest = key, item.lastAccess
+		path := string(item.value)
+		trackedPaths[path] = struct{}{}
+		candidate := evictionCandidate{key: key, path: path, lastAccess: item.lastAccess}
+		if info, err := os.Stat(path); err == nil {
+			candidate.size = uint64(info.Size())
 		}
+		candidates = append(candidates, candidate)
 	}
-	if victim != "" {
-		p.deleteLocked(victim)
-		_ = p.persistIndexLocked()
-		p.mu.Unlock()
-		p.evictions.Add(1)
-		return true
-	}
-	p.mu.Unlock()
-
 	entries, err := os.ReadDir(p.path)
 	if err != nil {
-		return false
+		p.mu.Unlock()
+		return 0, err
 	}
-	var orphan os.DirEntry
-	var orphanTime time.Time
 	for _, entry := range entries {
 		if entry.IsDir() || !isCacheData(entry.Name()) {
+			continue
+		}
+		path := filepath.Join(p.path, entry.Name())
+		if _, tracked := trackedPaths[path]; tracked {
 			continue
 		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
-		if orphan == nil || info.ModTime().Before(orphanTime) {
-			orphan, orphanTime = entry, info.ModTime()
+		candidates = append(candidates, evictionCandidate{path: path, size: uint64(info.Size()), lastAccess: info.ModTime(), orphan: true})
+	}
+	sort.Slice(candidates, func(first, second int) bool {
+		return candidates[first].lastAccess.Before(candidates[second].lastAccess)
+	})
+	victimKeys := make(map[string]struct{})
+	var freed, evicted uint64
+	trackedChanged := false
+	for _, candidate := range candidates {
+		if freed >= required {
+			break
+		}
+		if err := os.Remove(candidate.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		freed += candidate.size
+		evicted++
+		if !candidate.orphan {
+			delete(p.items, candidate.key)
+			victimKeys[candidate.key] = struct{}{}
+			trackedChanged = true
 		}
 	}
-	if orphan == nil {
-		return false
+	if trackedChanged {
+		for group, keys := range p.groups {
+			for key := range keys {
+				if _, removed := victimKeys[key]; removed {
+					delete(keys, key)
+				}
+			}
+			if len(keys) == 0 {
+				delete(p.groups, group)
+			}
+		}
+		p.repairMappingsLocked()
+		err = p.persistIndexLocked()
 	}
-	if os.Remove(filepath.Join(p.path, orphan.Name())) != nil {
-		return false
-	}
-	p.evictions.Add(1)
-	return true
+	p.mu.Unlock()
+	p.evictions.Add(evicted)
+	return freed, err
 }
 
 func (p *provider) itemLocked(key string, now time.Time) (cacheItem, bool) {
@@ -994,6 +1021,7 @@ func (p *provider) loadIndex() error {
 }
 
 func (p *provider) persistIndexLocked() error {
+	p.indexWrites.Add(1)
 	stored := diskIndex{Version: 1, Items: make(map[string]diskItem, len(p.items))}
 	for key, item := range p.items {
 		diskValue := diskItem{ExpiresAt: item.expiresAt, LastAccess: item.lastAccess}

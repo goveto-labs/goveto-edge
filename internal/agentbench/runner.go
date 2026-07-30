@@ -1,6 +1,7 @@
 package agentbench
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
@@ -10,6 +11,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"os"
@@ -31,6 +33,8 @@ type closeRoundTripper interface {
 	Close() error
 }
 
+var benchmarkUDPAddresses sync.Map
+
 type runState struct {
 	requests    atomic.Uint64
 	successes   atomic.Uint64
@@ -50,18 +54,25 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 	if err := validateConfig(&config); err != nil {
 		return Report{}, err
 	}
+	if config.UniqueQuery && config.UniqueQueryCardinality == 0 && config.UniqueQueryNamespace == "" {
+		config.UniqueQueryNamespace = fmt.Sprintf("%x", time.Now().UnixNano())
+	}
 	report := Report{
 		SchemaVersion: SchemaVersion,
 		GeneratedAt:   time.Now().UTC(),
 		Platform:      CollectPlatform(),
 		Scenario: Scenario{
-			Suite: config.Suite, Name: config.Scenario, Protocol: config.Protocol, URL: config.URL,
+			Suite: config.Suite, Name: config.Scenario, Method: config.Method, Protocol: config.Protocol, URL: config.URL,
 			Concurrency: config.Concurrency, DurationMS: config.Duration.Milliseconds(), WarmupMS: config.Warmup.Milliseconds(),
 			Repeats: config.Repeats, NewConnection: config.NewConnection, ExpectedStatus: config.ExpectedStatus,
 			ExpectedSHA256: config.ExpectedSHA256, ExpectedHeaders: config.ExpectedHeaders,
+			AllowedHeaders: config.AllowedHeaders, MaxHeaderRatios: config.MaxHeaderRatios,
 			RequestHeaders: config.RequestHeaders, CaptureHeaders: config.CaptureHeaders, UniqueQuery: config.UniqueQuery,
+			UniqueQueryCardinality: config.UniqueQueryCardinality,
+			CooldownMS:             config.Cooldown.Milliseconds(), CapacityProbe: config.CapacityProbe,
 			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
+			MaxAgentRSSBytes: config.MaxAgentRSSBytes,
 		},
 	}
 	var loadCPUMax float64
@@ -78,13 +89,21 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 	}
 	report.Summary = Summarize(report.Runs)
 	report.ErrorCounts = aggregateErrorCounts(report.Runs)
-	report.Validity = ValidateRuns(report.Runs, loadCPUMax, config.MaxLoadCPUPercent)
+	report.Validity = validateRuns(report.Runs, loadCPUMax, config.MaxLoadCPUPercent, config.CapacityProbe)
 	report.Validity = ValidateResourceExpectations(report.Validity, report.Runs, config)
 	return report, nil
 }
 
 func runOnce(ctx context.Context, config Config, index int) (Run, float64, error) {
-	transport, closeTransport, err := newTransport(config)
+	if config.UniqueQueryNamespace != "" {
+		config.UniqueQueryNamespace = fmt.Sprintf("%s-r%d", config.UniqueQueryNamespace, index)
+	}
+	sharedQUIC, closeSharedQUIC, err := newSharedQUICTransport(config)
+	if err != nil {
+		return Run{}, 0, err
+	}
+	defer closeSharedQUIC()
+	transport, closeTransport, err := newTransport(config, sharedQUIC)
 	if err != nil {
 		return Run{}, 0, err
 	}
@@ -94,7 +113,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 
 	if config.Warmup > 0 {
 		warmContext, cancel := context.WithTimeout(ctx, config.Warmup)
-		runWorkers(warmContext, config, client, nil, &requestSequence)
+		runWorkersWithRequestContext(warmContext, warmContext, config, client, nil, &requestSequence, sharedQUIC)
 		cancel()
 	}
 
@@ -121,8 +140,21 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	dispatchContext, stopDispatch := context.WithTimeout(measureContext, config.Duration)
 	// Stop dispatching at the measurement boundary, but allow requests already in
 	// flight to complete under the normal per-request timeout.
-	runWorkersWithRequestContext(dispatchContext, measureContext, config, client, state, &requestSequence)
+	runWorkersWithRequestContext(dispatchContext, measureContext, config, client, state, &requestSequence, sharedQUIC)
 	stopDispatch()
+	if config.Cooldown > 0 {
+		timer := time.NewTimer(config.Cooldown)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		}
+	}
 	cancelSampling()
 	<-samplesDone
 	metrics, failures, errorCounts := state.metrics(config.Duration)
@@ -130,10 +162,10 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 }
 
 func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
-	runWorkersWithRequestContext(ctx, ctx, config, sharedClient, state, sequence)
+	runWorkersWithRequestContext(ctx, ctx, config, sharedClient, state, sequence, nil)
 }
 
-func runWorkersWithRequestContext(dispatchContext, requestContext context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
+func runWorkersWithRequestContext(dispatchContext, requestContext context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64, sharedQUIC ...*quic.Transport) {
 	var workers sync.WaitGroup
 	for range config.Concurrency {
 		workers.Add(1)
@@ -143,7 +175,11 @@ func runWorkersWithRequestContext(dispatchContext, requestContext context.Contex
 				client := sharedClient
 				closeClient := func() {}
 				if config.NewConnection {
-					transport, closeTransport, err := newTransport(config)
+					var quicTransport *quic.Transport
+					if len(sharedQUIC) > 0 {
+						quicTransport = sharedQUIC[0]
+					}
+					transport, closeTransport, err := newTransport(config, quicTransport)
 					if err != nil {
 						if state != nil {
 							state.recordFailure(err)
@@ -186,7 +222,11 @@ type requestResult struct {
 }
 
 func executeRequest(ctx context.Context, client *http.Client, config Config, sequences ...*atomic.Uint64) requestResult {
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, config.URL, nil)
+	method := config.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	request, err := http.NewRequestWithContext(ctx, method, config.URL, nil)
 	if err != nil {
 		return requestResult{err: err}
 	}
@@ -202,8 +242,15 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		if len(sequences) > 0 && sequences[0] != nil {
 			sequence = sequences[0].Add(1)
 		}
+		if config.UniqueQueryCardinality > 0 {
+			sequence = (sequence-1)%uint64(config.UniqueQueryCardinality) + 1
+		}
 		query := request.URL.Query()
-		query.Set("_bench", fmt.Sprintf("%d", sequence))
+		value := fmt.Sprintf("%d", sequence)
+		if config.UniqueQueryNamespace != "" {
+			value = config.UniqueQueryNamespace + "-" + value
+		}
+		query.Set("_bench", value)
 		request.URL.RawQuery = query.Encode()
 	}
 	var tlsStarted, wroteRequest time.Time
@@ -235,6 +282,10 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		digest = sha256.New()
 		destination = digest
 	}
+	var errorBody limitedBuffer
+	if response.StatusCode != config.ExpectedStatus {
+		destination = io.MultiWriter(destination, &errorBody)
+	}
 	written, readErr := io.Copy(destination, response.Body)
 	result := requestResult{latency: time.Since(started), handshake: handshake, ttfb: ttfb, bytes: uint64(max(written, 0)), protocol: response.Proto, headers: make(map[string]string, len(config.CaptureHeaders))}
 	for _, name := range config.CaptureHeaders {
@@ -245,7 +296,7 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		return result
 	}
 	if response.StatusCode != config.ExpectedStatus {
-		result.err = fmt.Errorf("status %d, want %d", response.StatusCode, config.ExpectedStatus)
+		result.err = fmt.Errorf("status %d, want %d, body %q", response.StatusCode, config.ExpectedStatus, errorBody.String())
 		return result
 	}
 	if expected := protocolName(config.Protocol); response.Proto != expected {
@@ -262,10 +313,17 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 			return result
 		}
 	}
+	for name, allowed := range config.AllowedHeaders {
+		actual := response.Header.Get(name)
+		if !contains(allowed, actual) {
+			result.err = fmt.Errorf("header %s=%q, want one of %q", name, actual, allowed)
+			return result
+		}
+	}
 	return result
 }
 
-func newTransport(config Config) (http.RoundTripper, func(), error) {
+func newTransport(config Config, sharedQUIC ...*quic.Transport) (http.RoundTripper, func(), error) {
 	tlsConfig := &tls.Config{InsecureSkipVerify: config.InsecureSkipVerify, ServerName: serverName(config)} // benchmark targets may use private test certificates.
 	switch config.Protocol {
 	case ProtocolH1:
@@ -276,10 +334,46 @@ func newTransport(config Config) (http.RoundTripper, func(), error) {
 		return transport, func() { transport.CloseIdleConnections() }, nil
 	case ProtocolH3:
 		transport := &http3.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
+		if len(sharedQUIC) > 0 && sharedQUIC[0] != nil {
+			transport.Dial = func(ctx context.Context, address string, tlsConfig *tls.Config, quicConfig *quic.Config) (*quic.Conn, error) {
+				remote, err := resolveBenchmarkUDPAddress(address)
+				if err != nil {
+					return nil, err
+				}
+				return sharedQUIC[0].Dial(ctx, remote, tlsConfig, quicConfig)
+			}
+		}
 		return transport, func() { _ = transport.Close() }, nil
 	default:
 		return nil, func() {}, fmt.Errorf("unsupported protocol %q", config.Protocol)
 	}
+}
+
+func resolveBenchmarkUDPAddress(address string) (*net.UDPAddr, error) {
+	if cached, ok := benchmarkUDPAddresses.Load(address); ok {
+		return cached.(*net.UDPAddr), nil
+	}
+	resolved, err := net.ResolveUDPAddr("udp", address)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := benchmarkUDPAddresses.LoadOrStore(address, resolved)
+	return actual.(*net.UDPAddr), nil
+}
+
+func newSharedQUICTransport(config Config) (*quic.Transport, func(), error) {
+	if config.Protocol != ProtocolH3 || !config.NewConnection {
+		return nil, func() {}, nil
+	}
+	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
+	if err != nil {
+		return nil, func() {}, fmt.Errorf("open shared H3 UDP socket: %w", err)
+	}
+	transport := &quic.Transport{Conn: connection}
+	return transport, func() {
+		_ = transport.Close()
+		_ = connection.Close()
+	}, nil
 }
 
 func validateConfig(config *Config) error {
@@ -288,6 +382,13 @@ func validateConfig(config *Config) error {
 	}
 	if config.Scenario == "" {
 		return errors.New("scenario is required")
+	}
+	if config.Method == "" {
+		config.Method = http.MethodGet
+	}
+	config.Method = strings.ToUpper(config.Method)
+	if config.UniqueQueryCardinality < 0 {
+		return errors.New("unique query cardinality must not be negative")
 	}
 	if config.Concurrency <= 0 {
 		return errors.New("concurrency must be positive")
@@ -312,6 +413,26 @@ func validateConfig(config *Config) error {
 	}
 	if config.ExpectedHeaders == nil {
 		config.ExpectedHeaders = map[string]string{}
+	}
+	if config.AllowedHeaders == nil {
+		config.AllowedHeaders = map[string][]string{}
+	}
+	if config.MaxHeaderRatios == nil {
+		config.MaxHeaderRatios = map[string]map[string]float64{}
+	}
+	for name, values := range config.AllowedHeaders {
+		if strings.TrimSpace(name) == "" || len(values) == 0 {
+			return errors.New("allowed response headers require a name and at least one value")
+		}
+		config.CaptureHeaders = appendUniqueHeader(config.CaptureHeaders, name)
+	}
+	for name, values := range config.MaxHeaderRatios {
+		config.CaptureHeaders = appendUniqueHeader(config.CaptureHeaders, name)
+		for value, ratio := range values {
+			if value == "" || ratio < 0 || ratio > 1 {
+				return fmt.Errorf("invalid maximum header ratio %s=%q:%g", name, value, ratio)
+			}
+		}
 	}
 	if config.RequestHeaders == nil {
 		config.RequestHeaders = map[string]string{}
@@ -342,6 +463,42 @@ func serverName(config Config) string {
 		return strings.Split(config.Host, ":")[0]
 	}
 	return ""
+}
+
+const maxFailureBodyBytes = 4 << 10
+
+type limitedBuffer struct{ bytes.Buffer }
+
+func (buffer *limitedBuffer) Write(value []byte) (int, error) {
+	written := len(value)
+	if buffer.Len() < maxFailureBodyBytes {
+		remaining := maxFailureBodyBytes - buffer.Len()
+		_, _ = buffer.Buffer.Write(value[:min(len(value), remaining)])
+	}
+	return written, nil
+}
+
+func (buffer *limitedBuffer) WriteString(value string) (int, error) {
+	return buffer.Write([]byte(value))
+}
+
+func contains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func appendUniqueHeader(values []string, name string) []string {
+	canonical := http.CanonicalHeaderKey(name)
+	for _, value := range values {
+		if http.CanonicalHeaderKey(value) == canonical {
+			return values
+		}
+	}
+	return append(values, canonical)
 }
 
 func (state *runState) record(result requestResult) {
@@ -438,6 +595,10 @@ func classifyFailure(err error) string {
 		return "response_read"
 	case strings.Contains(message, "dial "):
 		return "dial"
+	case strings.Contains(message, "tls:") || strings.Contains(message, "x509:"):
+		return "tls"
+	case strings.Contains(message, "connection reset") || strings.Contains(message, "stream reset"):
+		return "reset"
 	default:
 		return "transport"
 	}
@@ -495,11 +656,20 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 		hasTelemetryBaseline = err == nil
 		if hasTelemetryBaseline {
 			previousTelemetry = telemetryBaseline
+			summary.HeapBytesStart = telemetryBaseline.HeapBytes
+			summary.GoroutinesStart = telemetryBaseline.Goroutines
 		}
 	}
 	baselineAt = time.Now()
 	previousTelemetryAt = baselineAt
 	if target != nil {
+		if memory, err := target.MemoryInfo(); err == nil {
+			summary.RSSBytesStart = memory.RSS
+		}
+		summary.FDsStart, _ = target.NumFDs()
+		if connections, err := target.Connections(); err == nil {
+			summary.ConnectionsStart = len(connections)
+		}
 		if times, err := target.Times(); err == nil {
 			previousTargetCPU = times.User + times.System
 			hasTargetCPU = true
@@ -558,6 +728,9 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 				summary.RSSBytesMax = max(summary.RSSBytesMax, point.RSSBytes)
 				summary.FDsMax = max(summary.FDsMax, point.FDs)
 				summary.ConnectionsMax = max(summary.ConnectionsMax, point.Connections)
+				summary.RSSBytesEnd = point.RSSBytes
+				summary.FDsEnd = point.FDs
+				summary.ConnectionsEnd = point.Connections
 			}
 			if metricsURL != "" {
 				if telemetry, err := fetchTelemetry(ctx, metricsClient, metricsURL); err == nil {
@@ -593,6 +766,8 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					summary.HeapBytesMax = max(summary.HeapBytesMax, point.HeapBytes)
 					summary.AllocationRateMax = max(summary.AllocationRateMax, point.AllocationRate)
 					summary.GoroutinesMax = max(summary.GoroutinesMax, point.Goroutines)
+					summary.HeapBytesEnd = point.HeapBytes
+					summary.GoroutinesEnd = point.Goroutines
 					summary.QueueBytesMax = max(summary.QueueBytesMax, point.QueueBytes)
 					summary.QueueRecordsMax = max(summary.QueueRecordsMax, point.QueueRecords)
 					summary.DroppedLogsMax = max(summary.DroppedLogsMax, point.DroppedLogs)

@@ -748,3 +748,31 @@ func BenchmarkRateLimiter(b *testing.B) {
 		}
 	})
 }
+
+func TestRateLimiterFixedWindowAndBanSemantics(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0)
+	withoutBan := &counterStore{entries: map[string]counter{}}
+	rule := policy.RateLimitRule{Requests: 2, WindowSeconds: 60}
+	for index := range 2 {
+		if allowed, _ := withoutBan.allow("client", started.Add(time.Duration(index)*time.Second), rule); !allowed {
+			t.Fatalf("request %d inside initial budget was rejected", index+1)
+		}
+	}
+	if allowed, _ := withoutBan.allow("client", started.Add(2*time.Second), rule); allowed {
+		t.Fatal("request above the fixed-window budget was allowed")
+	}
+	if allowed, _ := withoutBan.allow("client", started.Add(60*time.Second), rule); !allowed {
+		t.Fatal("new fixed window did not restore the request budget")
+	}
+
+	withBan := &counterStore{entries: map[string]counter{}}
+	rule.BanSeconds = 300
+	_, _ = withBan.allow("client", started, rule)
+	_, _ = withBan.allow("client", started.Add(time.Second), rule)
+	if allowed, _ := withBan.allow("client", started.Add(2*time.Second), rule); allowed {
+		t.Fatal("request above the budget did not trigger the ban")
+	}
+	if allowed, _ := withBan.allow("client", started.Add(120*time.Second), rule); allowed {
+		t.Fatal("fixed-window reset bypassed an active ban")
+	}
+}

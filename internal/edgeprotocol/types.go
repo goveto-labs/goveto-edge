@@ -105,18 +105,21 @@ type OriginPassiveHealthConfig struct {
 }
 
 type OriginTransportConfig struct {
-	DialTimeoutMS           int      `json:"dial_timeout_ms,omitempty"`
-	TLSHandshakeTimeoutMS   int      `json:"tls_handshake_timeout_ms,omitempty"`
-	ResponseHeaderTimeoutMS int      `json:"response_header_timeout_ms,omitempty"`
-	ReadTimeoutMS           int      `json:"read_timeout_ms,omitempty"`
-	WriteTimeoutMS          int      `json:"write_timeout_ms,omitempty"`
-	IPVersion               string   `json:"ip_version,omitempty"`
-	TLSServerName           string   `json:"tls_server_name,omitempty"`
-	TLSRootCAPEM            []string `json:"tls_root_ca_pem,omitempty"`
-	TLSClientCertificatePEM string   `json:"tls_client_certificate_pem,omitempty"`
-	TLSClientPrivateKeyPEM  string   `json:"tls_client_private_key_pem,omitempty"`
-	MTLSConfigured          bool     `json:"mtls_configured,omitempty"`
-	TLSInsecureSkipVerify   bool     `json:"tls_insecure_skip_verify,omitempty"`
+	DialTimeoutMS                int      `json:"dial_timeout_ms,omitempty"`
+	TLSHandshakeTimeoutMS        int      `json:"tls_handshake_timeout_ms,omitempty"`
+	ResponseHeaderTimeoutMS      int      `json:"response_header_timeout_ms,omitempty"`
+	ReadTimeoutMS                int      `json:"read_timeout_ms,omitempty"`
+	WriteTimeoutMS               int      `json:"write_timeout_ms,omitempty"`
+	MaxConnsPerHost              int      `json:"max_conns_per_host,omitempty"`
+	KeepAliveMaxIdleConnsPerHost int      `json:"keep_alive_max_idle_conns_per_host,omitempty"`
+	KeepAliveIdleTimeoutMS       int      `json:"keep_alive_idle_timeout_ms,omitempty"`
+	IPVersion                    string   `json:"ip_version,omitempty"`
+	TLSServerName                string   `json:"tls_server_name,omitempty"`
+	TLSRootCAPEM                 []string `json:"tls_root_ca_pem,omitempty"`
+	TLSClientCertificatePEM      string   `json:"tls_client_certificate_pem,omitempty"`
+	TLSClientPrivateKeyPEM       string   `json:"tls_client_private_key_pem,omitempty"`
+	MTLSConfigured               bool     `json:"mtls_configured,omitempty"`
+	TLSInsecureSkipVerify        bool     `json:"tls_insecure_skip_verify,omitempty"`
 }
 
 type OriginRetryConfig struct {
@@ -137,7 +140,8 @@ func DefaultOriginPolicy() OriginPolicyConfig {
 		},
 		Transport: OriginTransportConfig{
 			DialTimeoutMS: 3000, TLSHandshakeTimeoutMS: 5000,
-			ResponseHeaderTimeoutMS: 10000, IPVersion: "any",
+			ResponseHeaderTimeoutMS:      10000,
+			KeepAliveMaxIdleConnsPerHost: 128, KeepAliveIdleTimeoutMS: 120000, IPVersion: "any",
 		},
 		Retry: OriginRetryConfig{Retries: 2, TryDurationMS: 5000, TryIntervalMS: 250},
 	}
@@ -288,6 +292,15 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 	if policy.Transport.ResponseHeaderTimeoutMS == 0 {
 		policy.Transport.ResponseHeaderTimeoutMS = defaults.Transport.ResponseHeaderTimeoutMS
 	}
+	if policy.Transport.MaxConnsPerHost == 0 {
+		policy.Transport.MaxConnsPerHost = defaults.Transport.MaxConnsPerHost
+	}
+	if policy.Transport.KeepAliveMaxIdleConnsPerHost == 0 {
+		policy.Transport.KeepAliveMaxIdleConnsPerHost = defaults.Transport.KeepAliveMaxIdleConnsPerHost
+	}
+	if policy.Transport.KeepAliveIdleTimeoutMS == 0 {
+		policy.Transport.KeepAliveIdleTimeoutMS = defaults.Transport.KeepAliveIdleTimeoutMS
+	}
 	if policy.Transport.IPVersion == "" {
 		policy.Transport.IPVersion = defaults.Transport.IPVersion
 	}
@@ -302,9 +315,14 @@ func ValidateOriginPolicy(policy OriginPolicyConfig) error {
 		policy.PassiveHealth.FailDurationMS < 0 || policy.PassiveHealth.UnhealthyLatencyMS < 0 ||
 		policy.Transport.DialTimeoutMS < 0 || policy.Transport.TLSHandshakeTimeoutMS < 0 ||
 		policy.Transport.ResponseHeaderTimeoutMS < 0 || policy.Transport.ReadTimeoutMS < 0 ||
-		policy.Transport.WriteTimeoutMS < 0 || policy.Retry.Retries < 0 ||
+		policy.Transport.WriteTimeoutMS < 0 || policy.Transport.MaxConnsPerHost < 0 ||
+		policy.Transport.KeepAliveMaxIdleConnsPerHost < 0 || policy.Transport.KeepAliveIdleTimeoutMS < 0 ||
+		policy.Retry.Retries < 0 ||
 		policy.Retry.TryDurationMS < 0 || policy.Retry.TryIntervalMS < 0 {
-		return errors.New("origin durations and retry counts must not be negative")
+		return errors.New("origin durations, connection limits, and retry counts must not be negative")
+	}
+	if policy.Transport.MaxConnsPerHost > 0 && policy.Transport.KeepAliveMaxIdleConnsPerHost > policy.Transport.MaxConnsPerHost {
+		return errors.New("origin keep-alive idle connections per host must not exceed max connections per host")
 	}
 	if policy.ActiveHealth.Enabled {
 		method := strings.ToUpper(policy.ActiveHealth.Method)

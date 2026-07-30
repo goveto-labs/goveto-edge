@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -329,6 +330,45 @@ func TestEvictionRemovesVariantFromMapping(t *testing.T) {
 	}
 	if provider.Get(key) != nil || provider.Get(core.MappingKeyPrefix+key) != nil {
 		t.Fatal("eviction left a response body or lookup mapping behind")
+	}
+}
+
+func TestBatchEvictionRemovesEnoughLRUObjectsWithOneIndexWrite(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	keys := []string{
+		"GET-http-example.test-/first",
+		"GET-http-example.test-/second",
+		"GET-http-example.test-/third",
+	}
+	for _, key := range keys {
+		if err := provider.SetMultiLevel(key, key, cachedResponse(strings.Repeat(key, 64)), nil, "", time.Minute, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	provider.mu.Lock()
+	for index, key := range keys {
+		item := provider.items[key]
+		item.lastAccess = time.Unix(int64(index+1), 0)
+		provider.items[key] = item
+	}
+	firstInfo, err := os.Stat(string(provider.items[keys[0]].value))
+	provider.mu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+	writesBefore := provider.indexWrites.Load()
+	freed, err := provider.evictBytes(uint64(firstInfo.Size()) + 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if freed <= uint64(firstInfo.Size()) || provider.evictions.Load() != 2 {
+		t.Fatalf("batch eviction freed=%d evictions=%d", freed, provider.evictions.Load())
+	}
+	if writes := provider.indexWrites.Load() - writesBefore; writes != 1 {
+		t.Fatalf("batch eviction index writes=%d, want 1", writes)
+	}
+	if provider.Get(keys[0]) != nil || provider.Get(keys[1]) != nil || provider.Get(keys[2]) == nil {
+		t.Fatal("batch eviction did not remove the two oldest objects")
 	}
 }
 

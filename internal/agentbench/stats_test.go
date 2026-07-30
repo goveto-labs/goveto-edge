@@ -39,6 +39,43 @@ func TestValidateRunsSeparatesLoadSaturationFromProductFailure(t *testing.T) {
 	}
 }
 
+func TestValidateRunsClassifiesCapacityProbeFailureAsTargetSaturation(t *testing.T) {
+	runs := []Run{{Index: 1, Metrics: Metrics{Requests: 10, Successes: 9, Failures: 1, RPS: 10}}}
+	validity := validateRuns(runs, 10, 85, true)
+	if !validity.Valid || validity.Status != ResultTargetSaturated {
+		t.Fatalf("validity=%+v", validity)
+	}
+}
+
+func TestValidateResourceExpectationsEnforcesHeaderValueRatio(t *testing.T) {
+	runs := []Run{{Index: 1, Metrics: Metrics{ResponseHeaders: map[string]map[string]uint64{
+		"X-Cache": {"HIT": 98, "STALE": 2},
+	}}}}
+	config := Config{MaxHeaderRatios: map[string]map[string]float64{"x-cache": {"STALE": 0.01}}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, runs, config)
+	if validity.Valid || validity.Status != ResultProductFail {
+		t.Fatalf("validity=%+v", validity)
+	}
+	runs[0].Metrics.ResponseHeaders["X-Cache"]["STALE"] = 1
+	runs[0].Metrics.ResponseHeaders["X-Cache"]["HIT"] = 99
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, runs, config)
+	if !validity.Valid {
+		t.Fatalf("one percent stale should pass: %+v", validity)
+	}
+}
+
+func TestValidateResourceExpectationsEnforcesRSSAndCooldownRecovery(t *testing.T) {
+	run := Run{Index: 1, Resources: ResourceSummary{
+		RSSBytesStart: 100 << 20, RSSBytesEnd: 220 << 20, RSSBytesMax: 600 << 20,
+		HeapBytesStart: 50 << 20, HeapBytesEnd: 120 << 20,
+		FDsStart: 20, FDsEnd: 80, GoroutinesStart: 20, GoroutinesEnd: 80,
+	}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{Cooldown: time.Minute, MaxAgentRSSBytes: 512 << 20})
+	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 5 {
+		t.Fatalf("validity=%+v", validity)
+	}
+}
+
 func TestValidateResourceExpectations(t *testing.T) {
 	validity := ValidateResourceExpectations(Validity{Valid: true}, []Run{{Index: 1, Metrics: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Origin-Requests": {"1": 10, "2": 1}}}, Resources: ResourceSummary{CacheHitsDelta: 10, CacheMissesDelta: 2}}}, Config{MinCacheHits: 1, MinCacheMisses: 1, MinCacheEvictions: 1, MaxCapturedValues: 1})
 	if validity.Valid || len(validity.Reasons) != 2 {

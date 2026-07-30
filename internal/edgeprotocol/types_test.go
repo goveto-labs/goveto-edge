@@ -145,6 +145,27 @@ func TestDefaultOriginPolicyUsesRequestDrivenTransportHealth(t *testing.T) {
 	if len(policy.PassiveHealth.UnhealthyStatus) != 0 || policy.PassiveHealth.UnhealthyLatencyMS != 0 {
 		t.Fatalf("HTTP responses must not trip health: %#v", policy.PassiveHealth)
 	}
+	if policy.Transport.MaxConnsPerHost != 0 || policy.Transport.KeepAliveMaxIdleConnsPerHost != 128 ||
+		policy.Transport.KeepAliveIdleTimeoutMS != 120000 {
+		t.Fatalf("unexpected default origin connection pool: %#v", policy.Transport)
+	}
+}
+
+func TestNormalizeAndValidateOriginConnectionPool(t *testing.T) {
+	policy := DefaultOriginPolicy()
+	policy.Transport.MaxConnsPerHost = 0
+	policy.Transport.KeepAliveMaxIdleConnsPerHost = 0
+	policy.Transport.KeepAliveIdleTimeoutMS = 0
+	policy = NormalizeOriginPolicy(policy)
+	if policy.Transport.MaxConnsPerHost != 0 || policy.Transport.KeepAliveMaxIdleConnsPerHost != 128 ||
+		policy.Transport.KeepAliveIdleTimeoutMS != 120000 {
+		t.Fatalf("connection pool defaults were not restored: %#v", policy.Transport)
+	}
+	policy.Transport.MaxConnsPerHost = 64
+	policy.Transport.KeepAliveMaxIdleConnsPerHost = 65
+	if err := ValidateOriginPolicy(policy); err == nil {
+		t.Fatal("idle connection pool larger than connection cap was accepted")
+	}
 }
 
 func TestNormalizeOriginPolicyDropsResponseBasedHealthFailures(t *testing.T) {

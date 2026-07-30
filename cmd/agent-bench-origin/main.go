@@ -9,6 +9,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -46,7 +47,12 @@ func main() {
 		response.Header().Set("Cache-Control", "public, max-age=300, stale-while-revalidate=60, stale-if-error=60")
 		response.Header().Set("X-Origin-Requests", strconv.FormatUint(count, 10))
 		response.Header().Set("X-Benchmark-Origin", *originID)
-		payload := make([]byte, size)
+		var payload []byte
+		if behavior.pattern {
+			payload = deterministicPayload(size)
+		} else {
+			payload = make([]byte, size)
+		}
 		if behavior.bytesPerSecond > 0 && request.Header.Get("Range") == "" {
 			response.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 			writeThrottled(response, payload, behavior.bytesPerSecond)
@@ -62,13 +68,20 @@ func main() {
 type responseBehavior struct {
 	delay          time.Duration
 	bytesPerSecond int
+	pattern        bool
 }
+
+var deterministicPayloads sync.Map
 
 func parseRequestPath(requestPath string) (responseBehavior, int, error) {
 	parts := strings.Split(strings.Trim(path.Clean(requestPath), "/"), "/")
 	if len(parts) == 2 && parts[0] == "bytes" {
 		size, err := parseSize(parts[1])
 		return responseBehavior{}, size, err
+	}
+	if len(parts) == 2 && parts[0] == "pattern" {
+		size, err := parseSize(parts[1])
+		return responseBehavior{pattern: true}, size, err
 	}
 	if len(parts) == 4 && parts[0] == "delay" && parts[2] == "bytes" {
 		milliseconds, err := strconv.Atoi(parts[1])
@@ -87,6 +100,22 @@ func parseRequestPath(requestPath string) (responseBehavior, int, error) {
 		return responseBehavior{bytesPerSecond: rate}, size, sizeErr
 	}
 	return responseBehavior{}, 16 << 10, nil
+}
+
+func deterministicPayload(size int) []byte {
+	if payload, ok := deterministicPayloads.Load(size); ok {
+		return payload.([]byte)
+	}
+	payload := make([]byte, size)
+	state := uint64(0x9e3779b97f4a7c15)
+	for index := range payload {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		payload[index] = byte(state)
+	}
+	actual, _ := deterministicPayloads.LoadOrStore(size, payload)
+	return actual.([]byte)
 }
 
 func parseSize(value string) (int, error) {

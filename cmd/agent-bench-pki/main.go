@@ -53,12 +53,13 @@ func main() {
 	originPolicy.Retry = edgeprotocol.OriginRetryConfig{}
 	cache := cachepolicy.DefaultCachePolicy()
 	cache.Enabled = true
+	cache.AllowPurgeMethod = true
 	cache.TTL.DefaultSeconds = 3600
 	cache.Stale.IfErrorSeconds = 3600
 	cache.Stale.WhileRevalidateSeconds = 30
 	rateLimit := cachepolicy.DefaultRateLimitPolicy()
 	rateLimit.Enabled = true
-	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, StatusCode: 429}}
+	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, BanSeconds: 300, StatusCode: 429}}
 	resilientPolicy := edgeprotocol.DefaultOriginPolicy()
 	resilientPolicy.ActiveHealth.Enabled = false
 
@@ -69,7 +70,7 @@ func main() {
 		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
 		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, RateLimit: asMap(rateLimit)},
 	}
-	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 8 << 20, MaxDiskUsagePercent: 90})}
+	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 24 << 20, MaxDiskUsagePercent: 90})}
 	for _, site := range sites {
 		tasks = append(tasks, task(edgeprotocol.TaskApplySiteConfig, site))
 	}

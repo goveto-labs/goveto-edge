@@ -7,6 +7,7 @@ servers:
     - url: /
 tags:
     - name: .well-known-acme-challenge
+    - name: admin settings
     - name: analytics
     - name: auth
     - name: auth-password
@@ -58,6 +59,90 @@ paths:
                         application/json:
                             schema:
                                 type: object
+    /api/v1/admin/settings:
+        get:
+            operationId: get
+            summary: Get instance settings
+            description: Return system-level settings visible only to the instance owner.
+            tags:
+                - admin settings
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - requireInstanceOwner
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            agent_gateway_public_address:
+                                                type: string
+                                            restart_required:
+                                                type: boolean
+                                            restarting:
+                                                type: boolean
+        put:
+            operationId: update
+            summary: Update instance settings
+            description: Update system-level settings as the instance owner.
+            tags:
+                - admin settings
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - requireInstanceOwner
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                agent_gateway_public_address:
+                                    type: string
+                                restart:
+                                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            agent_gateway_public_address:
+                                                type: string
+                                            restart_required:
+                                                type: boolean
+                                            restarting:
+                                                type: boolean
     /api/v1/auth/login:
         post:
             operationId: login
@@ -105,6 +190,8 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
+                                            is_instance_owner:
+                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -112,6 +199,8 @@ paths:
                                             status:
                                                 $ref: '#/components/schemas/model_UserStatus'
                                             totp_enabled:
+                                                type: boolean
+                                            totp_required:
                                                 type: boolean
     /api/v1/auth/logout:
         post:
@@ -168,6 +257,8 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
+                                            is_instance_owner:
+                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -175,6 +266,8 @@ paths:
                                             status:
                                                 $ref: '#/components/schemas/model_UserStatus'
                                             totp_enabled:
+                                                type: boolean
+                                            totp_required:
                                                 type: boolean
     /api/v1/auth/password:
         put:
@@ -334,6 +427,8 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
+                                            is_instance_owner:
+                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -1172,10 +1267,18 @@ paths:
                   required: true
                   schema:
                     type: string
-                - name: limit
+                - name: page
                   in: query
                   schema:
                     type: number
+                - name: page_size
+                  in: query
+                  schema:
+                    type: number
+                - name: query
+                  in: query
+                  schema:
+                    type: string
                 - name: site_id
                   in: query
                   schema:
@@ -1193,9 +1296,7 @@ paths:
                                         enum:
                                             - ok
                                     data:
-                                        type: array
-                                        items:
-                                            $ref: '#/components/schemas/analytics_NodeRequestLog'
+                                        $ref: '#/components/schemas/analytics_RequestLogPage'
     /api/v1/clusters/{cluster_id}/analytics/summary:
         get:
             operationId: summary
@@ -3914,10 +4015,10 @@ paths:
                                                 type: array
                                                 items:
                                                     type: string
-                                            identity_json:
-                                                type: string
                                             identity_available:
                                                 type: boolean
+                                            identity_json:
+                                                type: string
                                             install_error:
                                                 type: string
                                             node_id:
@@ -7014,6 +7115,8 @@ paths:
                         schema:
                             type: object
                             properties:
+                                agent_gateway_public_address:
+                                    type: string
                                 email:
                                     type: string
                                 name:
@@ -7039,6 +7142,10 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
+                                            is_instance_owner:
+                                                type: boolean
+                                                enum:
+                                                    - true
                                             name:
                                                 type: string
                                             role:
@@ -7201,6 +7308,15 @@ paths:
                                             - unavailable
 components:
     schemas:
+        adminsettings_response:
+            type: object
+            properties:
+                agent_gateway_public_address:
+                    type: string
+                restart_required:
+                    type: boolean
+                restarting:
+                    type: boolean
         analytics_DistributionItem:
             type: object
             properties:
@@ -7265,25 +7381,61 @@ components:
             properties:
                 cache_status:
                     type: string
+                client_ip:
+                    type: string
                 config_version:
                     type: number
+                content_type:
+                    type: string
+                country:
+                    type: string
                 duration_us:
                     type: number
                 event_time:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+                file_extension:
+                    type: string
+                handler_error:
+                    type: string
                 hostname:
                     type: string
                 method:
                     type: string
+                node_id:
+                    type: string
                 path:
                     type: string
+                protocol:
+                    type: string
+                query_string:
+                    type: string
+                referer:
+                    type: string
+                region:
+                    type: string
+                request_body_bytes:
+                    type: number
+                request_header_bytes:
+                    type: number
                 request_id:
                     type: string
+                response_body_bytes:
+                    type: number
+                response_header_bytes:
+                    type: number
+                scheme:
+                    type: string
+                source_log_id:
+                    type: number
                 status_code:
                     type: number
                 upstream_address:
+                    type: string
+                upstream_status:
+                    type: number
+                user_agent:
                     type: string
                 waf_action:
                     type: string
@@ -7410,6 +7562,19 @@ components:
                 online:
                     type: boolean
                 requests_per_minute:
+                    type: number
+        analytics_RequestLogPage:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/analytics_NodeRequestLog'
+                page:
+                    type: number
+                page_size:
+                    type: number
+                total:
                     type: number
         analytics_SiteRate:
             type: object
@@ -7538,6 +7703,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_instance_owner:
+                    type: boolean
                 name:
                     type: string
                 role:
@@ -8034,6 +8201,12 @@ components:
                     type: number
                 ip_version:
                     type: string
+                keep_alive_idle_timeout_ms:
+                    type: number
+                keep_alive_max_idle_conns_per_host:
+                    type: number
+                max_conns_per_host:
+                    type: number
                 mtls_configured:
                     type: boolean
                 read_timeout_ms:
@@ -8063,6 +8236,8 @@ components:
                     type: string
                 id:
                     type: string
+                is_instance_owner:
+                    type: boolean
                 name:
                     type: string
                 role:
@@ -9777,6 +9952,8 @@ components:
                         type: string
                 enabled:
                     type: boolean
+                geoip_database:
+                    type: string
                 ip_allowlist:
                     type: array
                     items:

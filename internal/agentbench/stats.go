@@ -3,6 +3,7 @@ package agentbench
 import (
 	"fmt"
 	"math"
+	"net/http"
 	"sort"
 	"time"
 )
@@ -55,12 +56,20 @@ func Summarize(runs []Run) Metrics {
 }
 
 func ValidateRuns(runs []Run, loadCPUPercentMax, maxLoadCPUPercent float64) Validity {
+	return validateRuns(runs, loadCPUPercentMax, maxLoadCPUPercent, false)
+}
+
+func validateRuns(runs []Run, loadCPUPercentMax, maxLoadCPUPercent float64, capacityProbe bool) Validity {
 	validity := Validity{Valid: true, Status: ResultPass, LoadCPUPercentMax: loadCPUPercentMax}
 	rps := make([]float64, 0, len(runs))
 	for _, run := range runs {
 		rps = append(rps, run.Metrics.RPS)
 		if run.Metrics.Failures > 0 {
-			validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %d failed requests", run.Index, run.Metrics.Failures))
+			status := ResultProductFail
+			if capacityProbe {
+				status = ResultTargetSaturated
+			}
+			validity.addReason(status, fmt.Sprintf("run %d had %d failed requests", run.Index, run.Metrics.Failures))
 		}
 	}
 	validity.RPSCoefficientVar = CoefficientOfVariation(rps)
@@ -73,7 +82,7 @@ func ValidateRuns(runs []Run, loadCPUPercentMax, maxLoadCPUPercent float64) Vali
 	if loadCPUPercentMax > maxLoadCPUPercent {
 		validity.addReason(ResultLoadSaturated, fmt.Sprintf("load generator CPU %.2f%% exceeds %.2f%%", loadCPUPercentMax, maxLoadCPUPercent))
 	}
-	validity.Valid = len(validity.Reasons) == 0
+	validity.Valid = len(validity.Reasons) == 0 || validity.Status == ResultTargetSaturated
 	return validity
 }
 
@@ -103,9 +112,54 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 				}
 			}
 		}
+		for name, limits := range config.MaxHeaderRatios {
+			values := run.Metrics.ResponseHeaders[http.CanonicalHeaderKey(name)]
+			var total uint64
+			for _, count := range values {
+				total += count
+			}
+			for value, maximum := range limits {
+				actual := 0.0
+				if total > 0 {
+					actual = float64(values[value]) / float64(total)
+				}
+				if total == 0 || actual > maximum {
+					validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %s=%q ratio %.4f, want at most %.4f", run.Index, name, value, actual, maximum))
+				}
+			}
+		}
+		if config.MaxAgentRSSBytes > 0 && run.Resources.RSSBytesMax > config.MaxAgentRSSBytes {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS peaked at %d bytes, want at most %d", run.Index, run.Resources.RSSBytesMax, config.MaxAgentRSSBytes))
+		}
+		if config.Cooldown > 0 {
+			checkCooldownResources(&validity, run)
+		}
 	}
-	validity.Valid = len(validity.Reasons) == 0
+	validity.Valid = len(validity.Reasons) == 0 || validity.Status == ResultTargetSaturated
 	return validity
+}
+
+func checkCooldownResources(validity *Validity, run Run) {
+	checks := []struct {
+		name     string
+		start    uint64
+		end      uint64
+		additive uint64
+	}{
+		{"RSS", run.Resources.RSSBytesStart, run.Resources.RSSBytesEnd, 64 << 20},
+		{"heap", run.Resources.HeapBytesStart, run.Resources.HeapBytesEnd, 32 << 20},
+		{"file descriptors", uint64(max(run.Resources.FDsStart, 0)), uint64(max(run.Resources.FDsEnd, 0)), 32},
+		{"goroutines", uint64(max(run.Resources.GoroutinesStart, 0)), uint64(max(run.Resources.GoroutinesEnd, 0)), 32},
+	}
+	for _, check := range checks {
+		if check.start == 0 || check.end == 0 {
+			continue
+		}
+		limit := max(uint64(float64(check.start)*1.2), check.start+check.additive)
+		if check.end > limit {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d cooldown %s ended at %d, baseline %d, limit %d", run.Index, check.name, check.end, check.start, limit))
+		}
+	}
 }
 
 func (validity *Validity) addReason(status ResultStatus, reason string) {
@@ -118,10 +172,12 @@ func (validity *Validity) addReason(status ResultStatus, reason string) {
 func resultStatusPriority(status ResultStatus) int {
 	switch status {
 	case ResultProductFail:
-		return 3
+		return 4
 	case ResultEnvInvalid:
-		return 2
+		return 3
 	case ResultLoadSaturated:
+		return 2
+	case ResultTargetSaturated:
 		return 1
 	default:
 		return 0

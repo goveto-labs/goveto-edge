@@ -354,7 +354,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 	}
 	config.OriginPolicy = edgeprotocol.OriginPolicyConfig{
 		TimeoutMS: 17000,
-		Headers: map[string][]string{"X-Origin-Token": {"secret"}},
+		Headers:   map[string][]string{"X-Origin-Token": {"secret"}},
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
 			Enabled: true, Method: "HEAD", Host: "health.internal",
 			Headers: map[string][]string{"X-Health": {"probe"}}, ExpectedStatus: 204,
@@ -367,6 +367,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 		Transport: edgeprotocol.OriginTransportConfig{
 			DialTimeoutMS: 1100, TLSHandshakeTimeoutMS: 2200, ResponseHeaderTimeoutMS: 3300,
 			ReadTimeoutMS: 4400, WriteTimeoutMS: 5500, IPVersion: "ipv6",
+			MaxConnsPerHost: 333, KeepAliveMaxIdleConnsPerHost: 111, KeepAliveIdleTimeoutMS: 77000,
 			TLSServerName: "tls.internal", TLSInsecureSkipVerify: true,
 			TLSClientCertificatePEM: "CLIENT CERT", TLSClientPrivateKeyPEM: "CLIENT KEY",
 		},
@@ -382,6 +383,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 		`"max_fails":5`,
 		`"dial_timeout":1100000000`, `"handshake_timeout":2200000000`,
 		`"response_header_timeout":3300000000`, `"read_timeout":4400000000`, `"write_timeout":5500000000`,
+		`"max_conns_per_host":333`, `"max_idle_conns_per_host":111`, `"idle_timeout":77000000000`,
 		`"server_name":"tls.internal"`, `"insecure_skip_verify":true`,
 		`"client_certificate_pem":"CLIENT CERT"`, `"client_private_key_pem":"CLIENT KEY"`,
 		`"X-Origin-Token":["secret"]`, `"handler":"goveto_origin_metrics"`, `"timeout":17000000000`,
@@ -398,6 +400,22 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"method":["GET","HEAD","PUT","DELETE","OPTIONS","TRACE"]`) || strings.Contains(raw, `"method":["GET","HEAD","POST"`) {
 		t.Fatalf("retry matcher is not restricted to idempotent methods: %s", raw)
+	}
+}
+
+func TestRenderDefaultOriginPoolLeavesActiveConnectionsUnlimited(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.OriginPolicy = edgeprotocol.DefaultOriginPolicy()
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	if strings.Contains(raw, `"max_conns_per_host"`) {
+		t.Fatalf("default origin transport unexpectedly capped active connections: %s", raw)
+	}
+	if !strings.Contains(raw, `"max_idle_conns_per_host":128`) || !strings.Contains(raw, `"idle_timeout":120000000000`) {
+		t.Fatalf("default origin keep-alive pool was not rendered: %s", raw)
 	}
 }
 
@@ -429,7 +447,7 @@ func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
 			{Protocol: "http", Address: addresses[1], HostHeader: "two.internal", Weight: 1},
 		},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			TimeoutMS: 2000,
+			TimeoutMS:     2000,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 		},
@@ -603,7 +621,10 @@ func TestDeliveryHTTPSPoolPreservesPrivateCAAndMTLS(t *testing.T) {
 	originPolicy.Transport.TLSClientPrivateKeyPEM = "client private key"
 	baseProxy := map[string]any{
 		"load_balancing": map[string]any{},
-		"transport":      map[string]any{"protocol": "goveto_http"},
+		"transport": map[string]any{
+			"protocol": "goveto_http", "max_conns_per_host": 512,
+			"keep_alive": map[string]any{"max_idle_conns_per_host": 128, "idle_timeout": int64(120 * time.Second)},
+		},
 	}
 	pool := cachepolicy.PathOriginPool{
 		Name: "secure", Paths: []string{"/*"},
@@ -620,6 +641,10 @@ func TestDeliveryHTTPSPoolPreservesPrivateCAAndMTLS(t *testing.T) {
 	}
 	if transport["client_certificate_pem"] != "client certificate" || transport["client_private_key_pem"] != "client private key" {
 		t.Fatalf("mTLS credentials were dropped from HTTPS pool transport: %#v", transport)
+	}
+	keepAlive := transport["keep_alive"].(map[string]any)
+	if transport["max_conns_per_host"] != float64(512) || keepAlive["max_idle_conns_per_host"] != float64(128) {
+		t.Fatalf("connection pool settings were dropped from delivery transport: %#v", transport)
 	}
 }
 

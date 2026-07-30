@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +17,10 @@ import (
 )
 
 type headerFlags map[string]string
+
+type multiHeaderFlags map[string][]string
+
+type headerRatioFlags map[string]map[string]float64
 
 type stringFlags []string
 
@@ -49,6 +54,43 @@ func (values *headerFlags) Set(input string) error {
 	return nil
 }
 
+func (values *multiHeaderFlags) String() string { return fmt.Sprint(map[string][]string(*values)) }
+
+func (values *multiHeaderFlags) Set(input string) error {
+	name, value, ok := strings.Cut(input, "=")
+	name = strings.TrimSpace(name)
+	if !ok || name == "" || value == "" {
+		return errors.New("header must use Name=Value")
+	}
+	if *values == nil {
+		*values = make(map[string][]string)
+	}
+	(*values)[name] = append((*values)[name], value)
+	return nil
+}
+
+func (values *headerRatioFlags) String() string {
+	return fmt.Sprint(map[string]map[string]float64(*values))
+}
+
+func (values *headerRatioFlags) Set(input string) error {
+	header, rawRatio, ok := strings.Cut(input, ":")
+	name, value, hasHeader := strings.Cut(header, "=")
+	ratio, err := strconv.ParseFloat(rawRatio, 64)
+	if !ok || !hasHeader || strings.TrimSpace(name) == "" || value == "" || err != nil || ratio < 0 || ratio > 1 {
+		return errors.New("header ratio must use Name=Value:Ratio with Ratio between 0 and 1")
+	}
+	if *values == nil {
+		*values = make(map[string]map[string]float64)
+	}
+	name = strings.TrimSpace(name)
+	if (*values)[name] == nil {
+		(*values)[name] = make(map[string]float64)
+	}
+	(*values)[name][value] = ratio
+	return nil
+}
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		log.Print(err)
@@ -64,6 +106,7 @@ func run(args []string) error {
 	suite := flags.String("suite", string(agentbench.SuitePR), "pr, nightly, capacity, or soak")
 	protocol := flags.String("protocol", string(agentbench.ProtocolH1), "h1, h2, or h3")
 	scenario := flags.String("scenario", "pure-origin-16k", "stable scenario name")
+	method := flags.String("method", "GET", "HTTP request method")
 	targetURL := flags.String("url", "", "Edge Agent URL")
 	host := flags.String("host", "", "HTTP Host and TLS server name")
 	output := flags.String("output", "benchmark-results", "artifact output directory")
@@ -79,6 +122,9 @@ func run(args []string) error {
 	insecure := flags.Bool("insecure-skip-verify", false, "accept the benchmark environment's private certificate")
 	newConnection := flags.Bool("new-connection", false, "create a new transport for every request")
 	uniqueQuery := flags.Bool("unique-query", false, "append a unique _bench query value to every request")
+	uniqueQueryCardinality := flags.Int("unique-query-cardinality", 0, "reuse this many numbered _bench query values instead of an unbounded sequence")
+	cooldown := flags.Duration("cooldown", 0, "continue resource sampling after load stops")
+	capacityProbe := flags.Bool("capacity-probe", false, "classify request failures as target saturation instead of a compatibility failure")
 	agentPID := flags.Int("agent-pid", 0, "Edge Agent PID to sample")
 	agentMetricsURL := flags.String("agent-metrics-url", "", "optional benchmark telemetry URL")
 	minCacheHits := flags.Uint64("min-cache-hits", 0, "minimum cache hit delta required in every run")
@@ -87,10 +133,15 @@ func run(args []string) error {
 	maxCapturedValues := flags.Int("max-captured-values", 0, "maximum distinct values allowed for each captured response header")
 	agentBinary := flags.String("agent-binary", "", "Edge Agent binary to hash")
 	maxLoadCPU := flags.Float64("max-load-cpu", 85, "maximum load generator CPU percent before marking the result saturated")
+	maxAgentRSS := flags.Uint64("max-agent-rss", 0, "maximum Edge Agent RSS bytes allowed during the run")
 	var expectedHeaders headerFlags
+	var allowedHeaders multiHeaderFlags
+	var maxHeaderRatios headerRatioFlags
 	var requestHeaders headerFlags
 	var captureHeaders stringFlags
 	flags.Var(&expectedHeaders, "expected-header", "required response header Name=Value (repeatable)")
+	flags.Var(&allowedHeaders, "allowed-header", "allowed response header Name=Value (repeat a name for multiple values)")
+	flags.Var(&maxHeaderRatios, "max-header-ratio", "maximum response header value ratio Name=Value:Ratio")
 	flags.Var(&requestHeaders, "header", "request header Name=Value (repeatable)")
 	flags.Var(&captureHeaders, "capture-header", "response header to count in the report (repeatable)")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -120,14 +171,18 @@ func run(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	report, err := agentbench.RunBenchmark(ctx, agentbench.Config{
-		Suite: selectedSuite, Protocol: agentbench.Protocol(*protocol), Scenario: *scenario, URL: *targetURL, Host: *host,
+		Suite: selectedSuite, Protocol: agentbench.Protocol(*protocol), Scenario: *scenario, Method: *method, URL: *targetURL, Host: *host,
 		Concurrency: *concurrency, Duration: *duration, Warmup: *warmup, Repeats: *repeats, RequestTimeout: *timeout,
 		ExpectedStatus: *expectedStatus, ExpectedSHA256: strings.TrimSpace(*expectedHash), ExpectedHeaders: expectedHeaders,
+		AllowedHeaders: allowedHeaders, MaxHeaderRatios: maxHeaderRatios,
 		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
+		UniqueQueryCardinality: *uniqueQueryCardinality,
+		Cooldown:               *cooldown, CapacityProbe: *capacityProbe,
 		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
 		MaxCapturedValues: *maxCapturedValues,
 		MaxLoadCPUPercent: *maxLoadCPU,
+		MaxAgentRSSBytes:  *maxAgentRSS,
 	})
 	if err != nil {
 		return err

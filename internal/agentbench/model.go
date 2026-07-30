@@ -22,32 +22,40 @@ const (
 )
 
 type Config struct {
-	Suite              Suite
-	Protocol           Protocol
-	Scenario           string
-	URL                string
-	Host               string
-	Concurrency        int
-	Duration           time.Duration
-	Warmup             time.Duration
-	Repeats            int
-	RequestTimeout     time.Duration
-	ExpectedStatus     int
-	ExpectedSHA256     string
-	ExpectedHeaders    map[string]string
-	RequestHeaders     map[string]string
-	CaptureHeaders     []string
-	InsecureSkipVerify bool
-	NewConnection      bool
-	UniqueQuery        bool
-	AgentPID           int32
-	AgentMetricsURL    string
-	SampleInterval     time.Duration
-	MinCacheHits       uint64
-	MinCacheMisses     uint64
-	MinCacheEvictions  uint64
-	MaxCapturedValues  int
-	MaxLoadCPUPercent  float64
+	Suite                  Suite
+	Protocol               Protocol
+	Scenario               string
+	Method                 string
+	URL                    string
+	Host                   string
+	Concurrency            int
+	Duration               time.Duration
+	Warmup                 time.Duration
+	Repeats                int
+	RequestTimeout         time.Duration
+	ExpectedStatus         int
+	ExpectedSHA256         string
+	ExpectedHeaders        map[string]string
+	AllowedHeaders         map[string][]string
+	MaxHeaderRatios        map[string]map[string]float64
+	RequestHeaders         map[string]string
+	CaptureHeaders         []string
+	InsecureSkipVerify     bool
+	NewConnection          bool
+	UniqueQuery            bool
+	UniqueQueryNamespace   string
+	UniqueQueryCardinality int
+	Cooldown               time.Duration
+	CapacityProbe          bool
+	AgentPID               int32
+	AgentMetricsURL        string
+	SampleInterval         time.Duration
+	MinCacheHits           uint64
+	MinCacheMisses         uint64
+	MinCacheEvictions      uint64
+	MaxCapturedValues      int
+	MaxLoadCPUPercent      float64
+	MaxAgentRSSBytes       uint64
 }
 
 type Report struct {
@@ -76,26 +84,33 @@ type Platform struct {
 }
 
 type Scenario struct {
-	Suite             Suite             `json:"suite"`
-	Name              string            `json:"name"`
-	Protocol          Protocol          `json:"protocol"`
-	URL               string            `json:"url"`
-	Concurrency       int               `json:"concurrency"`
-	DurationMS        int64             `json:"duration_ms"`
-	WarmupMS          int64             `json:"warmup_ms"`
-	Repeats           int               `json:"repeats"`
-	NewConnection     bool              `json:"new_connection"`
-	ExpectedStatus    int               `json:"expected_status"`
-	ExpectedSHA256    string            `json:"expected_sha256,omitempty"`
-	ExpectedHeaders   map[string]string `json:"expected_headers,omitempty"`
-	RequestHeaders    map[string]string `json:"request_headers,omitempty"`
-	CaptureHeaders    []string          `json:"capture_headers,omitempty"`
-	UniqueQuery       bool              `json:"unique_query,omitempty"`
-	MinCacheHits      uint64            `json:"min_cache_hits,omitempty"`
-	MinCacheMisses    uint64            `json:"min_cache_misses,omitempty"`
-	MinCacheEvictions uint64            `json:"min_cache_evictions,omitempty"`
-	MaxCapturedValues int               `json:"max_captured_values,omitempty"`
-	MaxLoadCPUPercent float64           `json:"max_load_cpu_percent,omitempty"`
+	Suite                  Suite                         `json:"suite"`
+	Name                   string                        `json:"name"`
+	Method                 string                        `json:"method"`
+	Protocol               Protocol                      `json:"protocol"`
+	URL                    string                        `json:"url"`
+	Concurrency            int                           `json:"concurrency"`
+	DurationMS             int64                         `json:"duration_ms"`
+	WarmupMS               int64                         `json:"warmup_ms"`
+	Repeats                int                           `json:"repeats"`
+	NewConnection          bool                          `json:"new_connection"`
+	ExpectedStatus         int                           `json:"expected_status"`
+	ExpectedSHA256         string                        `json:"expected_sha256,omitempty"`
+	ExpectedHeaders        map[string]string             `json:"expected_headers,omitempty"`
+	AllowedHeaders         map[string][]string           `json:"allowed_headers,omitempty"`
+	MaxHeaderRatios        map[string]map[string]float64 `json:"max_header_ratios,omitempty"`
+	RequestHeaders         map[string]string             `json:"request_headers,omitempty"`
+	CaptureHeaders         []string                      `json:"capture_headers,omitempty"`
+	UniqueQuery            bool                          `json:"unique_query,omitempty"`
+	UniqueQueryCardinality int                           `json:"unique_query_cardinality,omitempty"`
+	CooldownMS             int64                         `json:"cooldown_ms,omitempty"`
+	CapacityProbe          bool                          `json:"capacity_probe,omitempty"`
+	MinCacheHits           uint64                        `json:"min_cache_hits,omitempty"`
+	MinCacheMisses         uint64                        `json:"min_cache_misses,omitempty"`
+	MinCacheEvictions      uint64                        `json:"min_cache_evictions,omitempty"`
+	MaxCapturedValues      int                           `json:"max_captured_values,omitempty"`
+	MaxLoadCPUPercent      float64                       `json:"max_load_cpu_percent,omitempty"`
+	MaxAgentRSSBytes       uint64                        `json:"max_agent_rss_bytes,omitempty"`
 }
 
 type Run struct {
@@ -127,6 +142,11 @@ type Metrics struct {
 }
 
 type ResourceSummary struct {
+	RSSBytesStart          uint64     `json:"rss_bytes_start,omitempty"`
+	FDsStart               int32      `json:"fds_start,omitempty"`
+	ConnectionsStart       int        `json:"connections_start,omitempty"`
+	HeapBytesStart         uint64     `json:"heap_bytes_start,omitempty"`
+	GoroutinesStart        int        `json:"goroutines_start,omitempty"`
 	CPUPercentMax          float64    `json:"cpu_percent_max,omitempty"`
 	RSSBytesMax            uint64     `json:"rss_bytes_max,omitempty"`
 	FDsMax                 int32      `json:"fds_max,omitempty"`
@@ -151,6 +171,11 @@ type ResourceSummary struct {
 	CacheHitsDelta         uint64     `json:"cache_hits_delta,omitempty"`
 	CacheMissesDelta       uint64     `json:"cache_misses_delta,omitempty"`
 	CacheEvictionsDelta    uint64     `json:"cache_evictions_delta,omitempty"`
+	RSSBytesEnd            uint64     `json:"rss_bytes_end,omitempty"`
+	FDsEnd                 int32      `json:"fds_end,omitempty"`
+	ConnectionsEnd         int        `json:"connections_end,omitempty"`
+	HeapBytesEnd           uint64     `json:"heap_bytes_end,omitempty"`
+	GoroutinesEnd          int        `json:"goroutines_end,omitempty"`
 }
 
 type TimeSeriesPoint struct {
@@ -186,10 +211,11 @@ type TimeSeriesPoint struct {
 type ResultStatus string
 
 const (
-	ResultPass          ResultStatus = "PASS"
-	ResultProductFail   ResultStatus = "PRODUCT_FAIL"
-	ResultLoadSaturated ResultStatus = "LOAD_SATURATED"
-	ResultEnvInvalid    ResultStatus = "ENV_INVALID"
+	ResultPass            ResultStatus = "PASS"
+	ResultProductFail     ResultStatus = "PRODUCT_FAIL"
+	ResultLoadSaturated   ResultStatus = "LOAD_SATURATED"
+	ResultTargetSaturated ResultStatus = "TARGET_SATURATED"
+	ResultEnvInvalid      ResultStatus = "ENV_INVALID"
 )
 
 type Validity struct {

@@ -17,8 +17,8 @@ stability stages.
 `full` starts with the same complete screen. It then runs Capacity only for
 cases whose screen status is exactly `PASS`, using a 30 second warmup, 120 second
 measurement, three repetitions, and focused concurrency 32/128. Finally it runs
-the long 1 MiB cache-hit stability test (H2 for six hours by default) only after
-the corresponding Capacity case passes.
+a 15 minute cache-hit preflight followed by the long stability test (H2 for six
+hours by default) only after the corresponding Capacity case passes.
 
 ## Commands
 
@@ -56,6 +56,9 @@ Each case is classified as:
 - `PRODUCT_FAIL`: request or product behavior failed.
 - `LOAD_SATURATED`: the load generator exceeded `--max-load-cpu` (85% by
   default), so throughput is only a lower bound and is not a product failure.
+- `TARGET_SATURATED`: the explicit H3 c512 new-connection capacity probe exceeded
+  the target's capacity after the c128 compatibility gate passed. The errors and
+  cooldown resources remain in the report, but this probe does not fail the suite.
 - `ENV_INVALID`: the environment or measurement was invalid.
 
 For a 1 MiB `LOAD_SATURATED` result, rerun on a reviewed agent4/agent8 layout or
@@ -71,6 +74,12 @@ the matrix, JSON/Markdown/CSV reports, per-service logs, resolved Compose and
 image details, Git state, Agent binary SHA-256, environment information, and
 complete error counts by type.
 
+Cache-hit Capacity and soak cases accept `HIT` and `STALE`, reject `MISS`, and
+limit `STALE` to 1% per repetition. Cache-miss keys include a per-run and
+per-repeat namespace. High-concurrency cases keep sampling during a 60 second
+cooldown so retained heap, goroutines, file descriptors, and connections are
+visible without restarting the Agent.
+
 ## H3 prerequisite
 
 Before H3 testing on Linux, set both UDP buffers to at least 7,500,000 bytes:
@@ -81,8 +90,8 @@ sudo sysctl -w net.core.wmem_max=7500000
 ```
 
 The entry script checks these values in the Agent network namespace and rejects
-quic-go receive/send buffer warnings as `ENV_INVALID`. H3 new-connection cases
-restart the Agent before and after measurement to isolate connection cleanup.
+quic-go receive/send buffer warnings as `ENV_INVALID`. H3 new-connection load
+shares one UDP socket while still creating a fresh QUIC connection per request.
 
 ## Environment
 
