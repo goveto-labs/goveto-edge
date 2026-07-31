@@ -15,6 +15,7 @@ import (
 type HTTPTransport struct {
 	reverseproxy.HTTPTransport
 	SiteID               string `json:"site_id"`
+	UnhealthyStatus      []int  `json:"unhealthy_status,omitempty"`
 	ClientCertificatePEM string `json:"client_certificate_pem,omitempty"`
 	ClientPrivateKeyPEM  string `json:"client_private_key_pem,omitempty"`
 
@@ -72,11 +73,23 @@ func (t *HTTPTransport) RoundTrip(request *http.Request) (*http.Response, error)
 	}
 	if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
 		if address, found := replacer.GetString("goveto.origin.address"); found && address != "" {
-			failed := err != nil
+			failed := err != nil || responseHasStatus(response, t.UnhealthyStatus)
 			observe(t.SiteID, address, time.Since(start), failed)
 		}
 	}
 	return response, err
+}
+
+func responseHasStatus(response *http.Response, statuses []int) bool {
+	if response == nil {
+		return false
+	}
+	for _, status := range statuses {
+		if response.StatusCode == status {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *HTTPTransport) Cleanup() error {

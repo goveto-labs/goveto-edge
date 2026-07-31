@@ -46,6 +46,7 @@ type runState struct {
 	ttfb        []time.Duration
 	protocols   map[string]uint64
 	headers     map[string]map[string]uint64
+	statuses    map[int]uint64
 	errors      []string
 	errorCounts map[string]uint64
 }
@@ -59,12 +60,14 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 	}
 	report := Report{
 		SchemaVersion: SchemaVersion,
+		RunnerID:      config.RunnerID,
 		GeneratedAt:   time.Now().UTC(),
 		Platform:      CollectPlatform(),
 		Scenario: Scenario{
 			Suite: config.Suite, Name: config.Scenario, Method: config.Method, Protocol: config.Protocol, URL: config.URL,
 			Concurrency: config.Concurrency, DurationMS: config.Duration.Milliseconds(), WarmupMS: config.Warmup.Milliseconds(),
 			Repeats: config.Repeats, NewConnection: config.NewConnection, ExpectedStatus: config.ExpectedStatus,
+			AllowedStatuses: config.AllowedStatuses, MinStatusCounts: config.MinStatusCounts, MaxStatusCounts: config.MaxStatusCounts,
 			ExpectedSHA256: config.ExpectedSHA256, ExpectedHeaders: config.ExpectedHeaders,
 			AllowedHeaders: config.AllowedHeaders, MaxHeaderRatios: config.MaxHeaderRatios,
 			RequestHeaders: config.RequestHeaders, CaptureHeaders: config.CaptureHeaders, UniqueQuery: config.UniqueQuery,
@@ -117,7 +120,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		cancel()
 	}
 
-	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64), errorCounts: make(map[string]uint64)}
+	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64), statuses: make(map[int]uint64), errorCounts: make(map[string]uint64)}
 	measureContext, cancelSampling := context.WithCancel(ctx)
 	defer cancelSampling()
 	samplesDone := make(chan struct{})
@@ -218,6 +221,7 @@ type requestResult struct {
 	bytes     uint64
 	protocol  string
 	headers   map[string]string
+	status    int
 	err       error
 }
 
@@ -283,11 +287,12 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		destination = digest
 	}
 	var errorBody limitedBuffer
-	if response.StatusCode != config.ExpectedStatus {
+	statusOK := statusAllowed(config, response.StatusCode)
+	if !statusOK {
 		destination = io.MultiWriter(destination, &errorBody)
 	}
 	written, readErr := io.Copy(destination, response.Body)
-	result := requestResult{latency: time.Since(started), handshake: handshake, ttfb: ttfb, bytes: uint64(max(written, 0)), protocol: response.Proto, headers: make(map[string]string, len(config.CaptureHeaders))}
+	result := requestResult{latency: time.Since(started), handshake: handshake, ttfb: ttfb, bytes: uint64(max(written, 0)), protocol: response.Proto, headers: make(map[string]string, len(config.CaptureHeaders)), status: response.StatusCode}
 	for _, name := range config.CaptureHeaders {
 		result.headers[http.CanonicalHeaderKey(name)] = response.Header.Get(name)
 	}
@@ -295,8 +300,12 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		result.err = fmt.Errorf("read response: %w", readErr)
 		return result
 	}
-	if response.StatusCode != config.ExpectedStatus {
-		result.err = fmt.Errorf("status %d, want %d, body %q", response.StatusCode, config.ExpectedStatus, errorBody.String())
+	if !statusOK {
+		if len(config.AllowedStatuses) > 0 {
+			result.err = fmt.Errorf("status %d, want one of %v, body %q", response.StatusCode, config.AllowedStatuses, errorBody.String())
+		} else {
+			result.err = fmt.Errorf("status %d, want %d, body %q", response.StatusCode, config.ExpectedStatus, errorBody.String())
+		}
 		return result
 	}
 	if expected := protocolName(config.Protocol); response.Proto != expected {
@@ -377,6 +386,9 @@ func newSharedQUICTransport(config Config) (*quic.Transport, func(), error) {
 }
 
 func validateConfig(config *Config) error {
+	if strings.TrimSpace(config.RunnerID) == "" {
+		config.RunnerID = "default"
+	}
 	if config.URL == "" {
 		return errors.New("URL is required")
 	}
@@ -410,6 +422,21 @@ func validateConfig(config *Config) error {
 	}
 	if config.ExpectedStatus == 0 {
 		config.ExpectedStatus = http.StatusOK
+	}
+	for _, status := range config.AllowedStatuses {
+		if status < 100 || status > 599 {
+			return fmt.Errorf("invalid allowed HTTP status %d", status)
+		}
+	}
+	for status := range config.MinStatusCounts {
+		if status < 100 || status > 599 {
+			return fmt.Errorf("invalid minimum HTTP status %d", status)
+		}
+	}
+	for status := range config.MaxStatusCounts {
+		if status < 100 || status > 599 {
+			return fmt.Errorf("invalid maximum HTTP status %d", status)
+		}
 	}
 	if config.ExpectedHeaders == nil {
 		config.ExpectedHeaders = map[string]string{}
@@ -491,6 +518,18 @@ func contains(values []string, expected string) bool {
 	return false
 }
 
+func statusAllowed(config Config, status int) bool {
+	if len(config.AllowedStatuses) == 0 {
+		return status == config.ExpectedStatus
+	}
+	for _, allowed := range config.AllowedStatuses {
+		if status == allowed {
+			return true
+		}
+	}
+	return false
+}
+
 func appendUniqueHeader(values []string, name string) []string {
 	canonical := http.CanonicalHeaderKey(name)
 	for _, value := range values {
@@ -504,6 +543,14 @@ func appendUniqueHeader(values []string, name string) []string {
 func (state *runState) record(result requestResult) {
 	state.requests.Add(1)
 	state.bytes.Add(result.bytes)
+	if result.status != 0 {
+		state.mu.Lock()
+		if state.statuses == nil {
+			state.statuses = make(map[int]uint64)
+		}
+		state.statuses[result.status]++
+		state.mu.Unlock()
+	}
 	if result.err != nil {
 		state.recordFailure(result.err)
 		return
@@ -545,7 +592,7 @@ func (state *runState) metrics(elapsed time.Duration) (Metrics, []string, map[st
 	defer state.mu.Unlock()
 	seconds := elapsed.Seconds()
 	requests, successes, failures := state.requests.Load(), state.successes.Load(), state.failures.Load()
-	result := Metrics{Requests: requests, Successes: successes, Failures: failures, Bytes: state.bytes.Load(), ResponseHeaders: state.headers}
+	result := Metrics{Requests: requests, Successes: successes, Failures: failures, Bytes: state.bytes.Load(), ResponseHeaders: state.headers, HTTPStatusCounts: cloneStatusCounts(state.statuses)}
 	if seconds > 0 {
 		result.RPS = float64(requests) / seconds
 		result.BytesPerSecond = float64(result.Bytes) / seconds
@@ -624,6 +671,17 @@ func cloneCounts(values map[string]uint64) map[string]uint64 {
 	result := make(map[string]uint64, len(values))
 	for key, value := range values {
 		result[key] = value
+	}
+	return result
+}
+
+func cloneStatusCounts(values map[int]uint64) map[int]uint64 {
+	if len(values) == 0 {
+		return nil
+	}
+	result := make(map[int]uint64, len(values))
+	for status, count := range values {
+		result[status] = count
 	}
 	return result
 }

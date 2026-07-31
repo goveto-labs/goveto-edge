@@ -83,8 +83,34 @@ func TestValidateResourceExpectations(t *testing.T) {
 	}
 }
 
+func TestValidateResourceExpectationsEnforcesStatusCountsPerRun(t *testing.T) {
+	runs := []Run{
+		{Index: 1, Metrics: Metrics{HTTPStatusCounts: map[int]uint64{200: 100, 429: 1}}},
+		{Index: 2, Metrics: Metrics{HTTPStatusCounts: map[int]uint64{200: 201}}},
+	}
+	config := Config{MinStatusCounts: map[int]uint64{429: 1}, MaxStatusCounts: map[int]uint64{200: 200}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, runs, config)
+	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 2 {
+		t.Fatalf("validity=%+v", validity)
+	}
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, runs[:1], config)
+	if !validity.Valid {
+		t.Fatalf("status constraints rejected boundary-valid run: %+v", validity)
+	}
+}
+
+func TestSummarizeAggregatesHTTPStatuses(t *testing.T) {
+	summary := Summarize([]Run{
+		{Metrics: Metrics{RPS: 10, HTTPStatusCounts: map[int]uint64{200: 3, 429: 1}}},
+		{Metrics: Metrics{RPS: 20, HTTPStatusCounts: map[int]uint64{200: 4, 429: 2}}},
+	})
+	if summary.HTTPStatusCounts[200] != 7 || summary.HTTPStatusCounts[429] != 3 {
+		t.Fatalf("status counts=%v", summary.HTTPStatusCounts)
+	}
+}
+
 func TestCompareAppliesArchitectureAndRegressionGates(t *testing.T) {
-	baseline := Report{Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "hit", Protocol: ProtocolH2}, Summary: Metrics{RPS: 1000, P99MS: 10}}
+	baseline := Report{RunnerID: "agent4", Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Suite: SuiteCapacity, Name: "hit", Protocol: ProtocolH2, Concurrency: 32}, Summary: Metrics{RPS: 1000, P99MS: 10}}
 	current := baseline
 	current.Summary = Metrics{RPS: 899, P99MS: 11.6}
 	decision := Compare(current, baseline)
@@ -95,5 +121,17 @@ func TestCompareAppliesArchitectureAndRegressionGates(t *testing.T) {
 	decision = Compare(current, baseline)
 	if decision.Passed || decision.Reason == "" {
 		t.Fatalf("cross-architecture comparison=%+v", decision)
+	}
+	current = baseline
+	current.RunnerID = "agent8"
+	decision = Compare(current, baseline)
+	if decision.Passed || decision.Reason != "baseline runner does not match current runner" {
+		t.Fatalf("cross-runner comparison=%+v", decision)
+	}
+	current = baseline
+	current.Scenario.Concurrency = 128
+	decision = Compare(current, baseline)
+	if decision.Passed || decision.Reason != "baseline concurrency configuration does not match" {
+		t.Fatalf("cross-concurrency comparison=%+v", decision)
 	}
 }

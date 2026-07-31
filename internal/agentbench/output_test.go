@@ -10,7 +10,7 @@ import (
 
 func TestWriteArtifactsAndReadReport(t *testing.T) {
 	directory := t.TempDir()
-	report := Report{SchemaVersion: SchemaVersion, Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "origin", Protocol: ProtocolH1}, Summary: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Cache": {"HIT": 10}}}, Validity: Validity{Valid: false, Status: ResultProductFail, Reasons: []string{"request failed"}}, ErrorCounts: map[string]uint64{"http_5xx": 2}, Runs: []Run{{Index: 1, Resources: ResourceSummary{CacheHitsDelta: 10}, Samples: []TimeSeriesPoint{{At: time.Now(), Requests: 10, RPS: 10}}}}}
+	report := Report{SchemaVersion: SchemaVersion, RunnerID: "agent4", Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Name: "origin", Protocol: ProtocolH1}, Summary: Metrics{ResponseHeaders: map[string]map[string]uint64{"X-Cache": {"HIT": 10}}, HTTPStatusCounts: map[int]uint64{200: 8, 502: 2}}, Validity: Validity{Valid: false, Status: ResultProductFail, Reasons: []string{"request failed"}}, ErrorCounts: map[string]uint64{"http_5xx": 2}, Runs: []Run{{Index: 1, Resources: ResourceSummary{CacheHitsDelta: 10}, Samples: []TimeSeriesPoint{{At: time.Now(), Requests: 10, RPS: 10}}}}}
 	if err := WriteArtifacts(directory, report); err != nil {
 		t.Fatal(err)
 	}
@@ -27,14 +27,14 @@ func TestWriteArtifactsAndReadReport(t *testing.T) {
 		}
 	}
 	summary, err := os.ReadFile(filepath.Join(directory, "summary.md"))
-	if err != nil || !strings.Contains(string(summary), "Captured response headers") || !strings.Contains(string(summary), "Cache activity") || !strings.Contains(string(summary), "PRODUCT_FAIL") || !strings.Contains(string(summary), "http_5xx") {
+	if err != nil || !strings.Contains(string(summary), "Captured response headers") || !strings.Contains(string(summary), "Cache activity") || !strings.Contains(string(summary), "HTTP status counts") || !strings.Contains(string(summary), "PRODUCT_FAIL") || !strings.Contains(string(summary), "http_5xx") {
 		t.Fatalf("summary=%q err=%v", summary, err)
 	}
 }
 
-func TestReadReportRejectsUnknownSchema(t *testing.T) {
+func TestReadReportRejectsLegacySchema(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "report.json")
-	if err := os.WriteFile(path, []byte(`{"schema_version":"2.0"}`), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(`{"schema_version":"1.0"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ReadReport(path)

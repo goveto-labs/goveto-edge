@@ -2,7 +2,7 @@ package agentbench
 
 import "time"
 
-const SchemaVersion = "1.0"
+const SchemaVersion = "1.1"
 
 type Protocol string
 
@@ -22,6 +22,7 @@ const (
 )
 
 type Config struct {
+	RunnerID               string
 	Suite                  Suite
 	Protocol               Protocol
 	Scenario               string
@@ -34,6 +35,9 @@ type Config struct {
 	Repeats                int
 	RequestTimeout         time.Duration
 	ExpectedStatus         int
+	AllowedStatuses        []int
+	MinStatusCounts        map[int]uint64
+	MaxStatusCounts        map[int]uint64
 	ExpectedSHA256         string
 	ExpectedHeaders        map[string]string
 	AllowedHeaders         map[string][]string
@@ -60,6 +64,7 @@ type Config struct {
 
 type Report struct {
 	SchemaVersion string            `json:"schema_version"`
+	RunnerID      string            `json:"runner_id"`
 	GeneratedAt   time.Time         `json:"generated_at"`
 	Commit        string            `json:"commit,omitempty"`
 	BinarySHA256  string            `json:"agent_binary_sha256,omitempty"`
@@ -95,6 +100,9 @@ type Scenario struct {
 	Repeats                int                           `json:"repeats"`
 	NewConnection          bool                          `json:"new_connection"`
 	ExpectedStatus         int                           `json:"expected_status"`
+	AllowedStatuses        []int                         `json:"allowed_statuses,omitempty"`
+	MinStatusCounts        map[int]uint64                `json:"min_status_counts,omitempty"`
+	MaxStatusCounts        map[int]uint64                `json:"max_status_counts,omitempty"`
 	ExpectedSHA256         string                        `json:"expected_sha256,omitempty"`
 	ExpectedHeaders        map[string]string             `json:"expected_headers,omitempty"`
 	AllowedHeaders         map[string][]string           `json:"allowed_headers,omitempty"`
@@ -139,6 +147,7 @@ type Metrics struct {
 	TTFBMS             float64                      `json:"ttfb_p50_ms,omitempty"`
 	NegotiatedProtocol string                       `json:"negotiated_protocol,omitempty"`
 	ResponseHeaders    map[string]map[string]uint64 `json:"response_headers,omitempty"`
+	HTTPStatusCounts   map[int]uint64               `json:"http_status_counts,omitempty"`
 }
 
 type ResourceSummary struct {

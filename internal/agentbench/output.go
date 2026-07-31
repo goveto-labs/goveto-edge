@@ -67,8 +67,8 @@ func writeMarkdown(path string, report Report) error {
 			status = ResultEnvInvalid
 		}
 	}
-	_, err = fmt.Fprintf(file, "# Edge Agent benchmark\n\n- Scenario: `%s`\n- Protocol: `%s` (`%s`)\n- Platform: `%s/%s`\n- Result: **%s**\n\n| RPS | Success | p50 | p95 | p99 | Max | Bandwidth |\n|---:|---:|---:|---:|---:|---:|---:|\n| %.2f | %.4f%% | %.2f ms | %.2f ms | %.2f ms | %.2f ms | %.2f MiB/s |\n",
-		report.Scenario.Name, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, status,
+	_, err = fmt.Fprintf(file, "# Edge Agent benchmark\n\n- Runner: `%s`\n- Scenario: `%s`\n- Protocol: `%s` (`%s`)\n- Platform: `%s/%s`\n- Result: **%s**\n\n| RPS | Success | p50 | p95 | p99 | Max | Bandwidth |\n|---:|---:|---:|---:|---:|---:|---:|\n| %.2f | %.4f%% | %.2f ms | %.2f ms | %.2f ms | %.2f ms | %.2f MiB/s |\n",
+		report.RunnerID, report.Scenario.Name, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, status,
 		report.Summary.RPS, report.Summary.SuccessRate*100, report.Summary.P50MS, report.Summary.P95MS, report.Summary.P99MS, report.Summary.MaxMS, report.Summary.BytesPerSecond/(1<<20))
 	if err != nil {
 		return err
@@ -83,6 +83,17 @@ func writeMarkdown(path string, report Report) error {
 		_, _ = io.WriteString(file, "\n## Error counts\n\n| Class | Count |\n|---|---:|\n")
 		for _, class := range sortedKeys(report.ErrorCounts) {
 			_, _ = fmt.Fprintf(file, "| %s | %d |\n", class, report.ErrorCounts[class])
+		}
+	}
+	if len(report.Summary.HTTPStatusCounts) > 0 {
+		_, _ = io.WriteString(file, "\n## HTTP status counts\n\n| Status | Responses |\n|---:|---:|\n")
+		statuses := make([]int, 0, len(report.Summary.HTTPStatusCounts))
+		for status := range report.Summary.HTTPStatusCounts {
+			statuses = append(statuses, status)
+		}
+		sort.Ints(statuses)
+		for _, status := range statuses {
+			_, _ = fmt.Fprintf(file, "| %d | %d |\n", status, report.Summary.HTTPStatusCounts[status])
 		}
 	}
 	if len(report.Summary.ResponseHeaders) > 0 {
@@ -106,9 +117,13 @@ func writeMarkdown(path string, report Report) error {
 		}
 	}
 	if report.Baseline != nil {
-		_, _ = io.WriteString(file, "\n## Baseline\n\n| Metric | Baseline | Current | Change | Limit | Passed |\n|---|---:|---:|---:|---:|:---:|\n")
-		for _, comparison := range report.Baseline.Comparisons {
-			_, _ = fmt.Fprintf(file, "| %s | %.2f | %.2f | %+.2f%% | %.2f%% | %t |\n", comparison.Metric, comparison.Baseline, comparison.Current, comparison.ChangePercent, comparison.LimitPercent, comparison.Passed)
+		if report.Baseline.Reason != "" {
+			_, _ = fmt.Fprintf(file, "\n## Baseline\n\n%s\n", report.Baseline.Reason)
+		} else {
+			_, _ = io.WriteString(file, "\n## Baseline\n\n| Metric | Baseline | Current | Change | Limit | Passed |\n|---|---:|---:|---:|---:|:---:|\n")
+			for _, comparison := range report.Baseline.Comparisons {
+				_, _ = fmt.Fprintf(file, "| %s | %.2f | %.2f | %+.2f%% | %.2f%% | %t |\n", comparison.Metric, comparison.Baseline, comparison.Current, comparison.ChangePercent, comparison.LimitPercent, comparison.Passed)
+			}
 		}
 	}
 	return nil

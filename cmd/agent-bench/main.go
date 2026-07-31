@@ -24,6 +24,10 @@ type headerRatioFlags map[string]map[string]float64
 
 type stringFlags []string
 
+type statusFlags []int
+
+type statusCountFlags map[int]uint64
+
 func (values *stringFlags) String() string { return strings.Join(*values, ",") }
 func (values *stringFlags) Set(input string) error {
 	input = strings.TrimSpace(input)
@@ -31,6 +35,31 @@ func (values *stringFlags) Set(input string) error {
 		return errors.New("value cannot be empty")
 	}
 	*values = append(*values, input)
+	return nil
+}
+
+func (values *statusFlags) String() string { return fmt.Sprint([]int(*values)) }
+func (values *statusFlags) Set(input string) error {
+	status, err := strconv.Atoi(strings.TrimSpace(input))
+	if err != nil || status < 100 || status > 599 {
+		return errors.New("status must be an integer between 100 and 599")
+	}
+	*values = append(*values, status)
+	return nil
+}
+
+func (values *statusCountFlags) String() string { return fmt.Sprint(map[int]uint64(*values)) }
+func (values *statusCountFlags) Set(input string) error {
+	rawStatus, rawCount, ok := strings.Cut(input, "=")
+	status, statusErr := strconv.Atoi(strings.TrimSpace(rawStatus))
+	count, countErr := strconv.ParseUint(strings.TrimSpace(rawCount), 10, 64)
+	if !ok || statusErr != nil || countErr != nil || status < 100 || status > 599 {
+		return errors.New("status count must use STATUS=COUNT with STATUS between 100 and 599")
+	}
+	if *values == nil {
+		*values = make(map[int]uint64)
+	}
+	(*values)[status] = count
 	return nil
 }
 
@@ -103,6 +132,7 @@ func run(args []string) error {
 		return errors.New("usage: agent-bench run [flags]")
 	}
 	flags := flag.NewFlagSet("agent-bench run", flag.ContinueOnError)
+	runnerID := flags.String("runner-id", "default", "stable benchmark runner identifier")
 	suite := flags.String("suite", string(agentbench.SuitePR), "pr, nightly, capacity, or soak")
 	protocol := flags.String("protocol", string(agentbench.ProtocolH1), "h1, h2, or h3")
 	scenario := flags.String("scenario", "pure-origin-16k", "stable scenario name")
@@ -139,11 +169,17 @@ func run(args []string) error {
 	var maxHeaderRatios headerRatioFlags
 	var requestHeaders headerFlags
 	var captureHeaders stringFlags
+	var allowedStatuses statusFlags
+	var minStatusCounts statusCountFlags
+	var maxStatusCounts statusCountFlags
 	flags.Var(&expectedHeaders, "expected-header", "required response header Name=Value (repeatable)")
 	flags.Var(&allowedHeaders, "allowed-header", "allowed response header Name=Value (repeat a name for multiple values)")
 	flags.Var(&maxHeaderRatios, "max-header-ratio", "maximum response header value ratio Name=Value:Ratio")
 	flags.Var(&requestHeaders, "header", "request header Name=Value (repeatable)")
 	flags.Var(&captureHeaders, "capture-header", "response header to count in the report (repeatable)")
+	flags.Var(&allowedStatuses, "allowed-status", "allowed HTTP response status (repeatable; replaces expected-status matching)")
+	flags.Var(&minStatusCounts, "min-status-count", "minimum response count per run as STATUS=COUNT (repeatable)")
+	flags.Var(&maxStatusCounts, "max-status-count", "maximum response count per run as STATUS=COUNT (repeatable)")
 	if err := flags.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -167,13 +203,22 @@ func run(args []string) error {
 	if *repeats == 0 {
 		*repeats = defaultRepeats
 	}
+	var baselineReport *agentbench.Report
+	if *baseline != "" {
+		loaded, readErr := agentbench.ReadReport(*baseline)
+		if readErr != nil {
+			return fmt.Errorf("read baseline: %w", readErr)
+		}
+		baselineReport = &loaded
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	report, err := agentbench.RunBenchmark(ctx, agentbench.Config{
-		Suite: selectedSuite, Protocol: agentbench.Protocol(*protocol), Scenario: *scenario, Method: *method, URL: *targetURL, Host: *host,
+		RunnerID: *runnerID, Suite: selectedSuite, Protocol: agentbench.Protocol(*protocol), Scenario: *scenario, Method: *method, URL: *targetURL, Host: *host,
 		Concurrency: *concurrency, Duration: *duration, Warmup: *warmup, Repeats: *repeats, RequestTimeout: *timeout,
-		ExpectedStatus: *expectedStatus, ExpectedSHA256: strings.TrimSpace(*expectedHash), ExpectedHeaders: expectedHeaders,
+		ExpectedStatus: *expectedStatus, AllowedStatuses: allowedStatuses, MinStatusCounts: minStatusCounts, MaxStatusCounts: maxStatusCounts,
+		ExpectedSHA256: strings.TrimSpace(*expectedHash), ExpectedHeaders: expectedHeaders,
 		AllowedHeaders: allowedHeaders, MaxHeaderRatios: maxHeaderRatios,
 		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
 		UniqueQueryCardinality: *uniqueQueryCardinality,
@@ -191,12 +236,8 @@ func run(args []string) error {
 	if *agentBinary != "" {
 		report.BinarySHA256 = agentbench.FileSHA256(*agentBinary)
 	}
-	if *baseline != "" {
-		baselineReport, readErr := agentbench.ReadReport(*baseline)
-		if readErr != nil {
-			return fmt.Errorf("read baseline: %w", readErr)
-		}
-		decision := agentbench.Compare(report, baselineReport)
+	if baselineReport != nil {
+		decision := agentbench.Compare(report, *baselineReport)
 		report.Baseline = &decision
 	}
 	if err := agentbench.WriteArtifacts(*output, report); err != nil {

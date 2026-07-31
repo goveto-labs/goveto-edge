@@ -8,6 +8,7 @@ readonly COMPOSE_BASE="$REPO_ROOT/deploy/benchmark/compose.yaml"
 readonly COMPOSE_26C="$REPO_ROOT/deploy/benchmark/compose.26c.yaml"
 readonly COMPOSE_26C_AGENT2="$REPO_ROOT/deploy/benchmark/compose.26c-agent2.yaml"
 readonly COMPOSE_26C_AGENT4="$REPO_ROOT/deploy/benchmark/compose.26c-agent4.yaml"
+readonly COMPOSE_26C_AGENT4_LOAD10="$REPO_ROOT/deploy/benchmark/compose.26c-agent4-load10.yaml"
 readonly COMPOSE_PROJECT="goveto-edge-benchmark"
 readonly STATE_DIR="$REPO_ROOT/deploy/benchmark/state"
 readonly RESULTS_ROOT="$REPO_ROOT/deploy/benchmark/results"
@@ -23,6 +24,7 @@ soak_duration="6h"
 reuse_environment=false
 cleanup=false
 dry_run=false
+baseline_run=""
 result_dir=""
 summary_file=""
 last_status=""
@@ -44,12 +46,13 @@ Modes:
          cases, then the long 1 MiB cache-hit stability test.
 
 Options:
-  --runner <name>             default, 26c-agent2, 26c-agent4, or 26c-agent8
+  --runner <name>             default, 26c-agent2, 26c-agent4, 26c-agent4-load10, or 26c-agent8
   --protocols "h1 h2 h3"      Protocols to include (default: all)
   --run-id <name>             Result directory name
   --max-load-cpu <percent>    Load saturation threshold (default: 85)
   --soak-protocols "h2"       Full-mode stability protocols (default: h2)
   --soak-duration <duration>  Full-mode stability duration (default: 6h)
+  --baseline-run <run-id>     Compare each case with the same case from this run
   --reuse-environment         Keep benchmark volumes and credentials
   --cleanup                   Stop containers after the run
   --dry-run                   Print all expanded cases without running Docker
@@ -73,6 +76,7 @@ while (($# > 0)); do
     --max-load-cpu) max_load_cpu="${2:-}"; shift 2 ;;
     --soak-protocols) soak_protocols="${2:-}"; shift 2 ;;
     --soak-duration) soak_duration="${2:-}"; shift 2 ;;
+    --baseline-run) baseline_run="${2:-}"; shift 2 ;;
     --reuse-environment) reuse_environment=true; shift ;;
     --cleanup) cleanup=true; shift ;;
     --dry-run) dry_run=true; shift ;;
@@ -83,8 +87,9 @@ done
 
 case "$mode" in quick|full) ;; *) die "mode must be quick or full" ;; esac
 [[ "$runner" == "26c" ]] && runner="26c-agent8"
-case "$runner" in default|26c-agent2|26c-agent4|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
+case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run-id"
+[[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
 for protocol in $protocols $soak_protocols; do
   case "$protocol" in h1|h2|h3) ;; *) die "invalid protocol: $protocol" ;; esac
@@ -94,6 +99,7 @@ compose_args=(-p "$COMPOSE_PROJECT" -f "$COMPOSE_BASE")
 case "$runner" in
   26c-agent2) compose_args+=(-f "$COMPOSE_26C_AGENT2") ;;
   26c-agent4) compose_args+=(-f "$COMPOSE_26C_AGENT4") ;;
+  26c-agent4-load10) compose_args+=(-f "$COMPOSE_26C_AGENT4_LOAD10") ;;
   26c-agent8) compose_args+=(-f "$COMPOSE_26C") ;;
 esac
 compose() { docker compose "${compose_args[@]}" "$@"; }
@@ -170,7 +176,7 @@ report_status() {
     echo PRODUCT_FAIL
     return
   fi
-  jq -r 'if .validity.status then .validity.status elif .validity.valid then "PASS" else "ENV_INVALID" end' "$report"
+  jq -r 'if .baseline and (.baseline.passed == false) then "PRODUCT_FAIL" elif .validity.status then .validity.status elif .validity.valid then "PASS" else "ENV_INVALID" end' "$report"
 }
 
 record_skip() {
@@ -185,7 +191,8 @@ record_skip() {
 run_case() {
   local phase="$1" key="$2" name="$3" protocol="$4"
   shift 4
-  local output container_output started status
+  local output container_output started status baseline_report container_baseline
+  local -a baseline_args=()
 
   if $dry_run; then
     printf '%-10s %-42s protocol=%s\n' "$phase" "$name" "$protocol"
@@ -201,19 +208,42 @@ run_case() {
 
   output="$result_dir/$phase/$name"
   container_output="/results/$run_id/$phase/$name"
+  if [[ -n "$baseline_run" ]]; then
+    baseline_report="$RESULTS_ROOT/$baseline_run/$phase/$name/report.json"
+    container_baseline="/results/$baseline_run/$phase/$name/report.json"
+    [[ -s "$baseline_report" ]] || die "baseline case is missing: $baseline_report"
+    baseline_args=(--baseline "$container_baseline")
+  fi
   mkdir -p "$output"
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "[$phase] $name"
   if compose --profile run run --rm load agent-bench run \
       --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
       --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
-      --output "$container_output" "$@" 2>&1 | tee "$output/run.log"; then
+      --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
     :
   else
     : # Read the typed result from report.json below.
   fi
-  capture_case_logs "$output" "$started"
   status="$(report_status "$output/report.json")"
+  if [[ "$status" == "ENV_INVALID" ]] && jq -e '
+    .validity.status == "ENV_INVALID" and
+    (.validity.reasons | length) == 1 and
+    (.validity.reasons[0] | startswith("RPS coefficient of variation "))
+  ' "$output/report.json" >/dev/null; then
+    cp "$output/report.json" "$output/report.cv-invalid-attempt-1.json"
+    echo "[$phase] $name: retrying once after isolated RPS CV invalidation"
+    if compose --profile run run --rm load agent-bench run \
+        --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+        --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
+        --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
+      :
+    else
+      :
+    fi
+    status="$(report_status "$output/report.json")"
+  fi
+  capture_case_logs "$output" "$started"
   if [[ "$protocol" == "h3" ]] && h3_buffer_warning "$output/agent.log"; then
     status=ENV_INVALID
   fi
@@ -232,7 +262,7 @@ run_origin_screen() {
   for protocol in $protocols; do
     for size in 1024 16384 1048576; do
       for mode in reuse new; do
-        for concurrency in 1 8 32 128 512; do
+        for concurrency in 1 8 32 128; do
           name="pure-origin-${size}b-${mode}-${protocol}-c${concurrency}"
           key="origin:$name"
           args=(--suite pr --protocol "$protocol" --scenario "pure-origin-${size}b-${mode}" \
@@ -240,11 +270,22 @@ run_origin_screen() {
             --concurrency "$concurrency" --warmup 1s --duration 5s --repeats 1 \
             --expected-sha256 "$(sha256_zeros "$size")")
           [[ "$mode" == "new" ]] && args+=(--new-connection)
-          if [[ "$protocol" == "h3" && "$mode" == "new" && "$concurrency" == "512" ]]; then
-            args+=(--capacity-probe --cooldown 60s)
-          fi
           run_case screen "$key" "$name" "$protocol" "${args[@]}"
         done
+        if [[ "$mode" == "new" ]]; then
+          name="pure-origin-${size}b-new-${protocol}-c512"
+          key="origin:$name"
+          local gate="origin:pure-origin-${size}b-new-${protocol}-c128"
+          if [[ "${screen_status[$gate]:-}" != "PASS" ]]; then
+            record_skip screen "$name" "$protocol" "c128=${screen_status[$gate]:-missing}"
+            continue
+          fi
+          run_case screen "$key" "$name" "$protocol" \
+            --suite pr --protocol "$protocol" --scenario "pure-origin-${size}b-new" \
+            --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
+            --concurrency 512 --warmup 1s --duration 5s --repeats 1 --new-connection \
+            --capacity-probe --cooldown 60s --expected-sha256 "$(sha256_zeros "$size")"
+        fi
       done
     done
   done
@@ -390,16 +431,23 @@ run_cdn_suite() {
     run_cdn_case "$phase" origin-failover-h2 h2 --suite "$suite" --protocol h2 --scenario origin-failover-h2 \
       --url https://agent:8444/failover/bytes/16384 --host resilient.benchmark.example.test --insecure-skip-verify \
       --concurrency 32 --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
-      --expected-sha256 "$(sha256_zeros 16384)" --capture-header X-Benchmark-Origin
+      --expected-sha256 "$(sha256_zeros 16384)" --expected-header X-Benchmark-Origin=origin-2 --capture-header X-Benchmark-Origin
   fi
   if has_protocol "$protocols" h1; then
     run_cdn_case "$phase" origin-throttle-8mib-h1 h1 --suite "$suite" --protocol h1 --scenario origin-throttle-8mib-h1 \
       --url https://agent:8444/throttle/8388608/bytes/16777216 --host benchmark.example.test --insecure-skip-verify \
       --concurrency 1 --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
       --expected-sha256 "$(sha256_zeros 16777216)"
-    run_cdn_case "$phase" request-rate-limit-h1 h1 --suite "$suite" --protocol h1 --scenario request-rate-limit-h1 \
-      --url https://agent:8444/bytes/1024 --host limit.benchmark.example.test --insecure-skip-verify \
-      --concurrency 8 --warmup "$warmup" --duration "$duration" --repeats 1 --expected-status 429
+    if [[ "$phase" == "screen" ]]; then
+      run_cdn_case "$phase" request-rate-limit-h1 h1 --suite "$suite" --protocol h1 --scenario request-rate-limit-h1 \
+        --url https://agent:8444/bytes/1024 --host limit.benchmark.example.test --insecure-skip-verify \
+        --concurrency 8 --warmup "$warmup" --duration "$duration" --repeats 1 --expected-status 429
+    else
+      run_cdn_case "$phase" request-rate-limit-h1 h1 --suite "$suite" --protocol h1 --scenario request-rate-limit-h1 \
+        --url https://agent:8444/bytes/1024 --host limit.benchmark.example.test --insecure-skip-verify \
+        --concurrency 8 --skip-warmup --duration "$duration" --repeats 1 \
+        --allowed-status 200 --allowed-status 429 --min-status-count 429=1 --max-status-count 200=200
+    fi
   fi
 }
 

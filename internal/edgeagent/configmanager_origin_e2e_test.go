@@ -50,7 +50,7 @@ func TestAgentHTTPSOriginUsesSNIPrivateCAAndMTLS(t *testing.T) {
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "https", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			TimeoutMS: 2000,
+			TimeoutMS:     2000,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Transport: edgeprotocol.OriginTransportConfig{
@@ -137,7 +137,7 @@ func TestAgentHTTPResponsesDoNotTripPassiveHealth(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS: 2000,
+		TimeoutMS:    2000,
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 200, MaxFails: 1, UnhealthyStatus: []int{503},
@@ -160,7 +160,122 @@ func TestAgentHTTPResponsesDoNotTripPassiveHealth(t *testing.T) {
 	}
 }
 
-func TestAgentDoesNotRemoveSlowOrigin(t *testing.T) {
+func TestAgentConfiguredStatusFailsOverAndRecovers(t *testing.T) {
+	ensureAgentLogSink(t)
+	origingovernance.ResetMetrics()
+	t.Cleanup(origingovernance.ResetMetrics)
+	var primaryHealthy atomic.Bool
+	var primaryHits atomic.Int64
+	var backupHits atomic.Int64
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits.Add(1)
+		if !primaryHealthy.Load() {
+			http.Error(w, "primary unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		_, _ = w.Write([]byte("primary"))
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backupHits.Add(1)
+		_, _ = w.Write([]byte("backup"))
+	}))
+	defer backup.Close()
+
+	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
+		TimeoutMS:    2000,
+		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
+		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+			Enabled: true, FailDurationMS: 150, MaxFails: 1, UnhealthyStatus: []int{502, 503, 504},
+		},
+		Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 1},
+	})
+	defer manager.Stop()
+
+	if body, status := requestOriginSite(t, port); body != "backup" || status != http.StatusOK {
+		t.Fatalf("configured 503 did not fail over: status=%d body=%q", status, body)
+	}
+	metrics := map[string]origingovernance.Metric{}
+	for _, metric := range origingovernance.SnapshotAndReset() {
+		metrics[metric.OriginAddress] = metric
+	}
+	if metric := metrics[primary.Listener.Addr().String()]; metric.Requests != 1 || metric.Errors != 1 {
+		t.Fatalf("primary status error attribution=%#v", metric)
+	}
+	if metric := metrics[backup.Listener.Addr().String()]; metric.Requests != 1 || metric.Errors != 0 {
+		t.Fatalf("backup error attribution=%#v", metric)
+	}
+
+	primaryHealthy.Store(true)
+	time.Sleep(250 * time.Millisecond)
+	if body, status := requestOriginSite(t, port); body != "primary" || status != http.StatusOK {
+		t.Fatalf("primary was not retried after recovery window: status=%d body=%q", status, body)
+	}
+	if primaryHits.Load() != 2 || backupHits.Load() != 1 {
+		t.Fatalf("unexpected origin hits primary=%d backup=%d", primaryHits.Load(), backupHits.Load())
+	}
+}
+
+func TestAgentDoesNotRetryNonIdempotentStatusFailure(t *testing.T) {
+	ensureAgentLogSink(t)
+	var primaryHits atomic.Int64
+	var backupHits atomic.Int64
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits.Add(1)
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backupHits.Add(1)
+		_, _ = w.Write([]byte("backup"))
+	}))
+	defer backup.Close()
+
+	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
+		TimeoutMS: 2000,
+		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+			Enabled: true, FailDurationMS: 500, MaxFails: 1, UnhealthyStatus: []int{503},
+		},
+		Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 1},
+	})
+	defer manager.Stop()
+
+	_, status := requestOriginSiteMethod(t, port, http.MethodPost)
+	if status != http.StatusServiceUnavailable || primaryHits.Load() != 1 || backupHits.Load() != 0 {
+		t.Fatalf("POST status=%d primary=%d backup=%d", status, primaryHits.Load(), backupHits.Load())
+	}
+}
+
+func TestAgentConfiguredGatewayStatusesFailOver(t *testing.T) {
+	for _, failureStatus := range []int{http.StatusBadGateway, http.StatusGatewayTimeout} {
+		t.Run(strconv.Itoa(failureStatus), func(t *testing.T) {
+			ensureAgentLogSink(t)
+			primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "gateway failure", failureStatus)
+			}))
+			defer primary.Close()
+			backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("backup"))
+			}))
+			defer backup.Close()
+
+			manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
+				TimeoutMS: 2000,
+				PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+					Enabled: true, FailDurationMS: 200, MaxFails: 1,
+					UnhealthyStatus: []int{502, 503, 504},
+				},
+				Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 1},
+			})
+			defer manager.Stop()
+			if body, status := requestOriginSite(t, port); body != "backup" || status != http.StatusOK {
+				t.Fatalf("status %d did not fail over: response=%d body=%q", failureStatus, status, body)
+			}
+		})
+	}
+}
+
+func TestAgentRemovesConfiguredSlowOrigin(t *testing.T) {
 	ensureAgentLogSink(t)
 	var primaryHits atomic.Int64
 	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -175,7 +290,7 @@ func TestAgentDoesNotRemoveSlowOrigin(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS: 2000,
+		TimeoutMS:    2000,
 		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 500, MaxFails: 1, UnhealthyLatencyMS: 20,
@@ -186,8 +301,8 @@ func TestAgentDoesNotRemoveSlowOrigin(t *testing.T) {
 	if body, _ := requestOriginSite(t, port); body != "primary" {
 		t.Fatalf("first slow response = %q", body)
 	}
-	if body, _ := requestOriginSite(t, port); body != "primary" || primaryHits.Load() != 2 {
-		t.Fatalf("slow primary was removed: body=%q hits=%d", body, primaryHits.Load())
+	if body, _ := requestOriginSite(t, port); body != "backup" || primaryHits.Load() != 1 {
+		t.Fatalf("slow primary was not removed: body=%q hits=%d", body, primaryHits.Load())
 	}
 }
 
@@ -235,7 +350,7 @@ func TestAgentEnforcesTotalOriginTimeout(t *testing.T) {
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "http", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
-			TimeoutMS: 50,
+			TimeoutMS:     50,
 			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Retry:         edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 100, TryIntervalMS: 10},
@@ -282,7 +397,12 @@ func applyOriginGovernanceSite(t *testing.T, primary, backup *httptest.Server, p
 
 func requestOriginSite(t *testing.T, port int) (string, int) {
 	t.Helper()
-	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
+	return requestOriginSiteMethod(t, port, http.MethodGet)
+}
+
+func requestOriginSiteMethod(t *testing.T, port int, method string) (string, int) {
+	t.Helper()
+	request, _ := http.NewRequest(method, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	request.Host = "governance.example.test"
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {

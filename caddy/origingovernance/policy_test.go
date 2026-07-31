@@ -2,6 +2,7 @@ package origingovernance
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -141,5 +142,15 @@ func TestHTTPTransportRequiresCompleteMTLSKeyPair(t *testing.T) {
 	transport := &HTTPTransport{ClientCertificatePEM: "certificate only"}
 	if err := transport.Provision(caddy.Context{}); err == nil {
 		t.Fatal("expected incomplete mTLS key pair to fail")
+	}
+}
+
+func TestResponseHasStatus(t *testing.T) {
+	statuses := []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout}
+	if !responseHasStatus(&http.Response{StatusCode: http.StatusServiceUnavailable}, statuses) {
+		t.Fatal("configured unhealthy response was not classified as an error")
+	}
+	if responseHasStatus(&http.Response{StatusCode: http.StatusNotFound}, statuses) || responseHasStatus(nil, statuses) {
+		t.Fatal("unconfigured or missing response was classified as an error")
 	}
 }

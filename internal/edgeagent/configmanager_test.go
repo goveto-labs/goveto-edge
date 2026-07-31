@@ -388,12 +388,14 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 		`"client_certificate_pem":"CLIENT CERT"`, `"client_private_key_pem":"CLIENT KEY"`,
 		`"X-Origin-Token":["secret"]`, `"handler":"goveto_origin_metrics"`, `"timeout":17000000000`,
 		`"retries":4`, `"try_duration":6000000000`, `"try_interval":300000000`,
+		`"unhealthy_status":[500,503]`, `"unhealthy_latency":2500000000`, `"max_requests":64`,
+		`{http.reverse_proxy.status_code} in [500,503]`,
 	} {
 		if !strings.Contains(raw, expected) {
 			t.Fatalf("missing origin governance setting %s in %s", expected, raw)
 		}
 	}
-	for _, forbidden := range []string{`"active":`, `"unhealthy_status"`, `"unhealthy_latency"`, `"unhealthy_request_count"`} {
+	for _, forbidden := range []string{`"active":`, `"unhealthy_request_count"`} {
 		if strings.Contains(raw, forbidden) {
 			t.Fatalf("response- or probe-based health setting %s must not be rendered in %s", forbidden, raw)
 		}
@@ -416,6 +418,26 @@ func TestRenderDefaultOriginPoolLeavesActiveConnectionsUnlimited(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"max_idle_conns_per_host":128`) || !strings.Contains(raw, `"idle_timeout":120000000000`) {
 		t.Fatalf("default origin keep-alive pool was not rendered: %s", raw)
+	}
+	if !strings.Contains(raw, `"unhealthy_status":[502,503,504]`) || !strings.Contains(raw, `status_code} in [502,503,504]`) {
+		t.Fatalf("default response status failover was not rendered: %s", raw)
+	}
+}
+
+func TestRenderDisabledPassiveHealthOmitsStatusFailover(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.OriginPolicy = edgeprotocol.DefaultOriginPolicy()
+	config.OriginPolicy.PassiveHealth.Enabled = false
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	if strings.Contains(raw, `"health_checks"`) || strings.Contains(raw, `"unhealthy_status"`) || strings.Contains(raw, `status_code} in`) {
+		t.Fatalf("disabled passive health rendered status failover: %s", raw)
+	}
+	if !strings.Contains(raw, `{http.reverse_proxy.is_transport_error} == true`) {
+		t.Fatalf("transport retry matcher missing: %s", raw)
 	}
 }
 

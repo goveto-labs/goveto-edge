@@ -137,6 +137,7 @@ func DefaultOriginPolicy() OriginPolicyConfig {
 		},
 		PassiveHealth: OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 30000, MaxFails: 3,
+			UnhealthyStatus: []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout},
 		},
 		Transport: OriginTransportConfig{
 			DialTimeoutMS: 3000, TLSHandshakeTimeoutMS: 5000,
@@ -278,11 +279,9 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 	if policy.PassiveHealth.MaxFails == 0 {
 		policy.PassiveHealth.MaxFails = defaults.PassiveHealth.MaxFails
 	}
-	// An HTTP response proves that the origin was reachable. Only transport
-	// failures from real proxied requests are allowed to trip passive health.
-	policy.PassiveHealth.UnhealthyStatus = nil
-	policy.PassiveHealth.UnhealthyLatencyMS = 0
-	policy.PassiveHealth.UnhealthyRequestCount = 0
+	if len(policy.PassiveHealth.UnhealthyStatus) == 0 {
+		policy.PassiveHealth.UnhealthyStatus = append([]int(nil), defaults.PassiveHealth.UnhealthyStatus...)
+	}
 	if policy.Transport.DialTimeoutMS == 0 {
 		policy.Transport.DialTimeoutMS = defaults.Transport.DialTimeoutMS
 	}

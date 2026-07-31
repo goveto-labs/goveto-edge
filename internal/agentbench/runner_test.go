@@ -103,6 +103,25 @@ func TestExecuteRequestLimitsUnexpectedStatusBody(t *testing.T) {
 	}
 }
 
+func TestExecuteRequestAcceptsConfiguredStatuses(t *testing.T) {
+	status := http.StatusOK
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: status, Proto: "HTTP/1.1", Header: make(http.Header), Body: io.NopCloser(strings.NewReader("ok")), Request: request}, nil
+	})}
+	config := Config{URL: "https://benchmark.example.test", Protocol: ProtocolH1, AllowedStatuses: []int{200, 429}}
+	if result := executeRequest(t.Context(), client, config); result.err != nil || result.status != 200 {
+		t.Fatalf("HTTP 200 result=%+v", result)
+	}
+	status = http.StatusTooManyRequests
+	if result := executeRequest(t.Context(), client, config); result.err != nil || result.status != 429 {
+		t.Fatalf("HTTP 429 result=%+v", result)
+	}
+	status = http.StatusServiceUnavailable
+	if result := executeRequest(t.Context(), client, config); result.err == nil || result.status != 503 {
+		t.Fatalf("HTTP 503 result=%+v", result)
+	}
+}
+
 func TestH3NewConnectionTransportUsesSharedQUICDialer(t *testing.T) {
 	shared := new(quic.Transport)
 	roundTripper, _, err := newTransport(Config{Protocol: ProtocolH3}, shared)
@@ -142,13 +161,13 @@ func TestIgnoreMeasurementCancellationRecognizesOnlyLocalH3Cancellation(t *testi
 
 func TestRunStateMetrics(t *testing.T) {
 	state := &runState{protocols: make(map[string]uint64)}
-	state.record(requestResult{latency: time.Millisecond, ttfb: 500 * time.Microsecond, bytes: 1024, protocol: "HTTP/3.0"})
-	state.record(requestResult{latency: 3 * time.Millisecond, ttfb: time.Millisecond, bytes: 1024, protocol: "HTTP/3.0"})
+	state.record(requestResult{latency: time.Millisecond, ttfb: 500 * time.Microsecond, bytes: 1024, protocol: "HTTP/3.0", status: 200})
+	state.record(requestResult{latency: 3 * time.Millisecond, ttfb: time.Millisecond, bytes: 1024, protocol: "HTTP/3.0", status: 429})
 	metrics, failures, errorCounts := state.metrics(time.Second)
 	if len(failures) != 0 || metrics.RPS != 2 || metrics.P50MS != 1 || metrics.P99MS != 3 || metrics.NegotiatedProtocol != "HTTP/3.0" {
 		t.Fatalf("metrics=%+v failures=%v", metrics, failures)
 	}
-	if len(errorCounts) != 0 {
+	if len(errorCounts) != 0 || metrics.HTTPStatusCounts[200] != 1 || metrics.HTTPStatusCounts[429] != 1 {
 		t.Fatalf("error counts=%v", errorCounts)
 	}
 }

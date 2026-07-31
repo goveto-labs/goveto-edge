@@ -52,6 +52,7 @@ func Summarize(runs []Run) Metrics {
 	sort.Slice(metrics, func(i, j int) bool { return metrics[i].Metrics.RPS < metrics[j].Metrics.RPS })
 	result := metrics[len(metrics)/2].Metrics
 	result.NegotiatedProtocol = commonProtocol(runs)
+	result.HTTPStatusCounts = aggregateStatusCounts(runs)
 	return result
 }
 
@@ -128,6 +129,16 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 				}
 			}
 		}
+		for status, minimum := range config.MinStatusCounts {
+			if actual := run.Metrics.HTTPStatusCounts[status]; actual < minimum {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %d HTTP %d responses, want at least %d", run.Index, actual, status, minimum))
+			}
+		}
+		for status, maximum := range config.MaxStatusCounts {
+			if actual := run.Metrics.HTTPStatusCounts[status]; actual > maximum {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d had %d HTTP %d responses, want at most %d", run.Index, actual, status, maximum))
+			}
+		}
 		if config.MaxAgentRSSBytes > 0 && run.Resources.RSSBytesMax > config.MaxAgentRSSBytes {
 			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS peaked at %d bytes, want at most %d", run.Index, run.Resources.RSSBytesMax, config.MaxAgentRSSBytes))
 		}
@@ -186,14 +197,24 @@ func resultStatusPriority(status ResultStatus) int {
 
 func Compare(current, baseline Report) BaselineDecision {
 	decision := BaselineDecision{Passed: true}
+	if current.RunnerID == "" || current.RunnerID != baseline.RunnerID {
+		decision.Passed = false
+		decision.Reason = "baseline runner does not match current runner"
+		return decision
+	}
 	if current.Platform.Architecture != baseline.Platform.Architecture {
 		decision.Passed = false
 		decision.Reason = "baseline architecture does not match current architecture"
 		return decision
 	}
-	if current.Scenario.Name != baseline.Scenario.Name || current.Scenario.Protocol != baseline.Scenario.Protocol {
+	if current.Scenario.Suite != baseline.Scenario.Suite || current.Scenario.Name != baseline.Scenario.Name || current.Scenario.Protocol != baseline.Scenario.Protocol {
 		decision.Passed = false
-		decision.Reason = "baseline scenario or protocol does not match"
+		decision.Reason = "baseline suite, scenario, or protocol does not match"
+		return decision
+	}
+	if current.Scenario.Concurrency != baseline.Scenario.Concurrency || current.Scenario.NewConnection != baseline.Scenario.NewConnection {
+		decision.Passed = false
+		decision.Reason = "baseline concurrency configuration does not match"
 		return decision
 	}
 	decision.Comparisons = []MetricComparison{
@@ -204,6 +225,19 @@ func Compare(current, baseline Report) BaselineDecision {
 		decision.Passed = decision.Passed && comparison.Passed
 	}
 	return decision
+}
+
+func aggregateStatusCounts(runs []Run) map[int]uint64 {
+	counts := make(map[int]uint64)
+	for _, run := range runs {
+		for status, count := range run.Metrics.HTTPStatusCounts {
+			counts[status] += count
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	return counts
 }
 
 func higherIsBetter(name string, current, baseline, limit float64) MetricComparison {

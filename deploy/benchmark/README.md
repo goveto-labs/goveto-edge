@@ -11,8 +11,9 @@ script/run_agent_benchmark.sh full [options]
 items with short timings, including H1/H2/H3, reused and new connections,
 1 KiB/16 KiB/1 MiB payloads, concurrency 1/8/32/128/512, caching, coalescing,
 eviction, ranges, 16 MiB transfers, multiple domains and origins, origin
-resilience, throttling, and rate limiting. It skips only the long Capacity and
-stability stages.
+resilience, throttling, and rate limiting. New-connection c512 cases run only
+after the matching c128 case passes and are explicitly classified as capacity
+probes. It skips only the long Capacity and stability stages.
 
 `full` starts with the same complete screen. It then runs Capacity only for
 cases whose screen status is exactly `PASS`, using a 30 second warmup, 120 second
@@ -41,11 +42,18 @@ script/run_agent_benchmark.sh quick --runner 26c-agent8 --dry-run
 script/run_agent_benchmark.sh full --runner 26c-agent2 --dry-run
 ```
 
-Available runner layouts are `default`, `26c-agent2`, `26c-agent4`, and
-`26c-agent8`. The 26-CPU layouts keep six CPUs assigned to the load generator;
-agent4/agent8 measure Agent scaling but do not increase load-generator capacity.
+Available runner layouts are `default`, `26c-agent2`, `26c-agent4`,
+`26c-agent4-load10`, and `26c-agent8`. The standard 26-CPU layouts keep six CPUs
+assigned to the load generator; agent4/agent8 measure Agent scaling but do not
+increase load-generator capacity. `26c-agent4-load10` assigns CPUs 0-9 to load,
+10-13 to Agent, four CPUs to each origin, and two CPUs each to Redis and Gateway.
+Use it for the 1 MiB and 16 MiB H1 follow-up when standard agent4 results are
+load-saturated; those standard results are lower bounds, not load10 baselines.
 Use `--protocols "h1 h2 h3"` to select protocols, `--run-id NAME` to name the
-result directory, and `--cleanup` to stop containers after the run. Run
+result directory, `--baseline-run RUN_ID` to compare against the matching case
+from a prior run, and `--cleanup` to stop containers after the run. Baseline
+comparison requires schema 1.1 and an exact runner, architecture, suite,
+scenario, protocol, concurrency, and connection-mode match. Run
 `script/run_agent_benchmark.sh --help` for all options.
 
 ## Result validity
@@ -56,7 +64,7 @@ Each case is classified as:
 - `PRODUCT_FAIL`: request or product behavior failed.
 - `LOAD_SATURATED`: the load generator exceeded `--max-load-cpu` (85% by
   default), so throughput is only a lower bound and is not a product failure.
-- `TARGET_SATURATED`: the explicit H3 c512 new-connection capacity probe exceeded
+- `TARGET_SATURATED`: an explicit c512 new-connection capacity probe exceeded
   the target's capacity after the c128 compatibility gate passed. The errors and
   cooldown resources remain in the report, but this probe does not fail the suite.
 - `ENV_INVALID`: the environment or measurement was invalid.
@@ -78,7 +86,11 @@ Cache-hit Capacity and soak cases accept `HIT` and `STALE`, reject `MISS`, and
 limit `STALE` to 1% per repetition. Cache-miss keys include a per-run and
 per-repeat namespace. High-concurrency cases keep sampling during a 60 second
 cooldown so retained heap, goroutines, file descriptors, and connections are
-visible without restarting the Agent.
+visible without restarting the Agent. Rate-limit screening requires every
+measured response to be 429. Its 120 second Capacity case accepts only 200/429,
+requires at least one 429, and permits at most 200 successful responses per
+repetition. Every HTTP status is counted in schema 1.1 reports. A run invalidated
+only by the fixed 5% RPS CV threshold is repeated once with identical settings.
 
 ## H3 prerequisite
 
@@ -105,6 +117,6 @@ stream. The benchmark-only telemetry listener exposes Agent CPU, memory, disk,
 connection, cache, heap, GC, goroutine, and log-queue measurements to the load
 container while the load generator remains pinned to separate CPUs.
 
-Fixed-runner results are comparable only within the same architecture. Capacity
-cases run serially so shared CPU, disk, network, and latency measurements remain
-usable as a per-node baseline.
+Fixed-runner results are comparable only within the same runner and architecture.
+Capacity cases run serially so shared CPU, disk, network, and latency
+measurements remain usable as a per-node baseline.

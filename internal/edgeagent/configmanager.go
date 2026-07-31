@@ -485,6 +485,10 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		if !supportedOriginScheduler(policy) {
 			return nil, fmt.Errorf("unsupported Caddy scheduler %q", policy)
 		}
+		retryExpression := "{http.reverse_proxy.is_transport_error} == true"
+		if originPolicy.PassiveHealth.Enabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
+			retryExpression += " || {http.reverse_proxy.status_code} in " + formatStatusList(originPolicy.PassiveHealth.UnhealthyStatus)
+		}
 		reverseProxy := map[string]any{
 			"handler":   "reverse_proxy",
 			"upstreams": upstreams,
@@ -497,16 +501,23 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				"try_interval": durationMS(originPolicy.Retry.TryIntervalMS),
 				"retry_match": []any{map[string]any{
 					"method":     []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodDelete, http.MethodOptions, http.MethodTrace},
-					"expression": "{http.reverse_proxy.is_transport_error} == true || {http.reverse_proxy.status_code} in [502, 503, 504]",
+					"expression": retryExpression,
 				}},
 			},
 		}
 		healthChecks := map[string]any{}
 		if originPolicy.PassiveHealth.Enabled {
-			healthChecks["passive"] = map[string]any{
+			passive := map[string]any{
 				"fail_duration": durationMS(originPolicy.PassiveHealth.FailDurationMS),
 				"max_fails":     originPolicy.PassiveHealth.MaxFails,
 			}
+			if len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
+				passive["unhealthy_status"] = originPolicy.PassiveHealth.UnhealthyStatus
+			}
+			if originPolicy.PassiveHealth.UnhealthyLatencyMS > 0 {
+				passive["unhealthy_latency"] = durationMS(originPolicy.PassiveHealth.UnhealthyLatencyMS)
+			}
+			healthChecks["passive"] = passive
 		}
 		if len(healthChecks) > 0 {
 			reverseProxy["health_checks"] = healthChecks
@@ -523,6 +534,9 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				"max_idle_conns_per_host": originPolicy.Transport.KeepAliveMaxIdleConnsPerHost,
 				"idle_timeout":            durationMS(originPolicy.Transport.KeepAliveIdleTimeoutMS),
 			},
+		}
+		if originPolicy.PassiveHealth.Enabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
+			transport["unhealthy_status"] = originPolicy.PassiveHealth.UnhealthyStatus
 		}
 		if originPolicy.Transport.MaxConnsPerHost > 0 {
 			transport["max_conns_per_host"] = originPolicy.Transport.MaxConnsPerHost
@@ -903,6 +917,11 @@ func cacheKeyHeaders(policy cachepolicy.CachePolicy) []string {
 
 func durationMS(value int) time.Duration {
 	return time.Duration(value) * time.Millisecond
+}
+
+func formatStatusList(statuses []int) string {
+	encoded, _ := json.Marshal(statuses)
+	return string(encoded)
 }
 
 func originDialAddress(address, policy string) string {

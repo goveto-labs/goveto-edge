@@ -1,0 +1,13 @@
+services:
+  load:
+    cpuset: "0-9"
+  agent:
+    cpuset: "10-13"
+  origin:
+    cpuset: "14-17"
+  origin2:
+    cpuset: "18-21"
+  redis:
+    cpuset: "22-23"
+  gateway:
+    cpuset: "24-25"

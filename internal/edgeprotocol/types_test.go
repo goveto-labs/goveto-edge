@@ -2,6 +2,7 @@ package edgeprotocol
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 )
 
@@ -134,16 +135,16 @@ func TestValidateOriginPolicyRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
-func TestDefaultOriginPolicyUsesRequestDrivenTransportHealth(t *testing.T) {
+func TestDefaultOriginPolicyUsesResponseStatusFailover(t *testing.T) {
 	policy := DefaultOriginPolicy()
 	if policy.ActiveHealth.Enabled {
 		t.Fatal("active origin probing must be disabled by default")
 	}
 	if !policy.PassiveHealth.Enabled {
-		t.Fatal("passive transport failure health must remain enabled")
+		t.Fatal("passive health must remain enabled")
 	}
-	if len(policy.PassiveHealth.UnhealthyStatus) != 0 || policy.PassiveHealth.UnhealthyLatencyMS != 0 {
-		t.Fatalf("HTTP responses must not trip health: %#v", policy.PassiveHealth)
+	if !reflect.DeepEqual(policy.PassiveHealth.UnhealthyStatus, []int{502, 503, 504}) || policy.PassiveHealth.UnhealthyLatencyMS != 0 {
+		t.Fatalf("unexpected passive health defaults: %#v", policy.PassiveHealth)
 	}
 	if policy.Transport.MaxConnsPerHost != 0 || policy.Transport.KeepAliveMaxIdleConnsPerHost != 128 ||
 		policy.Transport.KeepAliveIdleTimeoutMS != 120000 {
@@ -168,16 +169,25 @@ func TestNormalizeAndValidateOriginConnectionPool(t *testing.T) {
 	}
 }
 
-func TestNormalizeOriginPolicyDropsResponseBasedHealthFailures(t *testing.T) {
+func TestNormalizeOriginPolicyPreservesResponseBasedHealthFailures(t *testing.T) {
 	policy := DefaultOriginPolicy()
 	policy.ActiveHealth.Enabled = true
 	policy.PassiveHealth.UnhealthyStatus = []int{404, 500, 503}
 	policy.PassiveHealth.UnhealthyLatencyMS = 2500
 	policy.PassiveHealth.UnhealthyRequestCount = 64
 	policy = NormalizeOriginPolicy(policy)
-	if policy.ActiveHealth.Enabled || len(policy.PassiveHealth.UnhealthyStatus) != 0 ||
-		policy.PassiveHealth.UnhealthyLatencyMS != 0 || policy.PassiveHealth.UnhealthyRequestCount != 0 {
-		t.Fatalf("non-transport health survived normalization: %#v", policy)
+	if policy.ActiveHealth.Enabled || !reflect.DeepEqual(policy.PassiveHealth.UnhealthyStatus, []int{404, 500, 503}) ||
+		policy.PassiveHealth.UnhealthyLatencyMS != 2500 || policy.PassiveHealth.UnhealthyRequestCount != 64 {
+		t.Fatalf("response health did not survive normalization: %#v", policy)
+	}
+}
+
+func TestNormalizeOriginPolicyRestoresDefaultUnhealthyStatuses(t *testing.T) {
+	policy := DefaultOriginPolicy()
+	policy.PassiveHealth.UnhealthyStatus = nil
+	policy = NormalizeOriginPolicy(policy)
+	if !reflect.DeepEqual(policy.PassiveHealth.UnhealthyStatus, []int{502, 503, 504}) {
+		t.Fatalf("unhealthy statuses=%v", policy.PassiveHealth.UnhealthyStatus)
 	}
 }
 
