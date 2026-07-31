@@ -64,7 +64,7 @@ export default function App() {
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />
                                     <Route element={<Settings />} path='/settings' />
-                                    <Route element={<AdminSettings />} path='/settings/admin' />
+                                    <Route element={<AdminSettings />} path='/settings/admin/*' />
                                 </Route>
                             </Routes>
                         </ClusterProvider>

@@ -5,6 +5,7 @@ import "net/http"
 // ControlPlaneRoutes enumerates the current security-relevant HTTP mutations.
 var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/auth/login", "auth.login", "session", ""},
+	{http.MethodGet, "/api/v1/auth/providers/callback", "auth.external_login", "session", ""},
 	{http.MethodPost, "/api/v1/auth/logout", "auth.logout", "session", ""},
 	{http.MethodPost, "/api/v1/auth/register", "user.register", "user", ""},
 	{http.MethodPut, "/api/v1/auth/password", "auth.password.change", "user", ""},

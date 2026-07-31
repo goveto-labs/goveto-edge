@@ -12,6 +12,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
+
+	"goveto-edge/internal/settings"
 )
 
 func runMiddleware(t *testing.T, request *http.Request, options Options, handler echo.HandlerFunc) (*httptest.ResponseRecorder, error) {
@@ -122,32 +124,47 @@ func TestRateLimiterEnforcesQuota(t *testing.T) {
 	}
 }
 
-func TestTrustedProxyIPExtractorTrustsOnlyConfiguredRanges(t *testing.T) {
-	if extractor, err := TrustedProxyIPExtractor(nil); err != nil || extractor != nil {
-		t.Fatalf("no proxies should mean no extractor, got %v, %v", extractor, err)
+func TestProxyIPExtractorDisabledIgnoresForwardingHeaders(t *testing.T) {
+	extractor, err := ProxyIPExtractor(settings.HTTPProxyConfig{
+		ClientIPHeaders: []string{"X-Forwarded-For"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := TrustedProxyIPExtractor([]string{"not-a-cidr"}); err == nil {
-		t.Fatal("invalid CIDR was accepted")
+	if extractor != nil {
+		t.Fatal("disabled forwarding headers configured an IP extractor")
 	}
+}
 
-	extractor, err := TrustedProxyIPExtractor([]string{"10.0.0.0/8"})
+func TestProxyIPExtractorTrustsAnySourceAndHonorsHeaderPriority(t *testing.T) {
+	extractor, err := ProxyIPExtractor(settings.HTTPProxyConfig{
+		TrustAll:        true,
+		ClientIPHeaders: []string{"Cf-Connecting-IP", "X-Forwarded-For"},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "10.1.2.3:4444"
-	request.Header.Set("X-Forwarded-For", "203.0.113.9")
-	if got := extractor(request); got != "203.0.113.9" {
-		t.Fatalf("trusted proxy header ignored, got %q", got)
+	request.RemoteAddr = "192.0.2.20:4444"
+	request.Header.Set("Cf-Connecting-IP", "203.0.113.10")
+	request.Header.Set("X-Forwarded-For", "198.51.100.4, 10.1.2.3")
+	if got := extractor(request); got != "203.0.113.10" {
+		t.Fatalf("client IP = %q, want first configured header", got)
 	}
+}
 
-	// A connection from outside the trusted range cannot spoof its IP,
-	// even from a private address (echo's defaults are disabled).
-	request = httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "192.168.7.7:4444"
-	request.Header.Set("X-Forwarded-For", "203.0.113.9")
-	if got := extractor(request); got != "192.168.7.7" {
-		t.Fatalf("untrusted proxy header trusted, got %q", got)
+func TestProxyIPExtractorTrustAllAndForwarded(t *testing.T) {
+	extractor, err := ProxyIPExtractor(settings.HTTPProxyConfig{
+		TrustAll: true, ClientIPHeaders: []string{"Forwarded", "X-Real-IP"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.RemoteAddr = "192.0.2.20:4444"
+	request.Header.Set("Forwarded", `for="[2001:db8::8]:4711";proto=https`)
+	if got := extractor(request); got != "2001:db8::8" {
+		t.Fatalf("Forwarded client IP = %q", got)
 	}
 }
 

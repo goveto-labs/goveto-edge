@@ -1,9 +1,11 @@
-import { Button, Input, InputOTP, useOverlayState } from '@heroui/react';
-import { Globe, Loader2, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import type { AuthMethods } from '@/api';
 
-import { ApiError } from '@/api';
+import { Button, Input, InputOTP, useOverlayState } from '@heroui/react';
+import { Globe, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+
+import { ApiError, authApi } from '@/api';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
@@ -20,6 +22,7 @@ function isTotpRequired(err: unknown): boolean {
 export default function Login() {
     useSystemTheme();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const { login } = useAuth();
     const otpModal = useOverlayState();
     const [email, setEmail] = useState('');
@@ -28,6 +31,25 @@ export default function Login() {
     const [error, setError] = useState('');
     const [otpError, setOtpError] = useState('');
     const [loading, setLoading] = useState(false);
+    const [methods, setMethods] = useState<AuthMethods>({
+        local_login_enabled: true,
+        providers: [],
+    });
+
+    useEffect(() => {
+        let active = true;
+        authApi
+            .methods()
+            .then((result) => {
+                if (active) setMethods(result);
+            })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    const authError = searchParams.get('auth_error') ?? '';
 
     const completeLogin = async (otp?: string) => {
         await login({ email, password, code: otp });
@@ -100,65 +122,96 @@ export default function Login() {
                             Sign in
                         </h2>
                         <p className='text-sm text-muted'>
-                            Use your control plane credentials to continue.
+                            {methods.local_login_enabled
+                                ? 'Use your control plane credentials to continue.'
+                                : 'Choose an identity provider to continue.'}
                         </p>
                     </div>
 
-                    {error && (
+                    {(error || authError) && (
                         <div
                             className='mb-5 rounded-xl border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger-foreground'
                             role='alert'
                         >
-                            {error}
+                            {error || authError}
                         </div>
                     )}
 
-                    <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
-                        <FormField htmlFor='login-email' label='Email' required>
-                            <Input
-                                autoComplete='email'
-                                autoFocus
-                                id='login-email'
-                                placeholder='you@company.com'
-                                required
-                                type='email'
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </FormField>
-                        <FormField htmlFor='login-password' label='Password' required>
-                            <Input
-                                autoComplete='current-password'
-                                id='login-password'
-                                placeholder='••••••••'
-                                required
-                                type='password'
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </FormField>
+                    {methods.local_login_enabled && (
+                        <form className='flex flex-col gap-4' onSubmit={handleSubmit}>
+                            <FormField htmlFor='login-email' label='Email' required>
+                                <Input
+                                    autoComplete='email'
+                                    autoFocus
+                                    id='login-email'
+                                    placeholder='you@company.com'
+                                    required
+                                    type='email'
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                />
+                            </FormField>
+                            <FormField htmlFor='login-password' label='Password' required>
+                                <Input
+                                    autoComplete='current-password'
+                                    id='login-password'
+                                    placeholder='••••••••'
+                                    required
+                                    type='password'
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                />
+                            </FormField>
 
-                        <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
-                            {loading && !otpModal.isOpen ? (
-                                <span className='flex items-center justify-center gap-2'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                    Signing in…
-                                </span>
-                            ) : (
-                                'Sign in'
+                            <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
+                                {loading && !otpModal.isOpen ? (
+                                    <span className='flex items-center justify-center gap-2'>
+                                        <Loader2 className='h-4 w-4 animate-spin' />
+                                        Signing in…
+                                    </span>
+                                ) : (
+                                    'Sign in'
+                                )}
+                            </Button>
+                        </form>
+                    )}
+
+                    {methods.providers.length > 0 && (
+                        <div className={methods.local_login_enabled ? 'mt-5' : undefined}>
+                            {methods.local_login_enabled && (
+                                <div className='mb-5 flex items-center gap-3 text-xs text-muted'>
+                                    <div className='h-px flex-1 bg-border' />
+                                    <span>or</span>
+                                    <div className='h-px flex-1 bg-border' />
+                                </div>
                             )}
-                        </Button>
-                    </form>
+                            <div className='space-y-2.5'>
+                                {methods.providers.map((provider) => (
+                                    <Button
+                                        fullWidth
+                                        key={provider.id}
+                                        variant='secondary'
+                                        onPress={() => window.location.assign(provider.start_url)}
+                                    >
+                                        <KeyRound className='h-4 w-4' />
+                                        Continue with {provider.provider_name}
+                                    </Button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
-                    <p className='mt-8 text-center text-sm text-muted'>
-                        No account?{' '}
-                        <Link
-                            className='font-medium text-accent underline-offset-4 transition-colors hover:underline'
-                            to='/register'
-                        >
-                            Register
-                        </Link>
-                    </p>
+                    {methods.local_login_enabled && (
+                        <p className='mt-8 text-center text-sm text-muted'>
+                            No account?{' '}
+                            <Link
+                                className='font-medium text-accent underline-offset-4 transition-colors hover:underline'
+                                to='/register'
+                            >
+                                Register
+                            </Link>
+                        </p>
+                    )}
                 </div>
 
                 <p className='absolute bottom-6 left-0 right-0 text-center text-xs text-muted/70 lg:left-auto lg:right-10 lg:text-right'>

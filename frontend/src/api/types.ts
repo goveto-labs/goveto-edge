@@ -31,13 +31,60 @@ export interface InitializeRequest {
 
 export interface AdminSettings {
     agent_gateway_public_address: string;
+    http_proxy: HTTPProxySettings;
+    authentication: AuthenticationSettings;
     restart_required: boolean;
     restarting: boolean;
 }
 
-export interface UpdateAdminSettings {
-    agent_gateway_public_address: string;
+export interface HTTPProxySettings {
+    trust_all: boolean;
+    client_ip_headers: string[];
+}
+
+export type AuthenticationProviderType = 'OIDC' | 'OAUTH2';
+
+export interface AuthenticationProviderSettings {
+    id: string;
+    type: AuthenticationProviderType;
+    preset: string;
+    enabled: boolean;
+    provider_name: string;
+    issuer_url: string;
+    authorization_url: string;
+    token_url: string;
+    user_info_url: string;
+    email_url: string;
+    client_id: string;
+    client_secret_configured: boolean;
+    redirect_url: string;
+    scopes: string[];
+    auto_create_users: boolean;
+}
+
+export interface AuthenticationSettings {
+    local_login_enabled: boolean;
+    require_totp: boolean;
+    providers: AuthenticationProviderSettings[];
+}
+
+export interface UpdateAdminSettings
+    extends Omit<AdminSettings, 'restart_required' | 'restarting' | 'authentication'> {
+    authentication: AuthenticationSettings & {
+        providers: Array<AuthenticationProviderSettings & { client_secret?: string }>;
+    };
     restart: boolean;
+}
+
+export interface AuthMethods {
+    local_login_enabled: boolean;
+    providers: Array<{
+        id: string;
+        type: AuthenticationProviderType;
+        enabled: boolean;
+        provider_name: string;
+        start_url: string;
+    }>;
 }
 
 export interface InitializationStatus {

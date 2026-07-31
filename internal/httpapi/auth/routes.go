@@ -49,9 +49,10 @@ func newUserResponse(ctx context.Context, settingStore *settings.Store, user *mo
 	}, nil
 }
 
-func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, captchaVerifier *captcha.Verifier, limiter *httpsecurity.RateLimiter) {
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, secretCipher settings.SecretCipher, captchaVerifier *captcha.Verifier, limiter *httpsecurity.RateLimiter) {
 	group := e.Group("/api/v1/auth")
 	group.POST("/login", login(db, sessions, settingStore), limiter.Limit("login", 10, time.Minute))
+	registerExternalAuth(group, db, sessions, settingStore, secretCipher, limiter)
 	group.POST("/register", register(db, settingStore, captchaVerifier), limiter.Limit("register", 5, time.Hour))
 	group.GET("/registration-config", registrationConfig(settingStore), limiter.Limit("captcha-config", 60, time.Minute))
 	group.GET("/me", me(db, settingStore), authn.RequireAuth)
@@ -77,6 +78,13 @@ func rateKeyUser(c *echo.Context) string {
 func login(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store) echo.HandlerFunc {
 	dummyHash, _ := password.Hash("invalid-login-password")
 	return func(c *echo.Context) error {
+		localEnabled, err := settingStore.LocalLoginEnabled(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		if !localEnabled {
+			return echo.NewHTTPError(http.StatusForbidden, "local login is disabled")
+		}
 		var input loginRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")

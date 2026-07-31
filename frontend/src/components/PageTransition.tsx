@@ -10,6 +10,7 @@ function pageKey(pathname: string) {
     if (nodeDetail && nodeDetail[1] !== 'create') return `/nodes/${nodeDetail[1]}`;
     const siteDetail = pathname.match(/^\/sites\/([^/]+)/);
     if (siteDetail && siteDetail[1] !== 'create') return `/sites/${siteDetail[1]}`;
+    if (/^\/settings\/admin(?:\/|$)/.test(pathname)) return '/settings/admin';
     return pathname;
 }
 
@@ -18,9 +19,9 @@ export function PageTransition() {
     const element = useOutlet();
     const { pending } = useApiLoading();
     const currentPageKey = pageKey(location.pathname);
-    const isDetailPage = /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+(?:\/|$)/.test(
-        location.pathname
-    );
+    const usesLocalLoading =
+        /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+(?:\/|$)/.test(location.pathname) ||
+        /^\/settings\/admin(?:\/|$)/.test(location.pathname);
     const pendingRef = useRef(pending);
     const pageKeyRef = useRef(currentPageKey);
     pendingRef.current = pending;
@@ -62,7 +63,7 @@ export function PageTransition() {
             >
                 <LoadingSurface
                     className='min-h-full'
-                    isLoading={isVisible && pending > 0 && !isDetailPage}
+                    isLoading={isVisible && pending > 0 && !usesLocalLoading}
                     label='Updating page data'
                 >
                     {element}

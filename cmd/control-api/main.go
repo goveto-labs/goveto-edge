@@ -87,6 +87,20 @@ func main() {
 		agentGatewayPublicAddress = net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.AgentGatewayPort))
 		slog.Warn("using temporary agent gateway address until instance initialization", "public_address", agentGatewayPublicAddress)
 	}
+	httpProxyConfig, proxyConfigured, err := settingStore.HTTPProxy(ctx)
+	if err != nil {
+		slog.Error("read HTTP proxy settings", "error", err)
+		os.Exit(1)
+	}
+	if !proxyConfigured {
+		httpProxyConfig = settings.HTTPProxyConfig{
+			ClientIPHeaders: append([]string(nil), settings.DefaultClientIPHeaders...),
+		}
+		if err = settingStore.SetHTTPProxy(ctx, httpProxyConfig); err != nil {
+			slog.Error("initialize HTTP proxy settings", "error", err)
+			os.Exit(1)
+		}
+	}
 
 	redisClient, err := storage.OpenRedis(ctx, cfg.RedisURL)
 	if err != nil {
@@ -97,9 +111,9 @@ func main() {
 
 	sessions := auth.NewSessionStore(redisClient, orm, cfg.SessionCookieName, cfg.SessionTTL, cfg.SessionCookieSecure)
 
-	ipExtractor, err := httpsecurity.TrustedProxyIPExtractor(cfg.HTTPTrustedProxies)
+	ipExtractor, err := httpsecurity.ProxyIPExtractor(httpProxyConfig)
 	if err != nil {
-		slog.Error("configure trusted proxies", "error", err)
+		slog.Error("configure client IP forwarding headers", "error", err)
 		os.Exit(1)
 	}
 

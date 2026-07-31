@@ -7,6 +7,7 @@ require (
 	github.com/arsfy/gcorm v0.1.11
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/caddyserver/caddy/v2 v2.11.4
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/darkweak/souin/plugins/caddy v1.7.8
 	github.com/darkweak/storages/core v0.0.16
 	github.com/google/uuid v1.6.0
@@ -26,6 +27,7 @@ require (
 	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.54.0
 	golang.org/x/net v0.56.0
+	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sys v0.47.0
 	google.golang.org/grpc v1.81.0
 	google.golang.org/protobuf v1.36.11
@@ -60,7 +62,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chzyer/readline v1.5.1 // indirect
 	github.com/cloudflare/circl v1.6.3 // indirect
-	github.com/coreos/go-oidc/v3 v3.17.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
 	github.com/darkweak/go-esi v0.0.6 // indirect
 	github.com/darkweak/souin v1.7.8 // indirect
@@ -183,7 +184,6 @@ require (
 	golang.org/x/crypto/x509roots/fallback v0.0.0-20260213171211-a408498e5541 // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect

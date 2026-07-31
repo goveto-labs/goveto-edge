@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -25,7 +26,28 @@ func (store *fakeRedisStore) Get(_ context.Context, key string) *redis.StringCmd
 	return redis.NewStringResult("", redis.Nil)
 }
 
-func (store *fakeRedisStore) Set(context.Context, string, any, time.Duration) *redis.StatusCmd {
+func (store *fakeRedisStore) GetDel(_ context.Context, key string) *redis.StringCmd {
+	value, ok := store.values[key]
+	if !ok {
+		return redis.NewStringResult("", redis.Nil)
+	}
+	delete(store.values, key)
+	return redis.NewStringResult(value, nil)
+}
+
+func (store *fakeRedisStore) Set(_ context.Context, key string, value any, _ time.Duration) *redis.StatusCmd {
+	if store.values == nil {
+		store.values = map[string]string{}
+	}
+	switch typed := value.(type) {
+	case []byte:
+		store.values[key] = string(typed)
+	case string:
+		store.values[key] = typed
+	default:
+		encoded, _ := json.Marshal(typed)
+		store.values[key] = string(encoded)
+	}
 	return redis.NewStatusResult("OK", nil)
 }
 
@@ -35,7 +57,29 @@ func (store *fakeRedisStore) SetNX(context.Context, string, any, time.Duration) 
 
 func (store *fakeRedisStore) Del(_ context.Context, keys ...string) *redis.IntCmd {
 	store.deleted = append(store.deleted, keys...)
+	for _, key := range keys {
+		delete(store.values, key)
+	}
 	return redis.NewIntResult(int64(len(keys)), nil)
+}
+
+func TestExternalAuthStateIsConsumedOnce(t *testing.T) {
+	store := &fakeRedisStore{}
+	sessions := &SessionStore{redis: store}
+	want := ExternalAuthState{CodeVerifier: "verifier", ReturnPath: "/jobs", ProviderID: "provider-1"}
+	if err := sessions.StoreExternalAuthState(context.Background(), "state", want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := sessions.ConsumeExternalAuthState(context.Background(), "state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("external authentication state = %#v, want %#v", got, want)
+	}
+	if _, err = sessions.ConsumeExternalAuthState(context.Background(), "state"); err != ErrExternalAuthStateNotFound {
+		t.Fatalf("second consumption error = %v, want %v", err, ErrExternalAuthStateNotFound)
+	}
 }
 
 func TestRequireActiveUserInvalidatesDisabledSession(t *testing.T) {

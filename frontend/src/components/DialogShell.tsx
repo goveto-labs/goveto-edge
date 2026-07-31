@@ -45,6 +45,7 @@ export function DialogShell({
                             </div>
                             <Button
                                 isIconOnly
+                                aria-label='Close dialog'
                                 className='-mr-2 -mt-2 text-muted'
                                 size='sm'
                                 variant='ghost'

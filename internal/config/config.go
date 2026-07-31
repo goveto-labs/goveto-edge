@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -29,7 +28,6 @@ type Config struct {
 	HTTPMaxHeaderBytes             int
 	HTTPMaxBodyBytes               int64
 	HTTPMaxUploadBytes             int64
-	HTTPTrustedProxies             []string
 	AgentGatewayHost               string
 	AgentGatewayPort               int
 	ShutdownTimeout                time.Duration
@@ -99,10 +97,6 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	trustedProxies, err := envCIDRList("HTTP_TRUSTED_PROXIES")
-	if err != nil {
-		return Config{}, err
-	}
 	shutdownTimeout, err := envDuration("SHUTDOWN_TIMEOUT", 10*time.Second)
 	if err != nil {
 		return Config{}, err
@@ -149,7 +143,6 @@ func Load() (Config, error) {
 		HTTPMaxHeaderBytes:             maxHeaderBytes,
 		HTTPMaxBodyBytes:               int64(maxBodyBytes),
 		HTTPMaxUploadBytes:             int64(maxUploadBytes),
-		HTTPTrustedProxies:             trustedProxies,
 		AgentGatewayHost:               envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
 		AgentGatewayPort:               agentGatewayPort,
 		ShutdownTimeout:                shutdownTimeout,
@@ -371,34 +364,6 @@ func envInt(key string, fallback int) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer: %w", key, err)
 	}
 	return parsed, nil
-}
-
-// envCIDRList parses a comma-separated list of proxy addresses. Bare IPs are
-// normalized to single-host CIDRs so operators can list either form.
-func envCIDRList(key string) ([]string, error) {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return nil, nil
-	}
-	var entries []string
-	for entry := range strings.SplitSeq(value, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		if !strings.Contains(entry, "/") {
-			if strings.Contains(entry, ":") {
-				entry += "/128"
-			} else {
-				entry += "/32"
-			}
-		}
-		if _, _, err := net.ParseCIDR(entry); err != nil {
-			return nil, fmt.Errorf("%s contains an invalid IP or CIDR %q", key, entry)
-		}
-		entries = append(entries, entry)
-	}
-	return entries, nil
 }
 
 func envDuration(key string, fallback time.Duration) (time.Duration, error) {

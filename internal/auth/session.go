@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -26,6 +27,8 @@ const currentSessionIDKey = "auth.current_session_id"
 
 var ErrSessionNotFound = errors.New("session not found")
 
+var ErrExternalAuthStateNotFound = errors.New("external authentication state not found")
+
 type currentUserContextKey struct{}
 
 type SessionStore struct {
@@ -39,6 +42,7 @@ type SessionStore struct {
 
 type redisStore interface {
 	Get(ctx context.Context, key string) *redis.StringCmd
+	GetDel(ctx context.Context, key string) *redis.StringCmd
 	Set(ctx context.Context, key string, value any, expiration time.Duration) *redis.StatusCmd
 	SetNX(ctx context.Context, key string, value any, expiration time.Duration) *redis.BoolCmd
 	Del(ctx context.Context, keys ...string) *redis.IntCmd
@@ -51,6 +55,36 @@ func NewSessionStore(redisClient *redis.Client, db *client.Client, cookieName st
 type SessionMetadata struct {
 	IPAddress string
 	UserAgent string
+}
+
+type ExternalAuthState struct {
+	CodeVerifier string `json:"code_verifier"`
+	ReturnPath   string `json:"return_path"`
+	ProviderID   string `json:"provider_id"`
+}
+
+func (s *SessionStore) StoreExternalAuthState(ctx context.Context, state string, value ExternalAuthState) error {
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return s.redis.Set(ctx, "external-auth:state:"+state, encoded, 10*time.Minute).Err()
+}
+
+func (s *SessionStore) ConsumeExternalAuthState(ctx context.Context, state string) (ExternalAuthState, error) {
+	key := "external-auth:state:" + state
+	encoded, err := s.redis.GetDel(ctx, key).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return ExternalAuthState{}, ErrExternalAuthStateNotFound
+	}
+	if err != nil {
+		return ExternalAuthState{}, err
+	}
+	var value ExternalAuthState
+	if err = json.Unmarshal(encoded, &value); err != nil {
+		return ExternalAuthState{}, err
+	}
+	return value, nil
 }
 
 func (s *SessionStore) Create(ctx context.Context, uid string, metadata ...SessionMetadata) (string, error) {

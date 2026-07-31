@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -18,6 +19,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
+
+	"goveto-edge/internal/settings"
 )
 
 const RequestIDHeader = "X-Request-ID"
@@ -34,24 +37,58 @@ type Options struct {
 	IPExtractor echo.IPExtractor
 }
 
-// TrustedProxyIPExtractor returns an X-Forwarded-For based client IP extractor
-// that trusts only the given proxy CIDRs, or nil when none are configured.
-// Without it, rate limits key on the proxy's address and become global.
-func TrustedProxyIPExtractor(trustedCIDRs []string) (echo.IPExtractor, error) {
-	if len(trustedCIDRs) == 0 {
+var forwardedForPattern = regexp.MustCompile(`(?i)(?:^|[;,]\s*)for=(?:"?\[?)([^\]";,]+)`)
+
+// ProxyIPExtractor resolves a client address from the first configured header
+// when forwarding headers are explicitly trusted from all sources.
+func ProxyIPExtractor(config settings.HTTPProxyConfig) (echo.IPExtractor, error) {
+	if err := config.NormalizeAndValidate(); err != nil {
+		return nil, err
+	}
+	if !config.TrustAll {
 		return nil, nil
 	}
-	options := []echo.TrustOption{
-		echo.TrustLoopback(false), echo.TrustLinkLocal(false), echo.TrustPrivateNet(false),
-	}
-	for _, cidr := range trustedCIDRs {
-		_, network, err := net.ParseCIDR(strings.TrimSpace(cidr))
-		if err != nil {
-			return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", cidr, err)
+	return func(request *http.Request) string {
+		direct := directRequestIP(request)
+		for _, header := range config.ClientIPHeaders {
+			if value := clientIPHeaderValue(request.Header, header); value != "" {
+				return value
+			}
 		}
-		options = append(options, echo.TrustIPRange(network))
+		return direct
+	}, nil
+}
+
+func directRequestIP(request *http.Request) string {
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err == nil {
+		return host
 	}
-	return echo.ExtractIPFromXFFHeader(options...), nil
+	return strings.Trim(request.RemoteAddr, "[]")
+}
+
+func clientIPHeaderValue(headers http.Header, name string) string {
+	value := strings.TrimSpace(headers.Get(name))
+	if value == "" {
+		return ""
+	}
+	if strings.EqualFold(name, "Forwarded") {
+		match := forwardedForPattern.FindStringSubmatch(value)
+		if len(match) != 2 {
+			return ""
+		}
+		value = match[1]
+	} else {
+		value = strings.TrimSpace(strings.Split(value, ",")[0])
+	}
+	value = strings.Trim(value, "[]\"")
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		value = host
+	}
+	if ip := net.ParseIP(value); ip != nil {
+		return ip.String()
+	}
+	return ""
 }
 
 func Middleware(options Options) echo.MiddlewareFunc {
