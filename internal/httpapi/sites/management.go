@@ -319,7 +319,7 @@ func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (site
 	if err != nil || pool == nil {
 		return siteBundle{}, err
 	}
-	policy, err := edgeprotocol.DecodeOriginPolicy(pool.Governance, pool.Headers, pool.Timeout)
+	policy, err := edgeprotocol.ParseOriginPolicy(pool.Governance)
 	if err != nil {
 		return siteBundle{}, err
 	}
@@ -400,7 +400,6 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 	}
 	siteID, poolID, policyID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	governance, _ := json.Marshal(bundle.OriginPolicy)
-	headers, _ := json.Marshal(bundle.OriginPolicy.Headers)
 	status := bundle.Status
 	if status == "" {
 		status = model.SiteStatusACTIVE
@@ -411,8 +410,7 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 	err = db.Tx(ctx, func(tx *client.Client) error {
 		if _, createErr := tx.OriginPool.Create().Set(
 			query.OriginPool.Id.Set(poolID), query.OriginPool.ClusterId.Set(clusterID), query.OriginPool.Name.Set(bundle.Name),
-			query.OriginPool.Timeout.Set(bundle.OriginPolicy.TimeoutMS),
-			query.OriginPool.Headers.Set(headers), query.OriginPool.Governance.Set(governance),
+			query.OriginPool.Governance.Set(governance),
 		).Do(ctx); createErr != nil {
 			return createErr
 		}

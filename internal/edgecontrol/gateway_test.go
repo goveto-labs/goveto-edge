@@ -12,16 +12,13 @@ import (
 	"goveto-edge/internal/edgeprotocol"
 )
 
-func TestGatewayRegistersGzipAndKeepsLegacyLogAck(t *testing.T) {
+func TestGatewayRegistersGzipAndUsesStructuredLogAck(t *testing.T) {
 	if encoding.GetCompressor("gzip") == nil {
 		t.Fatal("gateway cannot decompress gzip agent messages")
 	}
 	message := acceptedLogAck(42)
 	if message.LogsAck == nil || !message.LogsAck.Accepted || message.LogsAck.Through != 42 {
 		t.Fatalf("structured log acknowledgement is missing: %#v", message)
-	}
-	if message.LogsAckThrough == nil || *message.LogsAckThrough != 42 {
-		t.Fatalf("legacy agent acknowledgement is missing: %#v", message)
 	}
 }
 

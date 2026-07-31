@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"reflect"
 	"strings"
 	"time"
 
@@ -148,35 +147,11 @@ func DefaultOriginPolicy() OriginPolicyConfig {
 	}
 }
 
-func DecodeOriginPolicy(governance, headers json.RawMessage, timeoutMS int) (OriginPolicyConfig, error) {
+func ParseOriginPolicy(governance json.RawMessage) (OriginPolicyConfig, error) {
 	policy := DefaultOriginPolicy()
 	if len(governance) > 0 && string(governance) != "null" {
 		if err := json.Unmarshal(governance, &policy); err != nil {
 			return OriginPolicyConfig{}, fmt.Errorf("decode origin governance: %w", err)
-		}
-	}
-	policy.TimeoutMS = timeoutMS
-	if len(headers) > 0 && string(headers) != "null" {
-		var values map[string]any
-		if err := json.Unmarshal(headers, &values); err != nil {
-			return OriginPolicyConfig{}, fmt.Errorf("decode origin headers: %w", err)
-		}
-		policy.Headers = make(map[string][]string, len(values))
-		for name, raw := range values {
-			switch value := raw.(type) {
-			case string:
-				policy.Headers[name] = []string{value}
-			case []any:
-				for _, item := range value {
-					text, ok := item.(string)
-					if !ok {
-						return OriginPolicyConfig{}, fmt.Errorf("origin header %q contains a non-string value", name)
-					}
-					policy.Headers[name] = append(policy.Headers[name], text)
-				}
-			default:
-				return OriginPolicyConfig{}, fmt.Errorf("origin header %q must be a string or string array", name)
-			}
 		}
 	}
 	policy = NormalizeOriginPolicy(policy)
@@ -241,15 +216,6 @@ func (c SiteConfig) Validate() error {
 
 func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 	defaults := DefaultOriginPolicy()
-	if reflect.DeepEqual(policy, OriginPolicyConfig{}) {
-		// Configs persisted by pre-governance agents had no policy at all.
-		// Keep them probe-free until the control plane republishes a fully
-		// materialized policy, avoiding an unexpected request stream on restore.
-		defaults.ActiveHealth.Enabled = false
-		defaults.PassiveHealth.Enabled = false
-		defaults.Retry = OriginRetryConfig{}
-		return defaults
-	}
 	if policy.TimeoutMS == 0 {
 		policy.TimeoutMS = defaults.TimeoutMS
 	}

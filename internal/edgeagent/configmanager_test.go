@@ -256,6 +256,9 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	httpApp := apps["http"].(map[string]any)
 	servers := httpApp["servers"].(map[string]any)
 	edge := servers["edge"].(map[string]any)
+	if edge["idle_timeout"] != float64(30*time.Second) {
+		t.Fatalf("unexpected server idle timeout: %#v", edge["idle_timeout"])
+	}
 	listen := asStringSlice(edge["listen"])
 	sitePort := ":" + strconv.Itoa(config.Listener.HTTPPort)
 	if !contains(listen, ":80") || !contains(listen, sitePort) {
@@ -266,6 +269,11 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 		t.Fatalf("expected site routes, got %d", len(routes))
 	}
 	raw := string(encoded)
+	for _, expected := range []string{`"format":"filter"`, `"request\u003euri":{"filter":"regexp"`, `"request\u003eclient_ip":{"filter":"ip_mask"`, `"request\u003eheaders\u003eAuthorization":{"filter":"delete"`} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("access log encoder is missing %s: %s", expected, raw)
+		}
+	}
 	if strings.Contains(raw, "goveto_agent") {
 		t.Fatalf("management API leaked onto the user traffic listener: %s", raw)
 	}

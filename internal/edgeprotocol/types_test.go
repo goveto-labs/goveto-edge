@@ -88,7 +88,7 @@ func TestSiteConfigValidateMixedOrigins(t *testing.T) {
 	}
 }
 
-func TestDecodeOriginPolicyMergesLegacyColumnsAndGovernance(t *testing.T) {
+func TestParseOriginPolicyUsesGovernanceAsSingleSource(t *testing.T) {
 	governance := json.RawMessage(`{
 		"timeout_ms":1,
 		"active_health":{"enabled":true,"method":"HEAD","expected_status":204,"fails":4},
@@ -96,12 +96,12 @@ func TestDecodeOriginPolicyMergesLegacyColumnsAndGovernance(t *testing.T) {
 		"transport":{"ip_version":"ipv4","tls_server_name":"origin.internal"},
 		"retry":{"retries":4,"try_duration_ms":8000,"try_interval_ms":400}
 	}`)
-	policy, err := DecodeOriginPolicy(governance, json.RawMessage(`{"X-Origin":"pool"}`), 12000)
+	policy, err := ParseOriginPolicy(governance)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.TimeoutMS != 12000 || policy.Headers["X-Origin"][0] != "pool" {
-		t.Fatalf("legacy columns did not override governance: %#v", policy)
+	if policy.TimeoutMS != 1 || len(policy.Headers) != 0 {
+		t.Fatalf("governance was not decoded directly: %#v", policy)
 	}
 	if policy.ActiveHealth.Method != "HEAD" || policy.ActiveHealth.ExpectedStatus != 204 || policy.ActiveHealth.Fails != 4 {
 		t.Fatalf("active health policy lost: %#v", policy.ActiveHealth)

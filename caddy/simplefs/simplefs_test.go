@@ -3,6 +3,7 @@ package simplefs
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"net/http"
 	"os"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/darkweak/storages/core"
 	"github.com/pierrec/lz4/v4"
+	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
 )
 
@@ -30,6 +32,7 @@ func newTestProvider(t *testing.T, directory string, stale time.Duration) *provi
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { provider.closeIndex() })
 	return provider
 }
 
@@ -124,23 +127,15 @@ func TestMultiLevelKeepsResponseBodyForStaleWindow(t *testing.T) {
 	_ = stale.Body.Close()
 }
 
-func TestFixedLimitEvictsOldestOrphan(t *testing.T) {
+func TestStartupRemovesOrphanWithoutScanningOnWrites(t *testing.T) {
 	directory := t.TempDir()
-	provider := newTestProvider(t, directory, 0)
-	old := filepath.Join(directory, "old-cache-entry")
+	old := filepath.Join(directory, bodyPrefix+"orphan")
 	if err := os.WriteFile(old, []byte("12345678"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	used, err := directorySize(directory)
-	if err != nil {
-		t.Fatal(err)
-	}
-	provider.limits.maxBytes = used - 8 + 10
-	if err := provider.ensureSpace(5, provider.limits); err != nil {
-		t.Fatal(err)
-	}
+	provider := newTestProvider(t, directory, 0)
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
-		t.Fatalf("old cache entry was not evicted: %v", err)
+		t.Fatalf("orphan cache entry was not removed at startup: %v", err)
 	}
 	if err := provider.ensureSpace(provider.limits.maxBytes+1, provider.limits); err == nil {
 		t.Fatal("oversized cache entry should be rejected")
@@ -153,6 +148,7 @@ func TestIndexRestoresCacheAcrossProviderRestart(t *testing.T) {
 	if err := first.SetMultiLevel("GET-http-example.test-/asset", "GET-http-example.test-/asset", cachedResponse("body"), nil, "", time.Minute, "GET-http-example.test-/asset"); err != nil {
 		t.Fatal(err)
 	}
+	first.closeIndex()
 
 	restarted := newTestProvider(t, directory, time.Minute)
 	fresh, _ := restarted.GetMultiLevel("GET-http-example.test-/asset", &http.Request{Header: http.Header{}}, &core.Revalidator{})
@@ -160,6 +156,33 @@ func TestIndexRestoresCacheAcrossProviderRestart(t *testing.T) {
 		t.Fatalf("cache index did not restore the response: keys=%v corruptions=%d", restarted.ListKeys(), restarted.corruptions.Load())
 	}
 	defer fresh.Body.Close()
+}
+
+func TestOverwritingCacheObjectReplacesUsedBytes(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), time.Minute)
+	key := "GET-http-example.test-/asset"
+	if err := provider.SetMultiLevel(key, key, cachedResponse("first"), nil, "", time.Minute, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.SetMultiLevel(key, key, cachedResponse(strings.Repeat("second", 100)), nil, "", time.Minute, key); err != nil {
+		t.Fatal(err)
+	}
+
+	provider.mu.Lock()
+	want := provider.items[key].compressedSize
+	provider.mu.Unlock()
+	if got := provider.cacheUsed.Load(); got != want {
+		t.Fatalf("cache used bytes after overwrite = %d, want current object size %d", got, want)
+	}
+	if err := provider.index.View(func(tx *bolt.Tx) error {
+		got := binary.BigEndian.Uint64(tx.Bucket(indexMetaBucket).Get(indexUsedBytesKey))
+		if got != want {
+			t.Fatalf("persisted used bytes after overwrite = %d, want %d", got, want)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestCorruptIndexAndBodyRecoverWithoutServingPartialData(t *testing.T) {
@@ -195,6 +218,7 @@ func TestCorruptIndexAndBodyRecoverWithoutServingPartialData(t *testing.T) {
 			if err := first.SetMultiLevel("GET-http-example.test-/asset", "GET-http-example.test-/asset", cachedResponse("body"), nil, "", time.Minute, "GET-http-example.test-/asset"); err != nil {
 				t.Fatal(err)
 			}
+			first.closeIndex()
 			test.corrupt(t, directory, first)
 			restarted := newTestProvider(t, directory, time.Minute)
 			fresh, stale := restarted.GetMultiLevel("GET-http-example.test-/asset", &http.Request{Header: http.Header{}}, &core.Revalidator{})

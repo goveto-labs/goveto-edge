@@ -74,15 +74,10 @@ func main() {
 	for _, site := range sites {
 		tasks = append(tasks, task(edgeprotocol.TaskApplySiteConfig, site))
 	}
-	legacy, err := json.MarshalIndent(tasks[1], "", "  ")
-	if err != nil {
-		log.Fatal(err)
-	}
 	encodedTasks, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		log.Fatal(err)
 	}
-	write(filepath.Join(*output, "initial-task.json"), legacy, 0600)
 	write(filepath.Join(*output, "initial-tasks.json"), encodedTasks, 0600)
 }
 

@@ -3,6 +3,7 @@ package edgeagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -35,21 +36,21 @@ var cacheAlertSamples = struct {
 }{values: map[string]cachefs.Statistics{}}
 
 func NewNodeConfigStore(path string) *NodeConfigStore {
-	store := &NodeConfigStore{path: path, value: NodeConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: true, MaxDiskUsagePercent: 80}}
+	store := &NodeConfigStore{path: path, value: defaultNodeConfig()}
 	if data, err := os.ReadFile(path); err == nil {
-		_ = json.Unmarshal(data, &store.value)
+		var fields map[string]json.RawMessage
+		var candidate NodeConfig
+		if json.Unmarshal(data, &fields) == nil && json.Unmarshal(data, &candidate) == nil &&
+			hasNodeConfigFields(fields) && validateNodeConfig(candidate) == nil {
+			store.value = candidate
+		}
 	}
-	if store.value.CacheDirectory == "" {
-		store.value.CacheDirectory = "/opt/goveto-edge/cache"
-	}
-	store.value.MaxDiskUsagePercent = normalizeCacheDiskPercent(store.value.MaxDiskUsagePercent)
 	return store
 }
 func (s *NodeConfigStore) Set(value NodeConfig) error {
-	if value.CacheDirectory == "" {
-		value.CacheDirectory = "/opt/goveto-edge/cache"
+	if err := validateNodeConfig(value); err != nil {
+		return err
 	}
-	value.MaxDiskUsagePercent = normalizeCacheDiskPercent(value.MaxDiskUsagePercent)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(s.path), 0700); err != nil {
@@ -70,6 +71,32 @@ func (s *NodeConfigStore) Set(value NodeConfig) error {
 	return nil
 }
 func (s *NodeConfigStore) Get() NodeConfig { s.mu.RLock(); defer s.mu.RUnlock(); return s.value }
+
+func defaultNodeConfig() NodeConfig {
+	return NodeConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: true, MaxDiskUsagePercent: 80}
+}
+
+func hasNodeConfigFields(fields map[string]json.RawMessage) bool {
+	for _, name := range []string{"cache_directory", "auto_max_size", "max_size_bytes", "max_disk_usage_percent"} {
+		if _, ok := fields[name]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func validateNodeConfig(value NodeConfig) error {
+	if value.CacheDirectory == "" {
+		return errors.New("cache_directory is required")
+	}
+	if value.MaxDiskUsagePercent < 1 || value.MaxDiskUsagePercent > 90 {
+		return errors.New("max_disk_usage_percent must be between 1 and 90")
+	}
+	if !value.AutoMaxSize && value.MaxSizeBytes == 0 {
+		return errors.New("max_size_bytes is required when auto_max_size is disabled")
+	}
+	return nil
+}
 
 func collectMetrics(ctx context.Context, queue *LogQueue, configs *NodeConfigStore) {
 	// Warm CPU sampler so the first real sample is meaningful.

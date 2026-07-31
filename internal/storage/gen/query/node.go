@@ -33,8 +33,6 @@ func ApplyNodeOptions(opts []NodeQueryOption) NodeQueryConfig {
 type NodeQuery struct {
 	Id                 nodeIdField
 	ClusterId          nodeClusterIdField
-	GroupId            nodeGroupIdField
-	RegionId           nodeRegionIdField
 	Name               nodeNameField
 	Version            nodeVersionField
 	HeartbeatAt        nodeHeartbeatAtField
@@ -46,8 +44,6 @@ type NodeQuery struct {
 	CreatedAt          nodeCreatedAtField
 	UpdatedAt          nodeUpdatedAtField
 	Cluster            nodeClusterRelation
-	Group              nodeGroupRelation
-	Region             nodeRegionRelation
 	Addresses          nodeAddressesRelation
 	DnsLines           nodeDnsLinesRelation
 	GroupMemberships   nodeGroupMembershipsRelation
@@ -65,8 +61,6 @@ type NodeQuery struct {
 const NodeTable = "nodes"
 const NodeIdColumn = "id"
 const NodeClusterIdColumn = "cluster_id"
-const NodeGroupIdColumn = "group_id"
-const NodeRegionIdColumn = "region_id"
 const NodeNameColumn = "name"
 const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
@@ -82,8 +76,6 @@ const NodeUpdatedAtColumn = "updated_at"
 var Node = NodeQuery{
 	Id:                 nodeIdField{},
 	ClusterId:          nodeClusterIdField{},
-	GroupId:            nodeGroupIdField{},
-	RegionId:           nodeRegionIdField{},
 	Name:               nodeNameField{},
 	Version:            nodeVersionField{},
 	HeartbeatAt:        nodeHeartbeatAtField{},
@@ -95,8 +87,6 @@ var Node = NodeQuery{
 	CreatedAt:          nodeCreatedAtField{},
 	UpdatedAt:          nodeUpdatedAtField{},
 	Cluster:            nodeClusterRelation{},
-	Group:              nodeGroupRelation{},
-	Region:             nodeRegionRelation{},
 	Addresses:          nodeAddressesRelation{},
 	DnsLines:           nodeDnsLinesRelation{},
 	GroupMemberships:   nodeGroupMembershipsRelation{},
@@ -305,148 +295,6 @@ func (nodeClusterIdField) Asc() NodeOrderByClause {
 // Desc returns a descending order clause for this field.
 func (nodeClusterIdField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "cluster_id", Direction: "DESC"}
-}
-
-// GroupIdField provides query operations for the groupId field.
-type nodeGroupIdField struct{}
-
-// Equals creates an equality condition.
-func (nodeGroupIdField) Equals(v *string) NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (nodeGroupIdField) Not(v *string) NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (nodeGroupIdField) In(vals ...*string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "group_id", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (nodeGroupIdField) NotIn(vals ...*string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "group_id", Operator: "NOT IN", Value: iVals}
-}
-
-// Contains creates a LIKE '%v%' condition.
-func (nodeGroupIdField) Contains(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeGroupIdField) StartsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeGroupIdField) EndsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "ENDS_WITH", Value: v}
-}
-
-// IsNull creates an IS NULL condition.
-func (nodeGroupIdField) IsNull() NodeWhereClause {
-	return NodeWhereClause{Field: "group_id", Operator: "IS NULL", Value: nil}
-}
-
-// Set creates a set operation for create/update.
-func (nodeGroupIdField) Set(v string) NodeSetClause {
-	return NodeSetClause{Field: "group_id", Value: v}
-}
-
-// SetNull sets the field to NULL.
-func (nodeGroupIdField) SetNull() NodeSetClause {
-	return NodeSetClause{Field: "group_id", Value: nil}
-}
-
-// Asc returns an ascending order clause for this field.
-func (nodeGroupIdField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "group_id", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (nodeGroupIdField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "group_id", Direction: "DESC"}
-}
-
-// RegionIdField provides query operations for the regionId field.
-type nodeRegionIdField struct{}
-
-// Equals creates an equality condition.
-func (nodeRegionIdField) Equals(v *string) NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (nodeRegionIdField) Not(v *string) NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (nodeRegionIdField) In(vals ...*string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "region_id", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (nodeRegionIdField) NotIn(vals ...*string) NodeWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return NodeWhereClause{Field: "region_id", Operator: "NOT IN", Value: iVals}
-}
-
-// Contains creates a LIKE '%v%' condition.
-func (nodeRegionIdField) Contains(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (nodeRegionIdField) StartsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (nodeRegionIdField) EndsWith(v string) NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "ENDS_WITH", Value: v}
-}
-
-// IsNull creates an IS NULL condition.
-func (nodeRegionIdField) IsNull() NodeWhereClause {
-	return NodeWhereClause{Field: "region_id", Operator: "IS NULL", Value: nil}
-}
-
-// Set creates a set operation for create/update.
-func (nodeRegionIdField) Set(v string) NodeSetClause {
-	return NodeSetClause{Field: "region_id", Value: v}
-}
-
-// SetNull sets the field to NULL.
-func (nodeRegionIdField) SetNull() NodeSetClause {
-	return NodeSetClause{Field: "region_id", Value: nil}
-}
-
-// Asc returns an ascending order clause for this field.
-func (nodeRegionIdField) Asc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "region_id", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (nodeRegionIdField) Desc() NodeOrderByClause {
-	return NodeOrderByClause{Field: "region_id", Direction: "DESC"}
 }
 
 // NameField provides query operations for the name field.
@@ -1117,22 +965,6 @@ func (nodeClusterRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "cluster"}
 }
 
-// GroupRelation provides relation query helpers for group.
-type nodeGroupRelation struct{}
-
-// Fetch creates an include clause to fetch related group.
-func (nodeGroupRelation) Fetch() NodeIncludeClause {
-	return NodeIncludeClause{Relation: "group"}
-}
-
-// RegionRelation provides relation query helpers for region.
-type nodeRegionRelation struct{}
-
-// Fetch creates an include clause to fetch related region.
-func (nodeRegionRelation) Fetch() NodeIncludeClause {
-	return NodeIncludeClause{Relation: "region"}
-}
-
 // AddressesRelation provides relation query helpers for addresses.
 type nodeAddressesRelation struct{}
 
@@ -1264,8 +1096,6 @@ type NodeGroupByResult struct {
 type NodeCreateInput struct {
 	Id                 string
 	ClusterId          string
-	GroupId            **string
-	RegionId           **string
 	Name               string
 	Version            **string
 	HeartbeatAt        **time.Time
@@ -1277,8 +1107,6 @@ type NodeCreateInput struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	Cluster            *ClusterCreateNestedInput
-	Group              *ClusterGroupCreateNestedInput
-	Region             *ClusterRegionCreateNestedInput
 	Addresses          *NodeAddressCreateNestedInput
 	DnsLines           *NodeDNSLineCreateNestedInput
 	GroupMemberships   *NodeGroupMembershipCreateNestedInput
@@ -1295,7 +1123,7 @@ type NodeCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.GroupId, d.RegionId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

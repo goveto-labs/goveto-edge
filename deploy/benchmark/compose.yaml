@@ -32,7 +32,6 @@ services:
     cpuset: "5"
     volumes:
       - ./state/certs:/certs:ro
-      - ./state/initial-task.json:/state/initial-task.json:ro
       - ./state/initial-tasks.json:/state/initial-tasks.json:ro
     networks: [benchmark]
 

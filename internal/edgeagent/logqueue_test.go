@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	bolt "go.etcd.io/bbolt"
 )
 
 func TestLogQueuePersistsUntilAck(t *testing.T) {
@@ -46,6 +48,45 @@ func TestLogQueuePersistsUntilAck(t *testing.T) {
 	}
 	if len(batch) != 0 {
 		t.Fatal("acknowledged record was not deleted")
+	}
+}
+
+func TestLogQueueRebuildsUnsupportedRecordFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "logs.db")
+	db, err := bolt.Open(path, 0o600, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Update(func(tx *bolt.Tx) error {
+		logs, createErr := tx.CreateBucket(logsBucket)
+		if createErr != nil {
+			return createErr
+		}
+		if createErr = logs.Put([]byte("legacy"), []byte(`{"id":1}`)); createErr != nil {
+			return createErr
+		}
+		meta, createErr := tx.CreateBucket(metaBucket)
+		if createErr != nil {
+			return createErr
+		}
+		return meta.Put(queueVersionKey, []byte{0})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	queue, err := OpenLogQueue(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	stats, err := queue.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Records != 0 || stats.Bytes != 0 {
+		t.Fatalf("unsupported queue state was not rebuilt: %#v", stats)
 	}
 }
 
@@ -211,8 +252,16 @@ func TestLogQueueDropsOversizedHeadWithoutBlockingLaterRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	limit := uint64(len(all[1].Payload) + 100)
-	if uint64(len(all[0].Payload))+100 <= limit {
+	largeEncoded, err := encodeLogEnvelope(all[0], time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	smallEncoded, err := encodeLogEnvelope(all[1], time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := uint64(len(smallEncoded) + 4)
+	if uint64(len(largeEncoded)+4) <= limit {
 		t.Fatal("test records do not exercise an oversized head")
 	}
 	dropped, err := queue.DropOversizedHead(limit)
@@ -530,15 +579,15 @@ func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
 	if err := sink.WriteCaddyLog("site-a", 42, time.Now().UTC(), json.RawMessage(`{"message":"not decoded on request path"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.WriteCaddyLog("", 0, time.Now().UTC(), json.RawMessage(`{"request":{},"status":200}`)); err != nil {
-		t.Fatal(err)
+	if err := sink.WriteCaddyLog("", 0, time.Now().UTC(), json.RawMessage(`{"request":{},"status":200}`)); err == nil {
+		t.Fatal("missing site ID was accepted")
 	}
 	before, err := queue.Batch(10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(before) != 1 || before[0].Type != "caddy" {
-		t.Fatalf("default Caddy log was not synchronously persisted: %#v", before)
+	if len(before) != 0 {
+		t.Fatalf("access log was persisted before the async flush: %#v", before)
 	}
 	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -549,7 +598,7 @@ func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != 2 || after[1].Type != "access" || after[1].SiteID != "site-a" || after[1].ConfigVersion != 42 {
+	if len(after) != 1 || after[0].Type != "access" || after[0].SiteID != "site-a" || after[0].ConfigVersion != 42 {
 		t.Fatalf("site log was not asynchronously classified as access: %#v", after)
 	}
 }

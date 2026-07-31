@@ -90,8 +90,7 @@ type Certificate struct {
 	Source               CertificateSource  `db:"source" json:"source"`
 	Status               CertificateStatus  `db:"status" json:"status"`
 	CertPem              *string            `db:"cert_pem" json:"certPem"`
-	PrivateKeyPem        *string            `db:"private_key_pem" json:"privateKeyPem"`
-	PrivateKeyEncrypted  *string            `db:"private_key_encrypted" json:"privateKeyEncrypted"`
+	PrivateKeyEncrypted  string             `db:"private_key_encrypted" json:"privateKeyEncrypted"`
 	Fingerprint          *string            `db:"fingerprint" json:"fingerprint"`
 	SerialNumber         *string            `db:"serial_number" json:"serialNumber"`
 	DomainsJson          json.RawMessage    `db:"domains_json" json:"domainsJson"`
@@ -173,7 +172,6 @@ type ClusterGroup struct {
 	CreatedAt       time.Time              `db:"created_at" json:"createdAt"`
 	UpdatedAt       time.Time              `db:"updated_at" json:"updatedAt"`
 	Cluster         *Cluster               `db:"-" json:"cluster,omitempty"`
-	Nodes           []*Node                `db:"-" json:"nodes,omitempty"`
 	NodeMemberships []*NodeGroupMembership `db:"-" json:"nodeMemberships,omitempty"`
 }
 
@@ -195,7 +193,6 @@ type ClusterRegion struct {
 	CreatedAt       time.Time               `db:"created_at" json:"createdAt"`
 	UpdatedAt       time.Time               `db:"updated_at" json:"updatedAt"`
 	Cluster         *Cluster                `db:"-" json:"cluster,omitempty"`
-	Nodes           []*Node                 `db:"-" json:"nodes,omitempty"`
 	NodeMemberships []*NodeRegionMembership `db:"-" json:"nodeMemberships,omitempty"`
 }
 
@@ -340,8 +337,6 @@ type JobExecution struct {
 type Node struct {
 	Id                 string                   `db:"id" json:"id"`
 	ClusterId          string                   `db:"cluster_id" json:"clusterId"`
-	GroupId            *string                  `db:"group_id" json:"groupId"`
-	RegionId           *string                  `db:"region_id" json:"regionId"`
 	Name               string                   `db:"name" json:"name"`
 	Version            *string                  `db:"version" json:"version"`
 	HeartbeatAt        *time.Time               `db:"heartbeat_at" json:"heartbeatAt"`
@@ -353,8 +348,6 @@ type Node struct {
 	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
 	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
 	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`
-	Group              *ClusterGroup            `db:"-" json:"group,omitempty"`
-	Region             *ClusterRegion           `db:"-" json:"region,omitempty"`
 	Addresses          []*NodeAddress           `db:"-" json:"addresses,omitempty"`
 	DnsLines           []*NodeDNSLine           `db:"-" json:"dnsLines,omitempty"`
 	GroupMemberships   []*NodeGroupMembership   `db:"-" json:"groupMemberships,omitempty"`
@@ -472,8 +465,6 @@ type OriginPool struct {
 	ClusterId  string           `db:"cluster_id" json:"clusterId"`
 	Name       string           `db:"name" json:"name"`
 	Scheduler  string           `db:"scheduler" json:"scheduler"`
-	Timeout    int              `db:"timeout" json:"timeout"`
-	Headers    json.RawMessage  `db:"headers" json:"headers"`
 	Governance json.RawMessage  `db:"governance" json:"governance"`
 	CreatedAt  time.Time        `db:"created_at" json:"createdAt"`
 	UpdatedAt  time.Time        `db:"updated_at" json:"updatedAt"`

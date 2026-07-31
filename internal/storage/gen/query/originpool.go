@@ -35,8 +35,6 @@ type OriginPoolQuery struct {
 	ClusterId  originPoolClusterIdField
 	Name       originPoolNameField
 	Scheduler  originPoolSchedulerField
-	Timeout    originPoolTimeoutField
-	Headers    originPoolHeadersField
 	Governance originPoolGovernanceField
 	CreatedAt  originPoolCreatedAtField
 	UpdatedAt  originPoolUpdatedAtField
@@ -50,8 +48,6 @@ const OriginPoolIdColumn = "id"
 const OriginPoolClusterIdColumn = "cluster_id"
 const OriginPoolNameColumn = "name"
 const OriginPoolSchedulerColumn = "scheduler"
-const OriginPoolTimeoutColumn = "timeout"
-const OriginPoolHeadersColumn = "headers"
 const OriginPoolGovernanceColumn = "governance"
 const OriginPoolCreatedAtColumn = "created_at"
 const OriginPoolUpdatedAtColumn = "updated_at"
@@ -62,8 +58,6 @@ var OriginPool = OriginPoolQuery{
 	ClusterId:  originPoolClusterIdField{},
 	Name:       originPoolNameField{},
 	Scheduler:  originPoolSchedulerField{},
-	Timeout:    originPoolTimeoutField{},
-	Headers:    originPoolHeadersField{},
 	Governance: originPoolGovernanceField{},
 	CreatedAt:  originPoolCreatedAtField{},
 	UpdatedAt:  originPoolUpdatedAtField{},
@@ -405,118 +399,6 @@ func (originPoolSchedulerField) Desc() OriginPoolOrderByClause {
 	return OriginPoolOrderByClause{Field: "scheduler", Direction: "DESC"}
 }
 
-// TimeoutField provides query operations for the timeout field.
-type originPoolTimeoutField struct{}
-
-// Equals creates an equality condition.
-func (originPoolTimeoutField) Equals(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (originPoolTimeoutField) Not(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (originPoolTimeoutField) In(vals ...int) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "timeout", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (originPoolTimeoutField) NotIn(vals ...int) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "timeout", Operator: "NOT IN", Value: iVals}
-}
-
-// Lt creates a less-than condition.
-func (originPoolTimeoutField) Lt(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: "<", Value: v}
-}
-
-// Lte creates a less-than-or-equal condition.
-func (originPoolTimeoutField) Lte(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: "<=", Value: v}
-}
-
-// Gt creates a greater-than condition.
-func (originPoolTimeoutField) Gt(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: ">", Value: v}
-}
-
-// Gte creates a greater-than-or-equal condition.
-func (originPoolTimeoutField) Gte(v int) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "timeout", Operator: ">=", Value: v}
-}
-
-// Set creates a set operation for create/update.
-func (originPoolTimeoutField) Set(v int) OriginPoolSetClause {
-	return OriginPoolSetClause{Field: "timeout", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (originPoolTimeoutField) Asc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "timeout", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (originPoolTimeoutField) Desc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "timeout", Direction: "DESC"}
-}
-
-// HeadersField provides query operations for the headers field.
-type originPoolHeadersField struct{}
-
-// Equals creates an equality condition.
-func (originPoolHeadersField) Equals(v json.RawMessage) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "headers", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (originPoolHeadersField) Not(v json.RawMessage) OriginPoolWhereClause {
-	return OriginPoolWhereClause{Field: "headers", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (originPoolHeadersField) In(vals ...json.RawMessage) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "headers", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (originPoolHeadersField) NotIn(vals ...json.RawMessage) OriginPoolWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return OriginPoolWhereClause{Field: "headers", Operator: "NOT IN", Value: iVals}
-}
-
-// Set creates a set operation for create/update.
-func (originPoolHeadersField) Set(v json.RawMessage) OriginPoolSetClause {
-	return OriginPoolSetClause{Field: "headers", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (originPoolHeadersField) Asc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "headers", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (originPoolHeadersField) Desc() OriginPoolOrderByClause {
-	return OriginPoolOrderByClause{Field: "headers", Direction: "DESC"}
-}
-
 // GovernanceField provides query operations for the governance field.
 type originPoolGovernanceField struct{}
 
@@ -756,8 +638,6 @@ type OriginPoolCreateInput struct {
 	ClusterId  string
 	Name       string
 	Scheduler  string
-	Timeout    int
-	Headers    json.RawMessage
 	Governance json.RawMessage
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
@@ -768,7 +648,7 @@ type OriginPoolCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d OriginPoolCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.Timeout, d.Headers, d.Governance, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Scheduler, d.Governance, d.CreatedAt, d.UpdatedAt}
 }
 
 // OriginPoolCreateNestedInput supports nested creates and connects.

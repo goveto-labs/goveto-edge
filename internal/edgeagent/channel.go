@@ -195,11 +195,6 @@ func (c *channelClient) runSession(ctx context.Context) error {
 				case <-ctx.Done():
 					return ctx.Err()
 				}
-			case message.LogsAckThrough != nil:
-				if err := c.logs.Ack(*message.LogsAckThrough); err != nil {
-					return err
-				}
-				logsOutstanding = false
 			case message.LogsAck != nil:
 				if message.LogsAck.Accepted {
 					if err := c.logs.Ack(message.LogsAck.Through); err != nil {

@@ -14,24 +14,18 @@ import (
 	cachefs "goveto-edge/caddy/simplefs"
 )
 
-func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
+func TestNodeConfigStoreRequiresCurrentCompleteFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "node.json")
 	store := NewNodeConfigStore(path)
-	if err := store.Set(NodeConfig{MaxDiskUsagePercent: 0, MaxSizeBytes: 42}); err != nil {
+	if err := store.Set(NodeConfig{MaxDiskUsagePercent: 0, MaxSizeBytes: 42}); err == nil {
+		t.Fatal("incomplete node config was accepted")
+	}
+	if err := store.Set(NodeConfig{CacheDirectory: "/cache", MaxDiskUsagePercent: 95, MaxSizeBytes: 42}); err == nil {
+		t.Fatal("out-of-range node config was accepted")
+	}
+	want := NodeConfig{CacheDirectory: "/cache", AutoMaxSize: false, MaxSizeBytes: 42, MaxDiskUsagePercent: 90}
+	if err := store.Set(want); err != nil {
 		t.Fatal(err)
-	}
-	got := store.Get()
-	if got.CacheDirectory != "/opt/goveto-edge/cache" {
-		t.Fatalf("default cache dir missing: %#v", got)
-	}
-	if got.MaxDiskUsagePercent != 80 {
-		t.Fatalf("percent not normalized: %#v", got)
-	}
-	if err := store.Set(NodeConfig{MaxDiskUsagePercent: 95, MaxSizeBytes: 42}); err != nil {
-		t.Fatal(err)
-	}
-	if got := store.Get().MaxDiskUsagePercent; got != 90 {
-		t.Fatalf("hard disk limit=%d, want 90", got)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -41,15 +35,15 @@ func TestNodeConfigStorePersistsAndNormalizes(t *testing.T) {
 		t.Fatalf("permissions: %o", info.Mode().Perm())
 	}
 	reloaded := NewNodeConfigStore(path)
-	if reloaded.Get().MaxSizeBytes != 42 {
+	if !reflect.DeepEqual(reloaded.Get(), want) {
 		t.Fatalf("reload failed: %#v", reloaded.Get())
 	}
 	legacyPath := filepath.Join(t.TempDir(), "legacy-node.json")
 	if err := os.WriteFile(legacyPath, []byte(`{"cache_directory":"/cache","max_disk_usage_percent":95}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got := NewNodeConfigStore(legacyPath).Get().MaxDiskUsagePercent; got != 90 {
-		t.Fatalf("legacy hard disk limit=%d, want 90", got)
+	if got := NewNodeConfigStore(legacyPath).Get(); !reflect.DeepEqual(got, defaultNodeConfig()) {
+		t.Fatalf("incomplete persisted config was not rebuilt: %#v", got)
 	}
 }
 

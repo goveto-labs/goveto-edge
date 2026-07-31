@@ -270,6 +270,9 @@ run_origin_screen() {
             --concurrency "$concurrency" --warmup 1s --duration 5s --repeats 1 \
             --expected-sha256 "$(sha256_zeros "$size")")
           [[ "$mode" == "new" ]] && args+=(--new-connection)
+          if [[ "$protocol" == "h3" && "$mode" == "new" && ( "$concurrency" == "32" || "$concurrency" == "128" ) ]]; then
+            args+=(--cooldown 60s)
+          fi
           run_case screen "$key" "$name" "$protocol" "${args[@]}"
         done
         if [[ "$mode" == "new" ]]; then

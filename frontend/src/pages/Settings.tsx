@@ -259,7 +259,12 @@ export default function Settings() {
                         </FormField>
                         <FormField label='Verification code' required>
                             <div className='flex justify-center py-1'>
-                                <InputOTP maxLength={6} value={code} variant='secondary' onChange={setCode}>
+                                <InputOTP
+                                    maxLength={6}
+                                    value={code}
+                                    variant='secondary'
+                                    onChange={setCode}
+                                >
                                     <InputOTP.Group>
                                         <InputOTP.Slot index={0} />
                                         <InputOTP.Slot index={1} />

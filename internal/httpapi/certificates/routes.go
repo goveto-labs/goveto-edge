@@ -106,10 +106,14 @@ func upload(db *client.Client, service *certmanager.Service) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		id := uuid.NewString()
+		encryptedKey, err := service.EncryptPrivateKey(c.Param("cluster_id"), id, material.PrivateKeyPEM)
+		if err != nil {
+			return err
+		}
 		item, err := db.Certificate.Create().Set(
 			query.Certificate.Id.Set(id), query.Certificate.ClusterId.Set(c.Param("cluster_id")), query.Certificate.Name.Set(input.Name),
 			query.Certificate.Source.Set(model.CertificateSourceMANUAL), query.Certificate.Status.Set(model.CertificateStatusPENDING),
-			query.Certificate.DomainsJson.Set(certmanager.EncodeDomains(material.Domains)),
+			query.Certificate.DomainsJson.Set(certmanager.EncodeDomains(material.Domains)), query.Certificate.PrivateKeyEncrypted.Set(encryptedKey),
 		).Do(c.Request().Context())
 		if err != nil {
 			return err
@@ -170,12 +174,17 @@ func issueACME(db *client.Client, service *certmanager.Service) echo.HandlerFunc
 		if input.AutoRenew != nil {
 			autoRenew = *input.AutoRenew
 		}
+		id := uuid.NewString()
+		encryptedKey, err := service.EncryptPrivateKey(c.Param("cluster_id"), id, "")
+		if err != nil {
+			return err
+		}
 		sets := []query.CertificateSetClause{
-			query.Certificate.ClusterId.Set(c.Param("cluster_id")), query.Certificate.Name.Set(input.Name),
+			query.Certificate.Id.Set(id), query.Certificate.ClusterId.Set(c.Param("cluster_id")), query.Certificate.Name.Set(input.Name),
 			query.Certificate.Source.Set(model.CertificateSourceACME), query.Certificate.Status.Set(model.CertificateStatusPENDING),
 			query.Certificate.DomainsJson.Set(certmanager.EncodeDomains(domains)), query.Certificate.AcmeEmail.Set(input.Email),
 			query.Certificate.AcmeChallengeType.Set(input.ChallengeType), query.Certificate.AutoRenew.Set(autoRenew),
-			query.Certificate.RenewBeforeDays.Set(input.RenewBeforeDays),
+			query.Certificate.RenewBeforeDays.Set(input.RenewBeforeDays), query.Certificate.PrivateKeyEncrypted.Set(encryptedKey),
 		}
 		if directory != "" {
 			sets = append(sets, query.Certificate.AcmeDirectoryUrl.Set(directory))

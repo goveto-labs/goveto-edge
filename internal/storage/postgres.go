@@ -23,36 +23,7 @@ func InitSchema(ctx context.Context, db *sql.DB, schemaFS fs.FS, databaseURL str
 	if err != nil {
 		return nil, fmt.Errorf("apply database schema: %w", err)
 	}
-	if err := migrateLegacyNodeMemberships(ctx, db); err != nil {
-		return nil, err
-	}
 	return result, nil
-}
-
-func migrateLegacyNodeMemberships(ctx context.Context, db *sql.DB) error {
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin legacy node membership migration: %w", err)
-	}
-	defer tx.Rollback()
-
-	statements := []string{
-		`INSERT INTO node_group_memberships (node_id, group_id)
-		 SELECT id, group_id FROM nodes WHERE group_id IS NOT NULL
-		 ON CONFLICT (node_id, group_id) DO NOTHING`,
-		`INSERT INTO node_region_memberships (node_id, region_id)
-		 SELECT id, region_id FROM nodes WHERE region_id IS NOT NULL
-		 ON CONFLICT (node_id, region_id) DO NOTHING`,
-	}
-	for _, statement := range statements {
-		if _, err := tx.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("migrate legacy node memberships: %w", err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit legacy node membership migration: %w", err)
-	}
-	return nil
 }
 
 func OpenPostgreSQL(ctx context.Context, databaseURL string) (*sql.DB, *client.Client, error) {

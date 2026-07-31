@@ -107,7 +107,6 @@ type ServerWelcome struct {
 type ServerMessage struct {
 	Welcome          *ServerWelcome    `json:"welcome,omitempty"`
 	Task             *AgentTask        `json:"task,omitempty"`
-	LogsAckThrough   *uint64           `json:"logs_ack_through,omitempty"`
 	LogsAck          *AgentLogAck      `json:"logs_ack,omitempty"`
 	RotateCredential bool              `json:"rotate_credential,omitempty"`
 	Credential       *CredentialUpdate `json:"credential,omitempty"`

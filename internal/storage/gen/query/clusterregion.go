@@ -36,7 +36,6 @@ type ClusterRegionQuery struct {
 	CreatedAt       clusterRegionCreatedAtField
 	UpdatedAt       clusterRegionUpdatedAtField
 	Cluster         clusterRegionClusterRelation
-	Nodes           clusterRegionNodesRelation
 	NodeMemberships clusterRegionNodeMembershipsRelation
 }
 
@@ -55,7 +54,6 @@ var ClusterRegion = ClusterRegionQuery{
 	CreatedAt:       clusterRegionCreatedAtField{},
 	UpdatedAt:       clusterRegionUpdatedAtField{},
 	Cluster:         clusterRegionClusterRelation{},
-	Nodes:           clusterRegionNodesRelation{},
 	NodeMemberships: clusterRegionNodeMembershipsRelation{},
 }
 
@@ -471,14 +469,6 @@ func (clusterRegionClusterRelation) Fetch() ClusterRegionIncludeClause {
 	return ClusterRegionIncludeClause{Relation: "cluster"}
 }
 
-// NodesRelation provides relation query helpers for nodes.
-type clusterRegionNodesRelation struct{}
-
-// Fetch creates an include clause to fetch related nodes.
-func (clusterRegionNodesRelation) Fetch() ClusterRegionIncludeClause {
-	return ClusterRegionIncludeClause{Relation: "nodes"}
-}
-
 // NodeMembershipsRelation provides relation query helpers for nodeMemberships.
 type clusterRegionNodeMembershipsRelation struct{}
 
@@ -526,7 +516,6 @@ type ClusterRegionCreateInput struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	Cluster         *ClusterCreateNestedInput
-	Nodes           *NodeCreateNestedInput
 	NodeMemberships *NodeRegionMembershipCreateNestedInput
 }
 

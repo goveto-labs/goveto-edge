@@ -38,7 +38,6 @@ type CertificateQuery struct {
 	Source               certificateSourceField
 	Status               certificateStatusField
 	CertPem              certificateCertPemField
-	PrivateKeyPem        certificatePrivateKeyPemField
 	PrivateKeyEncrypted  certificatePrivateKeyEncryptedField
 	Fingerprint          certificateFingerprintField
 	SerialNumber         certificateSerialNumberField
@@ -72,7 +71,6 @@ const CertificateNameColumn = "name"
 const CertificateSourceColumn = "source"
 const CertificateStatusColumn = "status"
 const CertificateCertPemColumn = "cert_pem"
-const CertificatePrivateKeyPemColumn = "private_key_pem"
 const CertificatePrivateKeyEncryptedColumn = "private_key_encrypted"
 const CertificateFingerprintColumn = "fingerprint"
 const CertificateSerialNumberColumn = "serial_number"
@@ -102,7 +100,6 @@ var Certificate = CertificateQuery{
 	Source:               certificateSourceField{},
 	Status:               certificateStatusField{},
 	CertPem:              certificateCertPemField{},
-	PrivateKeyPem:        certificatePrivateKeyPemField{},
 	PrivateKeyEncrypted:  certificatePrivateKeyEncryptedField{},
 	Fingerprint:          certificateFingerprintField{},
 	SerialNumber:         certificateSerialNumberField{},
@@ -564,92 +561,21 @@ func (certificateCertPemField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "cert_pem", Direction: "DESC"}
 }
 
-// PrivateKeyPemField provides query operations for the privateKeyPem field.
-type certificatePrivateKeyPemField struct{}
-
-// Equals creates an equality condition.
-func (certificatePrivateKeyPemField) Equals(v *string) CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (certificatePrivateKeyPemField) Not(v *string) CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (certificatePrivateKeyPemField) In(vals ...*string) CertificateWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (certificatePrivateKeyPemField) NotIn(vals ...*string) CertificateWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "NOT IN", Value: iVals}
-}
-
-// Contains creates a LIKE '%v%' condition.
-func (certificatePrivateKeyPemField) Contains(v string) CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "CONTAINS", Value: v}
-}
-
-// StartsWith creates a LIKE 'v%' condition.
-func (certificatePrivateKeyPemField) StartsWith(v string) CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "STARTS_WITH", Value: v}
-}
-
-// EndsWith creates a LIKE '%v' condition.
-func (certificatePrivateKeyPemField) EndsWith(v string) CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "ENDS_WITH", Value: v}
-}
-
-// IsNull creates an IS NULL condition.
-func (certificatePrivateKeyPemField) IsNull() CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_pem", Operator: "IS NULL", Value: nil}
-}
-
-// Set creates a set operation for create/update.
-func (certificatePrivateKeyPemField) Set(v string) CertificateSetClause {
-	return CertificateSetClause{Field: "private_key_pem", Value: v}
-}
-
-// SetNull sets the field to NULL.
-func (certificatePrivateKeyPemField) SetNull() CertificateSetClause {
-	return CertificateSetClause{Field: "private_key_pem", Value: nil}
-}
-
-// Asc returns an ascending order clause for this field.
-func (certificatePrivateKeyPemField) Asc() CertificateOrderByClause {
-	return CertificateOrderByClause{Field: "private_key_pem", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (certificatePrivateKeyPemField) Desc() CertificateOrderByClause {
-	return CertificateOrderByClause{Field: "private_key_pem", Direction: "DESC"}
-}
-
 // PrivateKeyEncryptedField provides query operations for the privateKeyEncrypted field.
 type certificatePrivateKeyEncryptedField struct{}
 
 // Equals creates an equality condition.
-func (certificatePrivateKeyEncryptedField) Equals(v *string) CertificateWhereClause {
+func (certificatePrivateKeyEncryptedField) Equals(v string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificatePrivateKeyEncryptedField) Not(v *string) CertificateWhereClause {
+func (certificatePrivateKeyEncryptedField) Not(v string) CertificateWhereClause {
 	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificatePrivateKeyEncryptedField) In(vals ...*string) CertificateWhereClause {
+func (certificatePrivateKeyEncryptedField) In(vals ...string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -658,7 +584,7 @@ func (certificatePrivateKeyEncryptedField) In(vals ...*string) CertificateWhereC
 }
 
 // NotIn creates a NOT IN condition.
-func (certificatePrivateKeyEncryptedField) NotIn(vals ...*string) CertificateWhereClause {
+func (certificatePrivateKeyEncryptedField) NotIn(vals ...string) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -681,19 +607,9 @@ func (certificatePrivateKeyEncryptedField) EndsWith(v string) CertificateWhereCl
 	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "ENDS_WITH", Value: v}
 }
 
-// IsNull creates an IS NULL condition.
-func (certificatePrivateKeyEncryptedField) IsNull() CertificateWhereClause {
-	return CertificateWhereClause{Field: "private_key_encrypted", Operator: "IS NULL", Value: nil}
-}
-
 // Set creates a set operation for create/update.
 func (certificatePrivateKeyEncryptedField) Set(v string) CertificateSetClause {
 	return CertificateSetClause{Field: "private_key_encrypted", Value: v}
-}
-
-// SetNull sets the field to NULL.
-func (certificatePrivateKeyEncryptedField) SetNull() CertificateSetClause {
-	return CertificateSetClause{Field: "private_key_encrypted", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
@@ -2071,8 +1987,7 @@ type CertificateCreateInput struct {
 	Source               model.CertificateSource
 	Status               model.CertificateStatus
 	CertPem              **string
-	PrivateKeyPem        **string
-	PrivateKeyEncrypted  **string
+	PrivateKeyEncrypted  string
 	Fingerprint          **string
 	SerialNumber         **string
 	DomainsJson          json.RawMessage
@@ -2100,7 +2015,7 @@ type CertificateCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d CertificateCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Source, d.Status, d.CertPem, d.PrivateKeyPem, d.PrivateKeyEncrypted, d.Fingerprint, d.SerialNumber, d.DomainsJson, d.NotBefore, d.ExpiresAt, d.Issuer, d.KeyAlgorithm, d.AcmeDirectoryUrl, d.AcmeEmail, d.AcmeChallengeType, d.AutoRenew, d.RenewBeforeDays, d.LastIssuedAt, d.LastRenewalAttemptAt, d.LastRenewalError, d.LastPublishedAt, d.LastPublishError, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Source, d.Status, d.CertPem, d.PrivateKeyEncrypted, d.Fingerprint, d.SerialNumber, d.DomainsJson, d.NotBefore, d.ExpiresAt, d.Issuer, d.KeyAlgorithm, d.AcmeDirectoryUrl, d.AcmeEmail, d.AcmeChallengeType, d.AutoRenew, d.RenewBeforeDays, d.LastIssuedAt, d.LastRenewalAttemptAt, d.LastRenewalError, d.LastPublishedAt, d.LastPublishError, d.CreatedAt, d.UpdatedAt}
 }
 
 // CertificateCreateNestedInput supports nested creates and connects.

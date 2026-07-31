@@ -3,11 +3,7 @@ package analytics
 import (
 	"context"
 	"encoding/json"
-	"net"
-	"strings"
 	"time"
-
-	"github.com/google/uuid"
 
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/node"
@@ -56,7 +52,7 @@ func (i *Ingest) Consume(ctx context.Context, nodeID string, records []edgeproto
 }
 
 func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord) error {
-	directSites, legacySites, err := i.resolveSites(ctx, clusterID, records)
+	directSites, err := i.resolveSites(ctx, clusterID, records)
 	if err != nil {
 		return err
 	}
@@ -133,19 +129,11 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 			continue
 		}
 
-		siteID := r.SiteID
-		if siteID != "" {
-			if !directSites[siteID] {
-				continue
-			}
-		} else {
-			siteID = legacySiteID(r.Payload, legacySites)
-		}
-		if siteID == "" {
+		if r.SiteID == "" || !directSites[r.SiteID] {
 			continue
 		}
 
-		event, e := ParseAccess(r.Payload, clusterID, nodeID, siteID)
+		event, e := ParseAccess(r.Payload, clusterID, nodeID, r.SiteID)
 		if e == nil {
 			if !accessLogHasTimestamp(r.Payload) && !r.CreatedAt.IsZero() {
 				event.EventTime = r.CreatedAt.UTC()
@@ -181,16 +169,13 @@ func (i *Ingest) resolveSites(
 	ctx context.Context,
 	clusterID string,
 	records []edgeprotocol.LogRecord,
-) (map[string]bool, map[string]string, error) {
+) (map[string]bool, error) {
 	directIDs := map[string]struct{}{}
-	legacy := false
 	for _, record := range records {
 		if record.Type != "access" && record.Type != "caddy" {
 			continue
 		}
-		if record.SiteID == "" {
-			legacy = legacy || accessLogHost(record.Payload) != ""
-		} else if _, err := uuid.Parse(record.SiteID); err == nil {
+		if record.SiteID != "" {
 			directIDs[record.SiteID] = struct{}{}
 		}
 	}
@@ -205,57 +190,14 @@ func (i *Ingest) resolveSites(
 			query.Site.ClusterId.Equals(clusterID), query.Site.Id.In(ids...),
 		).Do(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for _, site := range sites {
 			direct[site.Id] = true
 		}
 	}
 
-	legacyDomains := map[string]string{}
-	if !legacy {
-		return direct, legacyDomains, nil
-	}
-	clusterSites, err := i.db.Site.Query().Where(query.Site.ClusterId.Equals(clusterID)).Do(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(clusterSites) == 0 {
-		return direct, legacyDomains, nil
-	}
-	siteIDs := make([]string, 0, len(clusterSites))
-	for _, site := range clusterSites {
-		siteIDs = append(siteIDs, site.Id)
-	}
-	domains, err := i.db.SiteDomain.Query().Where(query.SiteDomain.SiteId.In(siteIDs...)).Do(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, domain := range domains {
-		legacyDomains[strings.ToLower(domain.Hostname)] = domain.SiteId
-	}
-	return direct, legacyDomains, nil
-}
-
-func legacySiteID(payload []byte, sites map[string]string) string {
-	host := accessLogHost(payload)
-	return sites[strings.ToLower(host)]
-}
-
-func accessLogHost(payload []byte) string {
-	var probe struct {
-		Request struct {
-			Host string `json:"host"`
-		} `json:"request"`
-	}
-	if json.Unmarshal(payload, &probe) != nil {
-		return ""
-	}
-	host := probe.Request.Host
-	if value, _, err := net.SplitHostPort(host); err == nil {
-		host = value
-	}
-	return host
+	return direct, nil
 }
 
 func decodeOriginHealth(payload []byte, clusterID, nodeID string) (OriginHealthMetric, bool) {

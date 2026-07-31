@@ -60,7 +60,7 @@ func TestPrivateKeyEnvelopeIsScoped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	certificate := &model.Certificate{Id: "cert-a", ClusterId: "cluster-a", PrivateKeyEncrypted: &encrypted}
+	certificate := &model.Certificate{Id: "cert-a", ClusterId: "cluster-a", PrivateKeyEncrypted: encrypted}
 	plain, err := DecryptPrivateKey(cipher, certificate)
 	if err != nil || plain != "secret" {
 		t.Fatalf("plain=%q err=%v", plain, err)

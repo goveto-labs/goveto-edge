@@ -180,12 +180,13 @@ type agentLogSink struct {
 }
 
 func (s agentLogSink) WriteCaddyLog(siteID string, configVersion uint64, receivedAt time.Time, payload []byte) error {
-	record := LogRecord{Type: "caddy", SiteID: siteID, ConfigVersion: configVersion, CreatedAt: receivedAt, Payload: payload}
-	if siteID != "" {
-		record.Type = "access"
-		s.queue.EnqueueAccess(record)
-		return nil
+	if siteID == "" {
+		return errors.New("access log site_id is required")
 	}
-	_, err := s.queue.Append(record)
-	return err
+	record := LogRecord{Type: "caddy", SiteID: siteID, ConfigVersion: configVersion, CreatedAt: receivedAt, Payload: payload}
+	record.Type = "access"
+	if !s.queue.EnqueueAccess(record) {
+		return errors.New("access log buffer is full")
+	}
+	return nil
 }

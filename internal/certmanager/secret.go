@@ -22,8 +22,8 @@ func DecryptPrivateKey(cipher *node.CredentialCipher, certificate *model.Certifi
 	if certificate == nil {
 		return "", errors.New("certificate is required")
 	}
-	if certificate.PrivateKeyEncrypted != nil && *certificate.PrivateKeyEncrypted != "" {
-		value := *certificate.PrivateKeyEncrypted
+	if certificate.PrivateKeyEncrypted != "" {
+		value := certificate.PrivateKeyEncrypted
 		if len(value) < len(privateKeyEnvelope) || value[:len(privateKeyEnvelope)] != privateKeyEnvelope {
 			return "", errors.New("unsupported certificate private key envelope")
 		}
@@ -32,9 +32,6 @@ func DecryptPrivateKey(cipher *node.CredentialCipher, certificate *model.Certifi
 			return "", fmt.Errorf("decrypt certificate private key: %w", err)
 		}
 		return plain, nil
-	}
-	if certificate.PrivateKeyPem != nil && *certificate.PrivateKeyPem != "" {
-		return *certificate.PrivateKeyPem, nil
 	}
 	return "", errors.New("certificate private key is unavailable")
 }

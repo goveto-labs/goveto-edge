@@ -46,13 +46,16 @@ func New(db *client.Client, cipher *node.CredentialCipher, publisher Publisher) 
 	return &Service{db: db, cipher: cipher, publisher: publisher, jobs: jobqueue.New(db)}
 }
 
+func (s *Service) EncryptPrivateKey(clusterID, certificateID, privateKey string) (string, error) {
+	return EncryptPrivateKey(s.cipher, clusterID, certificateID, privateKey)
+}
+
 func (s *Service) Run(ctx context.Context) {
 	go s.reconcileTerminalJobs(ctx)
 	jobTicker := time.NewTicker(2 * time.Second)
 	lifecycleTicker := time.NewTicker(time.Hour)
 	defer jobTicker.Stop()
 	defer lifecycleTicker.Stop()
-	s.migrateLegacyPrivateKeys(ctx)
 	s.reconcileLifecycle(ctx)
 	for {
 		select {
@@ -93,49 +96,6 @@ func (s *Service) reconcileTerminalJobs(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-		}
-	}
-}
-
-func (s *Service) migrateLegacyPrivateKeys(ctx context.Context) {
-	items, err := s.db.Certificate.Query().Do(ctx)
-	if err != nil {
-		slog.Warn("load legacy certificate keys", "error", err)
-		return
-	}
-	for index := range items {
-		certificate := &items[index]
-		if certificate.PrivateKeyPem == nil || *certificate.PrivateKeyPem == "" {
-			continue
-		}
-		encrypted, encryptErr := EncryptPrivateKey(s.cipher, certificate.ClusterId, certificate.Id, *certificate.PrivateKeyPem)
-		if encryptErr != nil {
-			slog.Warn("encrypt legacy certificate key", "certificate_id", certificate.Id, "error", encryptErr)
-			continue
-		}
-		sets := []query.CertificateSetClause{
-			query.Certificate.PrivateKeyEncrypted.Set(encrypted), query.Certificate.PrivateKeyPem.SetNull(),
-		}
-		if certificate.CertPem != nil {
-			material, validationErr := ValidateMaterial(*certificate.CertPem, *certificate.PrivateKeyPem, time.Now().UTC())
-			if validationErr != nil {
-				material, validationErr = InspectCertificatePEM(*certificate.CertPem)
-			}
-			if validationErr == nil {
-				sets = append(sets,
-					query.Certificate.Source.Set(model.CertificateSourceMANUAL),
-					query.Certificate.Status.Set(statusAt(&material.ExpiresAt, certificate.RenewBeforeDays, time.Now().UTC())),
-					query.Certificate.Fingerprint.Set(material.Fingerprint), query.Certificate.SerialNumber.Set(material.SerialNumber),
-					query.Certificate.DomainsJson.Set(EncodeDomains(material.Domains)), query.Certificate.NotBefore.Set(material.NotBefore),
-					query.Certificate.ExpiresAt.Set(material.ExpiresAt), query.Certificate.Issuer.Set(material.Issuer),
-					query.Certificate.KeyAlgorithm.Set(material.KeyAlgorithm),
-				)
-			} else {
-				slog.Warn("validate legacy certificate", "certificate_id", certificate.Id, "error", validationErr)
-			}
-		}
-		if _, updateErr := s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(sets...).Do(ctx); updateErr != nil {
-			slog.Warn("persist encrypted legacy certificate key", "certificate_id", certificate.Id, "error", updateErr)
 		}
 	}
 }
@@ -263,7 +223,7 @@ func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error 
 		return err
 	}
 	if job.Operation == model.CertificateOperationREPUBLISH {
-		return s.publishCertificate(ctx, certificate, nil)
+		return s.publishCertificate(ctx, certificate)
 	}
 	if certificate.Source != model.CertificateSourceACME {
 		return errors.New("only ACME certificates can be issued or renewed")
@@ -281,7 +241,6 @@ func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error 
 	if err = s.validateAttachedDomains(ctx, certificate.Id, material.Domains); err != nil {
 		return err
 	}
-	old := *certificate
 	if err = s.storeMaterial(ctx, certificate, material, model.CertificateStatusDEPLOYING); err != nil {
 		return err
 	}
@@ -289,7 +248,7 @@ func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error 
 	if err != nil {
 		return err
 	}
-	if err = s.publishCertificate(ctx, updated, &old); err != nil {
+	if err = s.publishCertificate(ctx, updated); err != nil {
 		return err
 	}
 	return nil
@@ -306,7 +265,7 @@ func (s *Service) StoreManual(ctx context.Context, certificate *model.Certificat
 	if err != nil {
 		return err
 	}
-	return s.publishCertificate(ctx, updated, certificate)
+	return s.publishCertificate(ctx, updated)
 }
 
 func (s *Service) validateAttachedDomains(ctx context.Context, certificateID string, certificateDomains []string) error {
@@ -338,7 +297,7 @@ func (s *Service) storeMaterial(ctx context.Context, certificate *model.Certific
 	now := time.Now().UTC()
 	_, err = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(
 		query.Certificate.Status.Set(status), query.Certificate.CertPem.Set(material.CertificatePEM),
-		query.Certificate.PrivateKeyEncrypted.Set(encrypted), query.Certificate.PrivateKeyPem.SetNull(),
+		query.Certificate.PrivateKeyEncrypted.Set(encrypted),
 		query.Certificate.Fingerprint.Set(material.Fingerprint), query.Certificate.SerialNumber.Set(material.SerialNumber),
 		query.Certificate.DomainsJson.Set(EncodeDomains(material.Domains)),
 		query.Certificate.NotBefore.Set(material.NotBefore), query.Certificate.ExpiresAt.Set(material.ExpiresAt),
@@ -348,7 +307,7 @@ func (s *Service) storeMaterial(ctx context.Context, certificate *model.Certific
 	return err
 }
 
-func (s *Service) publishCertificate(ctx context.Context, certificate, rollback *model.Certificate) error {
+func (s *Service) publishCertificate(ctx context.Context, certificate *model.Certificate) error {
 	jobs, err := s.enqueueSites(ctx, certificate.Id)
 	if err == nil {
 		err = s.waitPublishJobs(ctx, jobs, 5*time.Minute)
@@ -361,79 +320,11 @@ func (s *Service) publishCertificate(ctx context.Context, certificate, rollback 
 		).Do(ctx)
 		return updateErr
 	}
-	if rollback != nil && rollback.CertPem != nil {
-		if restoreErr := s.restoreMaterial(ctx, rollback); restoreErr != nil {
-			err = errors.Join(err, fmt.Errorf("restore previous certificate: %w", restoreErr))
-		} else if rollbackJobs, enqueueErr := s.enqueueSites(ctx, rollback.Id); enqueueErr != nil {
-			err = errors.Join(err, fmt.Errorf("enqueue rollback: %w", enqueueErr))
-		} else if waitErr := s.waitPublishJobs(ctx, rollbackJobs, 5*time.Minute); waitErr != nil {
-			err = errors.Join(err, fmt.Errorf("publish rollback: %w", waitErr))
-		}
-	}
 	_, _ = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(
 		query.Certificate.Status.Set(model.CertificateStatusDEPLOYMENT_FAILED),
 		query.Certificate.LastPublishError.Set(err.Error()),
 	).Do(ctx)
 	return err
-}
-
-func (s *Service) restoreMaterial(ctx context.Context, old *model.Certificate) error {
-	sets := []query.CertificateSetClause{
-		query.Certificate.Status.Set(old.Status), query.Certificate.DomainsJson.Set(old.DomainsJson),
-		query.Certificate.AutoRenew.Set(old.AutoRenew), query.Certificate.RenewBeforeDays.Set(old.RenewBeforeDays),
-	}
-	sets = appendOptionalCertificateSets(sets, old)
-	_, err := s.db.Certificate.Update().Where(query.Certificate.Id.Equals(old.Id)).Set(sets...).Do(ctx)
-	return err
-}
-
-func appendOptionalCertificateSets(sets []query.CertificateSetClause, old *model.Certificate) []query.CertificateSetClause {
-	if old.CertPem != nil {
-		sets = append(sets, query.Certificate.CertPem.Set(*old.CertPem))
-	} else {
-		sets = append(sets, query.Certificate.CertPem.SetNull())
-	}
-	if old.PrivateKeyPem != nil {
-		sets = append(sets, query.Certificate.PrivateKeyPem.Set(*old.PrivateKeyPem))
-	} else {
-		sets = append(sets, query.Certificate.PrivateKeyPem.SetNull())
-	}
-	if old.PrivateKeyEncrypted != nil {
-		sets = append(sets, query.Certificate.PrivateKeyEncrypted.Set(*old.PrivateKeyEncrypted))
-	} else {
-		sets = append(sets, query.Certificate.PrivateKeyEncrypted.SetNull())
-	}
-	if old.Fingerprint != nil {
-		sets = append(sets, query.Certificate.Fingerprint.Set(*old.Fingerprint))
-	} else {
-		sets = append(sets, query.Certificate.Fingerprint.SetNull())
-	}
-	if old.SerialNumber != nil {
-		sets = append(sets, query.Certificate.SerialNumber.Set(*old.SerialNumber))
-	} else {
-		sets = append(sets, query.Certificate.SerialNumber.SetNull())
-	}
-	if old.NotBefore != nil {
-		sets = append(sets, query.Certificate.NotBefore.Set(*old.NotBefore))
-	} else {
-		sets = append(sets, query.Certificate.NotBefore.SetNull())
-	}
-	if old.ExpiresAt != nil {
-		sets = append(sets, query.Certificate.ExpiresAt.Set(*old.ExpiresAt))
-	} else {
-		sets = append(sets, query.Certificate.ExpiresAt.SetNull())
-	}
-	if old.Issuer != nil {
-		sets = append(sets, query.Certificate.Issuer.Set(*old.Issuer))
-	} else {
-		sets = append(sets, query.Certificate.Issuer.SetNull())
-	}
-	if old.KeyAlgorithm != nil {
-		sets = append(sets, query.Certificate.KeyAlgorithm.Set(*old.KeyAlgorithm))
-	} else {
-		sets = append(sets, query.Certificate.KeyAlgorithm.SetNull())
-	}
-	return sets
 }
 
 func (s *Service) enqueueSites(ctx context.Context, certificateID string) ([]string, error) {

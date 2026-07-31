@@ -41,12 +41,8 @@ var ErrGeoIPUnavailable = errors.New("managed GeoIP database is not installed")
 
 func NewConfigManager(path, defaultListen string) *ConfigManager {
 	manager := &ConfigManager{
-		sites: map[string]SiteConfig{},
-		nodeConfig: NodeConfig{
-			CacheDirectory:      "/opt/goveto-edge/cache",
-			AutoMaxSize:         true,
-			MaxDiskUsagePercent: 80,
-		},
+		sites:      map[string]SiteConfig{},
+		nodeConfig: defaultNodeConfig(),
 	}
 	manager.path = path
 	manager.defaultListen = defaultListen
@@ -59,7 +55,9 @@ func NewConfigManager(path, defaultListen string) *ConfigManager {
 func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	config.MaxDiskUsagePercent = normalizeCacheDiskPercent(config.MaxDiskUsagePercent)
+	if err := validateNodeConfig(config); err != nil {
+		return err
+	}
 
 	encoded, err := renderManagedCaddyConfig(m.sites, m.defaultListen, m.geoIPPath, config)
 	if err != nil {
@@ -260,14 +258,12 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 }
 
 func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPPath string, nodeConfigs ...NodeConfig) ([]byte, error) {
-	nodeConfig := NodeConfig{
-		CacheDirectory:      "/opt/goveto-edge/cache",
-		AutoMaxSize:         true,
-		MaxDiskUsagePercent: 80,
-	}
+	nodeConfig := defaultNodeConfig()
 	if len(nodeConfigs) > 0 {
 		nodeConfig = nodeConfigs[0]
-		nodeConfig.MaxDiskUsagePercent = normalizeCacheDiskPercent(nodeConfig.MaxDiskUsagePercent)
+		if err := validateNodeConfig(nodeConfig); err != nil {
+			return nil, err
+		}
 	}
 
 	ids := make([]string, 0, len(sites))
@@ -314,6 +310,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			"writer": map[string]any{
 				"output": "goveto_buffer", "site_id": id, "config_version": site.Version,
 			},
+			"encoder": accessLogEncoder(),
 			"include": []string{"http.log.access." + loggerName},
 		}
 		for _, domain := range site.Domains {
@@ -709,6 +706,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		"edge": map[string]any{
 			"listen":                  listen,
 			"protocols":               protocolList,
+			"idle_timeout":            durationMS(30_000),
 			"routes":                  routes,
 			"tls_connection_policies": policies,
 			"automatic_https":         map[string]any{"disable": true},
@@ -733,6 +731,22 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		},
 	}
 	return json.Marshal(config)
+}
+
+func accessLogEncoder() map[string]any {
+	fields := map[string]any{
+		"request>uri":             map[string]any{"filter": "regexp", "regexp": `\?.*$`, "value": ""},
+		"request>client_ip":       map[string]any{"filter": "ip_mask", "ipv4_cidr": 24, "ipv6_cidr": 48},
+		"request>remote_ip":       map[string]any{"filter": "ip_mask", "ipv4_cidr": 24, "ipv6_cidr": 48},
+		"resp_headers>Set-Cookie": map[string]any{"filter": "delete"},
+	}
+	for _, header := range []string{
+		"Authorization", "Cf-Connecting-Ip", "Cookie", "Forwarded", "Proxy-Authorization",
+		"True-Client-Ip", "X-Api-Key", "X-Forwarded-For", "X-Real-Ip",
+	} {
+		fields["request>headers>"+header] = map[string]any{"filter": "delete"}
+	}
+	return map[string]any{"format": "filter", "wrap": map[string]any{"format": "json"}, "fields": fields}
 }
 
 func decodeCachePolicy(raw map[string]any) (cachepolicy.CachePolicy, bool, error) {

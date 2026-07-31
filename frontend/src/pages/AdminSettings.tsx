@@ -689,8 +689,8 @@ export default function AdminSettings() {
                             {restartAffected
                                 ? 'Connectivity and client IP changes restart the control plane after saving.'
                                 : dirty
-                                    ? 'These changes take effect only after you save them.'
-                                    : 'Changes on this page remain a draft until you save them.'}
+                                  ? 'These changes take effect only after you save them.'
+                                  : 'Changes on this page remain a draft until you save them.'}
                         </div>
                         <Button
                             className='shrink-0'

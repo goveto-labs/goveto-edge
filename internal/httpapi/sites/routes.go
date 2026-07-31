@@ -201,7 +201,6 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		governance, _ := json.Marshal(originPolicy)
-		headers, _ := json.Marshal(originPolicy.Headers)
 
 		ctx := c.Request().Context()
 		for _, certificateID := range input.CertificateIDs {
@@ -247,8 +246,6 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 					query.OriginPool.Id.Set(poolID),
 					query.OriginPool.ClusterId.Set(c.Param("cluster_id")),
 					query.OriginPool.Name.Set(input.Name),
-					query.OriginPool.Timeout.Set(originPolicy.TimeoutMS),
-					query.OriginPool.Headers.Set(headers),
 					query.OriginPool.Governance.Set(governance),
 				).
 				Do(ctx); err != nil {

@@ -239,8 +239,7 @@ model Certificate {
   source               CertificateSource  @default(MANUAL)
   status               CertificateStatus  @default(PENDING)
   certPem              String?            @db.Text @map("cert_pem")
-  privateKeyPem        String?            @db.Text @map("private_key_pem")
-  privateKeyEncrypted  String?            @db.Text @map("private_key_encrypted")
+  privateKeyEncrypted  String             @db.Text @map("private_key_encrypted")
   fingerprint          String?
   serialNumber         String?            @map("serial_number")
   domainsJson          Json               @default("[]") @map("domains_json")
@@ -332,7 +331,6 @@ model ClusterGroup {
   createdAt       DateTime              @default(now()) @map("created_at")
   updatedAt       DateTime              @default(now()) @updatedAt @map("updated_at")
   cluster         Cluster               @relation(fields: [clusterId], references: [id])
-  nodes           Node[]
   nodeMemberships NodeGroupMembership[]
 
   @@unique([clusterId, name])
@@ -360,7 +358,6 @@ model ClusterRegion {
   createdAt       DateTime               @default(now()) @map("created_at")
   updatedAt       DateTime               @default(now()) @updatedAt @map("updated_at")
   cluster         Cluster                @relation(fields: [clusterId], references: [id])
-  nodes           Node[]
   nodeMemberships NodeRegionMembership[]
 
   @@unique([clusterId, name])
@@ -537,8 +534,6 @@ model JobExecution {
 model Node {
   id                 UUID                    @id @default(uuid())
   clusterId          String                  @map("cluster_id")
-  groupId            String?                 @map("group_id")
-  regionId           String?                 @map("region_id")
   name               String
   version            String?
   heartbeatAt        DateTime?               @map("heartbeat_at")
@@ -550,8 +545,6 @@ model Node {
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])
-  group              ClusterGroup?           @relation(fields: [groupId], references: [id])
-  region             ClusterRegion?          @relation(fields: [regionId], references: [id])
   addresses          NodeAddress[]
   dnsLines           NodeDNSLine[]
   groupMemberships   NodeGroupMembership[]
@@ -567,8 +560,6 @@ model Node {
 
   @@unique([clusterId, name])
   @@index([clusterId, status])
-  @@index([groupId, status])
-  @@index([regionId, status])
   @@index([heartbeatAt])
   @@index([sshCredentialId])
   @@map("nodes")
@@ -695,8 +686,6 @@ model OriginPool {
   clusterId  String          @map("cluster_id")
   name       String
   scheduler  String          @default("round_robin")
-  timeout    Int             @default(10000)
-  headers    Json
   governance Json            @default("{}")
   createdAt  DateTime        @default(now()) @map("created_at")
   updatedAt  DateTime        @default(now()) @updatedAt @map("updated_at")
@@ -706,6 +695,20 @@ model OriginPool {
 
   @@index([clusterId])
   @@map("origin_pools")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([expiresAt])
+  @@map("password_reset_tokens")
 }
 
 model Policy {
@@ -935,18 +938,4 @@ model UserSession {
   @@index([expiresAt])
   @@index([userId, revokedAt, expiresAt])
   @@map("user_sessions")
-}
-
-model PasswordResetToken {
-  id        String    @id @default(uuid())
-  userId    String    @map("user_id")
-  tokenHash String    @unique @map("token_hash")
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, createdAt])
-  @@index([expiresAt])
-  @@map("password_reset_tokens")
 }

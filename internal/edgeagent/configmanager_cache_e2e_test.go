@@ -514,7 +514,7 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		for _, path := range []string{"/stale", "/stale-500", "/stale-503", "/stale-504", "/stale-interrupted"} {
 			stale := requestEdge(t, port, config.Domains[0], http.MethodGet, path, nil)
 			if stale.status != http.StatusOK || stale.body != staleBodies[path] || stale.header.Get("X-Cache") != "STALE" {
-				t.Fatalf("%s stale response status=%d body=%q want=%q x-cache=%q", path, stale.status, stale.body, staleBodies[path], stale.header.Get("X-Cache"))
+				t.Fatalf("%s stale response status=%d body=%q want=%q x-cache=%q stats=%#v", path, stale.status, stale.body, staleBodies[path], stale.header.Get("X-Cache"), cachefs.Stats(cacheDirectory))
 			}
 			if count := counters.count("GET " + path + " "); count != staleOriginCounts[path]+1 {
 				t.Fatalf("%s stale revalidation origin count=%d, want %d", path, count, staleOriginCounts[path]+1)

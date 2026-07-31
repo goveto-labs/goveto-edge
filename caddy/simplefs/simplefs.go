@@ -5,7 +5,9 @@ package simplefs
 import (
 	"bufio"
 	"bytes"
+	"container/list"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,13 +30,24 @@ import (
 	"github.com/darkweak/storages/core"
 	"github.com/pierrec/lz4/v4"
 	"github.com/shirou/gopsutil/v4/disk"
+	bolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
 )
 
 const (
-	moduleName = "simplefs"
-	indexName  = ".goveto-cache-index.json"
-	bodyPrefix = "body-"
+	moduleName   = "simplefs"
+	indexName    = ".goveto-cache-index.db"
+	oldIndexName = ".goveto-cache-index.json"
+	bodyPrefix   = "body-"
+	indexVersion = 2
+)
+
+var (
+	indexItemsBucket  = []byte("items")
+	indexGroupsBucket = []byte("groups")
+	indexMetaBucket   = []byte("meta")
+	indexVersionKey   = []byte("version")
+	indexUsedBytesKey = []byte("used_bytes")
 )
 
 var ErrCapacity = errors.New("cache storage limit leaves no room for this response")
@@ -154,24 +167,25 @@ type limits struct {
 }
 
 type cacheItem struct {
-	value      []byte
-	expiresAt  time.Time
-	lastAccess time.Time
-	file       bool
-	generation uint64
+	value          []byte
+	expiresAt      time.Time
+	lastAccess     time.Time
+	file           bool
+	generation     uint64
+	compressedSize uint64
+	originalSize   uint64
+	checksum       [sha256.Size]byte
+	lru            *list.Element
 }
 
 type diskItem struct {
-	Value      []byte    `json:"value,omitempty"`
-	File       string    `json:"file,omitempty"`
-	ExpiresAt  time.Time `json:"expires_at,omitempty"`
-	LastAccess time.Time `json:"last_access"`
-}
-
-type diskIndex struct {
-	Version int                 `json:"version"`
-	Items   map[string]diskItem `json:"items"`
-	Groups  map[string][]string `json:"groups,omitempty"`
+	Value          []byte    `json:"value,omitempty"`
+	File           string    `json:"file,omitempty"`
+	ExpiresAt      time.Time `json:"expires_at,omitempty"`
+	LastAccess     time.Time `json:"last_access"`
+	CompressedSize uint64    `json:"compressed_size,omitempty"`
+	OriginalSize   uint64    `json:"original_size,omitempty"`
+	Checksum       []byte    `json:"checksum,omitempty"`
 }
 
 type Statistics struct {
@@ -222,6 +236,10 @@ type provider struct {
 	capacityMu  sync.Mutex
 	items       map[string]cacheItem
 	groups      map[string]map[string]struct{}
+	lru         list.List
+	index       *bolt.DB
+	dirtyItems  map[string]struct{}
+	dirtyGroups map[string]struct{}
 	path        string
 	size        int
 	stale       time.Duration
@@ -235,6 +253,7 @@ type provider struct {
 	rejections  atomic.Uint64
 	corruptions atomic.Uint64
 	indexWrites atomic.Uint64
+	cacheUsed   atomic.Uint64
 	nextVersion uint64
 }
 
@@ -273,14 +292,16 @@ func buildProvider(config core.CacheProvider, logger core.Logger, stale time.Dur
 		return nil, err
 	}
 	provider := &provider{
-		items:     map[string]cacheItem{},
-		groups:    map[string]map[string]struct{}{},
-		path:      path,
-		size:      size,
-		stale:     stale,
-		limits:    configured,
-		logger:    logger,
-		diskUsage: diskUsageForProvider(path),
+		items:       map[string]cacheItem{},
+		groups:      map[string]map[string]struct{}{},
+		dirtyItems:  map[string]struct{}{},
+		dirtyGroups: map[string]struct{}{},
+		path:        path,
+		size:        size,
+		stale:       stale,
+		limits:      configured,
+		logger:      logger,
+		diskUsage:   diskUsageForProvider(path),
 	}
 	return provider, nil
 }
@@ -324,7 +345,7 @@ func (p *provider) Get(key string) []byte {
 	if !item.file {
 		return item.value
 	}
-	value, err := readCachedResponseFile(string(item.value))
+	value, err := readCachedObjectFile(string(item.value), item.compressedSize, item.checksum)
 	if err != nil {
 		p.mu.Lock()
 		current, exists := p.items[key]
@@ -375,37 +396,40 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 	if cacheResponseHasDirective(value, "private", "no-store", "no-cache", "must-revalidate") {
 		return ErrUncacheable
 	}
-	compressed := new(bytes.Buffer)
-	writer := lz4.NewWriter(compressed)
-	if _, err := writer.Write(value); err != nil {
-		_ = writer.Close()
-		return err
-	}
-	if err := writer.Close(); err != nil {
-		return err
-	}
 	path := filepath.Join(p.path, bodyFileName(variedKey))
+	temporaryPath, compressedSize, checksum, err := writeCompressedTemporary(path, value)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporaryPath)
 	p.capacityMu.Lock()
 	defer p.capacityMu.Unlock()
-	incoming := uint64(compressed.Len())
+	incoming := compressedSize
 	if info, err := os.Stat(path); err == nil && uint64(info.Size()) < incoming {
 		incoming -= uint64(info.Size())
 	} else if err == nil {
 		incoming = 0
 	}
-	if err := p.ensureSpaceLocked(incoming, p.limits); err != nil {
+	if err := p.ensureSpaceLockedWithTransient(incoming, p.limits, compressedSize); err != nil {
 		return err
 	}
-	if err := atomicWriteFile(path, compressed.Bytes(), 0o640); err != nil {
+	if err := os.Rename(temporaryPath, path); err != nil {
 		if errors.Is(err, syscall.ENOSPC) {
 			p.rejections.Add(1)
 		}
 		return err
 	}
+	if directory, openErr := os.Open(p.path); openErr == nil {
+		err = directory.Sync()
+		_ = directory.Close()
+		if err != nil {
+			return err
+		}
+	}
 
 	now := time.Now()
 	p.mu.Lock()
-	p.setLocked(variedKey, []byte(path), duration+p.stale, true, now)
+	p.setFileLocked(variedKey, path, duration+p.stale, now, compressedSize, uint64(len(value)), checksum)
 	mappingKey := core.MappingKeyPrefix + baseKey
 	previous, _ := p.itemLocked(mappingKey, now)
 	mapping, err := core.MappingUpdater(
@@ -427,6 +451,7 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 			}
 			p.groups[group][variedKey] = struct{}{}
 			p.groups[group][mappingKey] = struct{}{}
+			p.dirtyGroups[group] = struct{}{}
 		}
 		err = p.persistIndexLocked()
 		if err != nil {
@@ -643,6 +668,10 @@ func (p *provider) ensureSpace(incoming uint64, configured limits) error {
 }
 
 func (p *provider) ensureSpaceLocked(incoming uint64, configured limits) error {
+	return p.ensureSpaceLockedWithTransient(incoming, configured, 0)
+}
+
+func (p *provider) ensureSpaceLockedWithTransient(incoming uint64, configured limits, transient uint64) error {
 	p.mu.Lock()
 	pruned := p.pruneExpiredLocked(time.Now())
 	var pruneErr error
@@ -654,7 +683,7 @@ func (p *provider) ensureSpaceLocked(incoming uint64, configured limits) error {
 	if pruneErr != nil {
 		return pruneErr
 	}
-	used, available, err := p.capacityAvailable(configured)
+	used, available, err := p.capacityAvailable(configured, transient)
 	if err != nil {
 		return err
 	}
@@ -677,19 +706,17 @@ func (p *provider) ensureSpaceLocked(incoming uint64, configured limits) error {
 	return nil
 }
 
-func (p *provider) capacityAvailable(configured limits) (uint64, uint64, error) {
+func (p *provider) capacityAvailable(configured limits, transient uint64) (uint64, uint64, error) {
 	usage, err := p.diskUsage(p.path)
 	if err != nil {
 		return 0, 0, err
 	}
-	cacheUsed, err := directorySize(p.path)
-	if err != nil {
-		return 0, 0, err
-	}
+	cacheUsed := p.cacheUsed.Load()
 	target := usage.Total * uint64(normalizePercent(configured.maxDiskUsagePercent)) / 100
 	nonCacheUsed := uint64(0)
-	if usage.Used > cacheUsed {
-		nonCacheUsed = usage.Used - cacheUsed
+	trackedAndTransient := cacheUsed + transient
+	if usage.Used > trackedAndTransient {
+		nonCacheUsed = usage.Used - trackedAndTransient
 	}
 	if nonCacheUsed > target {
 		return cacheUsed, 0, nil
@@ -711,84 +738,32 @@ func (p *provider) evictOldest() bool {
 	return err == nil && freed > 0
 }
 
-type evictionCandidate struct {
-	key        string
-	path       string
-	size       uint64
-	lastAccess time.Time
-	orphan     bool
-}
-
 func (p *provider) evictBytes(required uint64) (uint64, error) {
 	if required == 0 {
 		return 0, nil
 	}
 	p.mu.Lock()
-	trackedPaths := make(map[string]struct{})
-	candidates := make([]evictionCandidate, 0)
-	for key, item := range p.items {
-		if !item.file {
-			continue
-		}
-		path := string(item.value)
-		trackedPaths[path] = struct{}{}
-		candidate := evictionCandidate{key: key, path: path, lastAccess: item.lastAccess}
-		if info, err := os.Stat(path); err == nil {
-			candidate.size = uint64(info.Size())
-		}
-		candidates = append(candidates, candidate)
-	}
-	entries, err := os.ReadDir(p.path)
-	if err != nil {
-		p.mu.Unlock()
-		return 0, err
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !isCacheData(entry.Name()) {
-			continue
-		}
-		path := filepath.Join(p.path, entry.Name())
-		if _, tracked := trackedPaths[path]; tracked {
-			continue
-		}
-		info, err := entry.Info()
-		if err != nil {
-			continue
-		}
-		candidates = append(candidates, evictionCandidate{path: path, size: uint64(info.Size()), lastAccess: info.ModTime(), orphan: true})
-	}
-	sort.Slice(candidates, func(first, second int) bool {
-		return candidates[first].lastAccess.Before(candidates[second].lastAccess)
-	})
-	victimKeys := make(map[string]struct{})
 	var freed, evicted uint64
-	trackedChanged := false
-	for _, candidate := range candidates {
-		if freed >= required {
+	for freed < required {
+		oldest := p.lru.Front()
+		if oldest == nil {
 			break
 		}
-		if err := os.Remove(candidate.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		key := oldest.Value.(string)
+		item, ok := p.items[key]
+		if !ok || !item.file {
+			p.lru.Remove(oldest)
 			continue
 		}
-		freed += candidate.size
+		if err := os.Remove(string(item.value)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			break
+		}
+		freed += item.compressedSize
 		evicted++
-		if !candidate.orphan {
-			delete(p.items, candidate.key)
-			victimKeys[candidate.key] = struct{}{}
-			trackedChanged = true
-		}
+		p.forgetItemLocked(key, item)
 	}
-	if trackedChanged {
-		for group, keys := range p.groups {
-			for key := range keys {
-				if _, removed := victimKeys[key]; removed {
-					delete(keys, key)
-				}
-			}
-			if len(keys) == 0 {
-				delete(p.groups, group)
-			}
-		}
+	var err error
+	if evicted > 0 {
 		p.repairMappingsLocked()
 		err = p.persistIndexLocked()
 	}
@@ -807,13 +782,26 @@ func (p *provider) itemLocked(key string, now time.Time) (cacheItem, bool) {
 		return cacheItem{}, false
 	}
 	item.lastAccess = now
+	if item.lru != nil {
+		p.lru.MoveToBack(item.lru)
+	}
 	p.items[key] = item
+	p.dirtyItems[key] = struct{}{}
 	return item, true
 }
 
 func (p *provider) setLocked(key string, value []byte, duration time.Duration, file bool, now time.Time) {
-	if old, ok := p.items[key]; ok && old.file && string(old.value) != string(value) {
-		_ = os.Remove(string(old.value))
+	if file {
+		panic("use setFileLocked for cache objects")
+	}
+	if old, ok := p.items[key]; ok {
+		if old.file {
+			_ = os.Remove(string(old.value))
+			if old.compressedSize > 0 {
+				p.cacheUsed.Add(^uint64(old.compressedSize - 1))
+			}
+		}
+		p.removeItemAccountingLocked(old)
 	}
 	expiresAt := time.Time{}
 	if duration > 0 {
@@ -823,6 +811,32 @@ func (p *provider) setLocked(key string, value []byte, duration time.Duration, f
 	p.items[key] = cacheItem{
 		value: value, expiresAt: expiresAt, lastAccess: now, file: file, generation: p.nextVersion,
 	}
+	p.dirtyItems[key] = struct{}{}
+}
+
+func (p *provider) setFileLocked(key, path string, duration time.Duration, now time.Time, compressedSize, originalSize uint64, checksum [sha256.Size]byte) {
+	if old, ok := p.items[key]; ok {
+		if old.file && string(old.value) != path {
+			_ = os.Remove(string(old.value))
+		}
+		p.removeItemAccountingLocked(old)
+		if old.file && old.compressedSize > 0 {
+			p.cacheUsed.Add(^uint64(old.compressedSize - 1))
+		}
+	}
+	expiresAt := time.Time{}
+	if duration > 0 {
+		expiresAt = now.Add(duration)
+	}
+	p.nextVersion++
+	item := cacheItem{
+		value: []byte(path), expiresAt: expiresAt, lastAccess: now, file: true, generation: p.nextVersion,
+		compressedSize: compressedSize, originalSize: originalSize, checksum: checksum,
+	}
+	item.lru = p.lru.PushBack(key)
+	p.items[key] = item
+	p.cacheUsed.Add(compressedSize)
+	p.dirtyItems[key] = struct{}{}
 }
 
 func (p *provider) deleteLocked(key string) {
@@ -837,15 +851,34 @@ func (p *provider) deleteLocked(key string) {
 }
 
 func (p *provider) deleteItemLocked(key string, item cacheItem) {
+	p.forgetItemLocked(key, item)
+	if item.file {
+		_ = os.Remove(string(item.value))
+	}
+}
+
+func (p *provider) forgetItemLocked(key string, item cacheItem) {
 	delete(p.items, key)
+	p.removeItemAccountingLocked(item)
+	p.dirtyItems[key] = struct{}{}
 	for group, keys := range p.groups {
+		if _, ok := keys[key]; !ok {
+			continue
+		}
 		delete(keys, key)
+		p.dirtyGroups[group] = struct{}{}
 		if len(keys) == 0 {
 			delete(p.groups, group)
 		}
 	}
-	if item.file {
-		_ = os.Remove(string(item.value))
+	if item.file && item.compressedSize > 0 {
+		p.cacheUsed.Add(^uint64(item.compressedSize - 1))
+	}
+}
+
+func (p *provider) removeItemAccountingLocked(item cacheItem) {
+	if item.lru != nil {
+		p.lru.Remove(item.lru)
 	}
 }
 
@@ -875,6 +908,7 @@ func (p *provider) removeVariantFromMappingsLocked(variedKey string) {
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
+		p.dirtyItems[key] = struct{}{}
 	}
 }
 
@@ -914,6 +948,7 @@ func (p *provider) repairMappingsLocked() bool {
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
+		p.dirtyItems[key] = struct{}{}
 	}
 	return repaired
 }
@@ -931,85 +966,137 @@ func (p *provider) pruneExpiredLocked(now time.Time) bool {
 
 func (p *provider) loadIndex() error {
 	indexPath := filepath.Join(p.path, indexName)
-	data, err := os.ReadFile(indexPath)
-	if errors.Is(err, os.ErrNotExist) {
-		if err = p.removeOrphanFiles(nil); err != nil {
+	_, statErr := os.Stat(indexPath)
+	newIndex := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !newIndex {
+		return statErr
+	}
+	if newIndex {
+		_ = os.Remove(filepath.Join(p.path, oldIndexName))
+		if err := p.removeOrphanFiles(nil); err != nil {
 			return err
 		}
-		return p.persistIndexLocked()
 	}
-	if err != nil {
-		return err
-	}
-	var stored diskIndex
-	if json.Unmarshal(data, &stored) != nil || stored.Version != 1 || stored.Items == nil {
+	if err := p.openIndex(indexPath); err != nil {
 		p.corruptions.Add(1)
-		backup := indexPath + ".corrupt-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-		if renameErr := os.Rename(indexPath, backup); renameErr != nil {
-			return renameErr
+		if rebuildErr := p.rebuildIndex(indexPath); rebuildErr != nil {
+			return errors.Join(err, rebuildErr)
 		}
-		if err = p.removeOrphanFiles(nil); err != nil {
-			return err
-		}
-		return p.persistIndexLocked()
+		return nil
 	}
 
 	now := time.Now()
 	validFiles := map[string]struct{}{}
 	repaired := false
-	for key, item := range stored.Items {
-		if !item.ExpiresAt.IsZero() && !item.ExpiresAt.After(now) {
-			repaired = true
-			continue
+	err := p.index.View(func(tx *bolt.Tx) error {
+		items := tx.Bucket(indexItemsBucket)
+		groups := tx.Bucket(indexGroupsBucket)
+		if items == nil || groups == nil {
+			return errors.New("cache metadata buckets are missing")
 		}
-		if item.File == "" {
-			if strings.HasPrefix(key, core.MappingKeyPrefix) {
-				if _, decodeErr := core.DecodeMapping(item.Value); decodeErr != nil {
-					p.corruptions.Add(1)
+		if err := items.ForEach(func(rawKey, rawValue []byte) error {
+			key := string(rawKey)
+			var item diskItem
+			if json.Unmarshal(rawValue, &item) != nil {
+				p.corruptions.Add(1)
+				repaired = true
+				p.dirtyItems[key] = struct{}{}
+				return nil
+			}
+			if !item.ExpiresAt.IsZero() && !item.ExpiresAt.After(now) {
+				repaired = true
+				p.dirtyItems[key] = struct{}{}
+				return nil
+			}
+			if item.File == "" {
+				if strings.HasPrefix(key, core.MappingKeyPrefix) {
+					if _, decodeErr := core.DecodeMapping(item.Value); decodeErr != nil {
+						p.corruptions.Add(1)
+						repaired = true
+						p.dirtyItems[key] = struct{}{}
+						return nil
+					}
+				}
+				p.nextVersion++
+				p.items[key] = cacheItem{
+					value: item.Value, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
+					generation: p.nextVersion,
+				}
+				return nil
+			}
+			if filepath.Base(item.File) != item.File || item.File == indexName {
+				p.corruptions.Add(1)
+				repaired = true
+				p.dirtyItems[key] = struct{}{}
+				return nil
+			}
+			path := filepath.Join(p.path, item.File)
+			compressed, originalSize, readErr := inspectCachedResponseFile(path)
+			if readErr != nil {
+				p.corruptions.Add(1)
+				repaired = true
+				p.dirtyItems[key] = struct{}{}
+				_ = os.Remove(path)
+				return nil
+			}
+			checksum := sha256.Sum256(compressed)
+			if item.CompressedSize != uint64(len(compressed)) || item.OriginalSize != originalSize || !bytes.Equal(item.Checksum, checksum[:]) {
+				repaired = true
+				p.dirtyItems[key] = struct{}{}
+			}
+			validFiles[item.File] = struct{}{}
+			p.nextVersion++
+			loaded := cacheItem{
+				value: []byte(path), file: true, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
+				generation: p.nextVersion, compressedSize: uint64(len(compressed)), originalSize: originalSize, checksum: checksum,
+			}
+			p.items[key] = loaded
+			p.cacheUsed.Add(loaded.compressedSize)
+			return nil
+		}); err != nil {
+			return err
+		}
+		return groups.ForEach(func(rawGroup, rawKeys []byte) error {
+			group := string(rawGroup)
+			var keys []string
+			if json.Unmarshal(rawKeys, &keys) != nil {
+				repaired = true
+				p.dirtyGroups[group] = struct{}{}
+				return nil
+			}
+			for _, key := range keys {
+				if _, ok := p.items[key]; !ok {
 					repaired = true
+					p.dirtyGroups[group] = struct{}{}
 					continue
 				}
+				if p.groups[group] == nil {
+					p.groups[group] = map[string]struct{}{}
+				}
+				p.groups[group][key] = struct{}{}
 			}
-			p.nextVersion++
-			p.items[key] = cacheItem{
-				value: item.Value, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
-				generation: p.nextVersion,
-			}
-			continue
+			return nil
+		})
+	})
+	if err != nil {
+		return err
+	}
+	keysByAccess := make([]string, 0, len(p.items))
+	for key, item := range p.items {
+		if item.file {
+			keysByAccess = append(keysByAccess, key)
 		}
-		if filepath.Base(item.File) != item.File || item.File == indexName {
-			p.corruptions.Add(1)
-			repaired = true
-			continue
-		}
-		path := filepath.Join(p.path, item.File)
-		if _, readErr := readCachedResponseFile(path); readErr != nil {
-			p.corruptions.Add(1)
-			repaired = true
-			_ = os.Remove(path)
-			continue
-		}
-		validFiles[item.File] = struct{}{}
-		p.nextVersion++
-		p.items[key] = cacheItem{
-			value: []byte(path), file: true, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
-			generation: p.nextVersion,
-		}
+	}
+	sort.Slice(keysByAccess, func(i, j int) bool {
+		return p.items[keysByAccess[i]].lastAccess.Before(p.items[keysByAccess[j]].lastAccess)
+	})
+	for _, key := range keysByAccess {
+		item := p.items[key]
+		item.lru = p.lru.PushBack(key)
+		p.items[key] = item
 	}
 	if p.repairMappingsLocked() {
 		repaired = true
-	}
-	for group, keys := range stored.Groups {
-		for _, key := range keys {
-			if _, ok := p.items[key]; !ok {
-				repaired = true
-				continue
-			}
-			if p.groups[group] == nil {
-				p.groups[group] = map[string]struct{}{}
-			}
-			p.groups[group][key] = struct{}{}
-		}
 	}
 	if err = p.removeOrphanFiles(validFiles); err != nil {
 		return err
@@ -1021,33 +1108,119 @@ func (p *provider) loadIndex() error {
 }
 
 func (p *provider) persistIndexLocked() error {
-	p.indexWrites.Add(1)
-	stored := diskIndex{Version: 1, Items: make(map[string]diskItem, len(p.items))}
-	for key, item := range p.items {
-		diskValue := diskItem{ExpiresAt: item.expiresAt, LastAccess: item.lastAccess}
-		if item.file {
-			diskValue.File = filepath.Base(string(item.value))
-		} else {
-			diskValue.Value = item.value
-		}
-		stored.Items[key] = diskValue
+	if p.index == nil {
+		return errors.New("cache metadata database is not open")
 	}
-	if len(p.groups) > 0 {
-		stored.Groups = make(map[string][]string, len(p.groups))
-		for group, keys := range p.groups {
+	p.indexWrites.Add(1)
+	err := p.index.Update(func(tx *bolt.Tx) error {
+		items := tx.Bucket(indexItemsBucket)
+		groups := tx.Bucket(indexGroupsBucket)
+		meta := tx.Bucket(indexMetaBucket)
+		for key := range p.dirtyItems {
+			item, ok := p.items[key]
+			if !ok {
+				if err := items.Delete([]byte(key)); err != nil {
+					return err
+				}
+				continue
+			}
+			diskValue := diskItem{ExpiresAt: item.expiresAt, LastAccess: item.lastAccess}
+			if item.file {
+				diskValue.File = filepath.Base(string(item.value))
+				diskValue.CompressedSize = item.compressedSize
+				diskValue.OriginalSize = item.originalSize
+				diskValue.Checksum = item.checksum[:]
+			} else {
+				diskValue.Value = item.value
+			}
+			encoded, err := json.Marshal(diskValue)
+			if err != nil {
+				return err
+			}
+			if err = items.Put([]byte(key), encoded); err != nil {
+				return err
+			}
+		}
+		for group := range p.dirtyGroups {
+			keys, ok := p.groups[group]
+			if !ok || len(keys) == 0 {
+				if err := groups.Delete([]byte(group)); err != nil {
+					return err
+				}
+				continue
+			}
 			values := make([]string, 0, len(keys))
 			for key := range keys {
 				values = append(values, key)
 			}
 			sort.Strings(values)
-			stored.Groups[group] = values
+			encoded, err := json.Marshal(values)
+			if err != nil {
+				return err
+			}
+			if err = groups.Put([]byte(group), encoded); err != nil {
+				return err
+			}
 		}
+		var used [8]byte
+		binary.BigEndian.PutUint64(used[:], p.cacheUsed.Load())
+		return meta.Put(indexUsedBytesKey, used[:])
+	})
+	if err == nil {
+		clear(p.dirtyItems)
+		clear(p.dirtyGroups)
 	}
-	data, err := json.Marshal(stored)
+	return err
+}
+
+func (p *provider) openIndex(path string) error {
+	db, err := bolt.Open(path, 0o640, &bolt.Options{Timeout: time.Second, NoFreelistSync: true})
 	if err != nil {
 		return err
 	}
-	return atomicWriteFile(filepath.Join(p.path, indexName), data, 0o640)
+	p.index = db
+	return db.Update(func(tx *bolt.Tx) error {
+		meta, err := tx.CreateBucketIfNotExists(indexMetaBucket)
+		if err != nil {
+			return err
+		}
+		version := meta.Get(indexVersionKey)
+		if len(version) > 0 && (len(version) != 1 || version[0] != indexVersion) {
+			return fmt.Errorf("unsupported cache metadata version %v", version)
+		}
+		if err = meta.Put(indexVersionKey, []byte{indexVersion}); err != nil {
+			return err
+		}
+		if _, err = tx.CreateBucketIfNotExists(indexItemsBucket); err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(indexGroupsBucket)
+		return err
+	})
+}
+
+func (p *provider) rebuildIndex(path string) error {
+	if p.index != nil {
+		_ = p.index.Close()
+		p.index = nil
+	}
+	if _, err := os.Stat(path); err == nil {
+		backup := path + ".corrupt-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+		if err = os.Rename(path, backup); err != nil {
+			return err
+		}
+	}
+	if err := p.removeOrphanFiles(nil); err != nil {
+		return err
+	}
+	return p.openIndex(path)
+}
+
+func (p *provider) closeIndex() {
+	if p.index != nil {
+		_ = p.index.Close()
+		p.index = nil
+	}
 }
 
 func (p *provider) removeOrphanFiles(valid map[string]struct{}) error {
@@ -1083,10 +1256,94 @@ func readCachedResponseFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = validateCachedResponseReader(lz4.NewReader(bytes.NewReader(compressed))); err != nil {
+	if _, err = validateCompressedResponse(compressed); err != nil {
 		return nil, err
 	}
 	return compressed, nil
+}
+
+func inspectCachedResponseFile(path string) ([]byte, uint64, error) {
+	compressed, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 0, err
+	}
+	originalSize, err := validateCompressedResponse(compressed)
+	return compressed, originalSize, err
+}
+
+func validateCompressedResponse(compressed []byte) (uint64, error) {
+	counted := &countingReader{Reader: lz4.NewReader(bytes.NewReader(compressed))}
+	if err := validateCachedResponseReader(counted); err != nil {
+		return 0, err
+	}
+	return counted.Bytes, nil
+}
+
+type countingReader struct {
+	io.Reader
+	Bytes uint64
+}
+
+func (r *countingReader) Read(target []byte) (int, error) {
+	count, err := r.Reader.Read(target)
+	r.Bytes += uint64(count)
+	return count, err
+}
+
+func readCachedObjectFile(path string, expectedSize uint64, expectedChecksum [sha256.Size]byte) ([]byte, error) {
+	compressed, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(compressed)) != expectedSize {
+		return nil, errors.New("cache object size does not match metadata")
+	}
+	if checksum := sha256.Sum256(compressed); checksum != expectedChecksum {
+		return nil, errors.New("cache object checksum does not match metadata")
+	}
+	return compressed, nil
+}
+
+func writeCompressedTemporary(target string, value []byte) (path string, size uint64, checksum [sha256.Size]byte, err error) {
+	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".tmp-")
+	if err != nil {
+		return "", 0, checksum, err
+	}
+	path = temporary.Name()
+	cleanup := func() {
+		_ = temporary.Close()
+		_ = os.Remove(path)
+	}
+	if err = temporary.Chmod(0o640); err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
+	hash := sha256.New()
+	writer := lz4.NewWriter(io.MultiWriter(temporary, hash))
+	if _, err = writer.Write(value); err != nil {
+		_ = writer.Close()
+		cleanup()
+		return "", 0, checksum, err
+	}
+	if err = writer.Close(); err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
+	if err = temporary.Sync(); err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
+	info, err := temporary.Stat()
+	if err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
+	if err = temporary.Close(); err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
+	copy(checksum[:], hash.Sum(nil))
+	return path, uint64(info.Size()), checksum, nil
 }
 
 func validateCachedResponse(value []byte) error {
@@ -1190,26 +1447,11 @@ func (p *provider) recordRejectedWrite(err error) {
 }
 
 func isCacheData(name string) bool {
-	return name != indexName && !strings.HasPrefix(name, indexName+".corrupt-") &&
-		!isTemporaryCacheFile(name)
+	return strings.HasPrefix(name, bodyPrefix) && !isTemporaryCacheFile(name)
 }
 
 func isTemporaryCacheFile(name string) bool {
 	return strings.Contains(name, ".tmp-")
-}
-
-func directorySize(path string) (uint64, error) {
-	var total uint64
-	err := filepath.Walk(path, func(current string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if info != nil && info.Mode().IsRegular() {
-			total += uint64(info.Size())
-		}
-		return nil
-	})
-	return total, err
 }
 
 func normalizePercent(value int) int {

@@ -353,7 +353,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 
 func acceptedLogAck(through uint64) *edgeprotocol.ServerMessage {
 	ack := edgeprotocol.AgentLogAck{Through: through, Accepted: true}
-	return &edgeprotocol.ServerMessage{LogsAckThrough: &through, LogsAck: &ack}
+	return &edgeprotocol.ServerMessage{LogsAck: &ack}
 }
 
 func validateLogBatch(batch edgeprotocol.AgentLogBatch) error {
@@ -377,6 +377,9 @@ func validateLogBatch(batch edgeprotocol.AgentLogBatch) error {
 	var actualBytes uint64
 	previous := first
 	for index, record := range batch.Records {
+		if (record.Type == "access" || record.Type == "caddy") && record.SiteID == "" {
+			return errors.New("access log site_id is required")
+		}
 		encoded, err := json.Marshal(record)
 		if err != nil {
 			return fmt.Errorf("encode log batch record: %w", err)

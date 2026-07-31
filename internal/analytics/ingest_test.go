@@ -2,19 +2,6 @@ package analytics
 
 import "testing"
 
-func TestNormalizeLegacyRuntimeMetricUsesEmptyCacheAlerts(t *testing.T) {
-	metric := normalizeRuntimeMetric(NodeRuntimeMetric{})
-	if metric.CacheAlerts == nil || len(metric.CacheAlerts) != 0 {
-		t.Fatalf("legacy cache alerts were not normalized: %#v", metric.CacheAlerts)
-	}
-
-	existing := []string{"CAPACITY_HIGH"}
-	metric = normalizeRuntimeMetric(NodeRuntimeMetric{CacheAlerts: existing})
-	if len(metric.CacheAlerts) != 1 || metric.CacheAlerts[0] != existing[0] {
-		t.Fatalf("existing cache alerts changed: %#v", metric.CacheAlerts)
-	}
-}
-
 func TestAccessLogHasTimestamp(t *testing.T) {
 	if !accessLogHasTimestamp([]byte(`{"ts":1753783200.25}`)) {
 		t.Fatal("valid access-log timestamp was not detected")
