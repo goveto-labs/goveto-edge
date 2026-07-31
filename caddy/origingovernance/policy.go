@@ -67,8 +67,8 @@ func (p *SelectionPolicy) Provision(caddy.Context) error {
 func (p *SelectionPolicy) Select(pool reverseproxy.UpstreamPool, request *http.Request, _ http.ResponseWriter) *reverseproxy.Upstream {
 	candidates := p.candidates(pool, true)
 	if len(candidates) == 0 {
-		// Health state should cause failover when a backup exists, but it must
-		// never make every configured origin ineligible.
+		// Enter panic mode when every origin is unavailable. Multi-origin sites
+		// retry an ejected origin early; single-origin sites always keep routing.
 		candidates = p.candidates(pool, false)
 	}
 	if len(candidates) == 0 {

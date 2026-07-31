@@ -415,6 +415,7 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 
 func TestRenderDefaultOriginPoolLeavesActiveConnectionsUnlimited(t *testing.T) {
 	config := validHTTPConfig(t)
+	config.Origins = append(config.Origins, OriginConfig{Protocol: "http", Address: "backup:80", Priority: 10})
 	config.OriginPolicy = edgeprotocol.DefaultOriginPolicy()
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
 	if err != nil {
@@ -429,6 +430,25 @@ func TestRenderDefaultOriginPoolLeavesActiveConnectionsUnlimited(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"unhealthy_status":[502,503,504]`) || !strings.Contains(raw, `status_code} in [502,503,504]`) {
 		t.Fatalf("default response status failover was not rendered: %s", raw)
+	}
+}
+
+func TestRenderSingleOriginDisablesPassiveEjection(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.OriginPolicy = edgeprotocol.DefaultOriginPolicy()
+	config.OriginPolicy.PassiveHealth.UnhealthyRequestCount = 5
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	for _, forbidden := range []string{`"health_checks"`, `"unhealthy_status"`, `"max_requests"`, `status_code} in`} {
+		if strings.Contains(raw, forbidden) {
+			t.Fatalf("single-origin config rendered passive ejection setting %s: %s", forbidden, raw)
+		}
+	}
+	if !strings.Contains(raw, `{http.reverse_proxy.is_transport_error} == true`) {
+		t.Fatalf("single-origin transport retry matcher missing: %s", raw)
 	}
 }
 

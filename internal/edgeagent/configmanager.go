@@ -457,12 +457,15 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		}
 
 		originPolicy := edgeprotocol.NormalizeOriginPolicy(site.OriginPolicy)
+		// Ejection only helps when another origin can receive the request. A
+		// single-origin site must keep routing to its sole origin even after errors.
+		passiveHealthEnabled := originPolicy.PassiveHealth.Enabled && len(site.Origins) > 1
 		upstreams := make([]any, 0, len(site.Origins))
 		originBackends := make([]any, 0, len(site.Origins))
 		for _, origin := range site.Origins {
 			dial := originDialAddress(origin.Address, originPolicy.Transport.IPVersion)
 			upstream := map[string]any{"dial": dial}
-			if originPolicy.PassiveHealth.UnhealthyRequestCount > 0 {
+			if passiveHealthEnabled && originPolicy.PassiveHealth.UnhealthyRequestCount > 0 {
 				upstream["max_requests"] = originPolicy.PassiveHealth.UnhealthyRequestCount
 			}
 			upstreams = append(upstreams, upstream)
@@ -483,7 +486,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			return nil, fmt.Errorf("unsupported Caddy scheduler %q", policy)
 		}
 		retryExpression := "{http.reverse_proxy.is_transport_error} == true"
-		if originPolicy.PassiveHealth.Enabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
+		if passiveHealthEnabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
 			retryExpression += " || {http.reverse_proxy.status_code} in " + formatStatusList(originPolicy.PassiveHealth.UnhealthyStatus)
 		}
 		reverseProxy := map[string]any{
@@ -503,7 +506,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			},
 		}
 		healthChecks := map[string]any{}
-		if originPolicy.PassiveHealth.Enabled {
+		if passiveHealthEnabled {
 			passive := map[string]any{
 				"fail_duration": durationMS(originPolicy.PassiveHealth.FailDurationMS),
 				"max_fails":     originPolicy.PassiveHealth.MaxFails,
@@ -532,7 +535,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				"idle_timeout":            durationMS(originPolicy.Transport.KeepAliveIdleTimeoutMS),
 			},
 		}
-		if originPolicy.PassiveHealth.Enabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
+		if passiveHealthEnabled && len(originPolicy.PassiveHealth.UnhealthyStatus) > 0 {
 			transport["unhealthy_status"] = originPolicy.PassiveHealth.UnhealthyStatus
 		}
 		if originPolicy.Transport.MaxConnsPerHost > 0 {

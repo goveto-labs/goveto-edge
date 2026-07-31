@@ -216,6 +216,46 @@ func TestAgentConfiguredStatusFailsOverAndRecovers(t *testing.T) {
 	}
 }
 
+func TestAgentRoutesToEjectedOriginWhenAllOriginsUnavailable(t *testing.T) {
+	ensureAgentLogSink(t)
+	var primaryHits atomic.Int64
+	var backupHits atomic.Int64
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		primaryHits.Add(1)
+		http.Error(w, "primary unavailable", http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	backup := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		backupHits.Add(1)
+		http.Error(w, "backup unavailable", http.StatusServiceUnavailable)
+	}))
+	defer backup.Close()
+
+	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
+		TimeoutMS: 2000,
+		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
+			Enabled: true, FailDurationMS: 5000, MaxFails: 1, UnhealthyStatus: []int{503},
+		},
+		Retry: edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 1000, TryIntervalMS: 1},
+	})
+	defer manager.Stop()
+
+	_, _ = requestOriginSite(t, port)
+	primaryAfterEjection := primaryHits.Load()
+	backupAfterEjection := backupHits.Load()
+	if primaryAfterEjection == 0 || backupAfterEjection == 0 {
+		t.Fatalf("initial request did not eject both origins: primary=%d backup=%d", primaryAfterEjection, backupAfterEjection)
+	}
+
+	_, status := requestOriginSite(t, port)
+	if status != http.StatusServiceUnavailable {
+		t.Fatalf("panic-mode response status=%d", status)
+	}
+	if primaryHits.Load() <= primaryAfterEjection {
+		t.Fatalf("ejected primary was not retried early: primary=%d backup=%d", primaryHits.Load(), backupHits.Load())
+	}
+}
+
 func TestAgentDoesNotRetryNonIdempotentStatusFailure(t *testing.T) {
 	ensureAgentLogSink(t)
 	var primaryHits atomic.Int64

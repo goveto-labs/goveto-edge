@@ -84,7 +84,7 @@ func TestSelectionPolicyUsesAvailableBackup(t *testing.T) {
 	}
 }
 
-func TestSelectionPolicyStillUsesSingleUnavailableOrigin(t *testing.T) {
+func TestSelectionPolicyAlwaysRoutesSingleOrigin(t *testing.T) {
 	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{{Dial: "origin:80"}}}
 	policy.available = func(*reverseproxy.Upstream) bool { return false }
 	if err := policy.Provision(caddy.Context{}); err != nil {
@@ -97,7 +97,7 @@ func TestSelectionPolicyStillUsesSingleUnavailableOrigin(t *testing.T) {
 	}
 }
 
-func TestSelectionPolicyFallsBackToLowestPriorityWhenAllUnavailable(t *testing.T) {
+func TestSelectionPolicyEntersPanicModeWhenAllOriginsUnavailable(t *testing.T) {
 	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{
 		{Dial: "primary-a:80", Priority: 0},
 		{Dial: "primary-b:80", Priority: 0},
