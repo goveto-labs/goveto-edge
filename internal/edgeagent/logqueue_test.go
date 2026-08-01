@@ -524,6 +524,35 @@ func TestAccessPipelineRedactsBeforePersistence(t *testing.T) {
 	}
 }
 
+func TestAccessPipelineDoesNotReparseEncoderSanitizedRecord(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err = queue.StartAccessPipeline(LogPolicy{SampleRate: 1, RedactQuery: true}, AccessLogConfig{
+		BufferBytes: 4096, BufferRecords: 10, BatchBytes: 4096, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload := json.RawMessage(`{"request":{"uri":"/already-encoded?marker=kept"},"status":200}`)
+	if !queue.EnqueueSanitizedAccess(LogRecord{Type: "access", Payload: payload}) {
+		t.Fatal("sanitized access record was not enqueued")
+	}
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err = queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	records, err := queue.Batch(10)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("persisted records=%#v error=%v", records, err)
+	}
+	if string(records[0].Payload) != string(payload) {
+		t.Fatalf("sanitized payload was parsed again: %s", records[0].Payload)
+	}
+}
+
 func TestAccessPipelineConcurrentEnqueue(t *testing.T) {
 	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 1<<30)
 	if err != nil {

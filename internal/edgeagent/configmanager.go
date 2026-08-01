@@ -737,19 +737,20 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 }
 
 func accessLogEncoder() map[string]any {
-	fields := map[string]any{
-		"request>uri":             map[string]any{"filter": "regexp", "regexp": `\?.*$`, "value": ""},
-		"request>client_ip":       map[string]any{"filter": "ip_mask", "ipv4_cidr": 24, "ipv6_cidr": 48},
-		"request>remote_ip":       map[string]any{"filter": "ip_mask", "ipv4_cidr": 24, "ipv6_cidr": 48},
-		"resp_headers>Set-Cookie": map[string]any{"filter": "delete"},
+	headers := map[string]struct{}{
+		"authorization": {}, "cf-connecting-ip": {}, "cookie": {}, "forwarded": {},
+		"proxy-authorization": {}, "set-cookie": {}, "true-client-ip": {}, "x-api-key": {},
+		"x-forwarded-for": {}, "x-real-ip": {},
 	}
-	for _, header := range []string{
-		"Authorization", "Cf-Connecting-Ip", "Cookie", "Forwarded", "Proxy-Authorization",
-		"True-Client-Ip", "X-Api-Key", "X-Forwarded-For", "X-Real-Ip",
-	} {
-		fields["request>headers>"+header] = map[string]any{"filter": "delete"}
+	for header := range logPolicyFromEnv().RedactedHeaders {
+		headers[header] = struct{}{}
 	}
-	return map[string]any{"format": "filter", "wrap": map[string]any{"format": "json"}, "fields": fields}
+	redacted := make([]string, 0, len(headers))
+	for header := range headers {
+		redacted = append(redacted, header)
+	}
+	sort.Strings(redacted)
+	return map[string]any{"format": "goveto_access", "redacted_headers": redacted}
 }
 
 func decodeCachePolicy(raw map[string]any) (cachepolicy.CachePolicy, bool, error) {

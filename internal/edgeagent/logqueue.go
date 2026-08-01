@@ -30,13 +30,18 @@ var ErrLogRecordTooLarge = errors.New("log record exceeds queue capacity")
 
 type LogRecord = edgeprotocol.LogRecord
 
+type queuedAccessRecord struct {
+	record    LogRecord
+	sanitized bool
+}
+
 type LogQueue struct {
 	db       *bolt.DB
 	notify   chan struct{}
 	maxBytes uint64
 
 	accessMu              sync.Mutex
-	accessBuffer          []LogRecord
+	accessBuffer          []queuedAccessRecord
 	accessHead            int
 	accessCount           int
 	accessBufferBytes     uint64

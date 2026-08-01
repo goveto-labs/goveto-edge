@@ -157,6 +157,7 @@ func run(args []string) error {
 	capacityProbe := flags.Bool("capacity-probe", false, "classify request failures as target saturation instead of a compatibility failure")
 	agentPID := flags.Int("agent-pid", 0, "Edge Agent PID to sample")
 	agentMetricsURL := flags.String("agent-metrics-url", "", "optional benchmark telemetry URL")
+	agentGCURL := flags.String("agent-gc-url", "", "optional benchmark-only post-cooldown GC URL")
 	minCacheHits := flags.Uint64("min-cache-hits", 0, "minimum cache hit delta required in every run")
 	minCacheMisses := flags.Uint64("min-cache-misses", 0, "minimum cache miss delta required in every run")
 	minCacheEvictions := flags.Uint64("min-cache-evictions", 0, "minimum cache eviction delta required in every run")
@@ -164,6 +165,7 @@ func run(args []string) error {
 	agentBinary := flags.String("agent-binary", "", "Edge Agent binary to hash")
 	maxLoadCPU := flags.Float64("max-load-cpu", 85, "maximum load generator CPU percent before marking the result saturated")
 	maxAgentRSS := flags.Uint64("max-agent-rss", 0, "maximum Edge Agent RSS bytes allowed during the run")
+	maxAgentRSSGrowth := flags.Uint64("max-agent-rss-growth", 0, "maximum Edge Agent RSS growth from the run baseline")
 	var expectedHeaders headerFlags
 	var allowedHeaders multiHeaderFlags
 	var maxHeaderRatios headerRatioFlags
@@ -223,11 +225,12 @@ func run(args []string) error {
 		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
 		UniqueQueryCardinality: *uniqueQueryCardinality,
 		Cooldown:               *cooldown, CapacityProbe: *capacityProbe,
-		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, SampleInterval: time.Second,
+		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, AgentGCURL: *agentGCURL, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
-		MaxCapturedValues: *maxCapturedValues,
-		MaxLoadCPUPercent: *maxLoadCPU,
-		MaxAgentRSSBytes:  *maxAgentRSS,
+		MaxCapturedValues:      *maxCapturedValues,
+		MaxLoadCPUPercent:      *maxLoadCPU,
+		MaxAgentRSSBytes:       *maxAgentRSS,
+		MaxAgentRSSGrowthBytes: *maxAgentRSSGrowth,
 	})
 	if err != nil {
 		return err

@@ -269,7 +269,7 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 		t.Fatalf("expected site routes, got %d", len(routes))
 	}
 	raw := string(encoded)
-	for _, expected := range []string{`"format":"filter"`, `"request\u003euri":{"filter":"regexp"`, `"request\u003eclient_ip":{"filter":"ip_mask"`, `"request\u003eheaders\u003eAuthorization":{"filter":"delete"`} {
+	for _, expected := range []string{`"format":"goveto_access"`, `"redacted_headers"`, `"authorization"`, `"x-forwarded-for"`} {
 		if !strings.Contains(raw, expected) {
 			t.Fatalf("access log encoder is missing %s: %s", expected, raw)
 		}

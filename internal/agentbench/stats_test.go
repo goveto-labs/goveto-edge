@@ -40,9 +40,17 @@ func TestValidateRunsSeparatesLoadSaturationFromProductFailure(t *testing.T) {
 }
 
 func TestValidateRunsClassifiesCapacityProbeFailureAsTargetSaturation(t *testing.T) {
-	runs := []Run{{Index: 1, Metrics: Metrics{Requests: 10, Successes: 9, Failures: 1, RPS: 10}}}
+	runs := []Run{{Index: 1, Metrics: Metrics{Requests: 10, Successes: 9, Failures: 1, RPS: 10}, ErrorCounts: map[string]uint64{"timeout": 1}}}
 	validity := validateRuns(runs, 10, 85, true)
 	if !validity.Valid || validity.Status != ResultTargetSaturated {
+		t.Fatalf("validity=%+v", validity)
+	}
+}
+
+func TestValidateRunsDoesNotDowngradeProductFailureInCapacityProbe(t *testing.T) {
+	runs := []Run{{Index: 1, Metrics: Metrics{Requests: 10, Successes: 9, Failures: 1, RPS: 10}, ErrorCounts: map[string]uint64{"header_mismatch": 1}}}
+	validity := validateRuns(runs, 10, 85, true)
+	if validity.Valid || validity.Status != ResultProductFail {
 		t.Fatalf("validity=%+v", validity)
 	}
 }
@@ -73,6 +81,31 @@ func TestValidateResourceExpectationsEnforcesRSSAndCooldownRecovery(t *testing.T
 	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{Cooldown: time.Minute, MaxAgentRSSBytes: 512 << 20})
 	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 5 {
 		t.Fatalf("validity=%+v", validity)
+	}
+}
+
+func TestValidateResourceExpectationsUsesPostGCAndRelativeRSS(t *testing.T) {
+	run := Run{Index: 1, Resources: ResourceSummary{
+		RSSBytesStart: 600 << 20, RSSBytesMax: 720 << 20, RSSBytesGrowth: 120 << 20,
+		RSSBytesEnd: 700 << 20, RSSBytesPostGC: 620 << 20,
+		HeapBytesStart: 100 << 20, HeapBytesEnd: 400 << 20, HeapBytesPostGC: 110 << 20,
+		FDsStart: 20, FDsEnd: 20, GoroutinesStart: 20, GoroutinesEnd: 20,
+	}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{Cooldown: time.Minute, MaxAgentRSSGrowthBytes: 128 << 20})
+	if !validity.Valid {
+		t.Fatalf("post-GC recovery and relative growth should pass: %+v", validity)
+	}
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{MaxAgentRSSGrowthBytes: 64 << 20})
+	if validity.Valid || validity.Status != ResultProductFail {
+		t.Fatalf("RSS growth limit was not enforced: %+v", validity)
+	}
+}
+
+func TestValidateResourceExpectationsCleanupErrorsRemainProductFailures(t *testing.T) {
+	run := Run{Index: 1, CleanupErrors: []string{"close QUIC: failed"}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultTargetSaturated}, []Run{run}, Config{})
+	if validity.Valid || validity.Status != ResultProductFail {
+		t.Fatalf("cleanup failure was downgraded: %+v", validity)
 	}
 }
 

@@ -185,7 +185,7 @@ func (s agentLogSink) WriteCaddyLog(siteID string, configVersion uint64, receive
 	}
 	record := LogRecord{Type: "caddy", SiteID: siteID, ConfigVersion: configVersion, CreatedAt: receivedAt, Payload: payload}
 	record.Type = "access"
-	if !s.queue.EnqueueAccess(record) {
+	if !s.queue.EnqueueSanitizedAccess(record) {
 		return errors.New("access log buffer is full")
 	}
 	return nil

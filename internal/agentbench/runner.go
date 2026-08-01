@@ -36,19 +36,21 @@ type closeRoundTripper interface {
 var benchmarkUDPAddresses sync.Map
 
 type runState struct {
-	requests    atomic.Uint64
-	successes   atomic.Uint64
-	failures    atomic.Uint64
-	bytes       atomic.Uint64
-	mu          sync.Mutex
-	latencies   []time.Duration
-	handshakes  []time.Duration
-	ttfb        []time.Duration
-	protocols   map[string]uint64
-	headers     map[string]map[string]uint64
-	statuses    map[int]uint64
-	errors      []string
-	errorCounts map[string]uint64
+	cleanupOnly   bool
+	requests      atomic.Uint64
+	successes     atomic.Uint64
+	failures      atomic.Uint64
+	bytes         atomic.Uint64
+	mu            sync.Mutex
+	latencies     []time.Duration
+	handshakes    []time.Duration
+	ttfb          []time.Duration
+	protocols     map[string]uint64
+	headers       map[string]map[string]uint64
+	statuses      map[int]uint64
+	errors        []string
+	cleanupErrors []string
+	errorCounts   map[string]uint64
 }
 
 func RunBenchmark(ctx context.Context, config Config) (Report, error) {
@@ -75,7 +77,8 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			CooldownMS:             config.Cooldown.Milliseconds(), CapacityProbe: config.CapacityProbe,
 			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
-			MaxAgentRSSBytes: config.MaxAgentRSSBytes,
+			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes,
+			PostCooldownGC: config.AgentGCURL != "" && config.Cooldown > 0,
 		},
 	}
 	var loadCPUMax float64
@@ -105,22 +108,33 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	if err != nil {
 		return Run{}, 0, err
 	}
-	defer closeSharedQUIC()
 	transport, closeTransport, err := newTransport(config, sharedQUIC)
 	if err != nil {
-		return Run{}, 0, err
+		return Run{}, 0, errors.Join(err, closeSharedQUIC())
 	}
-	defer closeTransport()
+	var cleanupOnce sync.Once
+	var cleanupErr error
+	cleanup := func() error {
+		cleanupOnce.Do(func() {
+			cleanupErr = errors.Join(closeTransport(), closeSharedQUIC())
+		})
+		return cleanupErr
+	}
+	defer cleanup()
 	client := &http.Client{Transport: transport, Timeout: config.RequestTimeout}
 	var requestSequence atomic.Uint64
+	warmupState := &runState{cleanupOnly: true}
 
 	if config.Warmup > 0 {
 		warmContext, cancel := context.WithTimeout(ctx, config.Warmup)
-		runWorkersWithRequestContext(warmContext, warmContext, config, client, nil, &requestSequence, sharedQUIC)
+		runWorkersWithRequestContext(warmContext, warmContext, config, client, warmupState, &requestSequence, sharedQUIC)
 		cancel()
 	}
 
 	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64), statuses: make(map[int]uint64), errorCounts: make(map[string]uint64)}
+	for _, cleanupErr := range warmupState.cleanupErrorSamples() {
+		state.recordCleanupError(errors.New(cleanupErr))
+	}
 	measureContext, cancelSampling := context.WithCancel(ctx)
 	defer cancelSampling()
 	samplesDone := make(chan struct{})
@@ -145,6 +159,9 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	// flight to complete under the normal per-request timeout.
 	runWorkersWithRequestContext(dispatchContext, measureContext, config, client, state, &requestSequence, sharedQUIC)
 	stopDispatch()
+	if err = cleanup(); err != nil {
+		state.recordCleanupError(err)
+	}
 	if config.Cooldown > 0 {
 		timer := time.NewTimer(config.Cooldown)
 		select {
@@ -160,8 +177,43 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	}
 	cancelSampling()
 	<-samplesDone
+	naturalEnd := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "cooldown_end")
+	if !naturalEnd.At.IsZero() {
+		samples = append(samples, naturalEnd)
+		applyNaturalEnd(&resources, naturalEnd)
+	}
+	var environmentErrors []string
+	if config.AgentGCURL != "" && config.Cooldown > 0 {
+		if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
+			environmentErrors = append(environmentErrors, gcErr.Error())
+		} else {
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+			}
+			postGC := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "post_gc")
+			if !postGC.At.IsZero() {
+				samples = append(samples, postGC)
+				if (config.AgentPID > 0 && postGC.RSSBytes == 0) || (config.AgentMetricsURL != "" && postGC.HeapBytes == 0) {
+					environmentErrors = append(environmentErrors, "post-cooldown GC completed but its resource snapshot was incomplete")
+				} else {
+					applyPostGC(&resources, postGC)
+				}
+			}
+		}
+	}
+	if resources.RSSBytesMax > resources.RSSBytesStart {
+		resources.RSSBytesGrowth = resources.RSSBytesMax - resources.RSSBytesStart
+	}
 	metrics, failures, errorCounts := state.metrics(config.Duration)
-	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures, ErrorCounts: errorCounts}, loadCPUMax, nil
+	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures, ErrorCounts: errorCounts, CleanupErrors: state.cleanupErrorSamples(), EnvironmentErrors: environmentErrors}, loadCPUMax, nil
 }
 
 func runWorkers(ctx context.Context, config Config, sharedClient *http.Client, state *runState, sequence *atomic.Uint64) {
@@ -176,7 +228,7 @@ func runWorkersWithRequestContext(dispatchContext, requestContext context.Contex
 			defer workers.Done()
 			for dispatchContext.Err() == nil {
 				client := sharedClient
-				closeClient := func() {}
+				closeClient := func() error { return nil }
 				if config.NewConnection {
 					var quicTransport *quic.Transport
 					if len(sharedQUIC) > 0 {
@@ -193,7 +245,9 @@ func runWorkersWithRequestContext(dispatchContext, requestContext context.Contex
 					closeClient = closeTransport
 				}
 				result := executeRequest(requestContext, client, config, sequence)
-				closeClient()
+				if err := closeClient(); err != nil && state != nil {
+					state.recordCleanupError(err)
+				}
 				if state != nil && !ignoreMeasurementCancellation(requestContext, result.err) {
 					state.record(result)
 				}
@@ -332,15 +386,15 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 	return result
 }
 
-func newTransport(config Config, sharedQUIC ...*quic.Transport) (http.RoundTripper, func(), error) {
+func newTransport(config Config, sharedQUIC ...*quic.Transport) (http.RoundTripper, func() error, error) {
 	tlsConfig := &tls.Config{InsecureSkipVerify: config.InsecureSkipVerify, ServerName: serverName(config)} // benchmark targets may use private test certificates.
 	switch config.Protocol {
 	case ProtocolH1:
 		transport := &http.Transport{TLSClientConfig: tlsConfig, ForceAttemptHTTP2: false, MaxIdleConns: config.Concurrency * 2, MaxIdleConnsPerHost: config.Concurrency * 2, DisableCompression: true}
-		return transport, transport.CloseIdleConnections, nil
+		return transport, func() error { transport.CloseIdleConnections(); return nil }, nil
 	case ProtocolH2:
 		transport := &http2.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
-		return transport, func() { transport.CloseIdleConnections() }, nil
+		return transport, func() error { transport.CloseIdleConnections(); return nil }, nil
 	case ProtocolH3:
 		transport := &http3.Transport{TLSClientConfig: tlsConfig, DisableCompression: true}
 		if len(sharedQUIC) > 0 && sharedQUIC[0] != nil {
@@ -352,9 +406,9 @@ func newTransport(config Config, sharedQUIC ...*quic.Transport) (http.RoundTripp
 				return sharedQUIC[0].Dial(ctx, remote, tlsConfig, quicConfig)
 			}
 		}
-		return transport, func() { _ = transport.Close() }, nil
+		return transport, transport.Close, nil
 	default:
-		return nil, func() {}, fmt.Errorf("unsupported protocol %q", config.Protocol)
+		return nil, func() error { return nil }, fmt.Errorf("unsupported protocol %q", config.Protocol)
 	}
 }
 
@@ -370,18 +424,30 @@ func resolveBenchmarkUDPAddress(address string) (*net.UDPAddr, error) {
 	return actual.(*net.UDPAddr), nil
 }
 
-func newSharedQUICTransport(config Config) (*quic.Transport, func(), error) {
+func newSharedQUICTransport(config Config) (*quic.Transport, func() error, error) {
 	if config.Protocol != ProtocolH3 || !config.NewConnection {
-		return nil, func() {}, nil
+		return nil, func() error { return nil }, nil
 	}
 	connection, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4zero})
 	if err != nil {
-		return nil, func() {}, fmt.Errorf("open shared H3 UDP socket: %w", err)
+		return nil, func() error { return nil }, fmt.Errorf("open shared H3 UDP socket: %w", err)
 	}
 	transport := &quic.Transport{Conn: connection}
-	return transport, func() {
-		_ = transport.Close()
-		_ = connection.Close()
+	var closeOnce sync.Once
+	var closeErr error
+	return transport, func() error {
+		closeOnce.Do(func() {
+			transportErr := transport.Close()
+			connectionErr := connection.Close()
+			if errors.Is(transportErr, net.ErrClosed) {
+				transportErr = nil
+			}
+			if errors.Is(connectionErr, net.ErrClosed) {
+				connectionErr = nil
+			}
+			closeErr = errors.Join(transportErr, connectionErr)
+		})
+		return closeErr
 	}, nil
 }
 
@@ -541,6 +607,9 @@ func appendUniqueHeader(values []string, name string) []string {
 }
 
 func (state *runState) record(result requestResult) {
+	if state.cleanupOnly {
+		return
+	}
 	state.requests.Add(1)
 	state.bytes.Add(result.bytes)
 	if result.status != 0 {
@@ -575,6 +644,9 @@ func (state *runState) record(result requestResult) {
 }
 
 func (state *runState) recordFailure(err error) {
+	if state.cleanupOnly {
+		return
+	}
 	state.failures.Add(1)
 	state.mu.Lock()
 	if state.errorCounts == nil {
@@ -585,6 +657,27 @@ func (state *runState) recordFailure(err error) {
 		state.errors = append(state.errors, err.Error())
 	}
 	state.mu.Unlock()
+}
+
+func (state *runState) recordCleanupError(err error) {
+	if err == nil {
+		return
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.errorCounts == nil {
+		state.errorCounts = make(map[string]uint64)
+	}
+	state.errorCounts["cleanup"]++
+	if len(state.cleanupErrors) < 20 {
+		state.cleanupErrors = append(state.cleanupErrors, err.Error())
+	}
+}
+
+func (state *runState) cleanupErrorSamples() []string {
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	return append([]string(nil), state.cleanupErrors...)
 }
 
 func (state *runState) metrics(elapsed time.Duration) (Metrics, []string, map[string]uint64) {
@@ -651,6 +744,14 @@ func classifyFailure(err error) string {
 	}
 }
 
+func capacityFailureCount(counts map[string]uint64) uint64 {
+	var total uint64
+	for _, class := range []string{"timeout", "response_read", "dial", "tls", "reset", "transport"} {
+		total += counts[class]
+	}
+	return total
+}
+
 func aggregateErrorCounts(runs []Run) map[string]uint64 {
 	counts := make(map[string]uint64)
 	for _, run := range runs {
@@ -715,6 +816,9 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 		if hasTelemetryBaseline {
 			previousTelemetry = telemetryBaseline
 			summary.HeapBytesStart = telemetryBaseline.HeapBytes
+			summary.HeapInuseBytesStart = telemetryBaseline.HeapInuseBytes
+			summary.HeapIdleBytesStart = telemetryBaseline.HeapIdleBytes
+			summary.HeapReleasedBytesStart = telemetryBaseline.HeapReleasedBytes
 			summary.GoroutinesStart = telemetryBaseline.Goroutines
 		}
 	}
@@ -793,6 +897,9 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 			if metricsURL != "" {
 				if telemetry, err := fetchTelemetry(ctx, metricsClient, metricsURL); err == nil {
 					point.HeapBytes = telemetry.HeapBytes
+					point.HeapInuseBytes = telemetry.HeapInuseBytes
+					point.HeapIdleBytes = telemetry.HeapIdleBytes
+					point.HeapReleasedBytes = telemetry.HeapReleasedBytes
 					point.GCCount = telemetry.GCCount
 					point.Goroutines = telemetry.Goroutines
 					point.QueueBytes = telemetry.QueueBytes
@@ -822,6 +929,9 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					previousTelemetry = telemetry
 					previousTelemetryAt = time.Now()
 					summary.HeapBytesMax = max(summary.HeapBytesMax, point.HeapBytes)
+					summary.HeapInuseBytesMax = max(summary.HeapInuseBytesMax, point.HeapInuseBytes)
+					summary.HeapIdleBytesMax = max(summary.HeapIdleBytesMax, point.HeapIdleBytes)
+					summary.HeapReleasedBytesMax = max(summary.HeapReleasedBytesMax, point.HeapReleasedBytes)
 					summary.AllocationRateMax = max(summary.AllocationRateMax, point.AllocationRate)
 					summary.GoroutinesMax = max(summary.GoroutinesMax, point.Goroutines)
 					summary.HeapBytesEnd = point.HeapBytes
@@ -857,6 +967,9 @@ func counterDelta(current, baseline uint64) uint64 {
 
 type telemetrySample struct {
 	HeapBytes          uint64    `json:"heap_bytes"`
+	HeapInuseBytes     uint64    `json:"heap_inuse_bytes"`
+	HeapIdleBytes      uint64    `json:"heap_idle_bytes"`
+	HeapReleasedBytes  uint64    `json:"heap_released_bytes"`
 	TotalAlloc         uint64    `json:"total_alloc_bytes"`
 	GCCount            uint32    `json:"gc_count"`
 	Goroutines         int       `json:"goroutines"`
@@ -875,6 +988,88 @@ type telemetrySample struct {
 	CacheHits          uint64    `json:"cache_hits"`
 	CacheMisses        uint64    `json:"cache_misses"`
 	CacheEvictions     uint64    `json:"cache_evictions"`
+}
+
+func captureResourcePoint(pid int32, metricsURL string, state *runState, phase string) TimeSeriesPoint {
+	if pid <= 0 && metricsURL == "" {
+		return TimeSeriesPoint{}
+	}
+	point := TimeSeriesPoint{At: time.Now().UTC(), Phase: phase}
+	if state != nil {
+		point.Requests = state.requests.Load()
+		point.Failures = state.failures.Load()
+	}
+	if pid > 0 {
+		if target, err := process.NewProcess(pid); err == nil {
+			if memory, memoryErr := target.MemoryInfo(); memoryErr == nil {
+				point.RSSBytes = memory.RSS
+			}
+			point.FDs, _ = target.NumFDs()
+			if connections, connectionErr := target.Connections(); connectionErr == nil {
+				point.Connections = len(connections)
+			}
+		}
+	}
+	if metricsURL != "" {
+		requestContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if telemetry, err := fetchTelemetry(requestContext, &http.Client{Timeout: 2 * time.Second}, metricsURL); err == nil {
+			point.HeapBytes = telemetry.HeapBytes
+			point.HeapInuseBytes = telemetry.HeapInuseBytes
+			point.HeapIdleBytes = telemetry.HeapIdleBytes
+			point.HeapReleasedBytes = telemetry.HeapReleasedBytes
+			point.GCCount = telemetry.GCCount
+			point.Goroutines = telemetry.Goroutines
+		}
+	}
+	return point
+}
+
+func applyNaturalEnd(summary *ResourceSummary, point TimeSeriesPoint) {
+	if point.RSSBytes > 0 {
+		summary.RSSBytesEnd = point.RSSBytes
+	}
+	if point.FDs > 0 {
+		summary.FDsEnd = point.FDs
+	}
+	if point.Connections > 0 || summary.ConnectionsStart > 0 {
+		summary.ConnectionsEnd = point.Connections
+	}
+	if point.HeapBytes > 0 {
+		summary.HeapBytesEnd = point.HeapBytes
+		summary.HeapInuseBytesEnd = point.HeapInuseBytes
+		summary.HeapIdleBytesEnd = point.HeapIdleBytes
+		summary.HeapReleasedBytesEnd = point.HeapReleasedBytes
+	}
+	if point.Goroutines > 0 {
+		summary.GoroutinesEnd = point.Goroutines
+	}
+	summary.RSSBytesMax = max(summary.RSSBytesMax, point.RSSBytes)
+	summary.HeapBytesMax = max(summary.HeapBytesMax, point.HeapBytes)
+}
+
+func applyPostGC(summary *ResourceSummary, point TimeSeriesPoint) {
+	summary.RSSBytesPostGC = point.RSSBytes
+	summary.HeapBytesPostGC = point.HeapBytes
+	summary.HeapInuseBytesPostGC = point.HeapInuseBytes
+	summary.HeapIdleBytesPostGC = point.HeapIdleBytes
+	summary.HeapReleasedBytesPostGC = point.HeapReleasedBytes
+}
+
+func triggerPostCooldownGC(ctx context.Context, url string) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return fmt.Errorf("create post-cooldown GC request: %w", err)
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	if err != nil {
+		return fmt.Errorf("trigger post-cooldown GC: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("trigger post-cooldown GC: status %d", response.StatusCode)
+	}
+	return nil
 }
 
 func fetchTelemetry(ctx context.Context, client *http.Client, url string) (telemetrySample, error) {

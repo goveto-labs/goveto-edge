@@ -43,7 +43,7 @@ func logPolicyFromEnv() LogPolicy {
 }
 
 func (p LogPolicy) Apply(payload []byte) ([]byte, bool) {
-	if p.SampleRate <= 0 || p.SampleRate < 1 && !sampled(payload, p.SampleRate) {
+	if !p.Keep(payload) {
 		return nil, false
 	}
 	if !p.RedactQuery && !p.AnonymizeIP && len(p.RedactedHeaders) == 0 {
@@ -116,6 +116,10 @@ func (p LogPolicy) Apply(payload []byte) ([]byte, bool) {
 		return payload, true
 	}
 	return redacted, true
+}
+
+func (p LogPolicy) Keep(payload []byte) bool {
+	return p.SampleRate > 0 && (p.SampleRate >= 1 || sampled(payload, p.SampleRate))
 }
 
 func sampled(payload []byte, rate float64) bool {

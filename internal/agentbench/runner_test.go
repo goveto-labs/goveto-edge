@@ -134,6 +134,22 @@ func TestH3NewConnectionTransportUsesSharedQUICDialer(t *testing.T) {
 	}
 }
 
+func TestSharedH3QUICTransportCloseIsIdempotent(t *testing.T) {
+	transport, closeTransport, err := newSharedQUICTransport(Config{Protocol: ProtocolH3, NewConnection: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transport == nil {
+		t.Fatal("shared QUIC transport was not created")
+	}
+	if err = closeTransport(); err != nil {
+		t.Fatalf("first close: %v", err)
+	}
+	if err = closeTransport(); err != nil {
+		t.Fatalf("second close: %v", err)
+	}
+}
+
 func TestCounterDeltaHandlesReset(t *testing.T) {
 	if got := counterDelta(15, 10); got != 5 {
 		t.Fatalf("counterDelta()=%d, want 5", got)

@@ -38,12 +38,15 @@ usage() {
 Usage:
   script/run_agent_benchmark.sh quick [options]
   script/run_agent_benchmark.sh full [options]
+  script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
 
 Modes:
   quick  Run every origin and CDN scenario with short timings. It omits only
          long Capacity repetitions and the soak test.
   full   Run the same complete screening suite, Capacity timings only for PASS
          cases, then the long 1 MiB cache-hit stability test.
+  bandwidth  Run only 1 MiB reuse and 16 MiB transfer Capacity cases on the
+             stronger 26c-agent4-load10 load-generator layout.
 
 Options:
   --runner <name>             default, 26c-agent2, 26c-agent4, 26c-agent4-load10, or 26c-agent8
@@ -62,7 +65,7 @@ EOF
 
 die() { echo "error: $*" >&2; exit 1; }
 
-if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" ]]; then
+if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" ]]; then
   mode="$1"
   shift
 fi
@@ -85,15 +88,22 @@ while (($# > 0)); do
   esac
 done
 
-case "$mode" in quick|full) ;; *) die "mode must be quick or full" ;; esac
+case "$mode" in quick|full|bandwidth) ;; *) die "mode must be quick, full, or bandwidth" ;; esac
 [[ "$runner" == "26c" ]] && runner="26c-agent8"
 case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
+[[ "$mode" != "bandwidth" || "$runner" == "26c-agent4-load10" ]] || die "bandwidth mode requires --runner 26c-agent4-load10"
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run-id"
 [[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
 for protocol in $protocols $soak_protocols; do
   case "$protocol" in h1|h2|h3) ;; *) die "invalid protocol: $protocol" ;; esac
 done
+if [[ "$mode" == "full" ]]; then
+  [[ -n "${soak_protocols// /}" ]] || die "full mode requires at least one soak protocol"
+  for protocol in $soak_protocols; do
+    [[ " $protocols " == *" $protocol "* ]] || die "soak protocol $protocol is not selected by --protocols"
+  done
+fi
 
 compose_args=(-p "$COMPOSE_PROJECT" -f "$COMPOSE_BASE")
 case "$runner" in
@@ -219,6 +229,7 @@ run_case() {
   echo "[$phase] $name"
   if compose --profile run run --rm load agent-bench run \
       --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+      --agent-gc-url http://agent:9900/gc \
       --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
       --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
     :
@@ -235,6 +246,7 @@ run_case() {
     echo "[$phase] $name: retrying once after isolated RPS CV invalidation"
     if compose --profile run run --rm load agent-bench run \
         --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+        --agent-gc-url http://agent:9900/gc \
         --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
         --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
       :
@@ -291,6 +303,40 @@ run_origin_screen() {
         fi
       done
     done
+    name="pure-origin-1024b-reuse-${protocol}-c512"
+    key="origin:$name"
+    local reuse_gate="origin:pure-origin-1024b-reuse-${protocol}-c128"
+    if [[ "${screen_status[$reuse_gate]:-}" != "PASS" ]]; then
+      record_skip screen "$name" "$protocol" "c128=${screen_status[$reuse_gate]:-missing}"
+    else
+      run_case screen "$key" "$name" "$protocol" \
+        --suite pr --protocol "$protocol" --scenario "pure-origin-1024b-reuse" \
+        --url "https://agent:8444/bytes/1024" --host benchmark.example.test --insecure-skip-verify \
+        --concurrency 512 --warmup 1s --duration 5s --repeats 1 \
+        --capacity-probe --cooldown 60s --expected-sha256 "$(sha256_zeros 1024)"
+    fi
+  done
+}
+
+run_bandwidth() {
+  local protocol concurrency name key
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="pure-origin-1048576b-reuse-${protocol}-c${concurrency}"
+      key="bandwidth:$name"
+      run_case bandwidth "$key" "$name" "$protocol" \
+        --suite capacity --protocol "$protocol" --scenario "pure-origin-1048576b-reuse" \
+        --url https://agent:8444/bytes/1048576 --host benchmark.example.test --insecure-skip-verify \
+        --concurrency "$concurrency" --warmup 30s --duration 120s --repeats 3 \
+        --expected-sha256 "$(sha256_zeros 1048576)"
+    done
+    name="large-transfer-16m-${protocol}"
+    key="bandwidth:$name"
+    run_case bandwidth "$key" "$name" "$protocol" \
+      --suite capacity --protocol "$protocol" --scenario "$name" \
+      --url https://agent:8444/bytes/16777216 --host benchmark.example.test --insecure-skip-verify \
+      --concurrency 8 --warmup 30s --duration 120s --repeats 3 \
+      --expected-sha256 "$(sha256_zeros 16777216)"
   done
 }
 
@@ -381,7 +427,7 @@ run_cdn_suite() {
     run_cdn_case "$phase" cache-eviction-16m-h1 h1 --suite "$suite" --protocol h1 --scenario cache-eviction-16m-h1 \
       --url https://agent:8444/pattern/16777216 --host cache.benchmark.example.test --insecure-skip-verify \
       --concurrency 4 --warmup 1s --duration "$eviction_duration" --repeats 1 --unique-query --unique-query-cardinality 2 \
-      --min-cache-misses 1 --min-cache-evictions 1 --max-agent-rss 536870912 --cooldown 60s
+      --min-cache-misses 1 --min-cache-evictions 1 --max-agent-rss-growth 536870912 --cooldown 60s
   fi
 
   for protocol in $protocols; do
@@ -455,7 +501,7 @@ run_cdn_suite() {
 }
 
 run_soak() {
-  local protocol name key
+  local protocol name key report
   for protocol in $soak_protocols; do
     has_protocol "$protocols" "$protocol" || { record_skip soak "cache-hit-1048576b-$protocol" "$protocol" "protocol not selected"; continue; }
     name="cache-hit-1048576b-${protocol}"
@@ -480,6 +526,12 @@ run_soak() {
       --expected-sha256 "$(sha256_zeros 1048576)" \
       --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE --max-header-ratio X-Cache=STALE:0.01 \
       --capture-header X-Cache --min-cache-hits 1
+    report="$result_dir/soak/$name/report.json"
+    if ! $dry_run && ! jq -e '.scenario.duration_ms > 0 and ([.runs[].metrics.requests] | add) > 0' "$report" >/dev/null 2>&1; then
+      last_status=ENV_INVALID
+      status_counts[ENV_INVALID]=$(( ${status_counts[ENV_INVALID]:-0} + 1 ))
+      printf '%s\t%s\t%s\tENV_INVALID\t%s\t%s\n' soak-validation "$name" "$protocol" "missing or empty soak artifact" "soak/$name" >> "$summary_file"
+    fi
   done
 }
 
@@ -532,6 +584,14 @@ print_summary() {
 
 if ! $dry_run; then
   setup_environment
+fi
+
+if [[ "$mode" == "bandwidth" ]]; then
+  echo "Running focused bandwidth Capacity suite..."
+  run_bandwidth
+  print_summary
+  (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
+  exit
 fi
 
 echo "Running complete quick screening suite..."

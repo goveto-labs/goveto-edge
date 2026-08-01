@@ -67,10 +67,11 @@ func validateRuns(runs []Run, loadCPUPercentMax, maxLoadCPUPercent float64, capa
 		rps = append(rps, run.Metrics.RPS)
 		if run.Metrics.Failures > 0 {
 			status := ResultProductFail
-			if capacityProbe {
+			capacityFailures := capacityFailureCount(run.ErrorCounts)
+			if capacityProbe && capacityFailures == run.Metrics.Failures {
 				status = ResultTargetSaturated
 			}
-			validity.addReason(status, fmt.Sprintf("run %d had %d failed requests", run.Index, run.Metrics.Failures))
+			validity.addReason(status, fmt.Sprintf("run %d had %d failed requests (%d capacity-shaped)", run.Index, run.Metrics.Failures, capacityFailures))
 		}
 	}
 	validity.RPSCoefficientVar = CoefficientOfVariation(rps)
@@ -92,6 +93,12 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		validity.Status = ResultPass
 	}
 	for _, run := range runs {
+		for _, cleanupErr := range run.CleanupErrors {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d cleanup failed: %s", run.Index, cleanupErr))
+		}
+		for _, environmentErr := range run.EnvironmentErrors {
+			validity.addReason(ResultEnvInvalid, fmt.Sprintf("run %d benchmark instrumentation failed: %s", run.Index, environmentErr))
+		}
 		checks := []struct {
 			name    string
 			actual  uint64
@@ -142,6 +149,9 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		if config.MaxAgentRSSBytes > 0 && run.Resources.RSSBytesMax > config.MaxAgentRSSBytes {
 			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS peaked at %d bytes, want at most %d", run.Index, run.Resources.RSSBytesMax, config.MaxAgentRSSBytes))
 		}
+		if config.MaxAgentRSSGrowthBytes > 0 && run.Resources.RSSBytesGrowth > config.MaxAgentRSSGrowthBytes {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS grew by %d bytes, want at most %d", run.Index, run.Resources.RSSBytesGrowth, config.MaxAgentRSSGrowthBytes))
+		}
 		if config.Cooldown > 0 {
 			checkCooldownResources(&validity, run)
 		}
@@ -151,14 +161,22 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 }
 
 func checkCooldownResources(validity *Validity, run Run) {
+	rssEnd := run.Resources.RSSBytesEnd
+	heapEnd := run.Resources.HeapBytesEnd
+	if run.Resources.RSSBytesPostGC > 0 {
+		rssEnd = run.Resources.RSSBytesPostGC
+	}
+	if run.Resources.HeapBytesPostGC > 0 {
+		heapEnd = run.Resources.HeapBytesPostGC
+	}
 	checks := []struct {
 		name     string
 		start    uint64
 		end      uint64
 		additive uint64
 	}{
-		{"RSS", run.Resources.RSSBytesStart, run.Resources.RSSBytesEnd, 64 << 20},
-		{"heap", run.Resources.HeapBytesStart, run.Resources.HeapBytesEnd, 32 << 20},
+		{"RSS", run.Resources.RSSBytesStart, rssEnd, 64 << 20},
+		{"heap", run.Resources.HeapBytesStart, heapEnd, 32 << 20},
 		{"file descriptors", uint64(max(run.Resources.FDsStart, 0)), uint64(max(run.Resources.FDsEnd, 0)), 32},
 		{"goroutines", uint64(max(run.Resources.GoroutinesStart, 0)), uint64(max(run.Resources.GoroutinesEnd, 0)), 32},
 	}

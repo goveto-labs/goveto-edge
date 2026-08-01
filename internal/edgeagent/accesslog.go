@@ -61,7 +61,7 @@ func (q *LogQueue) StartAccessPipeline(policy LogPolicy, config AccessLogConfig)
 	ctx, cancel := context.WithCancel(context.Background())
 	q.accessConfig = config
 	q.accessPolicy = policy
-	q.accessBuffer = make([]LogRecord, config.BufferRecords)
+	q.accessBuffer = make([]queuedAccessRecord, config.BufferRecords)
 	q.accessHead = 0
 	q.accessCount = 0
 	q.accessSignal = make(chan struct{}, 1)
@@ -77,6 +77,14 @@ func (q *LogQueue) StartAccessPipeline(policy LogPolicy, config AccessLogConfig)
 // EnqueueAccess adds an access record to the in-memory queue without waiting for disk.
 // The caller must not mutate record.Payload after a successful enqueue.
 func (q *LogQueue) EnqueueAccess(record LogRecord) bool {
+	return q.enqueueAccess(record, false)
+}
+
+func (q *LogQueue) EnqueueSanitizedAccess(record LogRecord) bool {
+	return q.enqueueAccess(record, true)
+}
+
+func (q *LogQueue) enqueueAccess(record LogRecord, sanitized bool) bool {
 	if len(record.Payload) == 0 {
 		return false
 	}
@@ -91,7 +99,7 @@ func (q *LogQueue) EnqueueAccess(record LogRecord) bool {
 		return false
 	}
 	position := (q.accessHead + q.accessCount) % len(q.accessBuffer)
-	q.accessBuffer[position] = record
+	q.accessBuffer[position] = queuedAccessRecord{record: record, sanitized: sanitized}
 	q.accessCount++
 	q.accessBufferBytes += size
 	flush := q.accessCount >= q.accessConfig.BatchRecords || q.accessBufferBytes >= q.accessConfig.BatchBytes
@@ -169,13 +177,13 @@ func (q *LogQueue) runAccessPipeline(ctx context.Context) {
 	}
 }
 
-func (q *LogQueue) peekAccessBatch() ([]LogRecord, uint64) {
+func (q *LogQueue) peekAccessBatch() ([]queuedAccessRecord, uint64) {
 	q.accessMu.Lock()
 	defer q.accessMu.Unlock()
 	limit := min(q.accessCount, q.accessConfig.BatchRecords, len(q.accessBuffer)-q.accessHead)
 	var bytes uint64
 	for index := 0; index < limit; index++ {
-		size := uint64(len(q.accessBuffer[q.accessHead+index].Payload))
+		size := uint64(len(q.accessBuffer[q.accessHead+index].record.Payload))
 		if index > 0 && bytes+size > q.accessConfig.BatchBytes {
 			limit = index
 			break
@@ -191,10 +199,16 @@ func (q *LogQueue) accessBatchReady() bool {
 	return q.accessCount >= q.accessConfig.BatchRecords || q.accessBufferBytes >= q.accessConfig.BatchBytes
 }
 
-func (q *LogQueue) persistAccessBatch(ctx context.Context, raw []LogRecord) bool {
+func (q *LogQueue) persistAccessBatch(ctx context.Context, raw []queuedAccessRecord) bool {
 	processed := make([]LogRecord, 0, len(raw))
-	for _, record := range raw {
-		payload, keep := q.accessPolicy.Apply(record.Payload)
+	for _, queued := range raw {
+		record := queued.record
+		payload, keep := record.Payload, false
+		if queued.sanitized {
+			keep = q.accessPolicy.Keep(record.Payload)
+		} else {
+			payload, keep = q.accessPolicy.Apply(record.Payload)
+		}
 		if !keep {
 			continue
 		}

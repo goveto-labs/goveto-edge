@@ -2,7 +2,7 @@ package agentbench
 
 import "time"
 
-const SchemaVersion = "1.1"
+const SchemaVersion = "1.2"
 
 type Protocol string
 
@@ -53,6 +53,7 @@ type Config struct {
 	CapacityProbe          bool
 	AgentPID               int32
 	AgentMetricsURL        string
+	AgentGCURL             string
 	SampleInterval         time.Duration
 	MinCacheHits           uint64
 	MinCacheMisses         uint64
@@ -60,6 +61,7 @@ type Config struct {
 	MaxCapturedValues      int
 	MaxLoadCPUPercent      float64
 	MaxAgentRSSBytes       uint64
+	MaxAgentRSSGrowthBytes uint64
 }
 
 type Report struct {
@@ -119,16 +121,20 @@ type Scenario struct {
 	MaxCapturedValues      int                           `json:"max_captured_values,omitempty"`
 	MaxLoadCPUPercent      float64                       `json:"max_load_cpu_percent,omitempty"`
 	MaxAgentRSSBytes       uint64                        `json:"max_agent_rss_bytes,omitempty"`
+	MaxAgentRSSGrowthBytes uint64                        `json:"max_agent_rss_growth_bytes,omitempty"`
+	PostCooldownGC         bool                          `json:"post_cooldown_gc,omitempty"`
 }
 
 type Run struct {
-	Index       int               `json:"index"`
-	StartedAt   time.Time         `json:"started_at"`
-	Metrics     Metrics           `json:"metrics"`
-	Resources   ResourceSummary   `json:"resources,omitempty"`
-	Samples     []TimeSeriesPoint `json:"samples,omitempty"`
-	Errors      []string          `json:"errors,omitempty"`
-	ErrorCounts map[string]uint64 `json:"error_counts,omitempty"`
+	Index             int               `json:"index"`
+	StartedAt         time.Time         `json:"started_at"`
+	Metrics           Metrics           `json:"metrics"`
+	Resources         ResourceSummary   `json:"resources,omitempty"`
+	Samples           []TimeSeriesPoint `json:"samples,omitempty"`
+	Errors            []string          `json:"errors,omitempty"`
+	ErrorCounts       map[string]uint64 `json:"error_counts,omitempty"`
+	CleanupErrors     []string          `json:"cleanup_errors,omitempty"`
+	EnvironmentErrors []string          `json:"environment_errors,omitempty"`
 }
 
 type Metrics struct {
@@ -151,44 +157,60 @@ type Metrics struct {
 }
 
 type ResourceSummary struct {
-	RSSBytesStart          uint64     `json:"rss_bytes_start,omitempty"`
-	FDsStart               int32      `json:"fds_start,omitempty"`
-	ConnectionsStart       int        `json:"connections_start,omitempty"`
-	HeapBytesStart         uint64     `json:"heap_bytes_start,omitempty"`
-	GoroutinesStart        int        `json:"goroutines_start,omitempty"`
-	CPUPercentMax          float64    `json:"cpu_percent_max,omitempty"`
-	RSSBytesMax            uint64     `json:"rss_bytes_max,omitempty"`
-	FDsMax                 int32      `json:"fds_max,omitempty"`
-	ConnectionsMax         int        `json:"connections_max,omitempty"`
-	ReadBytes              uint64     `json:"read_bytes,omitempty"`
-	WriteBytes             uint64     `json:"write_bytes,omitempty"`
-	HeapBytesMax           uint64     `json:"heap_bytes_max,omitempty"`
-	AllocationRateMax      float64    `json:"allocation_bytes_per_second_max,omitempty"`
-	GoroutinesMax          int        `json:"goroutines_max,omitempty"`
-	QueueBytesMax          uint64     `json:"log_queue_bytes_max,omitempty"`
-	QueueRecordsMax        uint64     `json:"log_queue_records_max,omitempty"`
-	DroppedLogsMax         uint64     `json:"dropped_logs_max,omitempty"`
-	BufferBytesMax         uint64     `json:"log_buffer_bytes_max,omitempty"`
-	BufferRecordsMax       uint64     `json:"log_buffer_records_max,omitempty"`
-	MemoryDroppedLogsDelta uint64     `json:"memory_dropped_logs_delta,omitempty"`
-	DiskDroppedLogsDelta   uint64     `json:"disk_dropped_logs_delta,omitempty"`
-	CommittedBatchesDelta  uint64     `json:"committed_log_batches_delta,omitempty"`
-	CommittedRecordsDelta  uint64     `json:"committed_log_records_delta,omitempty"`
-	AverageBatchSize       float64    `json:"average_log_batch_size,omitempty"`
-	LastPersistError       string     `json:"last_log_persist_error,omitempty"`
-	LastPersistSuccess     *time.Time `json:"last_log_persist_success,omitempty"`
-	CacheHitsDelta         uint64     `json:"cache_hits_delta,omitempty"`
-	CacheMissesDelta       uint64     `json:"cache_misses_delta,omitempty"`
-	CacheEvictionsDelta    uint64     `json:"cache_evictions_delta,omitempty"`
-	RSSBytesEnd            uint64     `json:"rss_bytes_end,omitempty"`
-	FDsEnd                 int32      `json:"fds_end,omitempty"`
-	ConnectionsEnd         int        `json:"connections_end,omitempty"`
-	HeapBytesEnd           uint64     `json:"heap_bytes_end,omitempty"`
-	GoroutinesEnd          int        `json:"goroutines_end,omitempty"`
+	RSSBytesStart           uint64     `json:"rss_bytes_start,omitempty"`
+	FDsStart                int32      `json:"fds_start,omitempty"`
+	ConnectionsStart        int        `json:"connections_start,omitempty"`
+	HeapBytesStart          uint64     `json:"heap_bytes_start,omitempty"`
+	GoroutinesStart         int        `json:"goroutines_start,omitempty"`
+	CPUPercentMax           float64    `json:"cpu_percent_max,omitempty"`
+	RSSBytesMax             uint64     `json:"rss_bytes_max,omitempty"`
+	RSSBytesGrowth          uint64     `json:"rss_bytes_growth,omitempty"`
+	FDsMax                  int32      `json:"fds_max,omitempty"`
+	ConnectionsMax          int        `json:"connections_max,omitempty"`
+	ReadBytes               uint64     `json:"read_bytes,omitempty"`
+	WriteBytes              uint64     `json:"write_bytes,omitempty"`
+	HeapBytesMax            uint64     `json:"heap_bytes_max,omitempty"`
+	HeapInuseBytesStart     uint64     `json:"heap_inuse_bytes_start,omitempty"`
+	HeapInuseBytesMax       uint64     `json:"heap_inuse_bytes_max,omitempty"`
+	HeapIdleBytesStart      uint64     `json:"heap_idle_bytes_start,omitempty"`
+	HeapIdleBytesMax        uint64     `json:"heap_idle_bytes_max,omitempty"`
+	HeapReleasedBytesStart  uint64     `json:"heap_released_bytes_start,omitempty"`
+	HeapReleasedBytesMax    uint64     `json:"heap_released_bytes_max,omitempty"`
+	AllocationRateMax       float64    `json:"allocation_bytes_per_second_max,omitempty"`
+	GoroutinesMax           int        `json:"goroutines_max,omitempty"`
+	QueueBytesMax           uint64     `json:"log_queue_bytes_max,omitempty"`
+	QueueRecordsMax         uint64     `json:"log_queue_records_max,omitempty"`
+	DroppedLogsMax          uint64     `json:"dropped_logs_max,omitempty"`
+	BufferBytesMax          uint64     `json:"log_buffer_bytes_max,omitempty"`
+	BufferRecordsMax        uint64     `json:"log_buffer_records_max,omitempty"`
+	MemoryDroppedLogsDelta  uint64     `json:"memory_dropped_logs_delta,omitempty"`
+	DiskDroppedLogsDelta    uint64     `json:"disk_dropped_logs_delta,omitempty"`
+	CommittedBatchesDelta   uint64     `json:"committed_log_batches_delta,omitempty"`
+	CommittedRecordsDelta   uint64     `json:"committed_log_records_delta,omitempty"`
+	AverageBatchSize        float64    `json:"average_log_batch_size,omitempty"`
+	LastPersistError        string     `json:"last_log_persist_error,omitempty"`
+	LastPersistSuccess      *time.Time `json:"last_log_persist_success,omitempty"`
+	CacheHitsDelta          uint64     `json:"cache_hits_delta,omitempty"`
+	CacheMissesDelta        uint64     `json:"cache_misses_delta,omitempty"`
+	CacheEvictionsDelta     uint64     `json:"cache_evictions_delta,omitempty"`
+	RSSBytesEnd             uint64     `json:"rss_bytes_end,omitempty"`
+	FDsEnd                  int32      `json:"fds_end,omitempty"`
+	ConnectionsEnd          int        `json:"connections_end,omitempty"`
+	HeapBytesEnd            uint64     `json:"heap_bytes_end,omitempty"`
+	HeapInuseBytesEnd       uint64     `json:"heap_inuse_bytes_end,omitempty"`
+	HeapIdleBytesEnd        uint64     `json:"heap_idle_bytes_end,omitempty"`
+	HeapReleasedBytesEnd    uint64     `json:"heap_released_bytes_end,omitempty"`
+	RSSBytesPostGC          uint64     `json:"rss_bytes_post_gc,omitempty"`
+	HeapBytesPostGC         uint64     `json:"heap_bytes_post_gc,omitempty"`
+	HeapInuseBytesPostGC    uint64     `json:"heap_inuse_bytes_post_gc,omitempty"`
+	HeapIdleBytesPostGC     uint64     `json:"heap_idle_bytes_post_gc,omitempty"`
+	HeapReleasedBytesPostGC uint64     `json:"heap_released_bytes_post_gc,omitempty"`
+	GoroutinesEnd           int        `json:"goroutines_end,omitempty"`
 }
 
 type TimeSeriesPoint struct {
 	At                 time.Time  `json:"at"`
+	Phase              string     `json:"phase,omitempty"`
 	Requests           uint64     `json:"requests"`
 	Failures           uint64     `json:"failures"`
 	RPS                float64    `json:"rps"`
@@ -197,6 +219,9 @@ type TimeSeriesPoint struct {
 	FDs                int32      `json:"fds,omitempty"`
 	Connections        int        `json:"connections,omitempty"`
 	HeapBytes          uint64     `json:"heap_bytes,omitempty"`
+	HeapInuseBytes     uint64     `json:"heap_inuse_bytes,omitempty"`
+	HeapIdleBytes      uint64     `json:"heap_idle_bytes,omitempty"`
+	HeapReleasedBytes  uint64     `json:"heap_released_bytes,omitempty"`
 	AllocationRate     float64    `json:"allocation_bytes_per_second,omitempty"`
 	GCCount            uint32     `json:"gc_count,omitempty"`
 	Goroutines         int        `json:"goroutines,omitempty"`

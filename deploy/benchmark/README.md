@@ -5,6 +5,7 @@ Benchmark testing has one shell entry point:
 ```sh
 script/run_agent_benchmark.sh quick [options]
 script/run_agent_benchmark.sh full [options]
+script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
 ```
 
 `quick` runs the complete functional screen. It covers all origin and CDN test
@@ -20,6 +21,10 @@ cases whose screen status is exactly `PASS`, using a 30 second warmup, 120 secon
 measurement, three repetitions, and focused concurrency 32/128. Finally it runs
 a 15 minute cache-hit preflight followed by the long stability test (H2 for six
 hours by default) only after the corresponding Capacity case passes.
+
+`bandwidth` runs only the 1 MiB reuse c32/c128 and 16 MiB transfer c8 Capacity
+cases. It requires `26c-agent4-load10`, keeping this follow-up separate from the
+functional and soak matrix.
 
 ## Commands
 
@@ -47,12 +52,13 @@ Available runner layouts are `default`, `26c-agent2`, `26c-agent4`,
 assigned to the load generator; agent4/agent8 measure Agent scaling but do not
 increase load-generator capacity. `26c-agent4-load10` assigns CPUs 0-9 to load,
 10-13 to Agent, four CPUs to each origin, and two CPUs each to Redis and Gateway.
-Use it for the 1 MiB and 16 MiB H1 follow-up when standard agent4 results are
-load-saturated; those standard results are lower bounds, not load10 baselines.
+Use `bandwidth` on it for the 1 MiB and 16 MiB protocol follow-up when standard
+agent4 results are load-saturated; those standard results are lower bounds, not
+load10 baselines.
 Use `--protocols "h1 h2 h3"` to select protocols, `--run-id NAME` to name the
 result directory, `--baseline-run RUN_ID` to compare against the matching case
 from a prior run, and `--cleanup` to stop containers after the run. Baseline
-comparison requires schema 1.1 and an exact runner, architecture, suite,
+comparison requires schema 1.2 and an exact runner, architecture, suite,
 scenario, protocol, concurrency, and connection-mode match. Run
 `script/run_agent_benchmark.sh --help` for all options.
 
@@ -64,9 +70,9 @@ Each case is classified as:
 - `PRODUCT_FAIL`: request or product behavior failed.
 - `LOAD_SATURATED`: the load generator exceeded `--max-load-cpu` (85% by
   default), so throughput is only a lower bound and is not a product failure.
-- `TARGET_SATURATED`: an explicit c512 new-connection capacity probe exceeded
-  the target's capacity after the c128 compatibility gate passed. The errors and
-  cooldown resources remain in the report, but this probe does not fail the suite.
+- `TARGET_SATURATED`: an explicit c512 capacity probe exceeded the target's
+  transport capacity after the c128 compatibility gate passed. HTTP, integrity,
+  and cleanup errors remain product failures.
 - `ENV_INVALID`: the environment or measurement was invalid.
 
 For a 1 MiB `LOAD_SATURATED` result, rerun on a reviewed agent4/agent8 layout or
@@ -84,12 +90,14 @@ complete error counts by type.
 
 Cache-hit Capacity and soak cases accept `HIT` and `STALE`, reject `MISS`, and
 limit `STALE` to 1% per repetition. Cache-miss keys include a per-run and
-per-repeat namespace. High-concurrency cases keep sampling during a 60 second
-cooldown so retained heap, goroutines, file descriptors, and connections are
-visible without restarting the Agent. Rate-limit screening requires every
+per-repeat namespace. High-concurrency cases close their load-side transports
+before a 60 second cooldown. Natural cooldown values remain in the report, then
+the benchmark-only telemetry endpoint records a separate post-GC/scavenge RSS
+and heap sample. Cache eviction gates RSS growth from the case baseline instead
+of absolute process RSS. Rate-limit screening requires every
 measured response to be 429. Its 120 second Capacity case accepts only 200/429,
 requires at least one 429, and permits at most 200 successful responses per
-repetition. Every HTTP status is counted in schema 1.1 reports. A run invalidated
+repetition. Every HTTP status is counted in schema 1.2 reports. A run invalidated
 only by the fixed 5% RPS CV threshold is repeated once with identical settings.
 
 ## H3 prerequisite
@@ -104,6 +112,7 @@ sudo sysctl -w net.core.wmem_max=7500000
 The entry script checks these values in the Agent network namespace and rejects
 quic-go receive/send buffer warnings as `ENV_INVALID`. H3 new-connection load
 shares one UDP socket while still creating a fresh QUIC connection per request.
+The 1 KiB matrix also adds a reuse c512 probe after reuse c128 passes.
 
 ## Environment
 

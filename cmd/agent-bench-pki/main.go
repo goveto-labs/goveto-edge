@@ -48,6 +48,7 @@ func main() {
 	listener := edgeprotocol.ListenerConfig{HTTPEnabled: true, HTTPPort: 8080, HTTPSEnabled: true, HTTPSPort: 8444, HTTP2Enabled: true, HTTP3Enabled: true, TLSMinVersion: "TLS1_3"}
 	certificate := edgeprotocol.CertificateConfig{CertificatePEM: string(edgeCert), PrivateKeyPEM: string(edgeKey)}
 	originPolicy := edgeprotocol.DefaultOriginPolicy()
+	originPolicy.Transport.KeepAliveIdleTimeoutMS = 15000
 	originPolicy.ActiveHealth.Enabled = false
 	originPolicy.PassiveHealth.Enabled = false
 	originPolicy.Retry = edgeprotocol.OriginRetryConfig{}
@@ -61,6 +62,7 @@ func main() {
 	rateLimit.Enabled = true
 	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, BanSeconds: 300, StatusCode: 429}}
 	resilientPolicy := edgeprotocol.DefaultOriginPolicy()
+	resilientPolicy.Transport.KeepAliveIdleTimeoutMS = 15000
 	resilientPolicy.ActiveHealth.Enabled = false
 
 	sites := []edgeprotocol.SiteConfig{
