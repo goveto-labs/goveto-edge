@@ -168,3 +168,36 @@ func TestCompareAppliesArchitectureAndRegressionGates(t *testing.T) {
 		t.Fatalf("cross-concurrency comparison=%+v", decision)
 	}
 }
+
+func TestCompareControlRequiresNinetyPercentThroughput(t *testing.T) {
+	control := Report{
+		RunnerID: "agent8", Platform: Platform{Architecture: "amd64"},
+		Scenario: Scenario{Suite: SuiteCapacity, Name: "small-reuse", Protocol: ProtocolH1, Concurrency: 32, Variant: VariantControl},
+		Summary:  Metrics{RPS: 1000, SuccessRate: 1},
+		Validity: Validity{Valid: true, Status: ResultPass},
+	}
+	full := control
+	full.Scenario.Variant = VariantFull
+	full.Summary = Metrics{RPS: 900, SuccessRate: 1}
+	if decision := CompareControl(full, control); !decision.Passed || decision.Ratio != 0.9 {
+		t.Fatalf("90%% control comparison=%#v", decision)
+	}
+	full.Summary.RPS = 899
+	if decision := CompareControl(full, control); decision.Passed {
+		t.Fatalf("sub-90%% control comparison passed: %#v", decision)
+	}
+}
+
+func TestCompleteAccessLogGateChecksDropsDrainAndCommits(t *testing.T) {
+	config := Config{RequireCompleteAccessLogs: true}
+	run := Run{Index: 1, Metrics: Metrics{Successes: 10}, Resources: ResourceSummary{CommittedRecordsDelta: 9, BufferRecordsEnd: 1, MemoryDroppedLogsDelta: 1}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 3 {
+		t.Fatalf("incomplete access logs were not rejected: %#v", validity)
+	}
+	run.Resources = ResourceSummary{CommittedRecordsDelta: 10}
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if !validity.Valid || len(validity.Reasons) != 0 {
+		t.Fatalf("complete access logs were rejected: %#v", validity)
+	}
+}

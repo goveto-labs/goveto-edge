@@ -14,6 +14,13 @@ const (
 
 type Suite string
 
+type Variant string
+
+const (
+	VariantFull    Variant = "full"
+	VariantControl Variant = "control"
+)
+
 const (
 	SuitePR       Suite = "pr"
 	SuiteNightly  Suite = "nightly"
@@ -22,46 +29,48 @@ const (
 )
 
 type Config struct {
-	RunnerID               string
-	Suite                  Suite
-	Protocol               Protocol
-	Scenario               string
-	Method                 string
-	URL                    string
-	Host                   string
-	Concurrency            int
-	Duration               time.Duration
-	Warmup                 time.Duration
-	Repeats                int
-	RequestTimeout         time.Duration
-	ExpectedStatus         int
-	AllowedStatuses        []int
-	MinStatusCounts        map[int]uint64
-	MaxStatusCounts        map[int]uint64
-	ExpectedSHA256         string
-	ExpectedHeaders        map[string]string
-	AllowedHeaders         map[string][]string
-	MaxHeaderRatios        map[string]map[string]float64
-	RequestHeaders         map[string]string
-	CaptureHeaders         []string
-	InsecureSkipVerify     bool
-	NewConnection          bool
-	UniqueQuery            bool
-	UniqueQueryNamespace   string
-	UniqueQueryCardinality int
-	Cooldown               time.Duration
-	CapacityProbe          bool
-	AgentPID               int32
-	AgentMetricsURL        string
-	AgentGCURL             string
-	SampleInterval         time.Duration
-	MinCacheHits           uint64
-	MinCacheMisses         uint64
-	MinCacheEvictions      uint64
-	MaxCapturedValues      int
-	MaxLoadCPUPercent      float64
-	MaxAgentRSSBytes       uint64
-	MaxAgentRSSGrowthBytes uint64
+	RunnerID                  string
+	Suite                     Suite
+	Protocol                  Protocol
+	Scenario                  string
+	Method                    string
+	URL                       string
+	Host                      string
+	Concurrency               int
+	Duration                  time.Duration
+	Warmup                    time.Duration
+	Repeats                   int
+	RequestTimeout            time.Duration
+	ExpectedStatus            int
+	AllowedStatuses           []int
+	MinStatusCounts           map[int]uint64
+	MaxStatusCounts           map[int]uint64
+	ExpectedSHA256            string
+	ExpectedHeaders           map[string]string
+	AllowedHeaders            map[string][]string
+	MaxHeaderRatios           map[string]map[string]float64
+	RequestHeaders            map[string]string
+	CaptureHeaders            []string
+	InsecureSkipVerify        bool
+	NewConnection             bool
+	UniqueQuery               bool
+	UniqueQueryNamespace      string
+	UniqueQueryCardinality    int
+	Cooldown                  time.Duration
+	CapacityProbe             bool
+	AgentPID                  int32
+	AgentMetricsURL           string
+	AgentGCURL                string
+	SampleInterval            time.Duration
+	MinCacheHits              uint64
+	MinCacheMisses            uint64
+	MinCacheEvictions         uint64
+	MaxCapturedValues         int
+	MaxLoadCPUPercent         float64
+	MaxAgentRSSBytes          uint64
+	MaxAgentRSSGrowthBytes    uint64
+	Variant                   Variant
+	RequireCompleteAccessLogs bool
 }
 
 type Report struct {
@@ -77,6 +86,7 @@ type Report struct {
 	Validity      Validity          `json:"validity"`
 	ErrorCounts   map[string]uint64 `json:"error_counts,omitempty"`
 	Baseline      *BaselineDecision `json:"baseline,omitempty"`
+	Control       *ControlDecision  `json:"control,omitempty"`
 }
 
 type Platform struct {
@@ -91,38 +101,40 @@ type Platform struct {
 }
 
 type Scenario struct {
-	Suite                  Suite                         `json:"suite"`
-	Name                   string                        `json:"name"`
-	Method                 string                        `json:"method"`
-	Protocol               Protocol                      `json:"protocol"`
-	URL                    string                        `json:"url"`
-	Concurrency            int                           `json:"concurrency"`
-	DurationMS             int64                         `json:"duration_ms"`
-	WarmupMS               int64                         `json:"warmup_ms"`
-	Repeats                int                           `json:"repeats"`
-	NewConnection          bool                          `json:"new_connection"`
-	ExpectedStatus         int                           `json:"expected_status"`
-	AllowedStatuses        []int                         `json:"allowed_statuses,omitempty"`
-	MinStatusCounts        map[int]uint64                `json:"min_status_counts,omitempty"`
-	MaxStatusCounts        map[int]uint64                `json:"max_status_counts,omitempty"`
-	ExpectedSHA256         string                        `json:"expected_sha256,omitempty"`
-	ExpectedHeaders        map[string]string             `json:"expected_headers,omitempty"`
-	AllowedHeaders         map[string][]string           `json:"allowed_headers,omitempty"`
-	MaxHeaderRatios        map[string]map[string]float64 `json:"max_header_ratios,omitempty"`
-	RequestHeaders         map[string]string             `json:"request_headers,omitempty"`
-	CaptureHeaders         []string                      `json:"capture_headers,omitempty"`
-	UniqueQuery            bool                          `json:"unique_query,omitempty"`
-	UniqueQueryCardinality int                           `json:"unique_query_cardinality,omitempty"`
-	CooldownMS             int64                         `json:"cooldown_ms,omitempty"`
-	CapacityProbe          bool                          `json:"capacity_probe,omitempty"`
-	MinCacheHits           uint64                        `json:"min_cache_hits,omitempty"`
-	MinCacheMisses         uint64                        `json:"min_cache_misses,omitempty"`
-	MinCacheEvictions      uint64                        `json:"min_cache_evictions,omitempty"`
-	MaxCapturedValues      int                           `json:"max_captured_values,omitempty"`
-	MaxLoadCPUPercent      float64                       `json:"max_load_cpu_percent,omitempty"`
-	MaxAgentRSSBytes       uint64                        `json:"max_agent_rss_bytes,omitempty"`
-	MaxAgentRSSGrowthBytes uint64                        `json:"max_agent_rss_growth_bytes,omitempty"`
-	PostCooldownGC         bool                          `json:"post_cooldown_gc,omitempty"`
+	Suite                     Suite                         `json:"suite"`
+	Name                      string                        `json:"name"`
+	Method                    string                        `json:"method"`
+	Protocol                  Protocol                      `json:"protocol"`
+	URL                       string                        `json:"url"`
+	Concurrency               int                           `json:"concurrency"`
+	DurationMS                int64                         `json:"duration_ms"`
+	WarmupMS                  int64                         `json:"warmup_ms"`
+	Repeats                   int                           `json:"repeats"`
+	NewConnection             bool                          `json:"new_connection"`
+	ExpectedStatus            int                           `json:"expected_status"`
+	AllowedStatuses           []int                         `json:"allowed_statuses,omitempty"`
+	MinStatusCounts           map[int]uint64                `json:"min_status_counts,omitempty"`
+	MaxStatusCounts           map[int]uint64                `json:"max_status_counts,omitempty"`
+	ExpectedSHA256            string                        `json:"expected_sha256,omitempty"`
+	ExpectedHeaders           map[string]string             `json:"expected_headers,omitempty"`
+	AllowedHeaders            map[string][]string           `json:"allowed_headers,omitempty"`
+	MaxHeaderRatios           map[string]map[string]float64 `json:"max_header_ratios,omitempty"`
+	RequestHeaders            map[string]string             `json:"request_headers,omitempty"`
+	CaptureHeaders            []string                      `json:"capture_headers,omitempty"`
+	UniqueQuery               bool                          `json:"unique_query,omitempty"`
+	UniqueQueryCardinality    int                           `json:"unique_query_cardinality,omitempty"`
+	CooldownMS                int64                         `json:"cooldown_ms,omitempty"`
+	CapacityProbe             bool                          `json:"capacity_probe,omitempty"`
+	MinCacheHits              uint64                        `json:"min_cache_hits,omitempty"`
+	MinCacheMisses            uint64                        `json:"min_cache_misses,omitempty"`
+	MinCacheEvictions         uint64                        `json:"min_cache_evictions,omitempty"`
+	MaxCapturedValues         int                           `json:"max_captured_values,omitempty"`
+	MaxLoadCPUPercent         float64                       `json:"max_load_cpu_percent,omitempty"`
+	MaxAgentRSSBytes          uint64                        `json:"max_agent_rss_bytes,omitempty"`
+	MaxAgentRSSGrowthBytes    uint64                        `json:"max_agent_rss_growth_bytes,omitempty"`
+	PostCooldownGC            bool                          `json:"post_cooldown_gc,omitempty"`
+	Variant                   Variant                       `json:"variant"`
+	RequireCompleteAccessLogs bool                          `json:"require_complete_access_logs,omitempty"`
 }
 
 type Run struct {
@@ -206,6 +218,14 @@ type ResourceSummary struct {
 	HeapIdleBytesPostGC     uint64     `json:"heap_idle_bytes_post_gc,omitempty"`
 	HeapReleasedBytesPostGC uint64     `json:"heap_released_bytes_post_gc,omitempty"`
 	GoroutinesEnd           int        `json:"goroutines_end,omitempty"`
+	QueueBytesEnd           uint64     `json:"log_queue_bytes_end,omitempty"`
+	QueueRecordsEnd         uint64     `json:"log_queue_records_end,omitempty"`
+	BufferBytesEnd          uint64     `json:"log_buffer_bytes_end,omitempty"`
+	BufferRecordsEnd        uint64     `json:"log_buffer_records_end,omitempty"`
+	memoryDroppedLogsStart  uint64
+	diskDroppedLogsStart    uint64
+	committedBatchesStart   uint64
+	committedRecordsStart   uint64
 }
 
 type TimeSeriesPoint struct {
@@ -264,6 +284,15 @@ type BaselineDecision struct {
 	Passed      bool               `json:"passed"`
 	Comparisons []MetricComparison `json:"comparisons"`
 	Reason      string             `json:"reason,omitempty"`
+}
+
+type ControlDecision struct {
+	Passed       bool    `json:"passed"`
+	FullRPS      float64 `json:"full_rps"`
+	ControlRPS   float64 `json:"control_rps"`
+	Ratio        float64 `json:"ratio"`
+	MinimumRatio float64 `json:"minimum_ratio"`
+	Reason       string  `json:"reason,omitempty"`
 }
 
 type MetricComparison struct {

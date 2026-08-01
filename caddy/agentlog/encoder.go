@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 
 	"github.com/caddyserver/caddy/v2"
 	caddylogging "github.com/caddyserver/caddy/v2/modules/logging"
@@ -19,7 +20,18 @@ type AccessEncoder struct {
 	RedactedHeaders []string `json:"redacted_headers,omitempty"`
 }
 
-func init() { caddy.RegisterModule(AccessEncoder{}) }
+var benchmarkAccessLogsEnabled atomic.Bool
+var emptyBufferPool = buffer.NewPool()
+
+func init() {
+	benchmarkAccessLogsEnabled.Store(true)
+	caddy.RegisterModule(AccessEncoder{})
+}
+
+// SetBenchmarkAccessLogsEnabled is used only by the private benchmark listener.
+func SetBenchmarkAccessLogsEnabled(enabled bool) {
+	benchmarkAccessLogsEnabled.Store(enabled)
+}
 
 func (AccessEncoder) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "caddy.logging.encoders.goveto_access", New: func() caddy.Module { return new(AccessEncoder) }}
@@ -78,6 +90,9 @@ func (encoder accessPrivacyEncoder) Clone() zapcore.Encoder {
 }
 
 func (encoder accessPrivacyEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
+	if !benchmarkAccessLogsEnabled.Load() {
+		return emptyBufferPool.Get(), nil
+	}
 	encoder.Encoder = encoder.Encoder.Clone()
 	for _, field := range fields {
 		field.AddTo(encoder)

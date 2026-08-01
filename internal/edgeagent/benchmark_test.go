@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -104,7 +105,9 @@ func BenchmarkLogQueue(b *testing.B) {
 		b.ReportAllocs()
 		b.ResetTimer()
 		for range b.N {
-			queue.EnqueueAccess(LogRecord{Type: "access", Payload: accessPayload})
+			for !queue.EnqueueSanitizedAccess(LogRecord{Type: "access", Payload: accessPayload}) {
+				runtime.Gosched()
+			}
 		}
 		b.StopTimer()
 		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -118,7 +121,40 @@ func BenchmarkLogQueue(b *testing.B) {
 		}
 		b.ReportMetric(stats.AverageBatchSize, "records/batch")
 		b.ReportMetric(float64(stats.MemoryDroppedRecords), "dropped")
+		if stats.CommittedRecords != uint64(b.N) || stats.MemoryDroppedRecords != 0 {
+			b.Fatalf("submitted=%d committed=%d dropped=%d", b.N, stats.CommittedRecords, stats.MemoryDroppedRecords)
+		}
 		if err := queue.Close(); err != nil {
+			b.Fatal(err)
+		}
+	})
+	b.Run("FullAccessBufferReject", func(b *testing.B) {
+		queue, err := OpenLogQueue(filepath.Join(b.TempDir(), "full-buffer.db"), 1<<40)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err = queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+			BufferBytes: 1024, BufferRecords: 1, BatchBytes: 1 << 20, BatchRecords: 1024, FlushInterval: time.Hour,
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if !queue.EnqueueSanitizedAccess(LogRecord{Type: "access", Payload: payload}) {
+			b.Fatal("failed to fill access buffer")
+		}
+		b.ReportAllocs()
+		b.ResetTimer()
+		for range b.N {
+			if queue.EnqueueSanitizedAccess(LogRecord{Type: "access", Payload: payload}) {
+				b.Fatal("full buffer accepted a record")
+			}
+		}
+		b.StopTimer()
+		shutdownContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err = queue.ShutdownAccess(shutdownContext); err != nil {
+			b.Fatal(err)
+		}
+		if err = queue.Close(); err != nil {
 			b.Fatal(err)
 		}
 	})

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/caddyserver/caddy/v2"
@@ -30,9 +31,16 @@ type Metric struct {
 }
 
 type metricState struct {
-	Metric
-	latency  time.Duration
-	upstream *reverseproxy.Upstream
+	siteID        string
+	originAddress string
+	requests      atomic.Uint64
+	errors        atomic.Uint64
+	latencyNanos  atomic.Uint64
+	measuredAt    atomic.Int64
+	healthy       atomic.Bool
+	available     atomic.Bool
+	fails         atomic.Int64
+	upstream      atomic.Pointer[reverseproxy.Upstream]
 }
 
 var registry = struct {
@@ -40,7 +48,17 @@ var registry = struct {
 	values map[string]*metricState
 }{values: map[string]*metricState{}}
 
-func init() { caddy.RegisterModule(MetricsHandler{}) }
+var benchmarkObservabilityEnabled atomic.Bool
+
+func init() {
+	benchmarkObservabilityEnabled.Store(true)
+	caddy.RegisterModule(MetricsHandler{})
+}
+
+// SetBenchmarkObservabilityEnabled is used only by the private benchmark listener.
+func SetBenchmarkObservabilityEnabled(enabled bool) {
+	benchmarkObservabilityEnabled.Store(enabled)
+}
 
 func (MetricsHandler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "http.handlers.goveto_origin_metrics", New: func() caddy.Module { return new(MetricsHandler) }}
@@ -58,67 +76,72 @@ func (h MetricsHandler) ServeHTTP(w http.ResponseWriter, request *http.Request, 
 }
 
 func updateHealth(siteID, address string, healthy, available bool, fails int) {
-	registry.Lock()
-	defer registry.Unlock()
-	state := metric(siteID, address)
-	state.Healthy = healthy
-	state.Available = available
-	state.Fails = fails
-	state.MeasuredAt = time.Now().UTC()
+	state := registerMetric(siteID, address)
+	state.healthy.Store(healthy)
+	state.available.Store(available)
+	state.fails.Store(int64(fails))
+	state.measuredAt.Store(time.Now().UnixNano())
 }
 
-func trackUpstream(siteID, address string, upstream *reverseproxy.Upstream) {
+func registerMetric(siteID, address string) *metricState {
 	registry.Lock()
 	defer registry.Unlock()
-	state := metric(siteID, address)
-	state.upstream = upstream
-	state.Healthy = upstream.Healthy()
-	state.Available = upstream.Available()
-	state.Fails = upstream.Host.Fails()
-	state.MeasuredAt = time.Now().UTC()
-}
-
-func observe(siteID, address string, latency time.Duration, failed bool) {
-	registry.Lock()
-	defer registry.Unlock()
-	state := metric(siteID, address)
-	state.Requests++
-	if failed {
-		state.Errors++
-	}
-	state.latency += latency
-	state.MeasuredAt = time.Now().UTC()
-}
-
-func metric(siteID, address string) *metricState {
 	key := siteID + "\x00" + address
 	state := registry.values[key]
 	if state == nil {
-		state = &metricState{Metric: Metric{SiteID: siteID, OriginAddress: address}}
+		state = &metricState{siteID: siteID, originAddress: address}
 		registry.values[key] = state
 	}
 	return state
 }
 
+func observe(siteID, address string, latency time.Duration, failed bool) {
+	observeState(registerMetric(siteID, address), latency, failed)
+}
+
+func observeState(state *metricState, latency time.Duration, failed bool) {
+	if state == nil {
+		return
+	}
+	state.requests.Add(1)
+	if failed {
+		state.errors.Add(1)
+	}
+	state.latencyNanos.Add(uint64(max(latency, 0)))
+	state.measuredAt.Store(time.Now().UnixNano())
+}
+
 func SnapshotAndReset() []Metric {
 	registry.Lock()
-	defer registry.Unlock()
-	result := make([]Metric, 0, len(registry.values))
+	states := make([]*metricState, 0, len(registry.values))
 	for _, state := range registry.values {
-		if state.upstream != nil {
-			state.Healthy = state.upstream.Healthy()
-			state.Available = state.upstream.Available()
-			state.Fails = state.upstream.Host.Fails()
+		states = append(states, state)
+	}
+	registry.Unlock()
+
+	result := make([]Metric, 0, len(states))
+	for _, state := range states {
+		requests := state.requests.Swap(0)
+		errors := state.errors.Swap(0)
+		latency := state.latencyNanos.Swap(0)
+		value := Metric{
+			SiteID: state.siteID, OriginAddress: state.originAddress,
+			Healthy: state.healthy.Load(), Available: state.available.Load(), Fails: int(state.fails.Load()),
+			Requests: requests, Errors: errors,
 		}
-		value := state.Metric
-		if value.Requests > 0 {
-			value.AverageLatencyMS = float64(state.latency.Microseconds()) / 1000 / float64(value.Requests)
-			value.ErrorRate = float64(value.Errors) / float64(value.Requests)
+		if upstream := state.upstream.Load(); upstream != nil {
+			value.Healthy = upstream.Healthy()
+			value.Available = upstream.Available()
+			value.Fails = upstream.Host.Fails()
+		}
+		if measuredAt := state.measuredAt.Load(); measuredAt > 0 {
+			value.MeasuredAt = time.Unix(0, measuredAt).UTC()
+		}
+		if requests > 0 {
+			value.AverageLatencyMS = float64(latency) / float64(time.Millisecond) / float64(requests)
+			value.ErrorRate = float64(errors) / float64(requests)
 		}
 		result = append(result, value)
-		state.Requests = 0
-		state.Errors = 0
-		state.latency = 0
 	}
 	return result
 }

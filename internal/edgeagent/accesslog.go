@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -13,7 +15,18 @@ const (
 	defaultAccessLogBatchBytes    = uint64(1 << 20)
 	defaultAccessLogBatchRecords  = 512
 	defaultAccessLogFlushInterval = 10 * time.Millisecond
+	accessDropReportInterval      = time.Minute
 )
+
+var accessPayloadPools = [...]sync.Pool{
+	{New: func() any { return make([]byte, 1<<10) }},
+	{New: func() any { return make([]byte, 2<<10) }},
+	{New: func() any { return make([]byte, 4<<10) }},
+	{New: func() any { return make([]byte, 8<<10) }},
+	{New: func() any { return make([]byte, 16<<10) }},
+	{New: func() any { return make([]byte, 32<<10) }},
+	{New: func() any { return make([]byte, 64<<10) }},
+}
 
 type AccessLogConfig struct {
 	BufferBytes   uint64
@@ -81,7 +94,17 @@ func (q *LogQueue) EnqueueAccess(record LogRecord) bool {
 }
 
 func (q *LogQueue) EnqueueSanitizedAccess(record LogRecord) bool {
+	if !q.benchmarkAccessLogs.Load() {
+		return false
+	}
+	if !q.accessPolicy.Keep(record.Payload) {
+		return false
+	}
 	return q.enqueueAccess(record, true)
+}
+
+func (q *LogQueue) setBenchmarkAccessLogsEnabled(enabled bool) {
+	q.benchmarkAccessLogs.Store(enabled)
 }
 
 func (q *LogQueue) enqueueAccess(record LogRecord, sanitized bool) bool {
@@ -98,8 +121,10 @@ func (q *LogQueue) enqueueAccess(record LogRecord, sanitized bool) bool {
 		q.accessMu.Unlock()
 		return false
 	}
+	payload, pooled := acquireAccessPayload(record.Payload)
+	record.Payload = payload
 	position := (q.accessHead + q.accessCount) % len(q.accessBuffer)
-	q.accessBuffer[position] = queuedAccessRecord{record: record, sanitized: sanitized}
+	q.accessBuffer[position] = queuedAccessRecord{record: record, sanitized: sanitized, pooled: pooled}
 	q.accessCount++
 	q.accessBufferBytes += size
 	flush := q.accessCount >= q.accessConfig.BatchRecords || q.accessBufferBytes >= q.accessConfig.BatchBytes
@@ -143,7 +168,9 @@ func (q *LogQueue) ShutdownAccess(ctx context.Context) error {
 
 func (q *LogQueue) runAccessPipeline(ctx context.Context) {
 	ticker := time.NewTicker(q.accessConfig.FlushInterval)
+	dropTicker := time.NewTicker(accessDropReportInterval)
 	defer ticker.Stop()
+	defer dropTicker.Stop()
 	defer close(q.accessDone)
 	shuttingDown := false
 	for {
@@ -155,6 +182,8 @@ func (q *LogQueue) runAccessPipeline(ctx context.Context) {
 				shuttingDown = true
 			case <-q.accessSignal:
 			case <-ticker.C:
+			case <-dropTicker.C:
+				q.reportAccessDrops()
 			}
 		}
 
@@ -205,7 +234,7 @@ func (q *LogQueue) persistAccessBatch(ctx context.Context, raw []queuedAccessRec
 		record := queued.record
 		payload, keep := record.Payload, false
 		if queued.sanitized {
-			keep = q.accessPolicy.Keep(record.Payload)
+			keep = true
 		} else {
 			payload, keep = q.accessPolicy.Apply(record.Payload)
 		}
@@ -255,8 +284,61 @@ func (q *LogQueue) persistAccessBatch(ctx context.Context, raw []queuedAccessRec
 func (q *LogQueue) completeAccessBatch(records int, bytes uint64) {
 	q.accessMu.Lock()
 	defer q.accessMu.Unlock()
+	for index := range records {
+		releaseAccessPayload(q.accessBuffer[q.accessHead+index])
+	}
 	clear(q.accessBuffer[q.accessHead : q.accessHead+records])
 	q.accessHead = (q.accessHead + records) % len(q.accessBuffer)
 	q.accessCount -= records
 	q.accessBufferBytes -= min(bytes, q.accessBufferBytes)
+}
+
+func (q *LogQueue) reportAccessDrops() {
+	q.accessMu.Lock()
+	dropped := q.accessMemoryDropped - q.accessReportedDropped
+	q.accessReportedDropped = q.accessMemoryDropped
+	q.accessMu.Unlock()
+	if dropped > 0 {
+		slog.Warn("access log buffer overloaded", "dropped_since_last_report", dropped)
+	}
+}
+
+func (q *LogQueue) releaseAccessBuffer() {
+	q.accessMu.Lock()
+	defer q.accessMu.Unlock()
+	for index := range q.accessCount {
+		position := (q.accessHead + index) % len(q.accessBuffer)
+		releaseAccessPayload(q.accessBuffer[position])
+		q.accessBuffer[position] = queuedAccessRecord{}
+	}
+	q.accessHead = 0
+	q.accessCount = 0
+	q.accessBufferBytes = 0
+}
+
+func acquireAccessPayload(payload []byte) ([]byte, bool) {
+	for index := range accessPayloadPools {
+		size := 1 << (10 + index)
+		if len(payload) <= size {
+			buffer := accessPayloadPools[index].Get().([]byte)
+			buffer = buffer[:len(payload)]
+			copy(buffer, payload)
+			return buffer, true
+		}
+	}
+	return append([]byte(nil), payload...), false
+}
+
+func releaseAccessPayload(record queuedAccessRecord) {
+	if !record.pooled || cap(record.record.Payload) < 1<<10 || cap(record.record.Payload) > 64<<10 {
+		return
+	}
+	size := cap(record.record.Payload)
+	index := 0
+	for 1<<(10+index) < size {
+		index++
+	}
+	if index < len(accessPayloadPools) && 1<<(10+index) == size {
+		accessPayloadPools[index].Put([]byte(record.record.Payload[:size]))
+	}
 }

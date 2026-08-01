@@ -63,7 +63,7 @@ func (w *queueWriter) Write(data []byte) (int, error) {
 		if len(line) == 0 {
 			continue
 		}
-		if err := w.sink.WriteCaddyLog(w.siteID, w.configVersion, time.Now().UTC(), append([]byte(nil), line...)); err != nil {
+		if err := w.sink.WriteCaddyLog(w.siteID, w.configVersion, time.Now().UTC(), line); err != nil {
 			return 0, fmt.Errorf("buffer caddy log: %w", err)
 		}
 	}

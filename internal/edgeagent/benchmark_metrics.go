@@ -6,15 +6,19 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	httppprof "net/http/pprof"
 	"runtime"
 	"runtime/debug"
 	"sync"
 	"time"
 
+	"goveto-edge/caddy/agentlog"
+	"goveto-edge/caddy/origingovernance"
 	cachefs "goveto-edge/caddy/simplefs"
 )
 
 func serveBenchmarkMetrics(ctx context.Context, address string, queue *LogQueue, configs *NodeConfigStore) {
+	runtime.SetMutexProfileFraction(5)
 	server := &http.Server{Addr: address, Handler: benchmarkMetricsHandler(queue, configs), ReadHeaderTimeout: 2 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -70,5 +74,27 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 		gcMu.Unlock()
 		response.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("GET /variant", func(response http.ResponseWriter, _ *http.Request) {
+		variant := "control"
+		if queue.benchmarkAccessLogs.Load() {
+			variant = "full"
+		}
+		_ = json.NewEncoder(response).Encode(map[string]string{"variant": variant})
+	})
+	mux.HandleFunc("POST /variant", func(response http.ResponseWriter, request *http.Request) {
+		variant := request.URL.Query().Get("value")
+		if variant != "full" && variant != "control" {
+			http.Error(response, "variant must be full or control", http.StatusBadRequest)
+			return
+		}
+		enabled := variant == "full"
+		queue.setBenchmarkAccessLogsEnabled(enabled)
+		agentlog.SetBenchmarkAccessLogsEnabled(enabled)
+		origingovernance.SetBenchmarkObservabilityEnabled(enabled)
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("GET /debug/pprof/profile", httppprof.Profile)
+	mux.Handle("GET /debug/pprof/mutex", httppprof.Handler("mutex"))
+	mux.Handle("GET /debug/pprof/allocs", httppprof.Handler("allocs"))
 	return mux
 }

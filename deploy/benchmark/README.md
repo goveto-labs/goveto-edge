@@ -6,6 +6,7 @@ Benchmark testing has one shell entry point:
 script/run_agent_benchmark.sh quick [options]
 script/run_agent_benchmark.sh full [options]
 script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
+script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
 ```
 
 `quick` runs the complete functional screen. It covers all origin and CDN test
@@ -25,6 +26,11 @@ hours by default) only after the corresponding Capacity case passes.
 `bandwidth` runs only the 1 MiB reuse c32/c128 and 16 MiB transfer c8 Capacity
 cases. It requires `26c-agent4-load10`, keeping this follow-up separate from the
 functional and soak matrix.
+
+`small-reuse` runs the 1 KiB and 16 KiB reuse matrix at c32/c128 for every
+selected protocol on `26c-agent8`. Each case compares full observability with a
+matching control and requires full throughput to reach 90% of control. The c32
+full cases additionally require complete, drained access logs.
 
 ## Commands
 

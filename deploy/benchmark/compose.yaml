@@ -55,6 +55,7 @@ services:
       - "18080:8080/tcp"
       - "18444:8444/tcp"
       - "18444:8444/udp"
+      - "127.0.0.1:19900:9900/tcp"
     depends_on: [origin, origin2, gateway, redis]
     networks: [benchmark]
 

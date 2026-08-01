@@ -155,6 +155,17 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		if config.Cooldown > 0 {
 			checkCooldownResources(&validity, run)
 		}
+		if config.RequireCompleteAccessLogs {
+			if run.Resources.MemoryDroppedLogsDelta != 0 || run.Resources.DiskDroppedLogsDelta != 0 {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d dropped access logs (memory=%d disk=%d)", run.Index, run.Resources.MemoryDroppedLogsDelta, run.Resources.DiskDroppedLogsDelta))
+			}
+			if run.Resources.QueueRecordsEnd != 0 || run.Resources.BufferRecordsEnd != 0 || run.Resources.QueueBytesEnd != 0 || run.Resources.BufferBytesEnd != 0 {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d access log queue did not drain (disk=%d/%d memory=%d/%d)", run.Index, run.Resources.QueueRecordsEnd, run.Resources.QueueBytesEnd, run.Resources.BufferRecordsEnd, run.Resources.BufferBytesEnd))
+			}
+			if run.Resources.CommittedRecordsDelta < run.Metrics.Successes {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d committed %d access logs for %d successful requests", run.Index, run.Resources.CommittedRecordsDelta, run.Metrics.Successes))
+			}
+		}
 	}
 	validity.Valid = len(validity.Reasons) == 0 || validity.Status == ResultTargetSaturated
 	return validity
@@ -225,9 +236,9 @@ func Compare(current, baseline Report) BaselineDecision {
 		decision.Reason = "baseline architecture does not match current architecture"
 		return decision
 	}
-	if current.Scenario.Suite != baseline.Scenario.Suite || current.Scenario.Name != baseline.Scenario.Name || current.Scenario.Protocol != baseline.Scenario.Protocol {
+	if current.Scenario.Suite != baseline.Scenario.Suite || current.Scenario.Name != baseline.Scenario.Name || current.Scenario.Protocol != baseline.Scenario.Protocol || current.Scenario.Variant != baseline.Scenario.Variant {
 		decision.Passed = false
-		decision.Reason = "baseline suite, scenario, or protocol does not match"
+		decision.Reason = "baseline suite, scenario, protocol, or variant does not match"
 		return decision
 	}
 	if current.Scenario.Concurrency != baseline.Scenario.Concurrency || current.Scenario.NewConnection != baseline.Scenario.NewConnection {
@@ -241,6 +252,35 @@ func Compare(current, baseline Report) BaselineDecision {
 	}
 	for _, comparison := range decision.Comparisons {
 		decision.Passed = decision.Passed && comparison.Passed
+	}
+	return decision
+}
+
+func CompareControl(full, control Report) ControlDecision {
+	decision := ControlDecision{Passed: false, FullRPS: full.Summary.RPS, ControlRPS: control.Summary.RPS, MinimumRatio: 0.9}
+	if full.Scenario.Variant != VariantFull || control.Scenario.Variant != VariantControl {
+		decision.Reason = "control comparison requires full and control variants"
+		return decision
+	}
+	if !full.Validity.Valid || !control.Validity.Valid {
+		decision.Reason = "full and control reports must both be valid"
+		return decision
+	}
+	if full.RunnerID != control.RunnerID || full.Platform.Architecture != control.Platform.Architecture ||
+		full.Scenario.Suite != control.Scenario.Suite || full.Scenario.Name != control.Scenario.Name ||
+		full.Scenario.Protocol != control.Scenario.Protocol || full.Scenario.Concurrency != control.Scenario.Concurrency ||
+		full.Scenario.NewConnection != control.Scenario.NewConnection || full.Scenario.Method != control.Scenario.Method ||
+		full.Scenario.URL != control.Scenario.URL || full.Scenario.DurationMS != control.Scenario.DurationMS ||
+		full.Scenario.WarmupMS != control.Scenario.WarmupMS || full.Scenario.Repeats != control.Scenario.Repeats {
+		decision.Reason = "control benchmark configuration does not match full benchmark"
+		return decision
+	}
+	if control.Summary.RPS > 0 {
+		decision.Ratio = full.Summary.RPS / control.Summary.RPS
+	}
+	decision.Passed = control.Summary.RPS > 0 && decision.Ratio >= decision.MinimumRatio && full.Summary.SuccessRate == 1 && control.Summary.SuccessRate == 1
+	if !decision.Passed {
+		decision.Reason = "full throughput must reach 90% of control with 100% success"
 	}
 	return decision
 }

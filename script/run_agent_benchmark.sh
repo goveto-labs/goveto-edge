@@ -39,6 +39,7 @@ Usage:
   script/run_agent_benchmark.sh quick [options]
   script/run_agent_benchmark.sh full [options]
   script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
+  script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
 
 Modes:
   quick  Run every origin and CDN scenario with short timings. It omits only
@@ -47,6 +48,7 @@ Modes:
          cases, then the long 1 MiB cache-hit stability test.
   bandwidth  Run only 1 MiB reuse and 16 MiB transfer Capacity cases on the
              stronger 26c-agent4-load10 load-generator layout.
+  small-reuse  Compare full observability with control for 1 KiB/16 KiB reuse.
 
 Options:
   --runner <name>             default, 26c-agent2, 26c-agent4, 26c-agent4-load10, or 26c-agent8
@@ -65,7 +67,7 @@ EOF
 
 die() { echo "error: $*" >&2; exit 1; }
 
-if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" ]]; then
+if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" || "$1" == "small-reuse" ]]; then
   mode="$1"
   shift
 fi
@@ -88,10 +90,11 @@ while (($# > 0)); do
   esac
 done
 
-case "$mode" in quick|full|bandwidth) ;; *) die "mode must be quick, full, or bandwidth" ;; esac
+case "$mode" in quick|full|bandwidth|small-reuse) ;; *) die "mode must be quick, full, bandwidth, or small-reuse" ;; esac
 [[ "$runner" == "26c" ]] && runner="26c-agent8"
 case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
 [[ "$mode" != "bandwidth" || "$runner" == "26c-agent4-load10" ]] || die "bandwidth mode requires --runner 26c-agent4-load10"
+[[ "$mode" != "small-reuse" || "$runner" == "26c-agent8" ]] || die "small-reuse mode requires --runner 26c-agent8"
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run-id"
 [[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
@@ -340,6 +343,63 @@ run_bandwidth() {
   done
 }
 
+run_small_reuse() {
+  local protocol size concurrency scenario control_name full_name control_report
+  for protocol in $protocols; do
+    for size in 1024 16384; do
+      for concurrency in 32 128; do
+        scenario="small-reuse-${size}b"
+        control_name="${scenario}-${protocol}-c${concurrency}-control"
+        full_name="${scenario}-${protocol}-c${concurrency}-full"
+        run_case small-reuse-control "control:$control_name" "$control_name" "$protocol" \
+          --suite capacity --variant control --protocol "$protocol" --scenario "$scenario" \
+          --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
+          --concurrency "$concurrency" --warmup 30s --duration 120s --repeats 3 \
+          --cooldown 10s --expected-sha256 "$(sha256_zeros "$size")"
+        if [[ "$last_status" != "PASS" ]]; then
+          record_skip small-reuse-full "$full_name" "$protocol" "control=$last_status"
+          continue
+        fi
+        control_report="/results/$run_id/small-reuse-control/$control_name/report.json"
+        local full_args=(--suite capacity --variant full --control "$control_report" \
+          --protocol "$protocol" --scenario "$scenario" \
+          --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
+          --concurrency "$concurrency" --warmup 30s --duration 120s --repeats 3 \
+          --cooldown 10s --expected-sha256 "$(sha256_zeros "$size")")
+        [[ "$concurrency" == "32" ]] && full_args+=(--require-complete-access-logs)
+        run_case small-reuse-full "full:$full_name" "$full_name" "$protocol" "${full_args[@]}"
+      done
+    done
+  done
+}
+
+capture_small_reuse_profile() {
+  local variant="$1" output="$result_dir/profiles/$variant" container_output="/results/$run_id/profiles/$variant/load"
+  local load_pid ready=false
+  mkdir -p "$output"
+  compose --profile run run --rm load agent-bench run \
+    --suite capacity --variant "$variant" --protocol h1 --scenario small-reuse-profile \
+    --url https://agent:8444/bytes/1024 --host benchmark.example.test --insecure-skip-verify \
+    --concurrency 32 --warmup 2s --duration 35s --repeats 1 \
+    --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+    --runner-id "$runner" --output "$container_output" > "$output/load.log" 2>&1 &
+  load_pid=$!
+  for _attempt in $(seq 1 20); do
+    if curl -fsS http://127.0.0.1:19900/variant | jq -e --arg variant "$variant" '.variant == $variant' >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  if $ready; then
+    curl -fsS "http://127.0.0.1:19900/debug/pprof/profile?seconds=30" -o "$output/cpu.pprof" || true
+    curl -fsS http://127.0.0.1:19900/debug/pprof/mutex -o "$output/mutex.pprof" || true
+    curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs.pprof" || true
+  fi
+  wait "$load_pid" || true
+  $ready || die "benchmark variant did not become ready for $variant profiling"
+}
+
 run_origin_capacity() {
   local protocol size concurrency name key
   for protocol in $protocols; do
@@ -539,6 +599,7 @@ setup_environment() {
   command -v docker >/dev/null 2>&1 || die "docker is required"
   command -v go >/dev/null 2>&1 || die "go is required"
   command -v jq >/dev/null 2>&1 || die "jq is required"
+	[[ "$mode" != "small-reuse" ]] || command -v curl >/dev/null 2>&1 || die "curl is required for small-reuse profiles"
   docker compose version >/dev/null 2>&1 || die "docker compose is required"
   docker_cpus="$(docker info --format '{{.NCPU}}' 2>/dev/null)"
   [[ "$docker_cpus" =~ ^[0-9]+$ ]] || die "cannot determine Docker CPU count"
@@ -589,6 +650,18 @@ fi
 if [[ "$mode" == "bandwidth" ]]; then
   echo "Running focused bandwidth Capacity suite..."
   run_bandwidth
+  print_summary
+  (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
+  exit
+fi
+
+if [[ "$mode" == "small-reuse" ]]; then
+  echo "Running small reuse full/control Capacity suite..."
+  run_small_reuse
+  if ! $dry_run; then
+    capture_small_reuse_profile control
+    capture_small_reuse_profile full
+  fi
   print_summary
   (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
   exit

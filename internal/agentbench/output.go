@@ -67,8 +67,8 @@ func writeMarkdown(path string, report Report) error {
 			status = ResultEnvInvalid
 		}
 	}
-	_, err = fmt.Fprintf(file, "# Edge Agent benchmark\n\n- Runner: `%s`\n- Scenario: `%s`\n- Protocol: `%s` (`%s`)\n- Platform: `%s/%s`\n- Result: **%s**\n\n| RPS | Success | p50 | p95 | p99 | Max | Bandwidth |\n|---:|---:|---:|---:|---:|---:|---:|\n| %.2f | %.4f%% | %.2f ms | %.2f ms | %.2f ms | %.2f ms | %.2f MiB/s |\n",
-		report.RunnerID, report.Scenario.Name, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, status,
+	_, err = fmt.Fprintf(file, "# Edge Agent benchmark\n\n- Runner: `%s`\n- Scenario: `%s`\n- Variant: `%s`\n- Protocol: `%s` (`%s`)\n- Platform: `%s/%s`\n- Result: **%s**\n\n| RPS | Success | p50 | p95 | p99 | Max | Bandwidth |\n|---:|---:|---:|---:|---:|---:|---:|\n| %.2f | %.4f%% | %.2f ms | %.2f ms | %.2f ms | %.2f ms | %.2f MiB/s |\n",
+		report.RunnerID, report.Scenario.Name, report.Scenario.Variant, report.Scenario.Protocol, report.Summary.NegotiatedProtocol, report.Platform.OS, report.Platform.Architecture, status,
 		report.Summary.RPS, report.Summary.SuccessRate*100, report.Summary.P50MS, report.Summary.P95MS, report.Summary.P99MS, report.Summary.MaxMS, report.Summary.BytesPerSecond/(1<<20))
 	if err != nil {
 		return err
@@ -124,6 +124,12 @@ func writeMarkdown(path string, report Report) error {
 			for _, comparison := range report.Baseline.Comparisons {
 				_, _ = fmt.Fprintf(file, "| %s | %.2f | %.2f | %+.2f%% | %.2f%% | %t |\n", comparison.Metric, comparison.Baseline, comparison.Current, comparison.ChangePercent, comparison.LimitPercent, comparison.Passed)
 			}
+		}
+	}
+	if report.Control != nil {
+		_, _ = fmt.Fprintf(file, "\n## Control\n\n| Full RPS | Control RPS | Ratio | Minimum | Passed |\n|---:|---:|---:|---:|:---:|\n| %.2f | %.2f | %.2f%% | %.2f%% | %t |\n", report.Control.FullRPS, report.Control.ControlRPS, report.Control.Ratio*100, report.Control.MinimumRatio*100, report.Control.Passed)
+		if report.Control.Reason != "" {
+			_, _ = fmt.Fprintf(file, "\n%s\n", report.Control.Reason)
 		}
 	}
 	return nil

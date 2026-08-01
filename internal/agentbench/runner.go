@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptrace"
+	"net/url"
 	"os"
 	"runtime"
 	"sort"
@@ -60,6 +61,11 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 	if config.UniqueQuery && config.UniqueQueryCardinality == 0 && config.UniqueQueryNamespace == "" {
 		config.UniqueQueryNamespace = fmt.Sprintf("%x", time.Now().UnixNano())
 	}
+	if config.AgentMetricsURL != "" {
+		if err := setBenchmarkVariant(ctx, config.AgentMetricsURL, config.Variant); err != nil {
+			return Report{}, err
+		}
+	}
 	report := Report{
 		SchemaVersion: SchemaVersion,
 		RunnerID:      config.RunnerID,
@@ -79,6 +85,7 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
 			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes,
 			PostCooldownGC: config.AgentGCURL != "" && config.Cooldown > 0,
+			Variant:        config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs,
 		},
 	}
 	var loadCPUMax float64
@@ -124,11 +131,17 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	client := &http.Client{Transport: transport, Timeout: config.RequestTimeout}
 	var requestSequence atomic.Uint64
 	warmupState := &runState{cleanupOnly: true}
+	var environmentErrors []string
 
 	if config.Warmup > 0 {
 		warmContext, cancel := context.WithTimeout(ctx, config.Warmup)
 		runWorkersWithRequestContext(warmContext, warmContext, config, client, warmupState, &requestSequence, sharedQUIC)
 		cancel()
+	}
+	if config.RequireCompleteAccessLogs {
+		if drainErr := waitForAccessBufferDrain(ctx, config.AgentMetricsURL, 10*time.Second); drainErr != nil {
+			environmentErrors = append(environmentErrors, drainErr.Error())
+		}
 	}
 
 	state := &runState{protocols: make(map[string]uint64), headers: make(map[string]map[string]uint64), statuses: make(map[int]uint64), errorCounts: make(map[string]uint64)}
@@ -182,7 +195,6 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		samples = append(samples, naturalEnd)
 		applyNaturalEnd(&resources, naturalEnd)
 	}
-	var environmentErrors []string
 	if config.AgentGCURL != "" && config.Cooldown > 0 {
 		if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
 			environmentErrors = append(environmentErrors, gcErr.Error())
@@ -488,6 +500,15 @@ func validateConfig(config *Config) error {
 	}
 	if config.ExpectedStatus == 0 {
 		config.ExpectedStatus = http.StatusOK
+	}
+	if config.Variant == "" {
+		config.Variant = VariantFull
+	}
+	if config.Variant != VariantFull && config.Variant != VariantControl {
+		return fmt.Errorf("variant must be %q or %q", VariantFull, VariantControl)
+	}
+	if (config.Variant == VariantControl || config.RequireCompleteAccessLogs) && config.AgentMetricsURL == "" {
+		return errors.New("control and complete access log modes require agent metrics")
 	}
 	for _, status := range config.AllowedStatuses {
 		if status < 100 || status > 599 {
@@ -820,6 +841,10 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 			summary.HeapIdleBytesStart = telemetryBaseline.HeapIdleBytes
 			summary.HeapReleasedBytesStart = telemetryBaseline.HeapReleasedBytes
 			summary.GoroutinesStart = telemetryBaseline.Goroutines
+			summary.memoryDroppedLogsStart = telemetryBaseline.MemoryDroppedLogs
+			summary.diskDroppedLogsStart = telemetryBaseline.DiskDroppedLogs
+			summary.committedBatchesStart = telemetryBaseline.CommittedBatches
+			summary.committedRecordsStart = telemetryBaseline.CommittedRecords
 		}
 	}
 	baselineAt = time.Now()
@@ -1020,6 +1045,14 @@ func captureResourcePoint(pid int32, metricsURL string, state *runState, phase s
 			point.HeapReleasedBytes = telemetry.HeapReleasedBytes
 			point.GCCount = telemetry.GCCount
 			point.Goroutines = telemetry.Goroutines
+			point.QueueBytes = telemetry.QueueBytes
+			point.QueueRecords = telemetry.QueueRecords
+			point.BufferBytes = telemetry.BufferBytes
+			point.BufferRecords = telemetry.BufferRecords
+			point.MemoryDroppedLogs = telemetry.MemoryDroppedLogs
+			point.DiskDroppedLogs = telemetry.DiskDroppedLogs
+			point.CommittedBatches = telemetry.CommittedBatches
+			point.CommittedRecords = telemetry.CommittedRecords
 		}
 	}
 	return point
@@ -1044,8 +1077,59 @@ func applyNaturalEnd(summary *ResourceSummary, point TimeSeriesPoint) {
 	if point.Goroutines > 0 {
 		summary.GoroutinesEnd = point.Goroutines
 	}
+	summary.QueueBytesEnd = point.QueueBytes
+	summary.QueueRecordsEnd = point.QueueRecords
+	summary.BufferBytesEnd = point.BufferBytes
+	summary.BufferRecordsEnd = point.BufferRecords
+	summary.MemoryDroppedLogsDelta = counterDelta(point.MemoryDroppedLogs, summary.memoryDroppedLogsStart)
+	summary.DiskDroppedLogsDelta = counterDelta(point.DiskDroppedLogs, summary.diskDroppedLogsStart)
+	summary.CommittedBatchesDelta = counterDelta(point.CommittedBatches, summary.committedBatchesStart)
+	summary.CommittedRecordsDelta = counterDelta(point.CommittedRecords, summary.committedRecordsStart)
 	summary.RSSBytesMax = max(summary.RSSBytesMax, point.RSSBytes)
 	summary.HeapBytesMax = max(summary.HeapBytesMax, point.HeapBytes)
+}
+
+func setBenchmarkVariant(ctx context.Context, metricsURL string, variant Variant) error {
+	endpoint, err := url.Parse(metricsURL)
+	if err != nil {
+		return fmt.Errorf("parse agent metrics URL: %w", err)
+	}
+	endpoint.Path = "/variant"
+	query := endpoint.Query()
+	query.Set("value", string(variant))
+	endpoint.RawQuery = query.Encode()
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), nil)
+	if err != nil {
+		return fmt.Errorf("create benchmark variant request: %w", err)
+	}
+	response, err := (&http.Client{Timeout: 2 * time.Second}).Do(request)
+	if err != nil {
+		return fmt.Errorf("set benchmark variant: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("set benchmark variant: status %d", response.StatusCode)
+	}
+	return nil
+}
+
+func waitForAccessBufferDrain(ctx context.Context, metricsURL string, maximum time.Duration) error {
+	drainContext, cancel := context.WithTimeout(ctx, maximum)
+	defer cancel()
+	client := &http.Client{Timeout: 2 * time.Second}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		telemetry, err := fetchTelemetry(drainContext, client, metricsURL)
+		if err == nil && telemetry.BufferBytes == 0 && telemetry.BufferRecords == 0 {
+			return nil
+		}
+		select {
+		case <-drainContext.Done():
+			return fmt.Errorf("access log buffer did not drain before measurement: %w", drainContext.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func applyPostGC(summary *ResourceSummary, point TimeSeriesPoint) {

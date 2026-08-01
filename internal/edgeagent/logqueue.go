@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
@@ -33,6 +34,7 @@ type LogRecord = edgeprotocol.LogRecord
 type queuedAccessRecord struct {
 	record    LogRecord
 	sanitized bool
+	pooled    bool
 }
 
 type LogQueue struct {
@@ -55,11 +57,13 @@ type LogQueue struct {
 	accessStarted         bool
 	accessAccepting       bool
 	accessMemoryDropped   uint64
+	accessReportedDropped uint64
 	accessBatches         uint64
 	accessRecords         uint64
 	accessLastError       string
 	accessLastSuccess     time.Time
 	accessPersistOverride func([]LogRecord) ([]uint64, error)
+	benchmarkAccessLogs   atomic.Bool
 }
 
 type LogQueueStats struct {
@@ -92,6 +96,7 @@ func OpenLogQueue(path string, maxBytes ...uint64) (*LogQueue, error) {
 		limit = maxBytes[0]
 	}
 	queue := &LogQueue{db: db, notify: make(chan struct{}, 1), maxBytes: limit}
+	queue.benchmarkAccessLogs.Store(true)
 	if err := db.Update(func(tx *bolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists(logsBucket)
 		if err != nil {
@@ -369,6 +374,7 @@ func (q *LogQueue) Close() error {
 		flushErr = q.ShutdownAccess(ctx)
 		cancel()
 	}
+	q.releaseAccessBuffer()
 	return errors.Join(flushErr, q.db.Sync(), q.db.Close())
 }
 

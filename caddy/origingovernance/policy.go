@@ -27,6 +27,7 @@ type SelectionPolicy struct {
 
 	index     atomic.Uint64
 	byDial    map[string]Backend
+	metrics   map[string]*metricState
 	available func(*reverseproxy.Upstream) bool
 }
 
@@ -49,6 +50,7 @@ func (p *SelectionPolicy) Provision(caddy.Context) error {
 		return fmt.Errorf("unsupported scheduler %q", p.Scheduler)
 	}
 	p.byDial = make(map[string]Backend, len(p.Backends))
+	p.metrics = make(map[string]*metricState, len(p.Backends))
 	if p.available == nil {
 		p.available = func(upstream *reverseproxy.Upstream) bool { return upstream.Available() }
 	}
@@ -60,23 +62,45 @@ func (p *SelectionPolicy) Provision(caddy.Context) error {
 			backend.Weight = 1
 		}
 		p.byDial[backend.Dial] = backend
+		p.metrics[backend.Dial] = registerMetric(p.SiteID, backend.Dial)
 	}
 	return nil
 }
 
 func (p *SelectionPolicy) Select(pool reverseproxy.UpstreamPool, request *http.Request, _ http.ResponseWriter) *reverseproxy.Upstream {
-	candidates := p.candidates(pool, true)
+	if len(pool) == 0 {
+		return nil
+	}
+	if len(pool) == 1 {
+		return p.selectUpstream(pool[0], request)
+	}
+	var local [8]*reverseproxy.Upstream
+	candidates := local[:0]
+	if len(pool) > len(local) {
+		candidates = make(reverseproxy.UpstreamPool, 0, len(pool))
+	}
+	candidates = p.candidates(pool, candidates, true)
 	if len(candidates) == 0 {
 		// Enter panic mode when every origin is unavailable. Multi-origin sites
 		// retry an ejected origin early; single-origin sites always keep routing.
-		candidates = p.candidates(pool, false)
+		candidates = p.candidates(pool, candidates[:0], false)
 	}
 	if len(candidates) == 0 {
 		return nil
 	}
 
-	selected := p.choose(candidates, request)
+	return p.selectUpstream(p.choose(candidates, request), request)
+}
+
+func (p *SelectionPolicy) selectUpstream(selected *reverseproxy.Upstream, request *http.Request) *reverseproxy.Upstream {
 	backend := p.byDial[selected.Dial]
+	state := p.metrics[backend.Dial]
+	if state == nil {
+		state = p.metrics[selected.Dial]
+	}
+	if state != nil && benchmarkObservabilityEnabled.Load() {
+		state.upstream.Store(selected)
+	}
 	host := backend.HostHeader
 	if host == "" {
 		host = dialHostPort(selected.Dial)
@@ -84,20 +108,24 @@ func (p *SelectionPolicy) Select(pool reverseproxy.UpstreamPool, request *http.R
 	if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
 		replacer.Set("goveto.origin.address", backend.Dial)
 		replacer.Set("goveto.origin.host", host)
+		if benchmarkObservabilityEnabled.Load() {
+			replacer.Set("goveto.origin.metric", state)
+		}
 	}
 	return selected
 }
 
-func (p *SelectionPolicy) candidates(pool reverseproxy.UpstreamPool, requireAvailable bool) reverseproxy.UpstreamPool {
+func (p *SelectionPolicy) candidates(pool, candidates reverseproxy.UpstreamPool, requireAvailable bool) reverseproxy.UpstreamPool {
 	lowestPriority := int(^uint(0) >> 1)
-	candidates := make([]*reverseproxy.Upstream, 0, len(pool))
 	for _, upstream := range pool {
 		backend, ok := p.byDial[upstream.Dial]
 		if !ok {
 			backend = Backend{Dial: upstream.Dial, Weight: 1}
 		}
 		available := p.available(upstream)
-		trackUpstream(p.SiteID, backend.Dial, upstream)
+		if state := p.metrics[backend.Dial]; state != nil && benchmarkObservabilityEnabled.Load() {
+			state.upstream.Store(upstream)
+		}
 		if requireAvailable && !available {
 			continue
 		}

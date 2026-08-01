@@ -141,6 +141,9 @@ func run(args []string) error {
 	host := flags.String("host", "", "HTTP Host and TLS server name")
 	output := flags.String("output", "benchmark-results", "artifact output directory")
 	baseline := flags.String("baseline", "", "baseline report.json")
+	control := flags.String("control", "", "matching control-variant report.json")
+	variant := flags.String("variant", string(agentbench.VariantFull), "benchmark variant: full or control")
+	requireCompleteAccessLogs := flags.Bool("require-complete-access-logs", false, "require zero access log loss and a drained queue")
 	duration := flags.Duration("duration", 0, "measurement duration")
 	warmup := flags.Duration("warmup", 0, "warmup duration")
 	skipWarmup := flags.Bool("skip-warmup", false, "disable warmup even when the suite has a default")
@@ -213,6 +216,14 @@ func run(args []string) error {
 		}
 		baselineReport = &loaded
 	}
+	var controlReport *agentbench.Report
+	if *control != "" {
+		loaded, readErr := agentbench.ReadReport(*control)
+		if readErr != nil {
+			return fmt.Errorf("read control report: %w", readErr)
+		}
+		controlReport = &loaded
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -231,6 +242,7 @@ func run(args []string) error {
 		MaxLoadCPUPercent:      *maxLoadCPU,
 		MaxAgentRSSBytes:       *maxAgentRSS,
 		MaxAgentRSSGrowthBytes: *maxAgentRSSGrowth,
+		Variant:                agentbench.Variant(*variant), RequireCompleteAccessLogs: *requireCompleteAccessLogs,
 	})
 	if err != nil {
 		return err
@@ -243,6 +255,15 @@ func run(args []string) error {
 		decision := agentbench.Compare(report, *baselineReport)
 		report.Baseline = &decision
 	}
+	if controlReport != nil {
+		decision := agentbench.CompareControl(report, *controlReport)
+		report.Control = &decision
+		if !decision.Passed && report.Validity.Valid {
+			report.Validity.Valid = false
+			report.Validity.Status = agentbench.ResultProductFail
+			report.Validity.Reasons = append(report.Validity.Reasons, "control gate failed: "+decision.Reason)
+		}
+	}
 	if err := agentbench.WriteArtifacts(*output, report); err != nil {
 		return fmt.Errorf("write artifacts: %w", err)
 	}
@@ -252,6 +273,9 @@ func run(args []string) error {
 	}
 	if report.Baseline != nil && !report.Baseline.Passed {
 		return errors.New("benchmark baseline gate failed")
+	}
+	if report.Control != nil && !report.Control.Passed {
+		return errors.New("benchmark control gate failed: " + report.Control.Reason)
 	}
 	return nil
 }

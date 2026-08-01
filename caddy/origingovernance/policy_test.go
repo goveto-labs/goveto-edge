@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,6 +136,65 @@ func TestOriginMetricsSnapshotReportsLatencyAndErrorRate(t *testing.T) {
 	}
 	if metric.AverageLatencyMS != 20 || metric.ErrorRate != 0.5 {
 		t.Fatalf("latency/error rate = %v/%v", metric.AverageLatencyMS, metric.ErrorRate)
+	}
+}
+
+func TestOriginMetricsConcurrentSnapshotDoesNotLoseObservations(t *testing.T) {
+	ResetMetrics()
+	t.Cleanup(ResetMetrics)
+	state := registerMetric("site-1", "origin:80")
+	const workers, observations = 8, 1000
+	var group sync.WaitGroup
+	for range workers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			for range observations {
+				observeState(state, time.Microsecond, false)
+			}
+		}()
+	}
+	var requests uint64
+	for range 20 {
+		for _, metric := range SnapshotAndReset() {
+			requests += metric.Requests
+		}
+	}
+	group.Wait()
+	for _, metric := range SnapshotAndReset() {
+		requests += metric.Requests
+	}
+	if requests != workers*observations {
+		t.Fatalf("snapshots reported %d requests, want %d", requests, workers*observations)
+	}
+}
+
+func TestSelectionPolicyReusesRegisteredMetricAcrossReload(t *testing.T) {
+	ResetMetrics()
+	t.Cleanup(ResetMetrics)
+	first := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{{Dial: "origin:80"}}}
+	second := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{{Dial: "origin:80"}}}
+	if err := first.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := second.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	if first.metrics["origin:80"] != second.metrics["origin:80"] {
+		t.Fatal("configuration reload replaced the registered metric state")
+	}
+}
+
+func TestSingleOriginSelectionDoesNotAllocateCandidates(t *testing.T) {
+	policy := &SelectionPolicy{SiteID: "site-1", Backends: []Backend{{Dial: "origin:80"}}}
+	if err := policy.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	pool := reverseproxy.UpstreamPool{{Dial: "origin:80", Host: new(reverseproxy.Host)}}
+	request := httptest.NewRequest("GET", "http://site.test/", nil)
+	allocations := testing.AllocsPerRun(100, func() { _ = policy.Select(pool, request, nil) })
+	if allocations != 0 {
+		t.Fatalf("single-origin selection allocations/op=%v, want 0", allocations)
 	}
 }
 

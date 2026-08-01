@@ -65,16 +65,24 @@ func (t *HTTPTransport) Provision(ctx caddy.Context) error {
 }
 
 func (t *HTTPTransport) RoundTrip(request *http.Request) (*http.Response, error) {
-	start := time.Now()
+	enabled := benchmarkObservabilityEnabled.Load()
+	var start time.Time
+	if enabled {
+		start = time.Now()
+	}
 	response, err := t.HTTPTransport.RoundTrip(request)
 	if response != nil {
 		response.Header.Del("X-Goveto-Origin-Content-Length")
 		response.Header.Del("X-Goveto-Origin-Method")
 	}
-	if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
-		if address, found := replacer.GetString("goveto.origin.address"); found && address != "" {
-			failed := err != nil || responseHasStatus(response, t.UnhealthyStatus)
-			observe(t.SiteID, address, time.Since(start), failed)
+	if enabled {
+		if replacer, ok := request.Context().Value(caddy.ReplacerCtxKey).(*caddy.Replacer); ok {
+			if value, found := replacer.Get("goveto.origin.metric"); found {
+				failed := err != nil || responseHasStatus(response, t.UnhealthyStatus)
+				if state, ok := value.(*metricState); ok {
+					observeState(state, time.Since(start), failed)
+				}
+			}
 		}
 	}
 	return response, err

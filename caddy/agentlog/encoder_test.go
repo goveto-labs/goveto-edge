@@ -2,6 +2,7 @@ package agentlog
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/caddyserver/caddy/v2"
@@ -33,11 +34,14 @@ func (headers testHeaders) MarshalLogObject(encoder zapcore.ObjectEncoder) error
 }
 
 func TestAccessEncoderSanitizesStructuredFields(t *testing.T) {
-	encoder := &AccessEncoder{RedactedHeaders: []string{"authorization"}}
+	encoder := &AccessEncoder{RedactedHeaders: []string{"authorization", "set-cookie"}}
 	if err := encoder.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := encoder.EncodeEntry(zapcore.Entry{}, []zapcore.Field{zap.Object("request", testRequestLog{})})
+	encoded, err := encoder.EncodeEntry(zapcore.Entry{}, []zapcore.Field{
+		zap.Object("request", testRequestLog{}),
+		zap.Object("resp_headers", testHeaders{"Set-Cookie": "session=secret", "X-Trace": "keep-response"}),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +53,7 @@ func TestAccessEncoderSanitizesStructuredFields(t *testing.T) {
 			RemoteIP string              `json:"remote_ip"`
 			Headers  map[string][]string `json:"headers"`
 		} `json:"request"`
+		ResponseHeaders map[string][]string `json:"resp_headers"`
 	}
 	if err = json.Unmarshal(encoded.Bytes(), &event); err != nil {
 		t.Fatal(err)
@@ -61,6 +66,28 @@ func TestAccessEncoderSanitizesStructuredFields(t *testing.T) {
 	}
 	if got := event.Request.Headers["X-Trace"]; len(got) != 1 || got[0] != "keep" {
 		t.Fatalf("x-trace=%v", got)
+	}
+	if got := event.ResponseHeaders["Set-Cookie"]; len(got) != 1 || got[0] != "[REDACTED]" {
+		t.Fatalf("set-cookie=%v", got)
+	}
+	if got := event.ResponseHeaders["X-Trace"]; len(got) != 1 || got[0] != "keep-response" {
+		t.Fatalf("response x-trace=%v", got)
+	}
+}
+
+func TestAccessEncoderCloneKeepsPrivacyConfiguration(t *testing.T) {
+	encoder := &AccessEncoder{RedactedHeaders: []string{"authorization"}}
+	if err := encoder.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	clone := encoder.Clone()
+	encoded, err := clone.EncodeEntry(zapcore.Entry{}, []zapcore.Field{zap.Object("request", testRequestLog{})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer encoded.Free()
+	if strings.Contains(encoded.String(), "token=secret") || strings.Contains(encoded.String(), "192.0.2.129") || strings.Contains(encoded.String(), `"Authorization":["secret"]`) {
+		t.Fatalf("clone leaked a private field: %s", encoded.String())
 	}
 }
 

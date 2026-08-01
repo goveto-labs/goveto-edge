@@ -553,6 +553,36 @@ func TestAccessPipelineDoesNotReparseEncoderSanitizedRecord(t *testing.T) {
 	}
 }
 
+func TestAccessPipelineOwnsAcceptedPayload(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err = queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 4096, BufferRecords: 10, BatchBytes: 4096, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	payload := []byte(`{"status":200,"marker":"original"}`)
+	if !queue.EnqueueSanitizedAccess(LogRecord{Type: "access", Payload: payload}) {
+		t.Fatal("access record was not accepted")
+	}
+	copy(payload, []byte(`{"status":500,"marker":"mutated!"}`))
+	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err = queue.ShutdownAccess(shutdownContext); err != nil {
+		t.Fatal(err)
+	}
+	records, err := queue.Batch(10)
+	if err != nil || len(records) != 1 {
+		t.Fatalf("records=%#v error=%v", records, err)
+	}
+	if strings.Contains(string(records[0].Payload), "mutated") || !strings.Contains(string(records[0].Payload), "original") {
+		t.Fatalf("queued payload followed caller mutation: %s", records[0].Payload)
+	}
+}
+
 func TestAccessPipelineConcurrentEnqueue(t *testing.T) {
 	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"), 1<<30)
 	if err != nil {
@@ -608,15 +638,15 @@ func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
 	if err := sink.WriteCaddyLog("site-a", 42, time.Now().UTC(), json.RawMessage(`{"message":"not decoded on request path"}`)); err != nil {
 		t.Fatal(err)
 	}
-	if err := sink.WriteCaddyLog("", 0, time.Now().UTC(), json.RawMessage(`{"request":{},"status":200}`)); err == nil {
-		t.Fatal("missing site ID was accepted")
+	if err := sink.WriteCaddyLog("", 0, time.Now().UTC(), json.RawMessage(`{"level":"warn","message":"runtime"}`)); err != nil {
+		t.Fatalf("runtime log was rejected: %v", err)
 	}
 	before, err := queue.Batch(10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(before) != 0 {
-		t.Fatalf("access log was persisted before the async flush: %#v", before)
+	if len(before) != 1 || before[0].Type != "caddy" || before[0].SiteID != "" {
+		t.Fatalf("runtime log channel was not preserved: %#v", before)
 	}
 	shutdownContext, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
@@ -627,7 +657,30 @@ func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(after) != 1 || after[0].Type != "access" || after[0].SiteID != "site-a" || after[0].ConfigVersion != 42 {
+	if len(after) != 2 || after[1].Type != "access" || after[1].SiteID != "site-a" || after[1].ConfigVersion != 42 {
 		t.Fatalf("site log was not asynchronously classified as access: %#v", after)
+	}
+}
+
+func TestAgentLogSinkTreatsAccessOverloadAsSuccessfulWrite(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if err = queue.StartAccessPipeline(LogPolicy{SampleRate: 1}, AccessLogConfig{
+		BufferBytes: 1024, BufferRecords: 1, BatchBytes: 1024, BatchRecords: 10, FlushInterval: time.Hour,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	sink := agentLogSink{queue: queue}
+	for range 2 {
+		if err = sink.WriteCaddyLog("site-a", 1, time.Now().UTC(), []byte(`{"status":200}`)); err != nil {
+			t.Fatalf("access overload reached Caddy: %v", err)
+		}
+	}
+	stats, err := queue.Stats()
+	if err != nil || stats.MemoryDroppedRecords != 1 {
+		t.Fatalf("overload stats=%#v error=%v", stats, err)
 	}
 }
