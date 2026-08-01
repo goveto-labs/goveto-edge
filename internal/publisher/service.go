@@ -2,6 +2,7 @@
 package publisher
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -119,6 +120,19 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 		if pendingErr != nil {
 			return pendingErr
 		}
+		var running *model.PublishJob
+		if pending == nil {
+			running, err = tx.PublishJob.Query().
+				Where(
+					query.PublishJob.SiteId.Equals(siteID),
+					query.PublishJob.Status.Equals(model.JobStatusRUNNING),
+				).
+				OrderBy(query.PublishJob.CreatedAt.Desc()).
+				First(ctx)
+			if err != nil {
+				return err
+			}
+		}
 
 		var latest *model.ConfigVersion
 		if pending == nil {
@@ -145,6 +159,30 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 		targetJSON, err := json.Marshal(targets)
 		if err != nil {
 			return err
+		}
+		if running != nil && canCoalesceIdempotencyKey(running, idempotencyKey) {
+			runningConfig, loadErr := tx.ConfigVersion.Query().
+				Where(
+					query.ConfigVersion.SiteId.Equals(siteID),
+					query.ConfigVersion.Version.Equals(running.Version),
+				).
+				First(ctx)
+			if loadErr != nil {
+				return loadErr
+			}
+			if runningConfig != nil && samePublishRequest(config, targets, runningConfig.ConfigJson, running.Targets) {
+				if idempotencyKey != "" && running.IdempotencyKey == nil {
+					running, err = tx.PublishJob.Update().
+						Where(query.PublishJob.Id.Equals(running.Id)).
+						Set(query.PublishJob.IdempotencyKey.Set(idempotencyKey)).
+						Do(ctx)
+					if err != nil {
+						return err
+					}
+				}
+				job = running
+				return nil
+			}
 		}
 
 		hash := sha256.Sum256(configJSON)
@@ -202,6 +240,46 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 		return err
 	})
 	return job, err
+}
+
+func canCoalesceIdempotencyKey(job *model.PublishJob, key string) bool {
+	return key == "" || job.IdempotencyKey == nil || *job.IdempotencyKey == key
+}
+
+func samePublishRequest(
+	config edgeprotocol.SiteConfig,
+	targets []target,
+	existingConfigJSON, existingTargetsJSON []byte,
+) bool {
+	var existingConfig edgeprotocol.SiteConfig
+	var existingTargets []target
+	if json.Unmarshal(existingConfigJSON, &existingConfig) != nil ||
+		json.Unmarshal(existingTargetsJSON, &existingTargets) != nil {
+		return false
+	}
+	config.Version = 0
+	existingConfig.Version = 0
+	configJSON, configErr := json.Marshal(config)
+	existingJSON, existingErr := json.Marshal(existingConfig)
+	return configErr == nil && existingErr == nil && bytes.Equal(configJSON, existingJSON) &&
+		sameTargetSet(targets, existingTargets)
+}
+
+func sameTargetSet(left, right []target) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	counts := make(map[string]int, len(left))
+	for _, item := range left {
+		counts[item.NodeID]++
+	}
+	for _, item := range right {
+		counts[item.NodeID]--
+		if counts[item.NodeID] < 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func nextPublishVersion(siteVersion int64, pending *model.PublishJob, latest *model.ConfigVersion) int64 {

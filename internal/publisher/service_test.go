@@ -1,6 +1,7 @@
 package publisher
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -88,6 +89,54 @@ func TestNextPublishVersionHandlesMissingHistory(t *testing.T) {
 	latest := &model.ConfigVersion{Version: 9}
 	if got := nextPublishVersion(3, nil, latest); got != 10 {
 		t.Fatalf("version after history = %d, want 10", got)
+	}
+}
+
+func TestSamePublishRequestIgnoresVersionAndTargetOrder(t *testing.T) {
+	config := edgeprotocol.SiteConfig{
+		SiteID:  "site-1",
+		Version: 12,
+		Domains: []string{"example.test"},
+	}
+	existing := config
+	existing.Version = 11
+	existingJSON, err := json.Marshal(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingTargets, err := json.Marshal([]target{{NodeID: "node-2"}, {NodeID: "node-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !samePublishRequest(
+		config,
+		[]target{{NodeID: "node-1"}, {NodeID: "node-2"}},
+		existingJSON,
+		existingTargets,
+	) {
+		t.Fatal("version-only change with the same targets was not coalesced")
+	}
+}
+
+func TestSamePublishRequestDetectsContentOrTargetChanges(t *testing.T) {
+	existing := edgeprotocol.SiteConfig{SiteID: "site-1", Version: 11, Domains: []string{"example.test"}}
+	existingJSON, err := json.Marshal(existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingTargets := []byte(`[{"node_id":"node-1"}]`)
+
+	changed := existing
+	changed.Version = 12
+	changed.Domains = []string{"changed.example.test"}
+	if samePublishRequest(changed, []target{{NodeID: "node-1"}}, existingJSON, existingTargets) {
+		t.Fatal("content change was incorrectly coalesced")
+	}
+
+	sameContent := existing
+	sameContent.Version = 12
+	if samePublishRequest(sameContent, []target{{NodeID: "node-2"}}, existingJSON, existingTargets) {
+		t.Fatal("target change was incorrectly coalesced")
 	}
 }
 
