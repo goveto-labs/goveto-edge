@@ -1,6 +1,7 @@
 package cachematch
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -90,4 +91,104 @@ func TestMatcherBypassesConditionalRange(t *testing.T) {
 	if m.Match(request) {
 		t.Fatal("multiple Range fields must bypass the cache engine")
 	}
+}
+
+func BenchmarkCacheRuleEvaluation(b *testing.B) {
+	complex := benchmarkMatchers(b, 32)
+	cases := []struct {
+		name     string
+		matchers []Matcher
+		path     string
+	}{
+		{name: "catch_all", matchers: benchmarkMatchers(b, 1), path: "/bytes/16384"},
+		{name: "first_of_32", matchers: complex, path: "/assets/app.css"},
+		{name: "late_of_32", matchers: complex, path: "/cache-rules/late/123.bin"},
+		{name: "fallback_of_32", matchers: complex, path: "/bytes/16384"},
+	}
+	for _, benchmark := range cases {
+		request := httptest.NewRequest(http.MethodGet, "https://cache.example.test"+benchmark.path, nil)
+		b.Run("Serial/"+benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for range b.N {
+				if !matchFirst(benchmark.matchers, request) {
+					b.Fatal("request did not match a cache rule")
+				}
+			}
+		})
+		b.Run("Parallel/"+benchmark.name, func(b *testing.B) {
+			b.ReportAllocs()
+			b.RunParallel(func(worker *testing.PB) {
+				for worker.Next() {
+					if !matchFirst(benchmark.matchers, request) {
+						b.Error("request did not match a cache rule")
+						return
+					}
+				}
+			})
+		})
+	}
+}
+
+func benchmarkMatchers(b *testing.B, count int) []Matcher {
+	b.Helper()
+	if count == 1 {
+		return []Matcher{{
+			Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{{
+				Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "ALL"}},
+			}}},
+			compiled: [][]*regexp.Regexp{{nil}},
+		}}
+	}
+	matchers := make([]Matcher, 0, count)
+	matchers = append(matchers, Matcher{
+		Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{{
+			Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "EXTENSION", Values: []string{"css"}}},
+		}}},
+		compiled: [][]*regexp.Regexp{{nil}},
+	})
+	for index := 1; index < count-2; index++ {
+		compiled := regexp.MustCompile(fmt.Sprintf(`^/unmatched/%d/[0-9]+$`, index))
+		matchers = append(matchers, Matcher{
+			Conditions: policy.CacheConditions{GroupOperator: "AND", Groups: []policy.CacheConditionGroup{
+				{Operator: "OR", Rules: []policy.CacheConditionRule{
+					{Type: "EXTENSION", Values: []string{fmt.Sprintf("cachebench%d", index)}},
+					{Type: "PATH_PREFIX", Values: []string{fmt.Sprintf("/unmatched/%d/", index)}},
+				}},
+				{Operator: "AND", Rules: []policy.CacheConditionRule{{Type: "PATH_REGEX", Value: compiled.String()}}},
+			}},
+			compiled: [][]*regexp.Regexp{{nil, nil}, {compiled}},
+		})
+	}
+	late := regexp.MustCompile(`^/cache-rules/late/[0-9]+[.]bin$`)
+	matchers = append(matchers,
+		Matcher{
+			Conditions: policy.CacheConditions{GroupOperator: "AND", Groups: []policy.CacheConditionGroup{
+				{Operator: "OR", Rules: []policy.CacheConditionRule{
+					{Type: "EXTENSION", Values: []string{"bin"}},
+					{Type: "PATH_PREFIX", Values: []string{"/cache-rules/late/"}},
+				}},
+				{Operator: "AND", Rules: []policy.CacheConditionRule{{Type: "PATH_REGEX", Value: late.String()}}},
+			}},
+			compiled: [][]*regexp.Regexp{{nil, nil}, {late}},
+		},
+		Matcher{
+			Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{{
+				Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "ALL"}},
+			}}},
+			compiled: [][]*regexp.Regexp{{nil}},
+		},
+	)
+	if len(matchers) != count {
+		b.Fatalf("created %d matchers, want %d", len(matchers), count)
+	}
+	return matchers
+}
+
+func matchFirst(matchers []Matcher, request *http.Request) bool {
+	for index := range matchers {
+		if matchers[index].Match(request) {
+			return true
+		}
+	}
+	return false
 }

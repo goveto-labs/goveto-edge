@@ -5,6 +5,7 @@ on:
     paths:
       - "caddy/**"
       - "cmd/agent-bench*/**"
+      - "deploy/benchmark/**"
       - "cmd/edge-agent/**"
       - "internal/agentbench/**"
       - "internal/edgeagent/**"
@@ -12,6 +13,7 @@ on:
       - "internal/geoipdb/**"
       - "internal/policy/**"
       - "internal/securitystate/**"
+      - "script/run_agent_benchmark.sh"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/agent-benchmark.yml"
@@ -35,9 +37,9 @@ jobs:
         run: go test ./internal/agentbench
       - name: Collect ten microbenchmark samples
         run: |
-          go test ./internal/edgeagent ./caddy/waf \
+          go test ./internal/edgeagent ./caddy/waf ./caddy/cachematch \
             -run '^$' \
-            -bench 'Benchmark(RenderCaddyConfig|LogQueue|WAFRuleEvaluation|RateLimiter)$' \
+            -bench 'Benchmark(RenderCaddyConfig|LogQueue|WAFRuleEvaluation|RateLimiter|CacheRuleEvaluation)$' \
             -benchmem -count 10 > agent-microbench.txt
       - uses: actions/upload-artifact@v4
         if: always()
@@ -56,3 +58,9 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: go build ./cmd/edge-agent ./cmd/agent-bench ./cmd/agent-bench-origin ./cmd/agent-bench-gateway ./cmd/agent-bench-pki
+      - name: Check standalone and full cache matrix expansion
+        run: |
+          script/run_agent_benchmark.sh cache --protocols h1 --cache-repeats 1 --dry-run
+          script/run_agent_benchmark.sh full --protocols h1 --soak-protocols h1 \
+            --cache-repeats 1 --dry-run > full-benchmark-dry-run.txt
+          grep -q 'cache-rules-fallback-h1-c128' full-benchmark-dry-run.txt

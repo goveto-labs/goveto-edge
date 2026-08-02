@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"flag"
+	"fmt"
 	"log"
 	"math/big"
 	"net"
@@ -36,7 +37,7 @@ func main() {
 	caCert, caKey, caPEM, _ := issueCA()
 	serverCert, serverKey := issueLeaf(caCert, caKey, "benchmark-gateway", []string{*serverName}, nil, true)
 	clientCert, clientKey := issueLeaf(caCert, caKey, *nodeID, nil, nil, false)
-	domains := []string{"benchmark.example.test", "cache.benchmark.example.test", "cache-alt.benchmark.example.test", "multi.benchmark.example.test", "resilient.benchmark.example.test", "limit.benchmark.example.test"}
+	domains := []string{"benchmark.example.test", "cache.benchmark.example.test", "cache-alt.benchmark.example.test", "cache-rules.benchmark.example.test", "multi.benchmark.example.test", "resilient.benchmark.example.test", "limit.benchmark.example.test"}
 	edgeCert, edgeKey := issueLeaf(caCert, caKey, domains[0], domains, nil, true)
 	write(filepath.Join(*output, "certs", "ca.crt"), caPEM, 0600)
 	write(filepath.Join(*output, "certs", "server.crt"), serverCert, 0600)
@@ -52,12 +53,10 @@ func main() {
 	originPolicy.ActiveHealth.Enabled = false
 	originPolicy.PassiveHealth.Enabled = false
 	originPolicy.Retry = edgeprotocol.OriginRetryConfig{}
-	cache := cachepolicy.DefaultCachePolicy()
-	cache.Enabled = true
-	cache.AllowPurgeMethod = true
-	cache.Rules[0].TTL.DefaultSeconds = 3600
-	cache.Stale.IfErrorSeconds = 3600
-	cache.Stale.WhileRevalidateSeconds = 30
+	cache, complexCache, err := benchmarkCachePolicies()
+	if err != nil {
+		log.Fatal(err)
+	}
 	rateLimit := cachepolicy.DefaultRateLimitPolicy()
 	rateLimit.Enabled = true
 	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, BanSeconds: 300, StatusCode: 429}}
@@ -68,9 +67,10 @@ func main() {
 	sites := []edgeprotocol.SiteConfig{
 		{SiteID: "benchmark-site", Version: 1, Domains: []string{domains[0]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy},
 		{SiteID: "benchmark-cache", Version: 1, Domains: domains[1:3], Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(cache)},
-		{SiteID: "benchmark-multi", Version: 1, Domains: []string{domains[3]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "round_robin", OriginPolicy: originPolicy},
-		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
-		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, RateLimit: asMap(rateLimit)},
+		{SiteID: "benchmark-cache-rules", Version: 1, Domains: []string{domains[3]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(complexCache)},
+		{SiteID: "benchmark-multi", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "round_robin", OriginPolicy: originPolicy},
+		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
+		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[6]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, RateLimit: asMap(rateLimit)},
 	}
 	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 24 << 20, MaxDiskUsagePercent: 90})}
 	for _, site := range sites {
@@ -101,6 +101,106 @@ func asMap(value any) map[string]any {
 		log.Fatal(err)
 	}
 	return result
+}
+
+func benchmarkCachePolicies() (cachepolicy.CachePolicy, cachepolicy.CachePolicy, error) {
+	standard := cachepolicy.DefaultCachePolicy()
+	standard.Enabled = true
+	standard.AllowPurgeMethod = true
+	standard.Stale.IfErrorSeconds = 3600
+	standard.Stale.WhileRevalidateSeconds = 30
+	standard.Rules = []cachepolicy.CacheRule{benchmarkCacheRule("Default", cachepolicy.CacheConditions{
+		GroupOperator: "OR",
+		Groups: []cachepolicy.CacheConditionGroup{{
+			Operator: "OR",
+			Rules:    []cachepolicy.CacheConditionRule{{Type: "ALL"}},
+		}},
+	})}
+	if err := standard.NormalizeAndValidate(); err != nil {
+		return cachepolicy.CachePolicy{}, cachepolicy.CachePolicy{}, fmt.Errorf("standard benchmark cache policy: %w", err)
+	}
+
+	complex := standard
+	complex.CacheKey.Parts = []string{
+		cachepolicy.CacheKeyPartMethod,
+		cachepolicy.CacheKeyPartScheme,
+		cachepolicy.CacheKeyPartHost,
+		cachepolicy.CacheKeyPartPath,
+		cachepolicy.CacheKeyPartQuery,
+	}
+	complex.CacheKey.Headers = []string{"X-Cache-Variant", "Accept-Language"}
+	complex.CacheKey.Hash = true
+	complex.CacheKey.Hide = true
+	complex.Rules = []cachepolicy.CacheRule{benchmarkCacheRule("Early extension", cachepolicy.CacheConditions{
+		GroupOperator: "OR",
+		Groups: []cachepolicy.CacheConditionGroup{{
+			Operator: "OR",
+			Rules:    []cachepolicy.CacheConditionRule{{Type: "EXTENSION", Values: []string{"css"}}},
+		}},
+	})}
+	for index := 1; index < 30; index++ {
+		complex.Rules = append(complex.Rules, benchmarkCacheRule(fmt.Sprintf("Decoy %02d", index), cachepolicy.CacheConditions{
+			GroupOperator: "AND",
+			Groups: []cachepolicy.CacheConditionGroup{
+				{
+					Operator: "OR",
+					Rules: []cachepolicy.CacheConditionRule{
+						{Type: "EXTENSION", Values: []string{fmt.Sprintf("cachebench%d", index)}},
+						{Type: "PATH_PREFIX", Values: []string{fmt.Sprintf("/unmatched/%d/", index)}},
+					},
+				},
+				{
+					Operator: "AND",
+					Rules: []cachepolicy.CacheConditionRule{{
+						Type: "PATH_REGEX", Value: fmt.Sprintf(`^/unmatched/%d/[0-9]+$`, index),
+					}},
+				},
+			},
+		}))
+	}
+	complex.Rules = append(complex.Rules,
+		benchmarkCacheRule("Late grouped match", cachepolicy.CacheConditions{
+			GroupOperator: "AND",
+			Groups: []cachepolicy.CacheConditionGroup{
+				{
+					Operator: "OR",
+					Rules: []cachepolicy.CacheConditionRule{
+						{Type: "EXTENSION", Values: []string{"bin"}},
+						{Type: "PATH_PREFIX", Values: []string{"/cache-rules/late/"}},
+					},
+				},
+				{
+					Operator: "AND",
+					Rules: []cachepolicy.CacheConditionRule{{
+						Type: "PATH_REGEX", Value: `^/cache-rules/late/[0-9]+[.]bin$`,
+					}},
+				},
+			},
+		}),
+		benchmarkCacheRule("Fallback", cachepolicy.CacheConditions{
+			GroupOperator: "OR",
+			Groups: []cachepolicy.CacheConditionGroup{{
+				Operator: "OR",
+				Rules:    []cachepolicy.CacheConditionRule{{Type: "ALL"}},
+			}},
+		}),
+	)
+	if err := complex.NormalizeAndValidate(); err != nil {
+		return cachepolicy.CachePolicy{}, cachepolicy.CachePolicy{}, fmt.Errorf("complex benchmark cache policy: %w", err)
+	}
+	return standard, complex, nil
+}
+
+func benchmarkCacheRule(name string, conditions cachepolicy.CacheConditions) cachepolicy.CacheRule {
+	return cachepolicy.CacheRule{
+		Name: name,
+		TTL: cachepolicy.CacheTTL{
+			DefaultSeconds: 3600,
+			Status:         map[string]int{"200": 3600, "206": 3600, "301": 3600, "404": 60},
+			ClientSeconds:  300,
+		},
+		Conditions: conditions,
+	}
 }
 
 func issueCA() (*x509.Certificate, ed25519.PrivateKey, []byte, []byte) {

@@ -21,6 +21,9 @@ run_id="$(date -u +%Y%m%dT%H%M%SZ)"
 max_load_cpu="85"
 soak_protocols="h2"
 soak_duration="6h"
+cache_warmup="5s"
+cache_duration="15s"
+cache_repeats="3"
 reuse_environment=false
 cleanup=false
 dry_run=false
@@ -40,15 +43,18 @@ Usage:
   script/run_agent_benchmark.sh full [options]
   script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
   script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
+  script/run_agent_benchmark.sh cache [options]
 
 Modes:
   quick  Run every origin and CDN scenario with short timings. It omits only
          long Capacity repetitions and the soak test.
   full   Run the same complete screening suite, Capacity timings only for PASS
-         cases, then the long 1 MiB cache-hit stability test.
+         cases, the focused cache matrix, then the long cache-hit stability test.
   bandwidth  Run only 1 MiB reuse and 16 MiB transfer Capacity cases on the
              stronger 26c-agent4-load10 load-generator layout.
   small-reuse  Compare full observability with control for 1 KiB/16 KiB reuse.
+  cache  Run the focused cache matrix: hot hits, cold writes, mixed traffic,
+         32-rule matching, range caching, coalescing, and eviction.
 
 Options:
   --runner <name>             default, 26c-agent2, 26c-agent4, 26c-agent4-load10, or 26c-agent8
@@ -57,6 +63,9 @@ Options:
   --max-load-cpu <percent>    Load saturation threshold (default: 85)
   --soak-protocols "h2"       Full-mode stability protocols (default: h2)
   --soak-duration <duration>  Full-mode stability duration (default: 6h)
+  --cache-warmup <duration>   Full/cache matrix warmup per case (default: 5s)
+  --cache-duration <duration> Full/cache measurement per repeat (default: 15s)
+  --cache-repeats <count>     Full/cache measurement repeats (default: 3)
   --baseline-run <run-id>     Compare each case with the same case from this run
   --reuse-environment         Keep benchmark volumes and credentials
   --cleanup                   Stop containers after the run
@@ -67,7 +76,7 @@ EOF
 
 die() { echo "error: $*" >&2; exit 1; }
 
-if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" || "$1" == "small-reuse" ]]; then
+if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" || "$1" == "small-reuse" || "$1" == "cache" ]]; then
   mode="$1"
   shift
 fi
@@ -81,6 +90,9 @@ while (($# > 0)); do
     --max-load-cpu) max_load_cpu="${2:-}"; shift 2 ;;
     --soak-protocols) soak_protocols="${2:-}"; shift 2 ;;
     --soak-duration) soak_duration="${2:-}"; shift 2 ;;
+    --cache-warmup) cache_warmup="${2:-}"; shift 2 ;;
+    --cache-duration) cache_duration="${2:-}"; shift 2 ;;
+    --cache-repeats) cache_repeats="${2:-}"; shift 2 ;;
     --baseline-run) baseline_run="${2:-}"; shift 2 ;;
     --reuse-environment) reuse_environment=true; shift ;;
     --cleanup) cleanup=true; shift ;;
@@ -90,7 +102,7 @@ while (($# > 0)); do
   esac
 done
 
-case "$mode" in quick|full|bandwidth|small-reuse) ;; *) die "mode must be quick, full, bandwidth, or small-reuse" ;; esac
+case "$mode" in quick|full|bandwidth|small-reuse|cache) ;; *) die "mode must be quick, full, bandwidth, small-reuse, or cache" ;; esac
 [[ "$runner" == "26c" ]] && runner="26c-agent8"
 case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
 [[ "$mode" != "bandwidth" || "$runner" == "26c-agent4-load10" ]] || die "bandwidth mode requires --runner 26c-agent4-load10"
@@ -98,6 +110,7 @@ case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;;
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run-id"
 [[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
+[[ "$cache_repeats" =~ ^[1-9][0-9]*$ ]] || die "cache-repeats must be a positive integer"
 for protocol in $protocols $soak_protocols; do
   case "$protocol" in h1|h2|h3) ;; *) die "invalid protocol: $protocol" ;; esac
 done
@@ -162,7 +175,9 @@ capture_environment() {
     --arg runner "$runner" --arg protocols "$protocols" --arg rmem_max "$rmem_max" \
     --arg wmem_max "$wmem_max" --arg max_load_cpu "$max_load_cpu" \
     --arg soak_protocols "$soak_protocols" --arg soak_duration "$soak_duration" \
-    '{commit: $commit, dirty: $dirty, mode: $mode, runner: $runner, protocols: ($protocols | split(" ")), max_load_cpu_percent: ($max_load_cpu | tonumber), udp: {rmem_max: (try ($rmem_max | tonumber) catch null), wmem_max: (try ($wmem_max | tonumber) catch null), required_bytes: 7500000}, soak: {protocols: ($soak_protocols | split(" ")), duration: $soak_duration}}' \
+    --arg cache_warmup "$cache_warmup" --arg cache_duration "$cache_duration" \
+    --argjson cache_repeats "$cache_repeats" \
+    '{commit: $commit, dirty: $dirty, mode: $mode, runner: $runner, protocols: ($protocols | split(" ")), max_load_cpu_percent: ($max_load_cpu | tonumber), udp: {rmem_max: (try ($rmem_max | tonumber) catch null), wmem_max: (try ($wmem_max | tonumber) catch null), required_bytes: 7500000}, soak: {protocols: ($soak_protocols | split(" ")), duration: $soak_duration}, cache: {warmup: $cache_warmup, duration: $cache_duration, repeats: $cache_repeats}}' \
     > "$result_dir/environment.json"
 
   if has_protocol "$protocols $soak_protocols" h3; then
@@ -371,6 +386,134 @@ run_small_reuse() {
       done
     done
   done
+}
+
+run_cache_benchmark() {
+  local protocol size concurrency name key match path
+  local -a common_args
+  common_args=(--suite capacity --insecure-skip-verify \
+    --warmup "$cache_warmup" --duration "$cache_duration" --repeats "$cache_repeats")
+
+  # Hot read throughput across object sizes and the normal concurrency ladder.
+  for protocol in $protocols; do
+    for size in 1024 16384 1048576; do
+      for concurrency in 1 8 32 128; do
+        name="cache-hot-${size}b-${protocol}-c${concurrency}"
+        key="cache:$name"
+        run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
+          --protocol "$protocol" --scenario "cache-hot-${size}b" \
+          --url "https://agent:8444/bytes/$size?cache_bench=hot-$run_id-$size" \
+          --host cache.benchmark.example.test --concurrency "$concurrency" \
+          --expected-sha256 "$(sha256_zeros "$size")" \
+          --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+          --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+      done
+    done
+  done
+
+  # Compare the first route, a late grouped/regex route, and the catch-all after
+  # 30 failed ordered matches. The site also hashes all cache-key parts and two headers.
+  for protocol in $protocols; do
+    for match in early late fallback; do
+      case "$match" in
+        early) path="/cache-rules/early/app.css" ;;
+        late) path="/cache-rules/late/123.bin" ;;
+        fallback) path="/bytes/16384" ;;
+      esac
+      for concurrency in 32 128; do
+        name="cache-rules-${match}-${protocol}-c${concurrency}"
+        key="cache:$name"
+        run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
+          --protocol "$protocol" --scenario "cache-rules-$match" \
+          --url "https://agent:8444${path}?cache_bench=rules-$run_id-$match" \
+          --host cache-rules.benchmark.example.test --concurrency "$concurrency" \
+          --header X-Cache-Variant=benchmark --header Accept-Language=en \
+          --expected-sha256 "$(sha256_zeros 16384)" \
+          --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+          --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+      done
+    done
+  done
+
+  # Cacheable fixed ranges have distinct storage keys and should become hot.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="cache-range-64k-of-1m-${protocol}-c${concurrency}"
+      key="cache:$name"
+      run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
+        --protocol "$protocol" --scenario cache-range-64k-of-1m \
+        --url "https://agent:8444/bytes/1048576?cache_bench=range-$run_id" \
+        --host cache.benchmark.example.test --concurrency "$concurrency" \
+        --header Range=bytes=0-65535 --expected-status 206 \
+        --expected-header "Content-Range=bytes 0-65535/1048576" \
+        --expected-sha256 "$(sha256_zeros 65536)" \
+        --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+    done
+  done
+
+  # Unique keys isolate cache write/miss throughput from hit throughput.
+  for protocol in $protocols; do
+    for size in 1024 16384 1048576; do
+      for concurrency in 1 32 128; do
+        name="cache-cold-${size}b-${protocol}-c${concurrency}"
+        key="cache:$name"
+        run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
+          --protocol "$protocol" --scenario "cache-cold-${size}b" \
+          --url "https://agent:8444/bytes/$size?cache_bench=cold-$run_id-$size" \
+          --host cache.benchmark.example.test --concurrency "$concurrency" --unique-query \
+          --expected-sha256 "$(sha256_zeros "$size")" --expected-header X-Cache=MISS \
+          --capture-header X-Cache --min-cache-misses 1
+      done
+    done
+  done
+
+  # A bounded key set starts cold on every repetition, then transitions to hits.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="cache-mixed-256keys-16k-${protocol}-c${concurrency}"
+      key="cache:$name"
+      run_case cache "$key" "$name" "$protocol" \
+        --suite capacity --protocol "$protocol" --scenario cache-mixed-256keys-16k \
+        --url "https://agent:8444/bytes/16384?cache_bench=mixed-$run_id" \
+        --host cache.benchmark.example.test --insecure-skip-verify --concurrency "$concurrency" \
+        --skip-warmup --duration "$cache_duration" --repeats "$cache_repeats" \
+        --unique-query --unique-query-cardinality 256 \
+        --unique-query-namespace "mixed-$run_id-$protocol-c$concurrency" \
+        --expected-sha256 "$(sha256_zeros 16384)" \
+        --allowed-header X-Cache=MISS --allowed-header X-Cache=HIT \
+        --capture-header X-Cache --min-cache-hits 1 --min-cache-misses 1
+    done
+  done
+
+  # Every cold burst must collapse to one upstream response, including c512.
+  for protocol in $protocols; do
+    for concurrency in 32 128 512; do
+      name="cache-coalescing-${protocol}-c${concurrency}"
+      key="cache:$name"
+      local -a coalescing_args=()
+      [[ "$concurrency" != "512" ]] || coalescing_args+=(--capacity-probe --cooldown 60s)
+      run_case cache "$key" "$name" "$protocol" \
+        --suite capacity --protocol "$protocol" --scenario cache-coalescing \
+        --url "https://agent:8444/delay/100/bytes/16384?cache_bench=coalesce-$run_id-$protocol-$concurrency" \
+        --host cache.benchmark.example.test --insecure-skip-verify --concurrency "$concurrency" \
+        --skip-warmup --duration "$cache_duration" --repeats 1 \
+        --expected-sha256 "$(sha256_zeros 16384)" --capture-header X-Origin-Requests \
+        --max-captured-values 1 --min-cache-hits 1 --min-cache-misses 1 "${coalescing_args[@]}"
+    done
+  done
+
+  # Keep capacity enforcement in the focused suite so write churn is measured
+  # together with actual disk eviction and bounded RSS growth.
+  if has_protocol "$protocols" h1; then
+    purge_eviction_keys
+    run_case cache cache:cache-eviction-16m-h1 cache-eviction-16m-h1 h1 \
+      --suite capacity --protocol h1 --scenario cache-eviction-16m-h1 \
+      --url https://agent:8444/pattern/16777216 --host cache.benchmark.example.test \
+      --insecure-skip-verify --concurrency 4 --warmup 1s --duration "$cache_duration" --repeats 1 \
+      --unique-query --unique-query-cardinality 2 --min-cache-misses 1 --min-cache-evictions 1 \
+      --max-agent-rss-growth 536870912 --cooldown 60s
+  fi
 }
 
 capture_small_reuse_profile() {
@@ -667,6 +810,14 @@ if [[ "$mode" == "small-reuse" ]]; then
   exit
 fi
 
+if [[ "$mode" == "cache" ]]; then
+  echo "Running focused cache performance and concurrency suite..."
+  run_cache_benchmark
+  print_summary
+  (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
+  exit
+fi
+
 echo "Running complete quick screening suite..."
 run_origin_screen
 run_cdn_suite screen pr 2s 8s 1
@@ -676,6 +827,8 @@ if [[ "$mode" == "full" ]]; then
   $dry_run || { compose restart agent >/dev/null; wait_for_agent || die "Edge Agent did not recover before Capacity"; }
   run_origin_capacity
   run_cdn_suite capacity capacity 30s 120s 3
+  echo "Starting complete cache performance and concurrency stage..."
+  run_cache_benchmark
   echo "Starting long stability stage..."
   run_soak
 fi

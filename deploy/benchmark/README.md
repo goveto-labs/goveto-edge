@@ -7,6 +7,7 @@ script/run_agent_benchmark.sh quick [options]
 script/run_agent_benchmark.sh full [options]
 script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
 script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
+script/run_agent_benchmark.sh cache [options]
 ```
 
 `quick` runs the complete functional screen. It covers all origin and CDN test
@@ -19,9 +20,11 @@ probes. It skips only the long Capacity and stability stages.
 
 `full` starts with the same complete screen. It then runs Capacity only for
 cases whose screen status is exactly `PASS`, using a 30 second warmup, 120 second
-measurement, three repetitions, and focused concurrency 32/128. Finally it runs
-a 15 minute cache-hit preflight followed by the long stability test (H2 for six
-hours by default) only after the corresponding Capacity case passes.
+measurement, three repetitions, and focused concurrency 32/128. It next runs
+the same complete cache matrix exposed by the standalone `cache` command.
+Finally it runs a 15 minute cache-hit preflight followed by the long stability
+test (H2 for six hours by default) only after the corresponding Capacity case
+passes.
 
 `bandwidth` runs only the 1 MiB reuse c32/c128 and 16 MiB transfer c8 Capacity
 cases. It requires `26c-agent4-load10`, keeping this follow-up separate from the
@@ -31,6 +34,17 @@ functional and soak matrix.
 selected protocol on `26c-agent8`. Each case compares full observability with a
 matching control and requires full throughput to reach 90% of control. The c32
 full cases additionally require complete, drained access logs.
+
+`cache` is the standalone entry point for the complete cache performance suite
+that is also included in `full`. For every selected protocol it
+measures hot reads at 1 KiB/16 KiB/1 MiB and c1/c8/c32/c128, unique-key cold
+writes, a bounded 256-key mixed workload, fixed range hits, and cold-request
+coalescing through c512. It also compares the first, 31st, and fallback routes
+of a maximum-size 32-rule policy using extension, prefix, grouped regex, full
+cache-key, header-key, and hashed-key settings. H1 additionally exercises disk
+eviction under the configured cache capacity. Every case validates cache
+telemetry and response behavior, so an origin-only result cannot pass as a
+cache measurement.
 
 ## Commands
 
@@ -46,11 +60,20 @@ Use the production-sized 2-core Agent layout for the full baseline workflow:
 script/run_agent_benchmark.sh full --runner 26c-agent2
 ```
 
+Run the dedicated cache matrix, using shorter timings for a calibration pass:
+
+```sh
+script/run_agent_benchmark.sh cache --runner 26c-agent4
+script/run_agent_benchmark.sh cache --runner 26c-agent4 \
+  --cache-warmup 2s --cache-duration 5s --cache-repeats 1
+```
+
 Inspect every expanded case without starting Docker:
 
 ```sh
 script/run_agent_benchmark.sh quick --runner 26c-agent8 --dry-run
 script/run_agent_benchmark.sh full --runner 26c-agent2 --dry-run
+script/run_agent_benchmark.sh cache --runner 26c-agent4 --dry-run
 ```
 
 Available runner layouts are `default`, `26c-agent2`, `26c-agent4`,
@@ -67,6 +90,12 @@ from a prior run, and `--cleanup` to stop containers after the run. Baseline
 comparison requires schema 1.2 and an exact runner, architecture, suite,
 scenario, protocol, concurrency, and connection-mode match. Run
 `script/run_agent_benchmark.sh --help` for all options.
+
+The cache matrix timings in `full` and `cache` default to a 5 second warmup,
+15 second measurement, and three repetitions. Override them with
+`--cache-warmup`, `--cache-duration`, and `--cache-repeats`. The coalescing and
+eviction cases intentionally use one repeat because they depend on a freshly
+cold key or cache-capacity transition.
 
 ## Result validity
 

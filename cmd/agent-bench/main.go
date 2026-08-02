@@ -156,6 +156,7 @@ func run(args []string) error {
 	newConnection := flags.Bool("new-connection", false, "create a new transport for every request")
 	uniqueQuery := flags.Bool("unique-query", false, "append a unique _bench query value to every request")
 	uniqueQueryCardinality := flags.Int("unique-query-cardinality", 0, "reuse this many numbered _bench query values instead of an unbounded sequence")
+	uniqueQueryNamespace := flags.String("unique-query-namespace", "", "stable _bench prefix; each repeat gets a separate suffix")
 	cooldown := flags.Duration("cooldown", 0, "continue resource sampling after load stops")
 	capacityProbe := flags.Bool("capacity-probe", false, "classify request failures as target saturation instead of a compatibility failure")
 	agentPID := flags.Int("agent-pid", 0, "Edge Agent PID to sample")
@@ -234,8 +235,8 @@ func run(args []string) error {
 		ExpectedSHA256: strings.TrimSpace(*expectedHash), ExpectedHeaders: expectedHeaders,
 		AllowedHeaders: allowedHeaders, MaxHeaderRatios: maxHeaderRatios,
 		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
-		UniqueQueryCardinality: *uniqueQueryCardinality,
-		Cooldown:               *cooldown, CapacityProbe: *capacityProbe,
+		UniqueQueryCardinality: *uniqueQueryCardinality, UniqueQueryNamespace: strings.TrimSpace(*uniqueQueryNamespace),
+		Cooldown: *cooldown, CapacityProbe: *capacityProbe,
 		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, AgentGCURL: *agentGCURL, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
 		MaxCapturedValues:      *maxCapturedValues,
