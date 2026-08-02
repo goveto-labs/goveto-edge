@@ -55,7 +55,7 @@ func main() {
 	cache := cachepolicy.DefaultCachePolicy()
 	cache.Enabled = true
 	cache.AllowPurgeMethod = true
-	cache.TTL.DefaultSeconds = 3600
+	cache.Rules[0].TTL.DefaultSeconds = 3600
 	cache.Stale.IfErrorSeconds = 3600
 	cache.Stale.WhileRevalidateSeconds = 30
 	rateLimit := cachepolicy.DefaultRateLimitPolicy()

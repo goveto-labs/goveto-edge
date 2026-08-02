@@ -126,7 +126,8 @@ type RequestConditionGroup struct {
 
 func DefaultWAFPolicy() WAFPolicy {
 	return WAFPolicy{
-		Engine: WAFEngineGovetoCompat, RuleSetVersion: CurrentWAFRuleSetVersion,
+		Enabled: true,
+		Engine:  WAFEngineGovetoCompat, RuleSetVersion: CurrentWAFRuleSetVersion,
 		AutoUpdate: true, RolloutPercentage: 100,
 		Mode:          WAFModeBlock,
 		BlockStatus:   http.StatusForbidden,

@@ -40,6 +40,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi, sshCredentialsApi } from '@/api';
+import { ByteSizeInput } from '@/components/ByteSizeInput.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
@@ -59,12 +60,6 @@ import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type DetailTab = 'overview' | 'details' | 'logs' | 'installation' | 'settings';
 type SettingsPage = 'network' | 'cache';
-const bytesPerGB = 1024 ** 3;
-
-function bytesToGB(value: number) {
-    if (value === 0) return '0';
-    return String(Number((value / bytesPerGB).toFixed(3)));
-}
 
 const tabs: Array<{ id: DetailTab; label: string; icon: typeof Server }> = [
     { id: 'overview', label: 'Overview', icon: Server },
@@ -326,7 +321,6 @@ export default function NodeDetail() {
     const [editingAddress, setEditingAddress] = useState('');
     const [addressBusyId, setAddressBusyId] = useState('');
     const [cache, setCache] = useState<NodeCacheConfig | null>(null);
-    const [maxSizeGB, setMaxSizeGB] = useState('0');
     const [cacheSaving, setCacheSaving] = useState(false);
     const [cacheMessage, setCacheMessage] = useState('');
 
@@ -353,7 +347,6 @@ export default function NodeDetail() {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
         setCache(value.cacheConfig ?? null);
-        setMaxSizeGB(bytesToGB(value.cacheConfig?.max_size_bytes ?? 0));
         setSshIp((current) => current || value.sshHost || value.addresses[0]?.address || '');
         setSshPort((current) => current || String(value.sshPort || 22));
         setSSHCredentialId((current) => current || value.sshCredentialId || '');
@@ -820,7 +813,7 @@ export default function NodeDetail() {
 
     const addressSummary = node?.addresses.length
         ? node.addresses.map((item) => item.address).join(', ')
-        : '—';
+        : '-';
     const cacheIsValid = Boolean(
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
@@ -1065,7 +1058,7 @@ export default function NodeDetail() {
                                             value={
                                                 snapshot.memory_total_bytes > 0
                                                     ? `${((snapshot.memory_used_bytes / snapshot.memory_total_bytes) * 100).toFixed(1)}%`
-                                                    : '—'
+                                                    : '-'
                                             }
                                         />
                                         <StatCell
@@ -1401,10 +1394,10 @@ export default function NodeDetail() {
                                                         {entry.status_code}
                                                     </td>
                                                     <td className='px-4 py-3'>
-                                                        {entry.cache_status || '—'}
+                                                        {entry.cache_status || '-'}
                                                     </td>
                                                     <td className='px-4 py-3 font-mono text-xs'>
-                                                        {entry.upstream_address || '—'}
+                                                        {entry.upstream_address || '-'}
                                                     </td>
                                                     <td className='px-4 py-3'>
                                                         {(entry.duration_us / 1000).toFixed(1)} ms
@@ -1637,28 +1630,19 @@ export default function NodeDetail() {
                                             <FormField
                                                 hint='Enter 0 for no cache size limit.'
                                                 htmlFor='node-cache-max-size'
-                                                label='Maximum size (GB)'
+                                                label='Maximum size'
                                             >
-                                                <Input
+                                                <ByteSizeInput
                                                     id='node-cache-max-size'
-                                                    min={0}
-                                                    step={0.1}
-                                                    type='number'
-                                                    value={maxSizeGB}
-                                                    variant='secondary'
-                                                    onChange={(event) => {
-                                                        setMaxSizeGB(event.target.value);
+                                                    bytes={cache.max_size_bytes}
+                                                    defaultUnit='GB'
+                                                    minimumBytes={0}
+                                                    maximumBytes={Number.MAX_SAFE_INTEGER}
+                                                    onChange={(max_size_bytes) => {
                                                         setCache({
                                                             ...cache,
                                                             auto_max_size: false,
-                                                            max_size_bytes: Math.max(
-                                                                0,
-                                                                Math.round(
-                                                                    Number(
-                                                                        event.target.value || 0
-                                                                    ) * bytesPerGB
-                                                                )
-                                                            ),
+                                                            max_size_bytes,
                                                         });
                                                     }}
                                                 />

@@ -15,6 +15,7 @@ import (
 type Matcher struct {
 	Conditions         policy.CacheConditions `json:"conditions"`
 	CacheRangeRequests bool                   `json:"cache_range_requests"`
+	BypassCacheControl []string               `json:"bypass_cache_control,omitempty"`
 	compiled           [][]*regexp.Regexp
 }
 
@@ -42,6 +43,9 @@ func (m *Matcher) Provision(_ caddy.Context) error {
 }
 
 func (m Matcher) Match(r *http.Request) bool {
+	if matchesCacheControl(r.Header.Values("Cache-Control"), m.BypassCacheControl) {
+		return false
+	}
 	if value := strings.Join(r.Header.Values("Range"), ","); value != "" {
 		if !m.CacheRangeRequests || r.Header.Get("If-Range") != "" || !cacheableRange(value) {
 			return false
@@ -56,6 +60,20 @@ func (m Matcher) Match(r *http.Request) bool {
 		groupMatches[gi] = combine(group.Operator, ruleMatches)
 	}
 	return combine(m.Conditions.GroupOperator, groupMatches)
+}
+
+func matchesCacheControl(values, configured []string) bool {
+	for _, part := range strings.Split(strings.Join(values, ","), ",") {
+		part = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(part), " ", ""))
+		name := strings.SplitN(part, "=", 2)[0]
+		for _, candidate := range configured {
+			candidate = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(candidate), " ", ""))
+			if part == candidate || (!strings.Contains(candidate, "=") && name == candidate) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func cacheableRange(value string) bool {

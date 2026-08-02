@@ -537,6 +537,20 @@ func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
 	}
 }
 
+func TestCacheConfigSkipsCacheRoutesWhenRulesAreEmpty(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Cache = toMap(t, cachepolicy.DefaultCachePolicy())
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, `"handler":"cache"`) || strings.Contains(text, `"@id":"site_site-1_cache_`) {
+		t.Fatalf("empty cache rules generated cache routes: %s", text)
+	}
+}
+
 func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Cache = enabledCachePolicy(t)
@@ -561,16 +575,120 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 		`"mode":"strict"`,
 		`"disable_coalescing":true`,
 		`"coalesce":true`,
-		`"coalesce_headers":["Accept-Encoding","Range","If-Range"]`,
+		`"coalesce_headers":["Range","If-Range"]`,
+		`"allowed_http_verbs":["GET","HEAD"]`,
+		`"disable_body":true`,
+		`"disable_query":false`,
+		`"disable_scheme":true`,
+		`"disable_host":false`,
+		`"disable_method":false`,
 		`"cache_range_requests":true`,
 		`"max_cacheable_body_bytes":67108864`,
-		`"headers":["Accept-Encoding","Range","If-Range"]`,
+		`"headers":["Range","If-Range"]`,
 		`"stale":"86400s"`,
 		`"stale_while_revalidate_ttl":30`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing SimpleFS cache policy %s: %s", expected, text)
 		}
+	}
+}
+
+func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
+	config := validHTTPConfig(t)
+	policy := cachePolicyWithCatchAllRule()
+	policy.Enabled = true
+	policy.Methods = []string{http.MethodGet, http.MethodPost}
+	policy.CacheKey.Parts = []string{
+		cachepolicy.CacheKeyPartMethod,
+		cachepolicy.CacheKeyPartHost,
+		cachepolicy.CacheKeyPartPath,
+	}
+	policy.CacheKey.Headers = []string{"Accept-Language"}
+	policy.CacheKey.Hash = true
+	policy.Rules[0].TTL.OverrideClientTTL = true
+	policy.Rules[0].TTL.ClientSeconds = 60
+	policy.BypassCacheControl = []string{"max-age=0", "no-store"}
+	config.Cache = toMap(t, policy)
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		`"allowed_http_verbs":["GET","POST"]`,
+		`"method":["GET","POST"]`,
+		`"disable_body":true`,
+		`"disable_query":true`,
+		`"disable_scheme":true`,
+		`"headers":["Accept-Language","Range","If-Range"]`,
+		`"hash":true`,
+		`"override_client_ttl":true`,
+		`"client_ttl":60`,
+		`"bypass_cache_control":["max-age=0","no-store"]`,
+		`"coalesce":false`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing advanced cache policy %s: %s", expected, text)
+		}
+	}
+}
+
+func TestCacheConfigRendersPerRuleTTLInOrder(t *testing.T) {
+	config := validHTTPConfig(t)
+	policy := cachePolicyWithCatchAllRule()
+	policy.Enabled = true
+	fallback := policy.Rules[0]
+	policy.Rules = []cachepolicy.CacheRule{
+		{
+			Name: "Assets",
+			TTL:  cachepolicy.CacheTTL{DefaultSeconds: 3600, Status: map[string]int{"404": 30}},
+			Conditions: cachepolicy.CacheConditions{GroupOperator: "OR", Groups: []cachepolicy.CacheConditionGroup{{
+				Operator: "OR", Rules: []cachepolicy.CacheConditionRule{{Type: "PATH_PREFIX", Values: []string{"/assets/"}}},
+			}}},
+		},
+		fallback,
+	}
+	config.Cache = toMap(t, policy)
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	for _, expected := range []string{
+		`"@id":"site_site-1_cache_0"`, `"@id":"site_site-1_cache_1"`,
+		`"default_ttl":3600`, `"404":30`, `"default_ttl":300`,
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("missing per-rule cache config %s: %s", expected, text)
+		}
+	}
+	if strings.Index(text, `"@id":"site_site-1_cache_0"`) > strings.Index(text, `"@id":"site_site-1_cache_1"`) {
+		t.Fatal("cache rule route order changed")
+	}
+}
+
+func TestDecodeCachePolicyDoesNotMergeDefaultRuleTTL(t *testing.T) {
+	policy := cachePolicyWithCatchAllRule()
+	policy.Rules[0].TTL.Status = map[string]int{}
+	decoded, configured, err := decodeCachePolicy(toMap(t, policy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured || len(decoded.Rules) != 1 || len(decoded.Rules[0].TTL.Status) != 0 {
+		t.Fatalf("cache policy inherited default rule TTLs: %#v", decoded.Rules)
+	}
+}
+
+func TestDecodeCachePolicyKeepsEmptyRules(t *testing.T) {
+	policy := cachepolicy.DefaultCachePolicy()
+	decoded, configured, err := decodeCachePolicy(toMap(t, policy))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured || len(decoded.Rules) != 0 {
+		t.Fatalf("empty cache rules changed during decode: %#v", decoded.Rules)
 	}
 }
 
@@ -918,7 +1036,7 @@ func validHTTPConfig(t *testing.T) SiteConfig {
 
 func enabledCachePolicy(t *testing.T) map[string]any {
 	t.Helper()
-	policy := cachepolicy.DefaultCachePolicy()
+	policy := cachePolicyWithCatchAllRule()
 	policy.Enabled = true
 	data, err := json.Marshal(policy)
 	if err != nil {
@@ -929,6 +1047,26 @@ func enabledCachePolicy(t *testing.T) map[string]any {
 		t.Fatal(err)
 	}
 	return result
+}
+
+func cachePolicyWithCatchAllRule() cachepolicy.CachePolicy {
+	policy := cachepolicy.DefaultCachePolicy()
+	policy.Rules = []cachepolicy.CacheRule{{
+		Name: "Default",
+		TTL: cachepolicy.CacheTTL{
+			DefaultSeconds: 300,
+			Status:         map[string]int{"200": 300, "301": 3600, "404": 60},
+			ClientSeconds:  300,
+		},
+		Conditions: cachepolicy.CacheConditions{
+			GroupOperator: "OR",
+			Groups: []cachepolicy.CacheConditionGroup{{
+				Operator: "OR",
+				Rules:    []cachepolicy.CacheConditionRule{{Type: "ALL"}},
+			}},
+		},
+	}}
+	return policy
 }
 
 func toMap(t *testing.T, value any) map[string]any {

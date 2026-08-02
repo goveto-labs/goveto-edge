@@ -660,12 +660,26 @@ export interface CachePolicy {
         if_error_seconds?: number;
         while_revalidate_seconds?: number;
     };
+    rules?: CacheRule[];
+    methods?: string[];
+    cache_key?: {
+        parts?: Array<'METHOD' | 'SCHEME' | 'HOST' | 'PATH' | 'QUERY'>;
+        headers?: string[];
+        hash?: boolean;
+        hide?: boolean;
+    };
+    bypass_cache_control?: string[];
+    surrogate_key_header?: string;
+}
+
+export interface CacheRule {
+    name?: string;
     ttl?: {
         default_seconds?: number;
         status?: Record<string, number>;
+        override_client_ttl?: boolean;
+        client_seconds?: number;
     };
-    vary_headers?: string[];
-    surrogate_key_header?: string;
     conditions?: {
         group_operator?: string;
         groups?: Array<{

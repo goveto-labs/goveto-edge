@@ -511,7 +511,7 @@ func prepareCloneBundle(bundle siteBundle, input cloneRequest) siteBundle {
 
 func normalizeSiteBundlePolicies(bundle *siteBundle) error {
 	var err error
-	bundle.Cache, err = normalizeBundlePolicy("cache", bundle.Cache, deliverypolicy.DefaultCachePolicy(), (*deliverypolicy.CachePolicy).NormalizeAndValidate)
+	bundle.Cache, err = normalizeBundlePolicy("cache", bundle.Cache, deliverypolicy.CachePolicy{}, (*deliverypolicy.CachePolicy).NormalizeAndValidate)
 	if err != nil {
 		return err
 	}

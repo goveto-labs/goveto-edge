@@ -10,17 +10,18 @@ import (
 )
 
 type CachePolicy struct {
-	Enabled            bool            `json:"enabled"`
-	ResponseHeaders    CacheHeaders    `json:"response_headers"`
-	AllowPurgeMethod   bool            `json:"allow_purge_method"`
-	RequestCoalescing  bool            `json:"request_coalescing"`
-	CacheRangeRequests bool            `json:"cache_range_requests"`
-	MaxBodyBytes       uint64          `json:"max_body_bytes"`
-	Stale              CacheStale      `json:"stale"`
-	TTL                CacheTTL        `json:"ttl"`
-	VaryHeaders        []string        `json:"vary_headers"`
-	SurrogateKeyHeader string          `json:"surrogate_key_header"`
-	Conditions         CacheConditions `json:"conditions"`
+	Enabled            bool         `json:"enabled"`
+	ResponseHeaders    CacheHeaders `json:"response_headers"`
+	AllowPurgeMethod   bool         `json:"allow_purge_method"`
+	RequestCoalescing  bool         `json:"request_coalescing"`
+	CacheRangeRequests bool         `json:"cache_range_requests"`
+	MaxBodyBytes       uint64       `json:"max_body_bytes"`
+	Stale              CacheStale   `json:"stale"`
+	Rules              []CacheRule  `json:"rules"`
+	Methods            []string     `json:"methods"`
+	CacheKey           CacheKey     `json:"cache_key"`
+	BypassCacheControl []string     `json:"bypass_cache_control"`
+	SurrogateKeyHeader string       `json:"surrogate_key_header"`
 }
 
 type CacheHeaders struct {
@@ -33,8 +34,30 @@ type CacheStale struct {
 	WhileRevalidateSeconds int  `json:"while_revalidate_seconds"`
 }
 type CacheTTL struct {
-	DefaultSeconds int            `json:"default_seconds"`
-	Status         map[string]int `json:"status"`
+	DefaultSeconds    int            `json:"default_seconds"`
+	Status            map[string]int `json:"status"`
+	OverrideClientTTL bool           `json:"override_client_ttl"`
+	ClientSeconds     int            `json:"client_seconds"`
+}
+type CacheRule struct {
+	Name       string          `json:"name"`
+	TTL        CacheTTL        `json:"ttl"`
+	Conditions CacheConditions `json:"conditions"`
+}
+
+const (
+	CacheKeyPartMethod = "METHOD"
+	CacheKeyPartScheme = "SCHEME"
+	CacheKeyPartHost   = "HOST"
+	CacheKeyPartPath   = "PATH"
+	CacheKeyPartQuery  = "QUERY"
+)
+
+type CacheKey struct {
+	Parts   []string `json:"parts"`
+	Headers []string `json:"headers"`
+	Hash    bool     `json:"hash"`
+	Hide    bool     `json:"hide"`
 }
 type CacheConditions struct {
 	GroupOperator string                `json:"group_operator"`
@@ -52,6 +75,7 @@ type CacheConditionRule struct {
 
 func DefaultCachePolicy() CachePolicy {
 	return CachePolicy{
+		Enabled:            true,
 		ResponseHeaders:    CacheHeaders{XCache: true, Age: true},
 		RequestCoalescing:  true,
 		CacheRangeRequests: true,
@@ -59,36 +83,23 @@ func DefaultCachePolicy() CachePolicy {
 		Stale: CacheStale{
 			Enabled: true, IfErrorSeconds: 86400, WhileRevalidateSeconds: 30,
 		},
-		TTL: CacheTTL{
-			DefaultSeconds: 300,
-			Status:         map[string]int{"200": 300, "301": 3600, "404": 60},
-		},
-		VaryHeaders:        []string{"Accept-Encoding"},
-		SurrogateKeyHeader: "Surrogate-Key",
-		Conditions: CacheConditions{
-			GroupOperator: "OR",
-			Groups: []CacheConditionGroup{
-				{
-					Operator: "OR",
-					Rules:    []CacheConditionRule{{Type: "ALL"}},
-				},
+		Rules:   []CacheRule{},
+		Methods: []string{http.MethodGet, http.MethodHead},
+		CacheKey: CacheKey{
+			Parts: []string{
+				CacheKeyPartMethod,
+				CacheKeyPartHost,
+				CacheKeyPartPath,
+				CacheKeyPartQuery,
 			},
+			Headers: []string{},
 		},
+		BypassCacheControl: []string{"no-store", "private"},
+		SurrogateKeyHeader: "Surrogate-Key",
 	}
 }
 
 func (p *CachePolicy) NormalizeAndValidate() error {
-	p.Conditions.GroupOperator = strings.ToUpper(strings.TrimSpace(p.Conditions.GroupOperator))
-	if p.Conditions.GroupOperator == "" {
-		p.Conditions.GroupOperator = "OR"
-	}
-	if !booleanOperator(p.Conditions.GroupOperator) {
-		return errors.New("conditions.group_operator must be AND or OR")
-	}
-
-	if p.TTL.DefaultSeconds < 1 || p.TTL.DefaultSeconds > 31536000 {
-		return errors.New("ttl.default_seconds must be between 1 and 31536000")
-	}
 	if p.Stale.Enabled && (p.Stale.IfErrorSeconds < 1 || p.Stale.IfErrorSeconds > 31536000) {
 		return errors.New("stale.if_error_seconds must be between 1 and 31536000")
 	}
@@ -99,25 +110,104 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 		return errors.New("max_body_bytes must be between 1 and 4294967296")
 	}
 
-	for status, ttl := range p.TTL.Status {
-		if !regexp.MustCompile(`^[1-5][0-9][0-9]$`).MatchString(status) || ttl < 1 || ttl > 31536000 {
-			return fmt.Errorf("invalid TTL for status %q", status)
+	if len(p.Methods) == 0 || len(p.Methods) > 8 {
+		return errors.New("methods must contain between 1 and 8 values")
+	}
+	allowedMethods := map[string]struct{}{
+		http.MethodGet: {}, http.MethodHead: {}, http.MethodPost: {}, http.MethodPut: {},
+		http.MethodPatch: {}, http.MethodDelete: {}, http.MethodOptions: {},
+	}
+	seenMethods := map[string]struct{}{}
+	for i, method := range p.Methods {
+		method = strings.ToUpper(strings.TrimSpace(method))
+		if _, ok := allowedMethods[method]; !ok {
+			return fmt.Errorf("unsupported cache method %q", method)
+		}
+		if _, ok := seenMethods[method]; ok {
+			return fmt.Errorf("duplicate cache method %q", method)
+		}
+		seenMethods[method] = struct{}{}
+		p.Methods[i] = method
+	}
+	sort.Strings(p.Methods)
+	for _, method := range p.Methods {
+		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+			p.RequestCoalescing = false
+			break
 		}
 	}
 
+	allowedKeyParts := map[string]struct{}{
+		CacheKeyPartMethod: {},
+		CacheKeyPartScheme: {},
+		CacheKeyPartHost:   {},
+		CacheKeyPartPath:   {},
+		CacheKeyPartQuery:  {},
+	}
+	keyPartOrder := map[string]int{
+		CacheKeyPartMethod: 0,
+		CacheKeyPartScheme: 1,
+		CacheKeyPartHost:   2,
+		CacheKeyPartPath:   3,
+		CacheKeyPartQuery:  4,
+	}
+	seenKeyParts := map[string]struct{}{}
+	for i, part := range p.CacheKey.Parts {
+		part = strings.ToUpper(strings.TrimSpace(part))
+		if _, ok := allowedKeyParts[part]; !ok {
+			return fmt.Errorf("unsupported cache key part %q", part)
+		}
+		if _, ok := seenKeyParts[part]; ok {
+			return fmt.Errorf("duplicate cache key part %q", part)
+		}
+		seenKeyParts[part] = struct{}{}
+		p.CacheKey.Parts[i] = part
+	}
+	if _, ok := seenKeyParts[CacheKeyPartPath]; !ok {
+		return errors.New("cache_key.parts must include PATH")
+	}
+	sort.Slice(p.CacheKey.Parts, func(i, j int) bool {
+		return keyPartOrder[p.CacheKey.Parts[i]] < keyPartOrder[p.CacheKey.Parts[j]]
+	})
+
 	seenHeaders := map[string]struct{}{}
-	for i, header := range p.VaryHeaders {
+	normalizedHeaders := make([]string, 0, len(p.CacheKey.Headers))
+	headerNamePattern := regexp.MustCompile("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
+	for _, header := range p.CacheKey.Headers {
 		header = http.CanonicalHeaderKey(strings.TrimSpace(header))
-		if header == "" {
-			return errors.New("vary_headers cannot contain an empty header")
+		if !headerNamePattern.MatchString(header) {
+			return fmt.Errorf("invalid cache key header %q", header)
+		}
+		// Content coding is negotiated by the compression layer and response Vary handling.
+		if strings.EqualFold(header, "Accept-Encoding") {
+			continue
 		}
 		if _, ok := seenHeaders[header]; ok {
-			return fmt.Errorf("duplicate vary header %q", header)
+			return fmt.Errorf("duplicate cache key header %q", header)
 		}
 		seenHeaders[header] = struct{}{}
-		p.VaryHeaders[i] = header
+		normalizedHeaders = append(normalizedHeaders, header)
 	}
-	sort.Strings(p.VaryHeaders)
+	sort.Strings(normalizedHeaders)
+	p.CacheKey.Headers = normalizedHeaders
+
+	seenDirectives := map[string]struct{}{}
+	directivePattern := regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:=[a-z0-9._-]+)?$`)
+	for i, directive := range p.BypassCacheControl {
+		directive = strings.ToLower(strings.TrimSpace(directive))
+		if strings.ContainsAny(directive, " \t\r\n") {
+			return fmt.Errorf("invalid bypass Cache-Control value %q", directive)
+		}
+		if !directivePattern.MatchString(directive) {
+			return fmt.Errorf("invalid bypass Cache-Control value %q", directive)
+		}
+		if _, ok := seenDirectives[directive]; ok {
+			return fmt.Errorf("duplicate bypass Cache-Control value %q", directive)
+		}
+		seenDirectives[directive] = struct{}{}
+		p.BypassCacheControl[i] = directive
+	}
+	sort.Strings(p.BypassCacheControl)
 
 	p.SurrogateKeyHeader = http.CanonicalHeaderKey(strings.TrimSpace(p.SurrogateKeyHeader))
 	if p.SurrogateKeyHeader == "" {
@@ -127,19 +217,70 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 		return errors.New("surrogate_key_header must be Surrogate-Key")
 	}
 
-	if len(p.Conditions.Groups) == 0 || len(p.Conditions.Groups) > 16 {
-		return errors.New("conditions must contain between 1 and 16 groups")
+	if len(p.Rules) > 32 {
+		return errors.New("rules must contain at most 32 cache rules")
 	}
+	seenNames := map[string]struct{}{}
+	for index := range p.Rules {
+		rule := &p.Rules[index]
+		rule.Name = strings.TrimSpace(rule.Name)
+		if rule.Name == "" || len(rule.Name) > 80 {
+			return fmt.Errorf("rules[%d].name must contain between 1 and 80 characters", index)
+		}
+		key := strings.ToLower(rule.Name)
+		if _, ok := seenNames[key]; ok {
+			return fmt.Errorf("duplicate cache rule name %q", rule.Name)
+		}
+		seenNames[key] = struct{}{}
+		if err := normalizeCacheTTL(&rule.TTL, fmt.Sprintf("rules[%d].ttl", index)); err != nil {
+			return err
+		}
+		hasAll, err := normalizeCacheConditions(&rule.Conditions, fmt.Sprintf("rules[%d].conditions", index))
+		if err != nil {
+			return err
+		}
+		if hasAll && index != len(p.Rules)-1 {
+			return fmt.Errorf("rules[%d] matches all requests and must be last", index)
+		}
+	}
+	return nil
+}
 
+func normalizeCacheTTL(ttl *CacheTTL, prefix string) error {
+	if ttl.DefaultSeconds < 1 || ttl.DefaultSeconds > 31536000 {
+		return fmt.Errorf("%s.default_seconds must be between 1 and 31536000", prefix)
+	}
+	if ttl.OverrideClientTTL && (ttl.ClientSeconds < 0 || ttl.ClientSeconds > 31536000) {
+		return fmt.Errorf("%s.client_seconds must be between 0 and 31536000", prefix)
+	}
+	for status, seconds := range ttl.Status {
+		if !regexp.MustCompile(`^[1-5][0-9][0-9]$`).MatchString(status) || seconds < 1 || seconds > 31536000 {
+			return fmt.Errorf("invalid %s.status TTL for %q", prefix, status)
+		}
+	}
+	return nil
+}
+
+func normalizeCacheConditions(conditions *CacheConditions, prefix string) (bool, error) {
+	conditions.GroupOperator = strings.ToUpper(strings.TrimSpace(conditions.GroupOperator))
+	if conditions.GroupOperator == "" {
+		conditions.GroupOperator = "OR"
+	}
+	if !booleanOperator(conditions.GroupOperator) {
+		return false, fmt.Errorf("%s.group_operator must be AND or OR", prefix)
+	}
+	if len(conditions.Groups) == 0 || len(conditions.Groups) > 16 {
+		return false, fmt.Errorf("%s must contain between 1 and 16 groups", prefix)
+	}
 	all := false
-	for gi := range p.Conditions.Groups {
-		group := &p.Conditions.Groups[gi]
+	for gi := range conditions.Groups {
+		group := &conditions.Groups[gi]
 		group.Operator = strings.ToUpper(strings.TrimSpace(group.Operator))
 		if !booleanOperator(group.Operator) {
-			return fmt.Errorf("conditions.groups[%d].operator must be AND or OR", gi)
+			return false, fmt.Errorf("%s.groups[%d].operator must be AND or OR", prefix, gi)
 		}
 		if len(group.Rules) == 0 || len(group.Rules) > 32 {
-			return fmt.Errorf("conditions.groups[%d] must contain between 1 and 32 rules", gi)
+			return false, fmt.Errorf("%s.groups[%d] must contain between 1 and 32 rules", prefix, gi)
 		}
 
 		for ri := range group.Rules {
@@ -148,12 +289,12 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 			switch rule.Type {
 			case "ALL":
 				all = true
-				if len(group.Rules) != 1 || len(p.Conditions.Groups) != 1 {
-					return errors.New("ALL cannot be combined with other cache conditions")
+				if len(group.Rules) != 1 || len(conditions.Groups) != 1 {
+					return false, errors.New("ALL cannot be combined with other cache conditions")
 				}
 			case "EXTENSION":
 				if len(rule.Values) == 0 {
-					return fmt.Errorf("extension rule %d/%d requires values", gi, ri)
+					return false, fmt.Errorf("%s extension rule %d/%d requires values", prefix, gi, ri)
 				}
 				for i := range rule.Values {
 					rule.Values[i] = strings.TrimPrefix(
@@ -161,33 +302,32 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 						".",
 					)
 					if !regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`).MatchString(rule.Values[i]) {
-						return fmt.Errorf("invalid extension %q", rule.Values[i])
+						return false, fmt.Errorf("invalid extension %q", rule.Values[i])
 					}
 				}
 			case "PATH_PREFIX":
 				if len(rule.Values) == 0 {
-					return fmt.Errorf("path prefix rule %d/%d requires values", gi, ri)
+					return false, fmt.Errorf("%s path prefix rule %d/%d requires values", prefix, gi, ri)
 				}
 				for _, value := range rule.Values {
 					if !strings.HasPrefix(value, "/") {
-						return fmt.Errorf("path prefix %q must start with /", value)
+						return false, fmt.Errorf("path prefix %q must start with /", value)
 					}
 				}
 			case "PATH_REGEX":
 				rule.Value = strings.TrimSpace(rule.Value)
 				if rule.Value == "" {
-					return fmt.Errorf("path regex rule %d/%d requires value", gi, ri)
+					return false, fmt.Errorf("%s path regex rule %d/%d requires value", prefix, gi, ri)
 				}
 				if _, err := regexp.Compile(rule.Value); err != nil {
-					return fmt.Errorf("invalid path regex: %w", err)
+					return false, fmt.Errorf("invalid path regex: %w", err)
 				}
 			default:
-				return fmt.Errorf("unsupported cache condition type %q", rule.Type)
+				return false, fmt.Errorf("unsupported cache condition type %q", rule.Type)
 			}
 		}
 	}
-	_ = all
-	return nil
+	return all, nil
 }
 
 func booleanOperator(value string) bool { return value == "AND" || value == "OR" }

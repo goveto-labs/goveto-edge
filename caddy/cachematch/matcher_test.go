@@ -55,6 +55,22 @@ func TestCacheableRangeAcceptsSingleStartRangesOnly(t *testing.T) {
 	}
 }
 
+func TestMatcherBypassesConfiguredRequestCacheControl(t *testing.T) {
+	m := Matcher{
+		Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{{
+			Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "ALL"}},
+		}}},
+		BypassCacheControl: []string{"no-store", "max-age=0"},
+	}
+	for _, value := range []string{"no-store", "public, max-age=0"} {
+		request := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+		request.Header.Set("Cache-Control", value)
+		if m.Match(request) {
+			t.Fatalf("request with Cache-Control %q should bypass", value)
+		}
+	}
+}
+
 func TestMatcherBypassesConditionalRange(t *testing.T) {
 	m := Matcher{
 		CacheRangeRequests: true,

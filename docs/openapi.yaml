@@ -5017,21 +5017,50 @@ paths:
                                                 type: boolean
                                                 enum:
                                                     - true
-                                            conditions:
+                                            bypass_cache_control:
+                                                type: array
+                                                items:
+                                                    type: string
+                                                example:
+                                                    - no-store
+                                                    - private
+                                            cache_key:
                                                 type: object
                                                 properties:
-                                                    group_operator:
-                                                        type: string
-                                                        enum:
-                                                            - OR
-                                                    groups:
+                                                    hash:
+                                                        type: boolean
+                                                    headers:
                                                         type: array
                                                         items:
-                                                            $ref: '#/components/schemas/policy_CacheConditionGroup'
+                                                            type: string
+                                                    hide:
+                                                        type: boolean
+                                                    parts:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                                            enum:
+                                                                - METHOD
+                                                                - SCHEME
+                                                                - HOST
+                                                                - PATH
+                                                                - QUERY
+                                                        example:
+                                                            - METHOD
+                                                            - HOST
+                                                            - PATH
+                                                            - QUERY
                                             enabled:
                                                 type: boolean
                                             max_body_bytes:
                                                 type: number
+                                            methods:
+                                                type: array
+                                                items:
+                                                    type: string
+                                                example:
+                                                    - GET
+                                                    - HEAD
                                             request_coalescing:
                                                 type: boolean
                                                 enum:
@@ -5047,6 +5076,10 @@ paths:
                                                         type: boolean
                                                         enum:
                                                             - true
+                                            rules:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/policy_CacheRule'
                                             stale:
                                                 type: object
                                                 properties:
@@ -5066,36 +5099,6 @@ paths:
                                                 type: string
                                                 enum:
                                                     - Surrogate-Key
-                                            ttl:
-                                                type: object
-                                                properties:
-                                                    default_seconds:
-                                                        type: number
-                                                        enum:
-                                                            - 300
-                                                    status:
-                                                        type: object
-                                                        properties:
-                                                            "200":
-                                                                type: number
-                                                                enum:
-                                                                    - 300
-                                                            "301":
-                                                                type: number
-                                                                enum:
-                                                                    - 3600
-                                                            "404":
-                                                                type: number
-                                                                enum:
-                                                                    - 60
-                                                        required:
-                                                            - "200"
-                                                            - "301"
-                                                            - "404"
-                                            vary_headers:
-                                                type: array
-                                                items:
-                                                    type: string
         put:
             operationId: updateCache
             summary: Update site cache policy
@@ -5133,26 +5136,32 @@ paths:
                                     type: boolean
                                 cache_range_requests:
                                     type: boolean
-                                conditions:
-                                    $ref: '#/components/schemas/policy_CacheConditions'
+                                bypass_cache_control:
+                                    type: array
+                                    items:
+                                        type: string
+                                cache_key:
+                                    $ref: '#/components/schemas/policy_CacheKey'
                                 enabled:
                                     type: boolean
                                 max_body_bytes:
                                     type: number
+                                methods:
+                                    type: array
+                                    items:
+                                        type: string
                                 request_coalescing:
                                     type: boolean
                                 response_headers:
                                     $ref: '#/components/schemas/policy_CacheHeaders'
+                                rules:
+                                    type: array
+                                    items:
+                                        $ref: '#/components/schemas/policy_CacheRule'
                                 stale:
                                     $ref: '#/components/schemas/policy_CacheStale'
                                 surrogate_key_header:
                                     type: string
-                                ttl:
-                                    $ref: '#/components/schemas/policy_CacheTTL'
-                                vary_headers:
-                                    type: array
-                                    items:
-                                        type: string
             responses:
                 "200":
                     description: OK
@@ -10035,33 +10044,69 @@ components:
                     type: boolean
                 x_cache:
                     type: boolean
+        policy_CacheKey:
+            type: object
+            properties:
+                hash:
+                    type: boolean
+                headers:
+                    type: array
+                    items:
+                        type: string
+                hide:
+                    type: boolean
+                parts:
+                    type: array
+                    items:
+                        type: string
+                        enum:
+                            - METHOD
+                            - SCHEME
+                            - HOST
+                            - PATH
+                            - QUERY
         policy_CachePolicy:
             type: object
             properties:
                 allow_purge_method:
                     type: boolean
+                bypass_cache_control:
+                    type: array
+                    items:
+                        type: string
+                cache_key:
+                    $ref: '#/components/schemas/policy_CacheKey'
                 cache_range_requests:
                     type: boolean
-                conditions:
-                    $ref: '#/components/schemas/policy_CacheConditions'
                 enabled:
                     type: boolean
                 max_body_bytes:
                     type: number
+                methods:
+                    type: array
+                    items:
+                        type: string
                 request_coalescing:
                     type: boolean
                 response_headers:
                     $ref: '#/components/schemas/policy_CacheHeaders'
+                rules:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_CacheRule'
                 stale:
                     $ref: '#/components/schemas/policy_CacheStale'
                 surrogate_key_header:
                     type: string
+        policy_CacheRule:
+            type: object
+            properties:
+                conditions:
+                    $ref: '#/components/schemas/policy_CacheConditions'
+                name:
+                    type: string
                 ttl:
                     $ref: '#/components/schemas/policy_CacheTTL'
-                vary_headers:
-                    type: array
-                    items:
-                        type: string
         policy_CacheStale:
             type: object
             properties:
@@ -10074,8 +10119,12 @@ components:
         policy_CacheTTL:
             type: object
             properties:
+                client_seconds:
+                    type: number
                 default_seconds:
                     type: number
+                override_client_ttl:
+                    type: boolean
                 status:
                     type: object
                     additionalProperties:

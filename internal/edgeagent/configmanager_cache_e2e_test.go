@@ -151,10 +151,10 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
 	}
-	cache := cachepolicy.DefaultCachePolicy()
+	cache := cachePolicyWithCatchAllRule()
 	cache.Enabled = true
-	cache.TTL.DefaultSeconds = 120
-	cache.VaryHeaders = []string{"X-Variant"}
+	cache.Rules[0].TTL.DefaultSeconds = 120
+	cache.CacheKey.Headers = []string{"X-Variant"}
 	config.Cache = toMap(t, cache)
 	if err := manager.ApplySite(config); err != nil {
 		t.Fatalf("apply cache site: %v", err)
@@ -169,6 +169,13 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		}
 		if first.header.Get("X-Cache") != "MISS" || second.header.Get("X-Cache") != "HIT" {
 			t.Fatalf("unexpected cache headers: first=%q second=%q", first.header.Get("X-Cache"), second.header.Get("X-Cache"))
+		}
+
+		requestEdge(t, port, config.Domains[0], http.MethodHead, "/head-first", nil)
+		getAfterHead := requestEdge(t, port, config.Domains[0], http.MethodGet, "/head-first", nil)
+		getAfterHeadHit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/head-first", nil)
+		if getAfterHead.body == "" || getAfterHead.body != getAfterHeadHit.body || counters.count("GET /head-first ") != 1 {
+			t.Fatalf("method key did not isolate HEAD from GET: first=%q hit=%q counters=%#v", getAfterHead.body, getAfterHeadHit.body, counters.values)
 		}
 
 		requestEdge(t, port, config.Domains[0], http.MethodGet, "/vary", http.Header{"X-Variant": {"a"}})
@@ -475,8 +482,8 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 
 	t.Run("stale if error and response header switches", func(t *testing.T) {
 		config.Version++
-		cache.TTL.DefaultSeconds = 2
-		cache.TTL.Status["200"] = 2
+		cache.Rules[0].TTL.DefaultSeconds = 2
+		cache.Rules[0].TTL.Status["200"] = 2
 		cache.Stale.Enabled = true
 		cache.Stale.IfErrorSeconds = 2
 		cache.Stale.WhileRevalidateSeconds = 0
@@ -503,7 +510,7 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 			}
 		}
 		first := primeStale("/stale")
-		if got := first.header.Get("Cache-Control"); got != "public, max-age=2, stale-if-error=2" {
+		if got := first.header.Get("Cache-Control"); got != "public, s-maxage=2, max-age=2, stale-if-error=2" {
 			t.Fatalf("stale cache control=%q", got)
 		}
 		for _, path := range []string{"/stale-500", "/stale-503", "/stale-504", "/stale-interrupted", "/stale-non-error"} {
@@ -580,8 +587,8 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 
 	t.Run("site cache and all purge are isolated", func(t *testing.T) {
 		config.Version++
-		cache.TTL.DefaultSeconds = 120
-		cache.TTL.Status["200"] = 120
+		cache.Rules[0].TTL.DefaultSeconds = 120
+		cache.Rules[0].TTL.Status["200"] = 120
 		config.Cache = toMap(t, cache)
 		if err := manager.ApplySite(config); err != nil {
 			t.Fatal(err)
@@ -616,15 +623,51 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("grouped cache expressions control real caching", func(t *testing.T) {
+	t.Run("ordered rules apply independent expiration", func(t *testing.T) {
 		config.Version++
-		cache.Conditions = cachepolicy.CacheConditions{
-			GroupOperator: "AND",
-			Groups: []cachepolicy.CacheConditionGroup{
-				{Operator: "OR", Rules: []cachepolicy.CacheConditionRule{{Type: "EXTENSION", Values: []string{"css"}}, {Type: "PATH_PREFIX", Values: []string{"/assets/"}}}},
-				{Operator: "AND", Rules: []cachepolicy.CacheConditionRule{{Type: "PATH_REGEX", Value: `^/assets/`}}},
+		cache.Rules = []cachepolicy.CacheRule{
+			{
+				Name: "Assets",
+				TTL:  cachepolicy.CacheTTL{DefaultSeconds: 7, Status: map[string]int{}},
+				Conditions: cachepolicy.CacheConditions{GroupOperator: "OR", Groups: []cachepolicy.CacheConditionGroup{{
+					Operator: "OR", Rules: []cachepolicy.CacheConditionRule{{Type: "PATH_PREFIX", Values: []string{"/assets/"}}},
+				}}},
+			},
+			{
+				Name: "Fallback",
+				TTL:  cachepolicy.CacheTTL{DefaultSeconds: 13, Status: map[string]int{}},
+				Conditions: cachepolicy.CacheConditions{GroupOperator: "OR", Groups: []cachepolicy.CacheConditionGroup{{
+					Operator: "OR", Rules: []cachepolicy.CacheConditionRule{{Type: "ALL"}},
+				}}},
 			},
 		}
+		config.Cache = toMap(t, cache)
+		if err := manager.ApplySite(config); err != nil {
+			t.Fatal(err)
+		}
+		asset := requestEdge(t, port, config.Domains[0], http.MethodGet, "/assets/per-rule", nil)
+		fallback := requestEdge(t, port, config.Domains[0], http.MethodGet, "/per-rule", nil)
+		if !strings.Contains(asset.header.Get("Cache-Control"), "s-maxage=7") {
+			t.Fatalf("asset rule TTL was not applied: cache-control=%q x-cache=%q policy=%#v", asset.header.Get("Cache-Control"), asset.header.Get("X-Cache"), config.Cache)
+		}
+		if !strings.Contains(fallback.header.Get("Cache-Control"), "s-maxage=13") {
+			t.Fatalf("fallback rule TTL was not applied: %q", fallback.header.Get("Cache-Control"))
+		}
+	})
+
+	t.Run("grouped cache expressions control real caching", func(t *testing.T) {
+		config.Version++
+		cache.Rules = []cachepolicy.CacheRule{{
+			Name: "Grouped",
+			TTL:  cachepolicy.CacheTTL{DefaultSeconds: 120, Status: map[string]int{"200": 120}},
+			Conditions: cachepolicy.CacheConditions{
+				GroupOperator: "AND",
+				Groups: []cachepolicy.CacheConditionGroup{
+					{Operator: "OR", Rules: []cachepolicy.CacheConditionRule{{Type: "EXTENSION", Values: []string{"css"}}, {Type: "PATH_PREFIX", Values: []string{"/assets/"}}}},
+					{Operator: "AND", Rules: []cachepolicy.CacheConditionRule{{Type: "PATH_REGEX", Value: `^/assets/`}}},
+				},
+			},
+		}}
 		config.Cache = toMap(t, cache)
 		if err := manager.ApplySite(config); err != nil {
 			t.Fatal(err)
@@ -641,6 +684,64 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 			t.Fatalf("outer AND expression should bypass cache")
 		}
 	})
+}
+
+func TestAgentCacheCompressionSharesObjectAcrossAcceptEncoding(t *testing.T) {
+	ensureAgentLogSink(t)
+	var originRequests atomic.Int32
+	body := bytes.Repeat([]byte("shared representation "), 128)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		originRequests.Add(1)
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		_, _ = w.Write(body)
+	}))
+	defer origin.Close()
+
+	port := freePort(t)
+	cacheDirectory := filepath.Join(t.TempDir(), "cache")
+	t.Cleanup(cachefs.OverrideDiskUsageForTesting(cacheDirectory, 1<<40, 0))
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
+	manager.nodeConfig = NodeConfig{
+		CacheDirectory:      cacheDirectory,
+		MaxSizeBytes:        64 << 20,
+		MaxDiskUsagePercent: 90,
+	}
+	defer manager.Stop()
+
+	cache := cachePolicyWithCatchAllRule()
+	// Simulate a policy stored before Accept-Encoding became compression-managed.
+	cache.CacheKey.Headers = []string{"Accept-Encoding"}
+	compression := cachepolicy.DefaultCompressionPolicy()
+	compression.Enabled = true
+	compression.MinimumLength = 1
+	config := SiteConfig{
+		SiteID:      "cache-compression-site",
+		Version:     1,
+		Domains:     []string{"cache-compression.example.test"},
+		Listener:    ListenerConfig{HTTPEnabled: true, HTTPPort: port},
+		Origins:     []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
+		Cache:       toMap(t, cache),
+		Compression: toMap(t, compression),
+	}
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatal(err)
+	}
+
+	br := requestEdge(t, port, config.Domains[0], http.MethodGet, "/asset.txt", http.Header{"Accept-Encoding": {"br"}})
+	gzip := requestEdge(t, port, config.Domains[0], http.MethodGet, "/asset.txt", http.Header{"Accept-Encoding": {"gzip"}})
+	identity := requestEdge(t, port, config.Domains[0], http.MethodGet, "/asset.txt", http.Header{"Accept-Encoding": {"identity"}})
+	if got := originRequests.Load(); got != 1 {
+		t.Fatalf("Accept-Encoding fragmented the cached object: origin requests=%d", got)
+	}
+	if br.header.Get("Content-Encoding") != "br" || gzip.header.Get("Content-Encoding") != "gzip" || identity.header.Get("Content-Encoding") != "" {
+		t.Fatalf("unexpected negotiated encodings: br=%q gzip=%q identity=%q", br.header.Get("Content-Encoding"), gzip.header.Get("Content-Encoding"), identity.header.Get("Content-Encoding"))
+	}
+	if br.header.Get("X-Cache") != "MISS" || gzip.header.Get("X-Cache") != "HIT" || identity.header.Get("X-Cache") != "HIT" {
+		t.Fatalf("unexpected cache statuses: br=%q gzip=%q identity=%q", br.header.Get("X-Cache"), gzip.header.Get("X-Cache"), identity.header.Get("X-Cache"))
+	}
+	if identity.body != string(body) {
+		t.Fatal("identity response did not preserve the cached representation")
+	}
 }
 
 type edgeResponse struct {

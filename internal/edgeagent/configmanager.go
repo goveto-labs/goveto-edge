@@ -587,7 +587,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
-		} else if ok && cachePolicy.Enabled {
+		} else if ok && cachePolicy.Enabled && len(cachePolicy.Rules) > 0 {
 			cacheHandler := souinHandler(id, cachePolicy, nodeConfig)
 			routes = append(routes, map[string]any{
 				"@id": "site_" + id + "_cache_api",
@@ -601,31 +601,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				"handle":   []any{cacheHandler},
 				"terminal": true,
 			})
-			cachedHandlers := append([]any(nil), handlers...)
-			cachedHandlers = append(cachedHandlers, map[string]any{
-				"handler":                    "goveto_cache_headers",
-				"site_id":                    id,
-				"x_cache":                    cachePolicy.ResponseHeaders.XCache,
-				"age":                        cachePolicy.ResponseHeaders.Age,
-				"stale_while_revalidate_ttl": staleWhileRevalidateTTL(cachePolicy),
-				"background_revalidate":      cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
-				"coalesce":                   cachePolicy.RequestCoalescing,
-				"coalesce_headers":           cacheKeyHeaders(cachePolicy),
-			})
-			cachedHandlers = append(cachedHandlers,
-				cacheHandler,
-				map[string]any{
-					"handler":            "goveto_cache_headers",
-					"age":                true,
-					"default_ttl":        cachePolicy.TTL.DefaultSeconds,
-					"status_ttl":         cachePolicy.TTL.Status,
-					"stale_if_error_ttl": staleIfErrorTTL(cachePolicy),
-					"validate_upstream":  true,
-				},
-				originMetrics, reverseProxy,
-			)
-
-			methods := []string{http.MethodGet, http.MethodHead}
+			methods := cachePolicy.Methods
 			if cachePolicy.AllowPurgeMethod {
 				routes = append(routes, map[string]any{
 					"@id": "site_" + id + "_purge",
@@ -645,21 +621,51 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 					"terminal": true,
 				})
 			}
-			routes = append(routes, map[string]any{
-				"@id": "site_" + id + "_cache",
-				"match": []any{
+			for ruleIndex, rule := range cachePolicy.Rules {
+				cachedHandlers := append([]any(nil), handlers...)
+				cachedHandlers = append(cachedHandlers, map[string]any{
+					"handler":                    "goveto_cache_headers",
+					"site_id":                    id,
+					"x_cache":                    cachePolicy.ResponseHeaders.XCache,
+					"age":                        cachePolicy.ResponseHeaders.Age,
+					"stale_while_revalidate_ttl": staleWhileRevalidateTTL(cachePolicy),
+					"background_revalidate":      cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
+					"coalesce":                   cacheRequestCoalescing(cachePolicy),
+					"coalesce_headers":           cacheKeyHeaders(cachePolicy),
+					"coalesce_ignore_query":      !cacheKeyHasPart(cachePolicy.CacheKey, cachepolicy.CacheKeyPartQuery),
+				})
+				cachedHandlers = append(cachedHandlers,
+					cacheHandler,
 					map[string]any{
-						"host":   site.Domains,
-						"method": methods,
-						"goveto_cache": map[string]any{
-							"conditions":           cachePolicy.Conditions,
-							"cache_range_requests": cachePolicy.CacheRangeRequests,
+						"handler":              "goveto_cache_headers",
+						"age":                  true,
+						"default_ttl":          rule.TTL.DefaultSeconds,
+						"status_ttl":           rule.TTL.Status,
+						"stale_if_error_ttl":   staleIfErrorTTL(cachePolicy),
+						"override_client_ttl":  rule.TTL.OverrideClientTTL,
+						"client_ttl":           rule.TTL.ClientSeconds,
+						"bypass_cache_control": cachePolicy.BypassCacheControl,
+						"validate_upstream":    true,
+					},
+					originMetrics, reverseProxy,
+				)
+				routes = append(routes, map[string]any{
+					"@id": "site_" + id + "_cache_" + strconv.Itoa(ruleIndex),
+					"match": []any{
+						map[string]any{
+							"host":   site.Domains,
+							"method": methods,
+							"goveto_cache": map[string]any{
+								"conditions":           rule.Conditions,
+								"cache_range_requests": cachePolicy.CacheRangeRequests,
+								"bypass_cache_control": cachePolicy.BypassCacheControl,
+							},
 						},
 					},
-				},
-				"handle":   cachedHandlers,
-				"terminal": true,
-			})
+					"handle":   cachedHandlers,
+					"terminal": true,
+				})
+			}
 		}
 
 		handlers = append(handlers, originMetrics, reverseProxy)
@@ -763,7 +769,7 @@ func decodeCachePolicy(raw map[string]any) (cachepolicy.CachePolicy, bool, error
 		return cachepolicy.CachePolicy{}, false, err
 	}
 
-	policy := cachepolicy.DefaultCachePolicy()
+	var policy cachepolicy.CachePolicy
 	if err = json.Unmarshal(data, &policy); err != nil {
 		return policy, false, err
 	}
@@ -860,23 +866,33 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 		stale = strconv.Itoa(staleSeconds) + "s"
 	}
 	keyHeaders := cacheKeyHeaders(policy)
+	defaultTTL := policy.Rules[0].TTL.DefaultSeconds
 
-	verbs := []string{http.MethodGet, http.MethodHead}
+	verbs := append([]string(nil), policy.Methods...)
 	if policy.AllowPurgeMethod {
 		verbs = append(verbs, "PURGE")
 	}
 
 	configuration := map[string]any{
 		"DefaultCache": map[string]any{
-			"allowed_http_verbs":       verbs,
-			"cache_name":               "Goveto-" + siteID,
-			"key":                      map[string]any{"headers": keyHeaders},
+			"allowed_http_verbs": verbs,
+			"cache_name":         "Goveto-" + siteID,
+			"key": map[string]any{
+				"disable_body":   true,
+				"disable_query":  !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartQuery),
+				"disable_scheme": !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartScheme),
+				"disable_host":   !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartHost),
+				"disable_method": !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartMethod),
+				"headers":        keyHeaders,
+				"hash":           policy.CacheKey.Hash,
+				"hide":           policy.CacheKey.Hide,
+			},
 			"mode":                     "strict",
 			"disable_coalescing":       true,
 			"max_cacheable_body_bytes": policy.MaxBodyBytes,
-			"ttl":                      strconv.Itoa(policy.TTL.DefaultSeconds) + "s",
+			"ttl":                      strconv.Itoa(defaultTTL) + "s",
 			"stale":                    stale,
-			"default_cache_control":    "public, max-age=" + strconv.Itoa(policy.TTL.DefaultSeconds),
+			"default_cache_control":    "public, max-age=" + strconv.Itoa(defaultTTL),
 			"simplefs": map[string]any{
 				"found": true,
 				"path":  filepath.Join(nodeConfig.CacheDirectory, siteID),
@@ -922,7 +938,7 @@ func containsFold(values []string, target string) bool {
 }
 
 func cacheKeyHeaders(policy cachepolicy.CachePolicy) []string {
-	headers := append([]string(nil), policy.VaryHeaders...)
+	headers := append([]string(nil), policy.CacheKey.Headers...)
 	if policy.CacheRangeRequests {
 		for _, header := range []string{"Range", "If-Range"} {
 			if !containsFold(headers, header) {
@@ -931,6 +947,27 @@ func cacheKeyHeaders(policy cachepolicy.CachePolicy) []string {
 		}
 	}
 	return headers
+}
+
+func cacheKeyHasPart(key cachepolicy.CacheKey, target string) bool {
+	for _, part := range key.Parts {
+		if part == target {
+			return true
+		}
+	}
+	return false
+}
+
+func cacheRequestCoalescing(policy cachepolicy.CachePolicy) bool {
+	if !policy.RequestCoalescing {
+		return false
+	}
+	for _, method := range policy.Methods {
+		if method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions {
+			return false
+		}
+	}
+	return true
 }
 
 func durationMS(value int) time.Duration {

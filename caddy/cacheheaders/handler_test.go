@@ -51,7 +51,41 @@ func TestHandlerAddsStaleIfErrorToGeneratedCacheControl(t *testing.T) {
 	if err := handler.ServeHTTP(recorder, request, caddyhttp.Handler(emptyHandler{})); err != nil {
 		t.Fatal(err)
 	}
-	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=300, stale-while-revalidate=30, stale-if-error=60" {
+	if got := recorder.Header().Get("Cache-Control"); got != "public, s-maxage=300, max-age=300, stale-while-revalidate=30, stale-if-error=60" {
+		t.Fatalf("Cache-Control=%q", got)
+	}
+}
+
+func TestHandlerOverridesEdgeAndClientTTL(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Cache-Control", "public, max-age=20, s-maxage=30")
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	handler := Handler{DefaultTTL: 300, OverrideClientTTL: true, ClientTTL: 60}
+	if err := handler.ServeHTTP(recorder, request, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=60, s-maxage=300" {
+		t.Fatalf("Cache-Control=%q", got)
+	}
+}
+
+func TestHandlerBypassesConfiguredResponseCacheControl(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) error {
+		w.Header().Set("Cache-Control", "public, max-age=0")
+		w.WriteHeader(http.StatusOK)
+		return nil
+	})
+	handler := Handler{DefaultTTL: 300, BypassCacheControl: []string{"max-age=0"}}
+	if err := handler.ServeHTTP(recorder, request, next); err != nil {
+		t.Fatal(err)
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("Cache-Control=%q", got)
 	}
 }

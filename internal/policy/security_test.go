@@ -7,11 +7,15 @@ import (
 )
 
 func TestDefaultSecurityPoliciesSerializeEmptyCollectionsAsArrays(t *testing.T) {
+	waf := DefaultWAFPolicy()
+	if !waf.Enabled {
+		t.Fatal("WAF must be enabled by default")
+	}
 	value := struct {
 		WAF       WAFPolicy       `json:"waf"`
 		Access    AccessPolicy    `json:"access"`
 		RateLimit RateLimitPolicy `json:"rate_limit"`
-	}{WAF: DefaultWAFPolicy(), Access: DefaultAccessPolicy(), RateLimit: DefaultRateLimitPolicy()}
+	}{WAF: waf, Access: DefaultAccessPolicy(), RateLimit: DefaultRateLimitPolicy()}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)

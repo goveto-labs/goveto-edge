@@ -12,7 +12,6 @@ import {
     ArrowRightLeft,
     Braces,
     ChevronRight,
-    CircleGauge,
     FileWarning,
     GitBranch,
     Globe2,
@@ -28,13 +27,16 @@ import { useRef } from 'react';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormField } from '@/components/FormField.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
+import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 
 interface Props {
     policy: DeliveryPolicy;
+    isDirty: boolean;
     saving: boolean;
     onChange: (policy: DeliveryPolicy) => void;
+    onDiscard: () => void;
     onSave: () => void;
 }
 
@@ -774,405 +776,410 @@ function summary(policy: DeliveryPolicy) {
     return `${rules} request rules, ${routing} routing rules`;
 }
 
-export function SiteDeliverySettings({ policy: inputPolicy, saving, onChange, onSave }: Props) {
+export function SiteDeliverySettings({
+    policy: inputPolicy,
+    isDirty,
+    saving,
+    onChange,
+    onDiscard,
+    onSave,
+}: Props) {
     const policy = normalizeDeliveryPolicy(inputPolicy);
     const complete = policyIsComplete(policy);
     const poolNames = policy.origin_pools.map((pool) => pool.name.trim()).filter(Boolean);
 
     return (
-        <ContentCard className='overflow-hidden' noPadding>
-            <div className='flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
-                <div className='flex items-center gap-3'>
-                    <span className='flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground'>
-                        <Route className='h-5 w-5' />
-                    </span>
-                    <div>
-                        <h2 className='text-base font-semibold'>Request delivery</h2>
-                        <p className='mt-0.5 text-xs text-muted'>{summary(policy)}</p>
-                    </div>
-                </div>
-                <div className='flex items-center gap-3'>
-                    {!complete && (
-                        <span className='flex items-center gap-1.5 text-xs font-medium text-danger'>
-                            <AlertTriangle className='h-3.5 w-3.5' /> Complete required fields
+        <div className='space-y-8'>
+            <ContentCard className='overflow-hidden' noPadding>
+                <div className='flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
+                    <div className='flex items-center gap-3'>
+                        <span className='flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground'>
+                            <Route className='h-5 w-5' />
                         </span>
-                    )}
-                </div>
-            </div>
-
-            <Section
-                description='Temporarily replace site responses or adjust the path sent to your default origins.'
-                icon={Wrench}
-                title='Availability'
-            >
-                <div className='space-y-5'>
-                    <div className='flex items-center justify-between gap-5 rounded-xl border border-border/70 bg-surface-secondary/20 px-4 py-3.5'>
                         <div>
-                            <div className='text-sm font-medium'>Maintenance mode</div>
-                            <div className='mt-0.5 text-xs leading-5 text-muted'>
-                                Return a controlled response before any origin request is made.
-                            </div>
+                            <h2 className='text-base font-semibold'>Request delivery</h2>
+                            <p className='mt-0.5 text-xs text-muted'>{summary(policy)}</p>
                         </div>
-                        <ToggleSwitch
-                            isSelected={policy.maintenance.enabled}
-                            label='Maintenance mode'
-                            onChange={(enabled) =>
-                                onChange({
-                                    ...policy,
-                                    maintenance: { ...policy.maintenance, enabled },
-                                })
-                            }
-                        />
                     </div>
-                    {policy.maintenance.enabled && (
-                        <div className='grid gap-4 rounded-lg border border-border/70 p-4 sm:grid-cols-[140px_1fr]'>
-                            <FormField label='HTTP status'>
-                                <Input
-                                    max={599}
-                                    min={400}
-                                    type='number'
-                                    value={String(policy.maintenance.status)}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            maintenance: {
-                                                ...policy.maintenance,
-                                                status: Number(event.target.value),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField label='Content type'>
-                                <Input
-                                    value={policy.maintenance.content_type}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            maintenance: {
-                                                ...policy.maintenance,
-                                                content_type: event.target.value,
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField className='sm:col-span-2' label='Response body'>
-                                <TextArea
-                                    rows={5}
-                                    value={policy.maintenance.body}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            maintenance: {
-                                                ...policy.maintenance,
-                                                body: event.target.value,
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                        </div>
-                    )}
-                    <FormField
-                        hint='Leave empty to preserve the incoming request path.'
-                        label='Origin path prefix'
-                    >
-                        <Input
-                            placeholder='/production'
-                            value={policy.origin_prefix}
-                            variant='secondary'
-                            onChange={(event) =>
-                                onChange({ ...policy, origin_prefix: event.target.value })
-                            }
-                        />
-                    </FormField>
-                </div>
-            </Section>
-
-            <Section
-                description='Rewrite an upstream path or redirect the visitor to a new location.'
-                icon={ArrowRightLeft}
-                title='URL behavior'
-            >
-                <URLRulesEditor
-                    redirects={policy.redirects}
-                    rewrites={policy.rewrites}
-                    onRedirectsChange={(redirects) => onChange({ ...policy, redirects })}
-                    onRewritesChange={(rewrites) => onChange({ ...policy, rewrites })}
-                />
-            </Section>
-
-            <Section
-                description='Modify metadata before a request reaches the origin and before its response reaches the visitor.'
-                icon={Braces}
-                title='Headers'
-            >
-                <div className='space-y-7'>
-                    <HeaderEditor
-                        description='Applied before forwarding the request upstream.'
-                        label='Request headers'
-                        rules={policy.request_headers}
-                        onChange={(request_headers) => onChange({ ...policy, request_headers })}
-                    />
-                    <div className='border-t border-border pt-6'>
-                        <HeaderEditor
-                            description='Applied after receiving the origin response.'
-                            label='Response headers'
-                            rules={policy.response_headers}
-                            onChange={(response_headers) =>
-                                onChange({ ...policy, response_headers })
-                            }
-                        />
+                    <div className='flex items-center gap-3'>
+                        {!complete && (
+                            <span className='flex items-center gap-1.5 text-xs font-medium text-danger'>
+                                <AlertTriangle className='h-3.5 w-3.5' /> Complete required fields
+                            </span>
+                        )}
                     </div>
                 </div>
-            </Section>
 
-            <Section
-                description='Control browser cross-origin access and connection upgrade support.'
-                icon={Globe2}
-                title='CORS and protocols'
-            >
-                <div className='space-y-5'>
-                    <div className='flex items-center justify-between gap-5 rounded-xl border border-border/70 bg-surface-secondary/20 px-4 py-3.5'>
-                        <div>
-                            <div className='text-sm font-medium'>Cross-origin resource sharing</div>
-                            <div className='mt-0.5 text-xs leading-5 text-muted'>
-                                Add browser CORS response headers and handle preflight requests at
-                                the edge.
+                <Section
+                    description='Temporarily replace site responses or adjust the path sent to your default origins.'
+                    icon={Wrench}
+                    title='Availability'
+                >
+                    <div className='space-y-5'>
+                        <div className='flex items-center justify-between gap-5 rounded-xl border border-border/70 bg-surface-secondary/20 px-4 py-3.5'>
+                            <div>
+                                <div className='text-sm font-medium'>Maintenance mode</div>
+                                <div className='mt-0.5 text-xs leading-5 text-muted'>
+                                    Return a controlled response before any origin request is made.
+                                </div>
                             </div>
+                            <ToggleSwitch
+                                isSelected={policy.maintenance.enabled}
+                                label='Maintenance mode'
+                                onChange={(enabled) =>
+                                    onChange({
+                                        ...policy,
+                                        maintenance: { ...policy.maintenance, enabled },
+                                    })
+                                }
+                            />
                         </div>
-                        <ToggleSwitch
-                            isSelected={policy.cors.enabled}
-                            label='Enable CORS'
-                            onChange={(enabled) =>
-                                onChange({ ...policy, cors: { ...policy.cors, enabled } })
-                            }
-                        />
-                    </div>
-                    {policy.cors.enabled && (
-                        <div className='grid gap-4 rounded-lg border border-border/70 p-4 sm:grid-cols-2'>
-                            <FormField
-                                hint='One origin per line. Use * only when credentials are disabled.'
-                                label='Allowed origins'
-                            >
-                                <TextArea
-                                    placeholder={
-                                        'https://app.example.com\nhttps://admin.example.com'
-                                    }
-                                    rows={4}
-                                    value={policy.cors.allow_origins.join('\n')}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            cors: {
-                                                ...policy.cors,
-                                                allow_origins: splitLines(event.target.value),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField hint='Comma or line separated.' label='Allowed methods'>
-                                <TextArea
-                                    placeholder='GET, HEAD, POST, OPTIONS'
-                                    rows={4}
-                                    value={policy.cors.allow_methods.join(', ')}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            cors: {
-                                                ...policy.cors,
-                                                allow_methods: splitLines(event.target.value).map(
-                                                    (item) => item.toUpperCase()
-                                                ),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField
-                                hint='Leave empty to allow no request headers.'
-                                label='Allowed headers'
-                            >
-                                <TextArea
-                                    placeholder='Authorization, Content-Type'
-                                    rows={3}
-                                    value={policy.cors.allow_headers.join(', ')}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            cors: {
-                                                ...policy.cors,
-                                                allow_headers: splitLines(event.target.value),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField
-                                hint='Headers browser scripts may read.'
-                                label='Exposed headers'
-                            >
-                                <TextArea
-                                    placeholder='ETag, X-Request-ID'
-                                    rows={3}
-                                    value={policy.cors.expose_headers.join(', ')}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            cors: {
-                                                ...policy.cors,
-                                                expose_headers: splitLines(event.target.value),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <FormField
-                                hint='Use 0 to disable preflight caching.'
-                                label='Preflight max age (seconds)'
-                            >
-                                <Input
-                                    min={0}
-                                    type='number'
-                                    value={String(policy.cors.max_age_seconds)}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        onChange({
-                                            ...policy,
-                                            cors: {
-                                                ...policy.cors,
-                                                max_age_seconds: Number(event.target.value),
-                                            },
-                                        })
-                                    }
-                                />
-                            </FormField>
-                            <div className='flex items-end pb-1'>
-                                <div className='flex w-full items-center justify-between gap-4 rounded-lg bg-surface-secondary/30 px-3 py-2.5'>
-                                    <span className='text-sm font-medium'>Allow credentials</span>
-                                    <ToggleSwitch
-                                        isSelected={policy.cors.allow_credentials}
-                                        label='Allow credentials'
-                                        onChange={(allow_credentials) =>
+                        {policy.maintenance.enabled && (
+                            <div className='grid gap-4 rounded-lg border border-border/70 p-4 sm:grid-cols-[140px_1fr]'>
+                                <FormField label='HTTP status'>
+                                    <Input
+                                        max={599}
+                                        min={400}
+                                        type='number'
+                                        value={String(policy.maintenance.status)}
+                                        variant='secondary'
+                                        onChange={(event) =>
                                             onChange({
                                                 ...policy,
-                                                cors: { ...policy.cors, allow_credentials },
+                                                maintenance: {
+                                                    ...policy.maintenance,
+                                                    status: Number(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField label='Content type'>
+                                    <Input
+                                        value={policy.maintenance.content_type}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                maintenance: {
+                                                    ...policy.maintenance,
+                                                    content_type: event.target.value,
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField className='sm:col-span-2' label='Response body'>
+                                    <TextArea
+                                        rows={5}
+                                        value={policy.maintenance.body}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                maintenance: {
+                                                    ...policy.maintenance,
+                                                    body: event.target.value,
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                            </div>
+                        )}
+                        <FormField
+                            hint='Leave empty to preserve the incoming request path.'
+                            label='Origin path prefix'
+                        >
+                            <Input
+                                placeholder='/production'
+                                value={policy.origin_prefix}
+                                variant='secondary'
+                                onChange={(event) =>
+                                    onChange({ ...policy, origin_prefix: event.target.value })
+                                }
+                            />
+                        </FormField>
+                    </div>
+                </Section>
+
+                <Section
+                    description='Rewrite an upstream path or redirect the visitor to a new location.'
+                    icon={ArrowRightLeft}
+                    title='URL behavior'
+                >
+                    <URLRulesEditor
+                        redirects={policy.redirects}
+                        rewrites={policy.rewrites}
+                        onRedirectsChange={(redirects) => onChange({ ...policy, redirects })}
+                        onRewritesChange={(rewrites) => onChange({ ...policy, rewrites })}
+                    />
+                </Section>
+
+                <Section
+                    description='Modify metadata before a request reaches the origin and before its response reaches the visitor.'
+                    icon={Braces}
+                    title='Headers'
+                >
+                    <div className='space-y-7'>
+                        <HeaderEditor
+                            description='Applied before forwarding the request upstream.'
+                            label='Request headers'
+                            rules={policy.request_headers}
+                            onChange={(request_headers) => onChange({ ...policy, request_headers })}
+                        />
+                        <div className='border-t border-border pt-6'>
+                            <HeaderEditor
+                                description='Applied after receiving the origin response.'
+                                label='Response headers'
+                                rules={policy.response_headers}
+                                onChange={(response_headers) =>
+                                    onChange({ ...policy, response_headers })
+                                }
+                            />
+                        </div>
+                    </div>
+                </Section>
+
+                <Section
+                    description='Control browser cross-origin access and connection upgrade support.'
+                    icon={Globe2}
+                    title='CORS and protocols'
+                >
+                    <div className='space-y-5'>
+                        <div className='flex items-center justify-between gap-5 rounded-xl border border-border/70 bg-surface-secondary/20 px-4 py-3.5'>
+                            <div>
+                                <div className='text-sm font-medium'>
+                                    Cross-origin resource sharing
+                                </div>
+                                <div className='mt-0.5 text-xs leading-5 text-muted'>
+                                    Add browser CORS response headers and handle preflight requests
+                                    at the edge.
+                                </div>
+                            </div>
+                            <ToggleSwitch
+                                isSelected={policy.cors.enabled}
+                                label='Enable CORS'
+                                onChange={(enabled) =>
+                                    onChange({ ...policy, cors: { ...policy.cors, enabled } })
+                                }
+                            />
+                        </div>
+                        {policy.cors.enabled && (
+                            <div className='grid gap-4 rounded-lg border border-border/70 p-4 sm:grid-cols-2'>
+                                <FormField
+                                    hint='One origin per line. Use * only when credentials are disabled.'
+                                    label='Allowed origins'
+                                >
+                                    <TextArea
+                                        placeholder={
+                                            'https://app.example.com\nhttps://admin.example.com'
+                                        }
+                                        rows={4}
+                                        value={policy.cors.allow_origins.join('\n')}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                cors: {
+                                                    ...policy.cors,
+                                                    allow_origins: splitLines(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField hint='Comma or line separated.' label='Allowed methods'>
+                                    <TextArea
+                                        placeholder='GET, HEAD, POST, OPTIONS'
+                                        rows={4}
+                                        value={policy.cors.allow_methods.join(', ')}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                cors: {
+                                                    ...policy.cors,
+                                                    allow_methods: splitLines(
+                                                        event.target.value
+                                                    ).map((item) => item.toUpperCase()),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField
+                                    hint='Leave empty to allow no request headers.'
+                                    label='Allowed headers'
+                                >
+                                    <TextArea
+                                        placeholder='Authorization, Content-Type'
+                                        rows={3}
+                                        value={policy.cors.allow_headers.join(', ')}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                cors: {
+                                                    ...policy.cors,
+                                                    allow_headers: splitLines(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField
+                                    hint='Headers browser scripts may read.'
+                                    label='Exposed headers'
+                                >
+                                    <TextArea
+                                        placeholder='ETag, X-Request-ID'
+                                        rows={3}
+                                        value={policy.cors.expose_headers.join(', ')}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                cors: {
+                                                    ...policy.cors,
+                                                    expose_headers: splitLines(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <FormField
+                                    hint='Use 0 to disable preflight caching.'
+                                    label='Preflight max age (seconds)'
+                                >
+                                    <Input
+                                        min={0}
+                                        type='number'
+                                        value={String(policy.cors.max_age_seconds)}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            onChange({
+                                                ...policy,
+                                                cors: {
+                                                    ...policy.cors,
+                                                    max_age_seconds: Number(event.target.value),
+                                                },
+                                            })
+                                        }
+                                    />
+                                </FormField>
+                                <div className='flex items-end pb-1'>
+                                    <div className='flex w-full items-center justify-between gap-4 rounded-lg bg-surface-secondary/30 px-3 py-2.5'>
+                                        <span className='text-sm font-medium'>
+                                            Allow credentials
+                                        </span>
+                                        <ToggleSwitch
+                                            isSelected={policy.cors.allow_credentials}
+                                            label='Allow credentials'
+                                            onChange={(allow_credentials) =>
+                                                onChange({
+                                                    ...policy,
+                                                    cors: { ...policy.cors, allow_credentials },
+                                                })
+                                            }
+                                        />
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                        <div className='grid gap-3 sm:grid-cols-3'>
+                            {[
+                                {
+                                    key: 'websocket' as const,
+                                    label: 'WebSocket',
+                                    description: 'Standard WebSocket upgrades',
+                                },
+                                {
+                                    key: 'grpc' as const,
+                                    label: 'gRPC',
+                                    description: 'gRPC and h2c upstreams',
+                                },
+                                {
+                                    key: 'http_upgrade' as const,
+                                    label: 'HTTP Upgrade',
+                                    description: 'Other upgrade protocols',
+                                },
+                            ].map((item) => (
+                                <div
+                                    className='flex min-h-20 items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-3'
+                                    key={item.key}
+                                >
+                                    <div>
+                                        <div className='text-sm font-medium'>{item.label}</div>
+                                        <div className='mt-0.5 text-xs text-muted'>
+                                            {item.description}
+                                        </div>
+                                    </div>
+                                    <ToggleSwitch
+                                        isSelected={policy.protocols[item.key]}
+                                        label={item.label}
+                                        onChange={(selected) =>
+                                            onChange({
+                                                ...policy,
+                                                protocols: {
+                                                    ...policy.protocols,
+                                                    [item.key]: selected,
+                                                },
                                             })
                                         }
                                     />
                                 </div>
-                            </div>
+                            ))}
                         </div>
-                    )}
-                    <div className='grid gap-3 sm:grid-cols-3'>
-                        {[
-                            {
-                                key: 'websocket' as const,
-                                label: 'WebSocket',
-                                description: 'Standard WebSocket upgrades',
-                            },
-                            {
-                                key: 'grpc' as const,
-                                label: 'gRPC',
-                                description: 'gRPC and h2c upstreams',
-                            },
-                            {
-                                key: 'http_upgrade' as const,
-                                label: 'HTTP Upgrade',
-                                description: 'Other upgrade protocols',
-                            },
-                        ].map((item) => (
-                            <div
-                                className='flex min-h-20 items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-3'
-                                key={item.key}
-                            >
-                                <div>
-                                    <div className='text-sm font-medium'>{item.label}</div>
-                                    <div className='mt-0.5 text-xs text-muted'>
-                                        {item.description}
-                                    </div>
-                                </div>
-                                <ToggleSwitch
-                                    isSelected={policy.protocols[item.key]}
-                                    label={item.label}
-                                    onChange={(selected) =>
-                                        onChange({
-                                            ...policy,
-                                            protocols: {
-                                                ...policy.protocols,
-                                                [item.key]: selected,
-                                            },
-                                        })
-                                    }
-                                />
-                            </div>
-                        ))}
                     </div>
-                </div>
-            </Section>
+                </Section>
 
-            <Section
-                description='Route selected paths to dedicated upstream groups with independent load balancing.'
-                icon={Network}
-                title='Origin routing'
+                <Section
+                    description='Route selected paths to dedicated upstream groups with independent load balancing.'
+                    icon={Network}
+                    title='Origin routing'
+                >
+                    <OriginPoolsEditor
+                        pools={policy.origin_pools}
+                        onChange={(origin_pools) => onChange({ ...policy, origin_pools })}
+                    />
+                </Section>
+
+                <Section
+                    description='Send matching requests or a stable percentage of traffic to an origin pool.'
+                    icon={GitBranch}
+                    title='Traffic splits'
+                >
+                    <SplitsEditor
+                        poolNames={poolNames}
+                        splits={policy.splits}
+                        onChange={(splits) => onChange({ ...policy, splits })}
+                    />
+                </Section>
+
+                <Section
+                    description='Replace selected origin error responses with a controlled response body.'
+                    icon={FileWarning}
+                    title='Error responses'
+                >
+                    <ErrorPagesEditor
+                        pages={policy.error_pages}
+                        onChange={(error_pages) => onChange({ ...policy, error_pages })}
+                    />
+                </Section>
+            </ContentCard>
+
+            <SettingsActionBar
+                error={!complete ? 'Complete all added rules before saving.' : undefined}
+                isDirty={isDirty}
+                isDiscardDisabled={saving}
+                onDiscard={onDiscard}
             >
-                <OriginPoolsEditor
-                    pools={policy.origin_pools}
-                    onChange={(origin_pools) => onChange({ ...policy, origin_pools })}
-                />
-            </Section>
-
-            <Section
-                description='Send matching requests or a stable percentage of traffic to an origin pool.'
-                icon={GitBranch}
-                title='Traffic splits'
-            >
-                <SplitsEditor
-                    poolNames={poolNames}
-                    splits={policy.splits}
-                    onChange={(splits) => onChange({ ...policy, splits })}
-                />
-            </Section>
-
-            <Section
-                description='Replace selected origin error responses with a controlled response body.'
-                icon={FileWarning}
-                title='Error responses'
-            >
-                <ErrorPagesEditor
-                    pages={policy.error_pages}
-                    onChange={(error_pages) => onChange({ ...policy, error_pages })}
-                />
-            </Section>
-
-            <div className='sticky bottom-0 flex flex-col gap-3 border-t border-border bg-surface/95 px-5 py-4 shadow-[0_-8px_24px_rgba(0,0,0,0.04)] backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between lg:px-6'>
-                <div className='flex items-center gap-2 text-xs text-muted'>
-                    {complete ? (
-                        <>
-                            <CircleGauge className='h-4 w-4' /> Changes are validated again when
-                            saved.
-                        </>
-                    ) : (
-                        <>
-                            <AlertTriangle className='h-4 w-4 text-danger' /> Complete all added
-                            rules before saving.
-                        </>
-                    )}
-                </div>
                 <Button isDisabled={saving || !complete} onPress={onSave}>
                     <Save className='mr-1.5 h-4 w-4' />
                     {saving ? 'Saving...' : 'Save delivery settings'}
                 </Button>
-            </div>
-        </ContentCard>
+            </SettingsActionBar>
+        </div>
     );
 }

@@ -3,6 +3,7 @@ package sites
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -44,9 +45,16 @@ func getCache(db *client.Client) echo.HandlerFunc {
 			if findErr != nil {
 				return findErr
 			}
-			if err = json.Unmarshal(stored.CacheJson, &result); err != nil {
-				return err
+			if raw := strings.TrimSpace(string(stored.CacheJson)); raw != "" && raw != "{}" && raw != "null" {
+				var configured cachepolicy.CachePolicy
+				if err = json.Unmarshal(stored.CacheJson, &configured); err != nil {
+					return err
+				}
+				result = configured
 			}
+		}
+		if err = result.NormalizeAndValidate(); err != nil {
+			return err
 		}
 		return types.JSON(c, http.StatusOK, result)
 	}
@@ -89,9 +97,11 @@ func updateCache(db *client.Client, publishService *publisher.Service) echo.Hand
 				return echo.NewHTTPError(http.StatusNotFound, "site policy not found")
 			}
 			if len(stored.CacheJson) > 0 {
-				if err = json.Unmarshal(stored.CacheJson, &before); err != nil {
+				var configured cachepolicy.CachePolicy
+				if err = json.Unmarshal(stored.CacheJson, &configured); err != nil {
 					return err
 				}
+				before = configured
 			}
 		}
 

@@ -10,7 +10,7 @@ interface DialogShellProps {
     title: ReactNode;
     subtitle?: ReactNode;
     icon?: ReactNode;
-    size?: 'sm' | 'md' | 'lg';
+    size?: 'sm' | 'md' | 'lg' | 'xl';
     isDismissable?: boolean;
 }
 
@@ -27,8 +27,13 @@ export function DialogShell({
     return (
         <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
             <Modal.Backdrop isDismissable={isDismissable}>
-                <Modal.Container placement='center' size={size}>
-                    <Modal.Dialog className='overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl'>
+                <Modal.Container
+                    placement='center'
+                    size={size as 'sm' | 'md' | 'lg' | 'cover' | 'full' | 'xs' | undefined}
+                >
+                    <Modal.Dialog
+                        className={`overflow-hidden rounded-2xl border border-border bg-surface p-0 shadow-xl ${size === 'xl' ? 'mx-4 max-w-5xl sm:mx-6' : ''}`}
+                    >
                         <div className='flex items-start justify-between border-b border-border bg-surface-secondary/50 px-6 py-4'>
                             <div className='flex items-center gap-3'>
                                 {icon && (

@@ -55,6 +55,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
+import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
@@ -140,6 +141,21 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
 
 function loadErrorMessage(error: unknown) {
     return error instanceof ApiError ? error.message : 'request failed';
+}
+
+function valuesEqual(left: unknown, right: unknown) {
+    return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function setsEqual(left: Set<string>, right: Set<string>) {
+    return left.size === right.size && Array.from(left).every((value) => right.has(value));
+}
+
+function originsEqual(drafts: OriginDraft[], saved: SiteOrigin[]) {
+    return valuesEqual(
+        drafts.map(({ draft_id: _draftID, ...origin }) => origin),
+        saved
+    );
 }
 
 const tabs = [
@@ -291,12 +307,12 @@ export default function SiteDetail() {
 
     const [site, setSite] = useState<SiteDetails | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
-    const [cache, setCache] = useState<CachePolicy>({});
+    const [cache, setCache] = useState<CachePolicy>({ enabled: true });
     const [compression, setCompression] = useState<CompressionPolicy>({});
     const [delivery, setDelivery] = useState<DeliveryPolicy>(defaultDeliveryPolicy);
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
-            enabled: false,
+            enabled: true,
             engine: 'GOVETO_COMPAT',
             rule_set_version: '2026.07.1',
             auto_update: true,
@@ -355,6 +371,11 @@ export default function SiteDetail() {
     const [targetCluster, setTargetCluster] = useState('');
     const [domainText, setDomainText] = useState('');
     const [origins, setOrigins] = useState<OriginDraft[]>([]);
+    const savedListenerRef = useRef(listener);
+    const savedCacheRef = useRef(cache);
+    const savedCompressionRef = useRef(compression);
+    const savedDeliveryRef = useRef(delivery);
+    const savedSecurityRef = useRef(security);
 
     const loadBase = useCallback(async () => {
         if (!clusterId || !siteId) return;
@@ -394,18 +415,28 @@ export default function SiteDetail() {
             ]);
 
             const failures: string[] = [];
-            if (listenerResult.status === 'fulfilled') setListener(listenerResult.value);
-            else failures.push(`listener: ${loadErrorMessage(listenerResult.reason)}`);
-            if (cacheResult.status === 'fulfilled') setCache(cacheResult.value);
-            else failures.push(`cache: ${loadErrorMessage(cacheResult.reason)}`);
-            if (compressionResult.status === 'fulfilled') setCompression(compressionResult.value);
-            else failures.push(`compression: ${loadErrorMessage(compressionResult.reason)}`);
-            if (deliveryResult.status === 'fulfilled')
-                setDelivery(normalizeDeliveryPolicy(deliveryResult.value));
-            else failures.push(`delivery: ${loadErrorMessage(deliveryResult.reason)}`);
-            if (securityResult.status === 'fulfilled')
-                setSecurity(withSecurityEditorIDs(securityResult.value));
-            else failures.push(`security: ${loadErrorMessage(securityResult.reason)}`);
+            if (listenerResult.status === 'fulfilled') {
+                savedListenerRef.current = listenerResult.value;
+                setListener(listenerResult.value);
+            } else failures.push(`listener: ${loadErrorMessage(listenerResult.reason)}`);
+            if (cacheResult.status === 'fulfilled') {
+                savedCacheRef.current = cacheResult.value;
+                setCache(cacheResult.value);
+            } else failures.push(`cache: ${loadErrorMessage(cacheResult.reason)}`);
+            if (compressionResult.status === 'fulfilled') {
+                savedCompressionRef.current = compressionResult.value;
+                setCompression(compressionResult.value);
+            } else failures.push(`compression: ${loadErrorMessage(compressionResult.reason)}`);
+            if (deliveryResult.status === 'fulfilled') {
+                const savedDelivery = normalizeDeliveryPolicy(deliveryResult.value);
+                savedDeliveryRef.current = savedDelivery;
+                setDelivery(savedDelivery);
+            } else failures.push(`delivery: ${loadErrorMessage(deliveryResult.reason)}`);
+            if (securityResult.status === 'fulfilled') {
+                const savedSecurity = withSecurityEditorIDs(securityResult.value);
+                savedSecurityRef.current = savedSecurity;
+                setSecurity(savedSecurity);
+            } else failures.push(`security: ${loadErrorMessage(securityResult.reason)}`);
             if (clusterResult.status === 'fulfilled') setClusters(clusterResult.value.clusters);
             else failures.push(`clusters: ${loadErrorMessage(clusterResult.reason)}`);
             if (dnsResult.status === 'fulfilled')
@@ -545,6 +576,7 @@ export default function SiteDetail() {
     const saveListener = () =>
         runSave(async () => {
             const result = await api.updateListener(siteId, listener);
+            savedListenerRef.current = result.listener;
             setListener(result.listener);
         }, 'Listener settings saved and publishing queued.');
     const saveHTTPS = () =>
@@ -555,33 +587,38 @@ export default function SiteDetail() {
             ]);
             setSite(updated);
             setCertificateIds(new Set(updated.certificate_ids));
+            savedListenerRef.current = result.listener;
             setListener(result.listener);
         }, 'HTTPS settings saved and publishing queued.');
     const saveCache = () =>
         runSave(async () => {
             const result = await api.updateCache(siteId, cache);
+            savedCacheRef.current = result.cache;
             setCache(result.cache);
         }, 'Cache settings saved and publishing queued.');
     const saveCompression = () =>
         runSave(async () => {
             const result = await api.updateCompression(siteId, compression);
+            savedCompressionRef.current = result.compression;
             setCompression(result.compression);
         }, 'Compression settings saved and publishing queued.');
     const saveDelivery = () =>
         runSave(async () => {
             const result = await api.updateDelivery(siteId, delivery);
-            setDelivery(normalizeDeliveryPolicy(result.delivery));
+            const savedDelivery = normalizeDeliveryPolicy(result.delivery);
+            savedDeliveryRef.current = savedDelivery;
+            setDelivery(savedDelivery);
         }, 'Delivery settings saved and publishing queued.');
     const saveSecurity = () =>
         runSave(async () => {
             const result = await api.updateSecurity(siteId, security);
-            setSecurity(
-                withSecurityEditorIDs({
-                    waf: result.waf,
-                    access: result.access,
-                    rate_limit: result.rate_limit,
-                })
-            );
+            const savedSecurity = withSecurityEditorIDs({
+                waf: result.waf,
+                access: result.access,
+                rate_limit: result.rate_limit,
+            });
+            savedSecurityRef.current = savedSecurity;
+            setSecurity(savedSecurity);
         }, 'Security settings saved and publishing queued.');
     const publish = async () => {
         setPublishingSite(true);
@@ -635,6 +672,17 @@ export default function SiteDetail() {
             })),
         [certificates]
     );
+    const basicDirty = Boolean(site && (name !== site.name || targetCluster !== site.cluster_id));
+    const domainsDirty = Boolean(site && domainText !== site.domains.join('\n'));
+    const originsDirty = Boolean(site && !originsEqual(origins, site.origins));
+    const listenerDirty = !valuesEqual(listener, savedListenerRef.current);
+    const certificateIdsDirty = Boolean(
+        site && !setsEqual(certificateIds, new Set(site.certificate_ids))
+    );
+    const cacheDirty = !valuesEqual(cache, savedCacheRef.current);
+    const compressionDirty = !valuesEqual(compression, savedCompressionRef.current);
+    const deliveryDirty = !valuesEqual(delivery, savedDeliveryRef.current);
+    const securityDirty = !valuesEqual(security, savedSecurityRef.current);
     const enteringDataTab = previousDetailPathRef.current !== detailPath && tab === 'overview';
     const tabContentLoading =
         enteringDataTab ||
@@ -906,7 +954,7 @@ export default function SiteDetail() {
                                     </nav>
                                     <div className='min-w-0'>
                                         {settingsPage === 'basic' && (
-                                            <div className='space-y-4'>
+                                            <div className='space-y-8'>
                                                 <ContentCard noPadding>
                                                     <SectionHeader
                                                         title='Basic settings'
@@ -951,25 +999,6 @@ export default function SiteDetail() {
                                                                 onChange={setTargetCluster}
                                                             />
                                                         </FormField>
-                                                        <div className='flex justify-end border-t border-border pt-4'>
-                                                            <Button
-                                                                isDisabled={saving || !name.trim()}
-                                                                onPress={() =>
-                                                                    void runSave(
-                                                                        () =>
-                                                                            updateSite({
-                                                                                name: name.trim(),
-                                                                                cluster_id:
-                                                                                    targetCluster,
-                                                                            }),
-                                                                        'Basic settings saved.'
-                                                                    )
-                                                                }
-                                                            >
-                                                                <Save className='mr-1.5 h-4 w-4' />
-                                                                Save basic settings
-                                                            </Button>
-                                                        </div>
                                                     </div>
                                                 </ContentCard>
                                                 {canManage && (
@@ -994,152 +1023,198 @@ export default function SiteDetail() {
                                                         </div>
                                                     </ContentCard>
                                                 )}
+                                                <SettingsActionBar
+                                                    isDirty={basicDirty}
+                                                    isDiscardDisabled={saving}
+                                                    onDiscard={() => {
+                                                        setName(site.name);
+                                                        setTargetCluster(site.cluster_id);
+                                                    }}
+                                                >
+                                                    <Button
+                                                        isDisabled={saving || !name.trim()}
+                                                        onPress={() =>
+                                                            void runSave(
+                                                                () =>
+                                                                    updateSite({
+                                                                        name: name.trim(),
+                                                                        cluster_id: targetCluster,
+                                                                    }),
+                                                                'Basic settings saved.'
+                                                            )
+                                                        }
+                                                    >
+                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        Save basic settings
+                                                    </Button>
+                                                </SettingsActionBar>
                                             </div>
                                         )}
                                         {settingsPage === 'domains' && (
-                                            <ContentCard noPadding>
-                                                <SectionHeader
-                                                    title='Domain configuration'
-                                                    description='One hostname per line. DNS should point to the CNAME target below.'
-                                                />
-                                                <div className='space-y-5 p-5'>
-                                                    <FormField
-                                                        htmlFor='site-domains'
-                                                        label='Domains'
-                                                    >
-                                                        <TextArea
-                                                            id='site-domains'
-                                                            rows={7}
-                                                            value={domainText}
-                                                            variant='secondary'
-                                                            onChange={(event) =>
-                                                                setDomainText(event.target.value)
-                                                            }
-                                                        />
-                                                    </FormField>
-                                                    {cnameTarget && (
-                                                        <div className='rounded-lg bg-surface-secondary px-4 py-3'>
-                                                            <div className='text-xs font-medium text-muted'>
-                                                                CNAME target
-                                                            </div>
-                                                            <code className='mt-1 block overflow-x-auto text-sm'>
-                                                                {cnameTarget}
-                                                            </code>
-                                                        </div>
-                                                    )}
-                                                    <div className='flex justify-end border-t border-border pt-4'>
-                                                        <Button
-                                                            isDisabled={saving}
-                                                            onPress={() =>
-                                                                void runSave(
-                                                                    () =>
-                                                                        updateSite({
-                                                                            domains: domainText
-                                                                                .split('\n')
-                                                                                .map((value) =>
-                                                                                    value.trim()
-                                                                                )
-                                                                                .filter(Boolean),
-                                                                        }),
-                                                                    'Domains saved.'
-                                                                )
-                                                            }
+                                            <div className='space-y-8'>
+                                                <ContentCard noPadding>
+                                                    <SectionHeader
+                                                        title='Domain configuration'
+                                                        description='One hostname per line. DNS should point to the CNAME target below.'
+                                                    />
+                                                    <div className='space-y-5 p-5'>
+                                                        <FormField
+                                                            htmlFor='site-domains'
+                                                            label='Domains'
                                                         >
-                                                            <Save className='mr-1.5 h-4 w-4' />
-                                                            Save domains
-                                                        </Button>
+                                                            <TextArea
+                                                                id='site-domains'
+                                                                rows={7}
+                                                                value={domainText}
+                                                                variant='secondary'
+                                                                onChange={(event) =>
+                                                                    setDomainText(
+                                                                        event.target.value
+                                                                    )
+                                                                }
+                                                            />
+                                                        </FormField>
+                                                        {cnameTarget && (
+                                                            <div className='rounded-lg bg-surface-secondary px-4 py-3'>
+                                                                <div className='text-xs font-medium text-muted'>
+                                                                    CNAME target
+                                                                </div>
+                                                                <code className='mt-1 block overflow-x-auto text-sm'>
+                                                                    {cnameTarget}
+                                                                </code>
+                                                            </div>
+                                                        )}
                                                     </div>
-                                                </div>
-                                            </ContentCard>
+                                                </ContentCard>
+                                                <SettingsActionBar
+                                                    isDirty={domainsDirty}
+                                                    isDiscardDisabled={saving}
+                                                    onDiscard={() =>
+                                                        setDomainText(site.domains.join('\n'))
+                                                    }
+                                                >
+                                                    <Button
+                                                        isDisabled={saving}
+                                                        onPress={() =>
+                                                            void runSave(
+                                                                () =>
+                                                                    updateSite({
+                                                                        domains: domainText
+                                                                            .split('\n')
+                                                                            .map((value) =>
+                                                                                value.trim()
+                                                                            )
+                                                                            .filter(Boolean),
+                                                                    }),
+                                                                'Domains saved.'
+                                                            )
+                                                        }
+                                                    >
+                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        Save domains
+                                                    </Button>
+                                                </SettingsActionBar>
+                                            </div>
                                         )}
                                         {settingsPage === 'http' && (
-                                            <ContentCard noPadding>
-                                                <SectionHeader
-                                                    title='HTTP configuration'
-                                                    description='Control the plain HTTP listener and HTTPS redirect.'
-                                                />
-                                                <div className='space-y-5 p-5'>
-                                                    <div className='flex items-center justify-between gap-4'>
-                                                        <div>
-                                                            <div className='text-sm font-medium'>
-                                                                Enable HTTP
+                                            <div className='space-y-4'>
+                                                <ContentCard noPadding>
+                                                    <SectionHeader
+                                                        title='HTTP configuration'
+                                                        description='Control the plain HTTP listener and HTTPS redirect.'
+                                                    />
+                                                    <div className='space-y-5 p-5'>
+                                                        <div className='flex items-center justify-between gap-4'>
+                                                            <div>
+                                                                <div className='text-sm font-medium'>
+                                                                    Enable HTTP
+                                                                </div>
+                                                                <div className='text-xs text-muted'>
+                                                                    Accept requests over plain HTTP.
+                                                                </div>
                                                             </div>
-                                                            <div className='text-xs text-muted'>
-                                                                Accept requests over plain HTTP.
-                                                            </div>
+                                                            <ToggleSwitch
+                                                                label='Enable HTTP'
+                                                                isSelected={
+                                                                    listener.http_enabled ?? true
+                                                                }
+                                                                onChange={(value) =>
+                                                                    setListener({
+                                                                        ...listener,
+                                                                        http_enabled: value,
+                                                                    })
+                                                                }
+                                                            />
                                                         </div>
-                                                        <ToggleSwitch
-                                                            label='Enable HTTP'
-                                                            isSelected={
-                                                                listener.http_enabled ?? true
-                                                            }
-                                                            onChange={(value) =>
-                                                                setListener({
-                                                                    ...listener,
-                                                                    http_enabled: value,
-                                                                })
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <FormField
-                                                        htmlFor='http-port'
-                                                        label='HTTP port'
-                                                    >
-                                                        <Input
-                                                            id='http-port'
-                                                            min={1}
-                                                            max={65535}
-                                                            type='number'
-                                                            value={String(listener.http_port ?? 80)}
-                                                            variant='secondary'
-                                                            onChange={(event) =>
-                                                                setListener({
-                                                                    ...listener,
-                                                                    http_port: Number(
-                                                                        event.target.value
-                                                                    ),
-                                                                })
-                                                            }
-                                                        />
-                                                    </FormField>
-                                                    <div className='flex items-center justify-between gap-4'>
-                                                        <div>
-                                                            <div className='text-sm font-medium'>
-                                                                Redirect to HTTPS
-                                                            </div>
-                                                            <div className='text-xs text-muted'>
-                                                                Send HTTP requests to the secure
-                                                                listener.
-                                                            </div>
-                                                        </div>
-                                                        <ToggleSwitch
-                                                            label='Redirect to HTTPS'
-                                                            isSelected={
-                                                                listener.redirect_http_to_https ??
-                                                                true
-                                                            }
-                                                            onChange={(value) =>
-                                                                setListener({
-                                                                    ...listener,
-                                                                    redirect_http_to_https: value,
-                                                                })
-                                                            }
-                                                        />
-                                                    </div>
-                                                    <div className='flex justify-end border-t border-border pt-4'>
-                                                        <Button
-                                                            isDisabled={saving}
-                                                            onPress={() => void saveListener()}
+                                                        <FormField
+                                                            htmlFor='http-port'
+                                                            label='HTTP port'
                                                         >
-                                                            <Save className='mr-1.5 h-4 w-4' />
-                                                            Save HTTP settings
-                                                        </Button>
+                                                            <Input
+                                                                id='http-port'
+                                                                min={1}
+                                                                max={65535}
+                                                                type='number'
+                                                                value={String(
+                                                                    listener.http_port ?? 80
+                                                                )}
+                                                                variant='secondary'
+                                                                onChange={(event) =>
+                                                                    setListener({
+                                                                        ...listener,
+                                                                        http_port: Number(
+                                                                            event.target.value
+                                                                        ),
+                                                                    })
+                                                                }
+                                                            />
+                                                        </FormField>
+                                                        <div className='flex items-center justify-between gap-4'>
+                                                            <div>
+                                                                <div className='text-sm font-medium'>
+                                                                    Redirect to HTTPS
+                                                                </div>
+                                                                <div className='text-xs text-muted'>
+                                                                    Send HTTP requests to the secure
+                                                                    listener.
+                                                                </div>
+                                                            </div>
+                                                            <ToggleSwitch
+                                                                label='Redirect to HTTPS'
+                                                                isSelected={
+                                                                    listener.redirect_http_to_https ??
+                                                                    true
+                                                                }
+                                                                onChange={(value) =>
+                                                                    setListener({
+                                                                        ...listener,
+                                                                        redirect_http_to_https:
+                                                                            value,
+                                                                    })
+                                                                }
+                                                            />
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </ContentCard>
+                                                </ContentCard>
+                                                <SettingsActionBar
+                                                    isDirty={listenerDirty}
+                                                    isDiscardDisabled={saving}
+                                                    onDiscard={() =>
+                                                        setListener(savedListenerRef.current)
+                                                    }
+                                                >
+                                                    <Button
+                                                        isDisabled={saving}
+                                                        onPress={() => void saveListener()}
+                                                    >
+                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        Save HTTP settings
+                                                    </Button>
+                                                </SettingsActionBar>
+                                            </div>
                                         )}
                                         {settingsPage === 'https' && (
-                                            <div className='space-y-4'>
+                                            <div className='space-y-8'>
                                                 <ContentCard className='overflow-visible' noPadding>
                                                     <SectionHeader
                                                         title='HTTPS configuration'
@@ -1308,209 +1383,270 @@ export default function SiteDetail() {
                                                                 />
                                                             </FormField>
                                                         )}
-                                                        <div className='flex justify-end border-t border-border pt-4'>
-                                                            <Button
-                                                                isDisabled={saving}
-                                                                onPress={() => void saveHTTPS()}
-                                                            >
-                                                                <ShieldCheck className='mr-1.5 h-4 w-4' />
-                                                                Save HTTPS settings
-                                                            </Button>
-                                                        </div>
                                                     </div>
                                                 </ContentCard>
+                                                <SettingsActionBar
+                                                    isDirty={listenerDirty || certificateIdsDirty}
+                                                    isDiscardDisabled={saving}
+                                                    onDiscard={() => {
+                                                        setListener(savedListenerRef.current);
+                                                        setCertificateIds(
+                                                            new Set(site.certificate_ids)
+                                                        );
+                                                    }}
+                                                >
+                                                    <Button
+                                                        isDisabled={saving}
+                                                        onPress={() => void saveHTTPS()}
+                                                    >
+                                                        <ShieldCheck className='mr-1.5 h-4 w-4' />
+                                                        Save HTTPS settings
+                                                    </Button>
+                                                </SettingsActionBar>
                                             </div>
                                         )}
                                         {settingsPage === 'origins' && (
-                                            <ContentCard noPadding>
-                                                <SectionHeader
-                                                    title='Origin configuration'
-                                                    description='Requests are distributed across enabled upstreams by weight.'
-                                                />
-                                                <div className='space-y-4 p-5'>
-                                                    {origins.map((origin, index) => (
-                                                        <div
-                                                            className='grid gap-3 rounded-xl border border-border p-4 md:grid-cols-[110px_1fr_1fr_90px_auto]'
-                                                            key={origin.draft_id}
-                                                        >
-                                                            <SelectField
-                                                                ariaLabel={`Origin ${index + 1} protocol`}
-                                                                options={[
-                                                                    { id: 'HTTP', label: 'HTTP' },
-                                                                    { id: 'HTTPS', label: 'HTTPS' },
-                                                                ]}
-                                                                value={origin.protocol}
-                                                                variant='secondary'
-                                                                onChange={(value) =>
-                                                                    setOrigins(
-                                                                        origins.map(
-                                                                            (item, itemIndex) =>
-                                                                                itemIndex === index
-                                                                                    ? {
-                                                                                          ...item,
-                                                                                          protocol:
-                                                                                              value as SiteOrigin['protocol'],
-                                                                                      }
-                                                                                    : item
-                                                                        )
-                                                                    )
-                                                                }
-                                                            />
-                                                            <Input
-                                                                aria-label={`Origin ${index + 1} address`}
-                                                                placeholder='origin.example.com:443'
-                                                                value={origin.address}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setOrigins(
-                                                                        origins.map(
-                                                                            (item, itemIndex) =>
-                                                                                itemIndex === index
-                                                                                    ? {
-                                                                                          ...item,
-                                                                                          address:
-                                                                                              event
-                                                                                                  .target
-                                                                                                  .value,
-                                                                                      }
-                                                                                    : item
-                                                                        )
-                                                                    )
-                                                                }
-                                                            />
-                                                            <Input
-                                                                aria-label={`Origin ${index + 1} host header`}
-                                                                placeholder='Host header'
-                                                                value={origin.host_header || ''}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setOrigins(
-                                                                        origins.map(
-                                                                            (item, itemIndex) =>
-                                                                                itemIndex === index
-                                                                                    ? {
-                                                                                          ...item,
-                                                                                          host_header:
-                                                                                              event
-                                                                                                  .target
-                                                                                                  .value,
-                                                                                      }
-                                                                                    : item
-                                                                        )
-                                                                    )
-                                                                }
-                                                            />
-                                                            <Input
-                                                                aria-label={`Origin ${index + 1} weight`}
-                                                                min={1}
-                                                                type='number'
-                                                                value={String(origin.weight ?? 1)}
-                                                                variant='secondary'
-                                                                onChange={(event) =>
-                                                                    setOrigins(
-                                                                        origins.map(
-                                                                            (item, itemIndex) =>
-                                                                                itemIndex === index
-                                                                                    ? {
-                                                                                          ...item,
-                                                                                          weight: Number(
-                                                                                              event
-                                                                                                  .target
-                                                                                                  .value
-                                                                                          ),
-                                                                                      }
-                                                                                    : item
-                                                                        )
-                                                                    )
-                                                                }
-                                                            />
-                                                            <Button
-                                                                isIconOnly
-                                                                aria-label={`Remove origin ${index + 1}`}
-                                                                variant='ghost'
-                                                                onPress={() =>
-                                                                    setOrigins(
-                                                                        origins.filter(
-                                                                            (_, itemIndex) =>
-                                                                                itemIndex !== index
-                                                                        )
-                                                                    )
-                                                                }
+                                            <div className='space-y-8'>
+                                                <ContentCard noPadding>
+                                                    <SectionHeader
+                                                        title='Origin configuration'
+                                                        description='Requests are distributed across enabled upstreams by weight.'
+                                                    />
+                                                    <div className='space-y-4 p-5'>
+                                                        {origins.map((origin, index) => (
+                                                            <div
+                                                                className='grid gap-3 rounded-xl border border-border p-4 md:grid-cols-[110px_1fr_1fr_90px_auto]'
+                                                                key={origin.draft_id}
                                                             >
-                                                                <Trash2 className='h-4 w-4 text-danger' />
-                                                            </Button>
-                                                        </div>
-                                                    ))}
-                                                    <Button
-                                                        variant='secondary'
-                                                        onPress={() =>
-                                                            setOrigins([
-                                                                ...origins,
-                                                                {
-                                                                    protocol: 'HTTPS',
-                                                                    address: '',
-                                                                    weight: 1,
-                                                                    draft_id: crypto.randomUUID(),
-                                                                },
-                                                            ])
-                                                        }
-                                                    >
-                                                        <Plus className='mr-1.5 h-4 w-4' />
-                                                        Add origin
-                                                    </Button>
-                                                    <div className='flex justify-end border-t border-border pt-4'>
+                                                                <SelectField
+                                                                    ariaLabel={`Origin ${index + 1} protocol`}
+                                                                    options={[
+                                                                        {
+                                                                            id: 'HTTP',
+                                                                            label: 'HTTP',
+                                                                        },
+                                                                        {
+                                                                            id: 'HTTPS',
+                                                                            label: 'HTTPS',
+                                                                        },
+                                                                    ]}
+                                                                    value={origin.protocol}
+                                                                    variant='secondary'
+                                                                    onChange={(value) =>
+                                                                        setOrigins(
+                                                                            origins.map(
+                                                                                (
+                                                                                    item,
+                                                                                    itemIndex
+                                                                                ) =>
+                                                                                    itemIndex ===
+                                                                                    index
+                                                                                        ? {
+                                                                                              ...item,
+                                                                                              protocol:
+                                                                                                  value as SiteOrigin['protocol'],
+                                                                                          }
+                                                                                        : item
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                />
+                                                                <Input
+                                                                    aria-label={`Origin ${index + 1} address`}
+                                                                    placeholder='origin.example.com:443'
+                                                                    value={origin.address}
+                                                                    variant='secondary'
+                                                                    onChange={(event) =>
+                                                                        setOrigins(
+                                                                            origins.map(
+                                                                                (
+                                                                                    item,
+                                                                                    itemIndex
+                                                                                ) =>
+                                                                                    itemIndex ===
+                                                                                    index
+                                                                                        ? {
+                                                                                              ...item,
+                                                                                              address:
+                                                                                                  event
+                                                                                                      .target
+                                                                                                      .value,
+                                                                                          }
+                                                                                        : item
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                />
+                                                                <Input
+                                                                    aria-label={`Origin ${index + 1} host header`}
+                                                                    placeholder='Host header'
+                                                                    value={origin.host_header || ''}
+                                                                    variant='secondary'
+                                                                    onChange={(event) =>
+                                                                        setOrigins(
+                                                                            origins.map(
+                                                                                (
+                                                                                    item,
+                                                                                    itemIndex
+                                                                                ) =>
+                                                                                    itemIndex ===
+                                                                                    index
+                                                                                        ? {
+                                                                                              ...item,
+                                                                                              host_header:
+                                                                                                  event
+                                                                                                      .target
+                                                                                                      .value,
+                                                                                          }
+                                                                                        : item
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                />
+                                                                <Input
+                                                                    aria-label={`Origin ${index + 1} weight`}
+                                                                    min={1}
+                                                                    type='number'
+                                                                    value={String(
+                                                                        origin.weight ?? 1
+                                                                    )}
+                                                                    variant='secondary'
+                                                                    onChange={(event) =>
+                                                                        setOrigins(
+                                                                            origins.map(
+                                                                                (
+                                                                                    item,
+                                                                                    itemIndex
+                                                                                ) =>
+                                                                                    itemIndex ===
+                                                                                    index
+                                                                                        ? {
+                                                                                              ...item,
+                                                                                              weight: Number(
+                                                                                                  event
+                                                                                                      .target
+                                                                                                      .value
+                                                                                              ),
+                                                                                          }
+                                                                                        : item
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                />
+                                                                <Button
+                                                                    isIconOnly
+                                                                    aria-label={`Remove origin ${index + 1}`}
+                                                                    variant='ghost'
+                                                                    onPress={() =>
+                                                                        setOrigins(
+                                                                            origins.filter(
+                                                                                (_, itemIndex) =>
+                                                                                    itemIndex !==
+                                                                                    index
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <Trash2 className='h-4 w-4 text-danger' />
+                                                                </Button>
+                                                            </div>
+                                                        ))}
                                                         <Button
-                                                            isDisabled={
-                                                                saving ||
-                                                                origins.length === 0 ||
-                                                                origins.some(
-                                                                    (origin) =>
-                                                                        !origin.address.trim()
-                                                                )
-                                                            }
+                                                            variant='secondary'
                                                             onPress={() =>
-                                                                void runSave(
-                                                                    () => updateSite({ origins }),
-                                                                    'Origins saved.'
-                                                                )
+                                                                setOrigins([
+                                                                    ...origins,
+                                                                    {
+                                                                        protocol: 'HTTPS',
+                                                                        address: '',
+                                                                        weight: 1,
+                                                                        draft_id:
+                                                                            crypto.randomUUID(),
+                                                                    },
+                                                                ])
                                                             }
                                                         >
-                                                            <Cloud className='mr-1.5 h-4 w-4' />
-                                                            Save origins
+                                                            <Plus className='mr-1.5 h-4 w-4' />
+                                                            Add origin
                                                         </Button>
                                                     </div>
-                                                </div>
-                                            </ContentCard>
+                                                </ContentCard>
+                                                <SettingsActionBar
+                                                    isDirty={originsDirty}
+                                                    isDiscardDisabled={saving}
+                                                    onDiscard={() =>
+                                                        setOrigins(
+                                                            site.origins.map((origin, index) => ({
+                                                                ...origin,
+                                                                draft_id: `${site.id}-${index}`,
+                                                            }))
+                                                        )
+                                                    }
+                                                >
+                                                    <Button
+                                                        isDisabled={
+                                                            saving ||
+                                                            origins.length === 0 ||
+                                                            origins.some(
+                                                                (origin) => !origin.address.trim()
+                                                            )
+                                                        }
+                                                        onPress={() =>
+                                                            void runSave(
+                                                                () => updateSite({ origins }),
+                                                                'Origins saved.'
+                                                            )
+                                                        }
+                                                    >
+                                                        <Cloud className='mr-1.5 h-4 w-4' />
+                                                        Save origins
+                                                    </Button>
+                                                </SettingsActionBar>
+                                            </div>
                                         )}
                                         {settingsPage === 'cache' && (
                                             <SiteCacheSettings
                                                 cache={cache}
+                                                isDirty={cacheDirty}
                                                 saving={saving}
                                                 onChange={setCache}
+                                                onDiscard={() => setCache(savedCacheRef.current)}
                                                 onSave={() => void saveCache()}
                                             />
                                         )}
                                         {settingsPage === 'compression' && (
                                             <SiteCompressionSettings
                                                 compression={compression}
+                                                isDirty={compressionDirty}
                                                 saving={saving}
                                                 onChange={setCompression}
+                                                onDiscard={() =>
+                                                    setCompression(savedCompressionRef.current)
+                                                }
                                                 onSave={() => void saveCompression()}
                                             />
                                         )}
                                         {settingsPage === 'delivery' && (
                                             <SiteDeliverySettings
+                                                isDirty={deliveryDirty}
                                                 policy={delivery}
                                                 saving={saving}
                                                 onChange={setDelivery}
+                                                onDiscard={() =>
+                                                    setDelivery(savedDeliveryRef.current)
+                                                }
                                                 onSave={() => void saveDelivery()}
                                             />
                                         )}
                                         {settingsPage === 'security' && (
                                             <SiteSecuritySettings
+                                                isDirty={securityDirty}
                                                 policy={security}
                                                 saving={saving}
                                                 onChange={setSecurity}
+                                                onDiscard={() =>
+                                                    setSecurity(savedSecurityRef.current)
+                                                }
                                                 onSave={() => void saveSecurity()}
                                             />
                                         )}

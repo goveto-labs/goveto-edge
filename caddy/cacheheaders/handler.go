@@ -25,6 +25,10 @@ type Handler struct {
 	SiteID               string         `json:"site_id,omitempty"`
 	Coalesce             bool           `json:"coalesce,omitempty"`
 	CoalesceHeaders      []string       `json:"coalesce_headers,omitempty"`
+	CoalesceIgnoreQuery  bool           `json:"coalesce_ignore_query,omitempty"`
+	OverrideClientTTL    bool           `json:"override_client_ttl,omitempty"`
+	ClientTTL            int            `json:"client_ttl,omitempty"`
+	BypassCacheControl   []string       `json:"bypass_cache_control,omitempty"`
 }
 
 var ErrIncompleteResponse = errors.New("upstream response ended before its declared content length")
@@ -202,7 +206,11 @@ func (h Handler) coalescingKey(request *http.Request) string {
 	key.WriteByte('\x00')
 	key.WriteString(request.Host)
 	key.WriteByte('\x00')
-	key.WriteString(request.URL.RequestURI())
+	key.WriteString(request.URL.Path)
+	if !h.CoalesceIgnoreQuery && request.URL.RawQuery != "" {
+		key.WriteByte('?')
+		key.WriteString(request.URL.RawQuery)
+	}
 	for _, header := range h.CoalesceHeaders {
 		key.WriteByte('\x00')
 		key.WriteString(http.CanonicalHeaderKey(header))
@@ -290,20 +298,15 @@ func (w *responseWriter) WriteHeader(status int) {
 	}
 	if header.Get("Set-Cookie") != "" {
 		header.Set("Cache-Control", "private, no-store")
-	} else if cacheControlValue(header) == "" {
+	} else if matchesConfiguredCacheControl(cacheControlValue(header), w.policy.BypassCacheControl) {
+		header.Set("Cache-Control", "no-store")
+	} else {
 		ttl := w.policy.DefaultTTL
 		if configured, ok := w.policy.StatusTTL[strconv.Itoa(status)]; ok {
 			ttl = configured
 		}
 		if ttl > 0 {
-			cacheControl := "public, max-age=" + strconv.Itoa(ttl)
-			if w.policy.StaleWhileTTL > 0 {
-				cacheControl += ", stale-while-revalidate=" + strconv.Itoa(w.policy.StaleWhileTTL)
-			}
-			if w.policy.StaleIfErrorTTL > 0 {
-				cacheControl += ", stale-if-error=" + strconv.Itoa(w.policy.StaleIfErrorTTL)
-			}
-			header.Set("Cache-Control", cacheControl)
+			applyCacheTTL(header, ttl, w.policy)
 		}
 	}
 	cacheControl := cacheControlValue(header)
@@ -329,6 +332,71 @@ func (w *responseWriter) WriteHeader(status int) {
 		header.Del("Age")
 	}
 	w.ResponseWriterWrapper.WriteHeader(status)
+}
+
+func applyCacheTTL(header http.Header, edgeTTL int, policy Handler) {
+	value := cacheControlValue(header)
+	if hasCacheDirective(value, "private") || hasCacheDirective(value, "no-store") ||
+		hasCacheDirective(value, "no-cache") || hasCacheDirective(value, "must-revalidate") ||
+		hasCacheDirective(value, "proxy-revalidate") {
+		return
+	}
+	if strings.TrimSpace(value) == "" {
+		value = "public"
+	}
+	value = replaceCacheDirective(value, "s-maxage", strconv.Itoa(edgeTTL))
+	if policy.OverrideClientTTL {
+		value = replaceCacheDirective(value, "max-age", strconv.Itoa(policy.ClientTTL))
+	} else if !hasCacheDirective(value, "max-age") {
+		value = replaceCacheDirective(value, "max-age", strconv.Itoa(edgeTTL))
+	}
+	if policy.StaleWhileTTL > 0 && !hasCacheDirective(value, "stale-while-revalidate") {
+		value += ", stale-while-revalidate=" + strconv.Itoa(policy.StaleWhileTTL)
+	}
+	if policy.StaleIfErrorTTL > 0 && !hasCacheDirective(value, "stale-if-error") {
+		value += ", stale-if-error=" + strconv.Itoa(policy.StaleIfErrorTTL)
+	}
+	header.Set("Cache-Control", value)
+}
+
+func replaceCacheDirective(value, directive, replacement string) string {
+	parts := splitCacheControl(value)
+	replaced := false
+	for index, part := range parts {
+		name := strings.TrimSpace(strings.SplitN(part, "=", 2)[0])
+		if strings.EqualFold(name, directive) {
+			if !replaced {
+				parts[index] = directive + "=" + replacement
+				replaced = true
+			} else {
+				parts[index] = ""
+			}
+		}
+	}
+	if !replaced {
+		parts = append(parts, directive+"="+replacement)
+	}
+	kept := parts[:0]
+	for _, part := range parts {
+		if strings.TrimSpace(part) != "" {
+			kept = append(kept, strings.TrimSpace(part))
+		}
+	}
+	return strings.Join(kept, ", ")
+}
+
+func matchesConfiguredCacheControl(value string, configured []string) bool {
+	for _, part := range splitCacheControl(value) {
+		part = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(part), " ", ""))
+		name := strings.SplitN(part, "=", 2)[0]
+		for _, candidate := range configured {
+			candidate = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(candidate), " ", ""))
+			if part == candidate || (!strings.Contains(candidate, "=") && name == candidate) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func responseIsStale(header http.Header) bool {

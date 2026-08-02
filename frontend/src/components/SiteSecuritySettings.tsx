@@ -12,12 +12,15 @@ import { Button, Input } from '@heroui/react';
 import { Bot, Plus, Save, ShieldCheck, Trash2, Zap } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { ByteSizeInput } from '@/components/ByteSizeInput.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { FormField } from '@/components/FormField.tsx';
 import {
     type MultiAddOption,
     SearchableMultiAddField,
 } from '@/components/SearchableMultiAddField.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
+import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { ValueListAddField } from '@/components/ValueListAddField.tsx';
 import { countryOptions } from '@/data/countries.ts';
@@ -691,13 +694,17 @@ function WAFActionEditor({
 
 export function SiteSecuritySettings({
     policy,
+    isDirty,
     saving,
     onChange,
+    onDiscard,
     onSave,
 }: {
     policy: SecurityPolicy;
+    isDirty: boolean;
     saving: boolean;
     onChange: (policy: SecurityPolicy) => void;
+    onDiscard: () => void;
     onSave: () => void;
 }) {
     const valid = useMemo(
@@ -752,1028 +759,1070 @@ export function SiteSecuritySettings({
         onChange({ ...policy, waf: { ...policy.waf, exceptions } });
 
     return (
-        <ContentCard noPadding>
-            <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between'>
-                <div>
-                    <div className='flex items-center gap-2'>
-                        <ShieldCheck className='h-4 w-4 text-primary' />
-                        <h2 className='text-sm font-semibold'>Web application firewall</h2>
-                    </div>
-                    <p className='mt-1 max-w-2xl text-xs leading-5 text-muted'>
-                        Managed attack signatures, custom request expressions and CC protection run
-                        on every edge node before cache and origin handling.
-                    </p>
-                </div>
-                <ToggleSwitch
-                    isSelected={policy.waf.enabled}
-                    label='Enable WAF'
-                    onChange={(enabled) => onChange({ ...policy, waf: { ...policy.waf, enabled } })}
-                />
-            </div>
-
-            <div className='space-y-6 p-5'>
-                <div className='grid gap-4 md:grid-cols-3'>
-                    <SelectField
-                        label='Operating mode'
-                        options={[
-                            { id: 'BLOCK', label: 'Block matches' },
-                            { id: 'MONITOR', label: 'Monitor only' },
-                        ]}
-                        value={policy.waf.mode}
-                        variant='secondary'
-                        onChange={(value) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, mode: value },
-                            })
-                        }
-                    />
-                    <LabeledInput
-                        label='Default block status'
-                        max={599}
-                        min={400}
-                        type='number'
-                        value={String(policy.waf.block_status)}
-                        onChange={(value) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, block_status: Number(value) },
-                            })
-                        }
-                    />
-                    <LabeledInput
-                        label='Inspected body bytes'
-                        max={1_048_576}
-                        min={0}
-                        type='number'
-                        value={String(policy.waf.max_body_bytes)}
-                        onChange={(value) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, max_body_bytes: Number(value) },
-                            })
-                        }
-                    />
-                </div>
-
-                <div>
-                    <div className='flex flex-col gap-1.5'>
-                        <span className='text-sm font-medium'>Managed rule set</span>
-                        <div className='flex min-h-10 items-center gap-2'>
-                            <span className='font-mono text-sm'>{policy.waf.rule_set_version}</span>
-                            <span className='text-xs text-muted'>Current version</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div className='space-y-3 rounded-xl border border-border/70 p-4'>
+        <div className='space-y-8'>
+            <ContentCard noPadding>
+                <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-start sm:justify-between'>
                     <div>
-                        <h3 className='text-sm font-semibold'>Managed WAF block response</h3>
-                        <p className='mt-1 text-xs leading-5 text-muted'>
-                            Used when a managed attack preset blocks a request. The default is the
-                            embedded Goveto Edge WAF page.
+                        <div className='flex items-center gap-2'>
+                            <ShieldCheck className='h-4 w-4 text-primary' />
+                            <h2 className='text-sm font-semibold'>Web application firewall</h2>
+                        </div>
+                        <p className='mt-1 max-w-2xl text-xs leading-5 text-muted'>
+                            Managed attack signatures, custom request expressions and CC protection
+                            run on every edge node before cache and origin handling.
                         </p>
                     </div>
-                    <ResponseEditor
-                        response={policy.waf.block_response}
-                        onChange={(blockResponse) =>
-                            onChange({
-                                ...policy,
-                                waf: { ...policy.waf, block_response: blockResponse },
-                            })
+                    <ToggleSwitch
+                        isSelected={policy.waf.enabled}
+                        label='Enable WAF'
+                        onChange={(enabled) =>
+                            onChange({ ...policy, waf: { ...policy.waf, enabled } })
                         }
                     />
                 </div>
 
-                <div className='space-y-3'>
-                    <div>
-                        <h3 className='text-sm font-semibold'>Managed presets</h3>
-                        <p className='mt-1 text-xs leading-5 text-muted'>
-                            Enable maintained signatures for common web attacks and automated
-                            scanners.
-                        </p>
-                    </div>
-                    <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-3'>
-                        {presets.map(([id, label]) => {
-                            const selected = policy.waf.presets.includes(id);
-                            return (
-                                <div
-                                    className='flex items-center justify-between gap-3 rounded-xl border border-border/70 px-3.5 py-3 text-sm'
-                                    key={id}
-                                >
-                                    <span>{label}</span>
-                                    <ToggleSwitch
-                                        isSelected={selected}
-                                        label={label}
-                                        onChange={(enabled) =>
-                                            onChange({
-                                                ...policy,
-                                                waf: {
-                                                    ...policy.waf,
-                                                    presets: enabled
-                                                        ? [...policy.waf.presets, id]
-                                                        : policy.waf.presets.filter(
-                                                              (preset) => preset !== id
-                                                          ),
-                                                },
-                                            })
-                                        }
-                                    />
-                                </div>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                <div className='space-y-3'>
-                    <div className='flex flex-wrap items-start justify-between gap-3'>
-                        <div>
-                            <h3 className='text-sm font-semibold'>Custom rule groups</h3>
-                            <p className='mt-1 text-xs leading-5 text-muted'>
-                                Rules inside a group use AND or OR. Groups are evaluated in order.
-                            </p>
-                        </div>
-                        <Button
-                            variant='secondary'
-                            onPress={() => updateWAFGroups([...policy.waf.groups, newWAFGroup()])}
-                        >
-                            <Plus className='mr-1.5 h-4 w-4' /> Add WAF group
-                        </Button>
-                    </div>
-                    {policy.waf.groups.length === 0 && (
-                        <div className='rounded-xl border border-dashed border-border px-5 py-8 text-center text-sm text-muted'>
-                            No custom WAF groups. Managed presets can still protect the site.
-                        </div>
-                    )}
-                    {policy.waf.groups.map((group, groupIndex) => (
-                        <div
-                            className='overflow-hidden rounded-2xl border border-border/70'
-                            key={group.id}
-                        >
-                            <div className='flex flex-col gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3 sm:flex-row sm:items-center'>
-                                <Input
-                                    aria-label='WAF group name'
-                                    className='min-w-0 flex-1'
-                                    value={group.name}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        updateWAFGroup(groupIndex, {
-                                            ...group,
-                                            name: event.target.value,
-                                        })
-                                    }
-                                />
-                                <ToggleSwitch
-                                    isSelected={group.enabled}
-                                    label='Enable group'
-                                    onChange={(enabled) =>
-                                        updateWAFGroup(groupIndex, { ...group, enabled })
-                                    }
-                                />
-                                <Input
-                                    aria-label='Group rollout percentage'
-                                    className='w-24'
-                                    max={100}
-                                    min={1}
-                                    type='number'
-                                    value={String(group.rollout_percentage)}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        updateWAFGroup(groupIndex, {
-                                            ...group,
-                                            rollout_percentage: Number(event.target.value),
-                                        })
-                                    }
-                                />
-                                <Button
-                                    isIconOnly
-                                    aria-label='Remove WAF group'
-                                    variant='ghost'
-                                    onPress={() =>
-                                        updateWAFGroups(
-                                            policy.waf.groups.filter(
-                                                (_, index) => index !== groupIndex
-                                            )
-                                        )
-                                    }
-                                >
-                                    <Trash2 className='h-4 w-4 text-danger' />
-                                </Button>
-                            </div>
-                            <div className='grid 2xl:grid-cols-[minmax(0,1.12fr)_minmax(340px,.88fr)]'>
-                                <section className='min-w-0 border-b border-border 2xl:border-r 2xl:border-b-0'>
-                                    <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-3'>
-                                        <div>
-                                            <p className='text-sm font-semibold'>1. Match rules</p>
-                                            <p className='mt-0.5 text-xs text-muted'>
-                                                Define which requests enter this group.
-                                            </p>
-                                        </div>
-                                        <SelectField
-                                            ariaLabel='WAF group operator'
-                                            className='min-w-40'
-                                            options={[
-                                                { id: 'AND', label: 'Match all rules' },
-                                                { id: 'OR', label: 'Match any rule' },
-                                            ]}
-                                            value={group.operator}
-                                            variant='secondary'
-                                            onChange={(value) =>
-                                                updateWAFGroup(groupIndex, {
-                                                    ...group,
-                                                    operator: value,
-                                                })
-                                            }
-                                        />
-                                    </div>
-                                    <div className='waf-rule-list border-t border-border'>
-                                        {group.rules.map((rule, ruleIndex) => (
-                                            <RuleRow
-                                                key={rule.id}
-                                                removeDisabled={group.rules.length === 1}
-                                                rule={rule}
-                                                onChange={(nextRule) =>
-                                                    updateWAFGroup(groupIndex, {
-                                                        ...group,
-                                                        rules: group.rules.map((current, index) =>
-                                                            index === ruleIndex ? nextRule : current
-                                                        ),
-                                                    })
-                                                }
-                                                onRemove={() =>
-                                                    updateWAFGroup(groupIndex, {
-                                                        ...group,
-                                                        rules: group.rules.filter(
-                                                            (_, index) => index !== ruleIndex
-                                                        ),
-                                                    })
-                                                }
-                                            />
-                                        ))}
-                                    </div>
-                                    <div className='border-t border-border px-4 py-2.5'>
-                                        <Button
-                                            size='sm'
-                                            variant='ghost'
-                                            onPress={() =>
-                                                updateWAFGroup(groupIndex, {
-                                                    ...group,
-                                                    rules: [...group.rules, newRule()],
-                                                })
-                                            }
-                                        >
-                                            <Plus className='mr-1.5 h-3.5 w-3.5' /> Add rule
-                                        </Button>
-                                    </div>
-                                </section>
-                                <section className='min-w-0 bg-surface-secondary/10 p-4'>
-                                    <div className='mb-3'>
-                                        <p className='text-sm font-semibold'>2. Execute action</p>
-                                        <p className='mt-0.5 text-xs text-muted'>
-                                            Choose exactly what the edge does after a match.
-                                        </p>
-                                    </div>
-                                    <WAFActionEditor
-                                        defaultStatus={policy.waf.block_status}
-                                        group={group}
-                                        onChange={(nextGroup) =>
-                                            updateWAFGroup(groupIndex, nextGroup)
-                                        }
-                                    />
-                                </section>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <div className='space-y-3 border-t border-border pt-6'>
-                    <div className='flex flex-wrap items-start justify-between gap-3'>
-                        <div>
-                            <h3 className='text-sm font-semibold'>Rule exceptions</h3>
-                            <p className='mt-1 text-xs leading-5 text-muted'>
-                                Skip named managed or custom rules for narrowly matched requests.
-                            </p>
-                        </div>
-                        <Button
-                            variant='secondary'
-                            onPress={() =>
-                                updateExceptions([...policy.waf.exceptions, newWAFException()])
-                            }
-                        >
-                            <Plus className='mr-1.5 h-4 w-4' /> Add exception
-                        </Button>
-                    </div>
-                    {policy.waf.exceptions.length === 0 && (
-                        <div className='rounded-xl border border-dashed border-border px-5 py-6 text-center text-sm text-muted'>
-                            No rule exceptions are configured.
-                        </div>
-                    )}
-                    {policy.waf.exceptions.map((exception, exceptionIndex) => (
-                        <div
-                            className='overflow-hidden rounded-xl border border-border/70'
-                            key={exception.id}
-                        >
-                            <div className='flex flex-wrap items-center gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3'>
-                                <Input
-                                    aria-label='Exception ID'
-                                    className='min-w-48 flex-1'
-                                    value={exception.id}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        updateExceptions(
-                                            policy.waf.exceptions.map((item, index) =>
-                                                index === exceptionIndex
-                                                    ? { ...item, id: event.target.value }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <ToggleSwitch
-                                    isSelected={exception.enabled}
-                                    label='Enable exception'
-                                    onChange={(enabled) =>
-                                        updateExceptions(
-                                            policy.waf.exceptions.map((item, index) =>
-                                                index === exceptionIndex
-                                                    ? { ...item, enabled }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <Button
-                                    isIconOnly
-                                    aria-label='Remove exception'
-                                    variant='ghost'
-                                    onPress={() =>
-                                        updateExceptions(
-                                            policy.waf.exceptions.filter(
-                                                (_, index) => index !== exceptionIndex
-                                            )
-                                        )
-                                    }
-                                >
-                                    <Trash2 className='h-4 w-4 text-danger' />
-                                </Button>
-                            </div>
-                            <div className='space-y-4 p-4'>
-                                <CSVInput
-                                    label='Rule IDs'
-                                    placeholder='SQL_INJECTION, custom-rule-id'
-                                    values={exception.rule_ids}
-                                    onChange={(ruleIds) =>
-                                        updateExceptions(
-                                            policy.waf.exceptions.map((item, index) =>
-                                                index === exceptionIndex
-                                                    ? { ...item, rule_ids: ruleIds }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <ConditionGroups
-                                    groupOperator={exception.conditions.group_operator}
-                                    groups={exception.conditions.groups}
-                                    onChange={(groups, groupOperator) =>
-                                        updateExceptions(
-                                            policy.waf.exceptions.map((item, index) =>
-                                                index === exceptionIndex
-                                                    ? {
-                                                          ...item,
-                                                          conditions: {
-                                                              groups,
-                                                              group_operator: groupOperator,
-                                                          },
-                                                      }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <div className='space-y-5 border-t border-border pt-6'>
-                    <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                        <div>
-                            <h3 className='text-sm font-semibold'>Access control</h3>
-                            <p className='mt-1 text-xs leading-5 text-muted'>
-                                Enforce network, location, method and hotlink policies before WAF
-                                evaluation.
-                            </p>
-                        </div>
-                        <ToggleSwitch
-                            isSelected={policy.access.enabled}
-                            label='Enable access control'
-                            onChange={(enabled) =>
-                                onChange({ ...policy, access: { ...policy.access, enabled } })
-                            }
-                        />
-                    </div>
-
+                <div className='space-y-6 p-5'>
                     <div className='grid gap-4 md:grid-cols-3'>
                         <SelectField
                             label='Operating mode'
                             options={[
-                                { id: 'BLOCK', label: 'Block violations' },
+                                { id: 'BLOCK', label: 'Block matches' },
                                 { id: 'MONITOR', label: 'Monitor only' },
                             ]}
-                            value={policy.access.mode}
+                            value={policy.waf.mode}
                             variant='secondary'
                             onChange={(value) =>
                                 onChange({
                                     ...policy,
-                                    access: { ...policy.access, mode: value },
+                                    waf: { ...policy.waf, mode: value },
                                 })
                             }
                         />
                         <LabeledInput
-                            label='Denied response status'
+                            label='Default block status'
                             max={599}
                             min={400}
                             type='number'
-                            value={String(policy.access.status_code)}
+                            value={String(policy.waf.block_status)}
                             onChange={(value) =>
                                 onChange({
                                     ...policy,
-                                    access: { ...policy.access, status_code: Number(value) },
+                                    waf: { ...policy.waf, block_status: Number(value) },
                                 })
                             }
                         />
-                        <ValueListAddField
-                            addLabel='Add proxy'
-                            dialogTitle='Add trusted proxy'
-                            emptyLabel='No trusted proxies'
-                            label='Trusted proxy CIDRs'
-                            placeholder='10.0.0.0/8'
-                            values={policy.access.trusted_proxies}
-                            onChange={(trustedProxies) =>
-                                onChange({
-                                    ...policy,
-                                    access: {
-                                        ...policy.access,
-                                        trusted_proxies: trustedProxies,
-                                    },
-                                })
+                        <FormField
+                            error={
+                                policy.waf.max_body_bytes >= 0 &&
+                                policy.waf.max_body_bytes <= 1_048_576
+                                    ? undefined
+                                    : 'Choose a size from 0 B to 1 MB.'
                             }
-                        />
+                            htmlFor='waf-max-body-size'
+                            label='Inspected body size'
+                        >
+                            <ByteSizeInput
+                                id='waf-max-body-size'
+                                bytes={policy.waf.max_body_bytes}
+                                defaultUnit='KB'
+                                minimumBytes={0}
+                                maximumBytes={1_048_576}
+                                onChange={(max_body_bytes) =>
+                                    onChange({
+                                        ...policy,
+                                        waf: { ...policy.waf, max_body_bytes },
+                                    })
+                                }
+                            />
+                        </FormField>
                     </div>
 
-                    <div className='grid gap-4 md:grid-cols-2'>
-                        <ValueListAddField
-                            addLabel='Add address'
-                            dialogTitle='Add allowed IP or CIDR'
-                            emptyLabel='No allowed addresses'
-                            label='IP/CIDR allowlist'
-                            placeholder='192.0.2.10 or 2001:db8::/32'
-                            values={policy.access.ip_allowlist}
-                            onChange={(ipAllowlist) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, ip_allowlist: ipAllowlist },
-                                })
-                            }
-                        />
-                        <ValueListAddField
-                            addLabel='Add address'
-                            dialogTitle='Add blocked IP or CIDR'
-                            emptyLabel='No blocked addresses'
-                            label='IP/CIDR blocklist'
-                            placeholder='198.51.100.0/24'
-                            values={policy.access.ip_blocklist}
-                            onChange={(ipBlocklist) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, ip_blocklist: ipBlocklist },
-                                })
-                            }
-                        />
-                        <div className='space-y-1.5'>
-                            <div className='text-sm font-medium'>Allowed countries</div>
-                            <SearchableMultiAddField
-                                addLabel='Add countries'
-                                dialogSubtitle='Search ISO countries and select those allowed to access this site.'
-                                dialogTitle='Select allowed countries'
-                                emptyLabel='No country allowlist'
-                                itemLabel='country'
-                                options={includeSelectedOptions(
-                                    countryOptions,
-                                    policy.access.allowed_countries,
-                                    'Existing country code'
-                                )}
-                                searchPlaceholder='Search by country name or code'
-                                selected={new Set(policy.access.allowed_countries)}
-                                onChange={(allowedCountries) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            allowed_countries: Array.from(allowedCountries),
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                        <div className='space-y-1.5'>
-                            <div className='text-sm font-medium'>Blocked countries</div>
-                            <SearchableMultiAddField
-                                addLabel='Add countries'
-                                dialogSubtitle='Search ISO countries and select those blocked from this site.'
-                                dialogTitle='Select blocked countries'
-                                emptyLabel='No blocked countries'
-                                itemLabel='country'
-                                options={includeSelectedOptions(
-                                    countryOptions,
-                                    policy.access.blocked_countries,
-                                    'Existing country code'
-                                )}
-                                searchPlaceholder='Search by country name or code'
-                                selected={new Set(policy.access.blocked_countries)}
-                                onChange={(blockedCountries) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            blocked_countries: Array.from(blockedCountries),
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                        <ValueListAddField
-                            addLabel='Add region'
-                            dialogTitle='Add allowed region'
-                            emptyLabel='No region allowlist'
-                            label='Allowed regions'
-                            hint='Use an ISO 3166-2 subdivision code.'
-                            placeholder='US-CA'
-                            values={policy.access.allowed_regions}
-                            normalize={(value) => value.trim().toUpperCase()}
-                            validate={(value) =>
-                                /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
-                                    ? ''
-                                    : 'Enter an ISO 3166-2 code such as US-CA.'
-                            }
-                            onChange={(allowedRegions) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, allowed_regions: allowedRegions },
-                                })
-                            }
-                        />
-                        <ValueListAddField
-                            addLabel='Add region'
-                            dialogTitle='Add blocked region'
-                            emptyLabel='No blocked regions'
-                            label='Blocked regions'
-                            hint='Use an ISO 3166-2 subdivision code.'
-                            placeholder='US-NY'
-                            values={policy.access.blocked_regions}
-                            normalize={(value) => value.trim().toUpperCase()}
-                            validate={(value) =>
-                                /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
-                                    ? ''
-                                    : 'Enter an ISO 3166-2 code such as US-NY.'
-                            }
-                            onChange={(blockedRegions) =>
-                                onChange({
-                                    ...policy,
-                                    access: { ...policy.access, blocked_regions: blockedRegions },
-                                })
-                            }
-                        />
-                    </div>
-
-                    <div className='grid gap-4 md:grid-cols-2'>
-                        <div className='space-y-1.5'>
-                            <div className='text-sm font-medium'>Allowed HTTP methods</div>
-                            <SearchableMultiAddField
-                                addLabel='Add methods'
-                                dialogSubtitle='Select the HTTP methods allowed by this access policy.'
-                                dialogTitle='Select allowed HTTP methods'
-                                emptyLabel='All methods allowed by default'
-                                itemLabel='method'
-                                options={includeSelectedOptions(
-                                    httpMethodOptions,
-                                    policy.access.allowed_methods,
-                                    'Custom HTTP method'
-                                )}
-                                searchPlaceholder='Search HTTP methods'
-                                selected={new Set(policy.access.allowed_methods)}
-                                onChange={(allowedMethods) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            allowed_methods: Array.from(allowedMethods),
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                        <div className='space-y-1.5'>
-                            <div className='text-sm font-medium'>Blocked HTTP methods</div>
-                            <SearchableMultiAddField
-                                addLabel='Add methods'
-                                dialogSubtitle='Select the HTTP methods blocked by this access policy.'
-                                dialogTitle='Select blocked HTTP methods'
-                                emptyLabel='No blocked methods'
-                                itemLabel='method'
-                                options={includeSelectedOptions(
-                                    httpMethodOptions,
-                                    policy.access.blocked_methods,
-                                    'Custom HTTP method'
-                                )}
-                                searchPlaceholder='Search HTTP methods'
-                                selected={new Set(policy.access.blocked_methods)}
-                                onChange={(blockedMethods) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            blocked_methods: Array.from(blockedMethods),
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                    </div>
-
-                    <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
-                        <ValueListAddField
-                            addLabel='Add host'
-                            dialogTitle='Add allowed Referer host'
-                            emptyLabel='No Referer restrictions'
-                            label='Allowed Referer hosts'
-                            placeholder='example.com'
-                            values={policy.access.allowed_referer_hosts}
-                            normalize={(value) => value.trim().toLowerCase().replace(/\.$/, '')}
-                            validate={(value) =>
-                                /[/:?#@\s]/.test(value)
-                                    ? 'Enter a hostname without a protocol, port or path.'
-                                    : ''
-                            }
-                            onChange={(allowedRefererHosts) =>
-                                onChange({
-                                    ...policy,
-                                    access: {
-                                        ...policy.access,
-                                        allowed_referer_hosts: allowedRefererHosts,
-                                    },
-                                })
-                            }
-                        />
-                        <div className='flex items-end pb-1'>
-                            <ToggleSwitch
-                                isSelected={policy.access.allow_empty_referer}
-                                label='Allow empty Referer'
-                                onChange={(allowEmptyReferer) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            allow_empty_referer: allowEmptyReferer,
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                    </div>
-
-                    <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-[auto_minmax(220px,1fr)]'>
-                        <div className='flex items-end pb-1'>
-                            <ToggleSwitch
-                                isSelected={policy.access.temporary_blocks}
-                                label='Enforce temporary blocks'
-                                onChange={(temporaryBlocks) =>
-                                    onChange({
-                                        ...policy,
-                                        access: {
-                                            ...policy.access,
-                                            temporary_blocks: temporaryBlocks,
-                                        },
-                                    })
-                                }
-                            />
-                        </div>
-                        <SelectField
-                            label='Redis failure policy'
-                            options={[
-                                { id: 'OPEN', label: 'Fail open' },
-                                { id: 'CLOSED', label: 'Fail closed' },
-                            ]}
-                            value={policy.access.temporary_block_failure}
-                            variant='secondary'
-                            onChange={(value) =>
-                                onChange({
-                                    ...policy,
-                                    access: {
-                                        ...policy.access,
-                                        temporary_block_failure: value,
-                                    },
-                                })
-                            }
-                        />
-                    </div>
-                </div>
-
-                <div className='space-y-4 border-t border-border pt-6'>
-                    <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                        <div>
-                            <div className='flex items-center gap-2'>
-                                <Zap className='h-4 w-4 text-primary' />
-                                <h3 className='text-sm font-semibold'>
-                                    CC and request rate protection
-                                </h3>
+                    <div>
+                        <div className='flex flex-col gap-1.5'>
+                            <span className='text-sm font-medium'>Managed rule set</span>
+                            <div className='flex min-h-10 items-center gap-2'>
+                                <span className='font-mono text-sm'>
+                                    {policy.waf.rule_set_version}
+                                </span>
+                                <span className='text-xs text-muted'>Current version</span>
                             </div>
+                        </div>
+                    </div>
+
+                    <div className='space-y-3 rounded-xl border border-border/70 p-4'>
+                        <div>
+                            <h3 className='text-sm font-semibold'>Managed WAF block response</h3>
                             <p className='mt-1 text-xs leading-5 text-muted'>
-                                Apply fixed-window limits by client IP, path, Header, Cookie or the
-                                entire site.
+                                Used when a managed attack preset blocks a request. The default is
+                                the embedded Goveto Edge WAF page.
                             </p>
                         </div>
-                        <ToggleSwitch
-                            isSelected={policy.rate_limit.enabled}
-                            label='Enable CC protection'
-                            onChange={(enabled) =>
+                        <ResponseEditor
+                            response={policy.waf.block_response}
+                            onChange={(blockResponse) =>
                                 onChange({
                                     ...policy,
-                                    rate_limit: { ...policy.rate_limit, enabled },
+                                    waf: { ...policy.waf, block_response: blockResponse },
                                 })
                             }
                         />
                     </div>
-                    <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-2'>
-                        <SelectField
-                            label='Counter backend'
-                            options={[
-                                { id: 'LOCAL', label: 'Local node memory' },
-                                { id: 'REDIS', label: 'Distributed Redis' },
-                            ]}
-                            value={policy.rate_limit.backend}
-                            variant='secondary'
-                            onChange={(value) =>
-                                onChange({
-                                    ...policy,
-                                    rate_limit: {
-                                        ...policy.rate_limit,
-                                        backend: value,
-                                    },
-                                })
-                            }
-                        />
-                        <SelectField
-                            label='Redis failure policy'
-                            options={[
-                                { id: 'OPEN', label: 'Fail open' },
-                                { id: 'CLOSED', label: 'Fail closed' },
-                                { id: 'LOCAL', label: 'Fall back to local counters' },
-                            ]}
-                            value={policy.rate_limit.failure_mode}
-                            variant='secondary'
-                            onChange={(value) =>
-                                onChange({
-                                    ...policy,
-                                    rate_limit: {
-                                        ...policy.rate_limit,
-                                        failure_mode: value,
-                                    },
-                                })
-                            }
-                        />
+
+                    <div className='space-y-3'>
+                        <div>
+                            <h3 className='text-sm font-semibold'>Managed presets</h3>
+                            <p className='mt-1 text-xs leading-5 text-muted'>
+                                Enable maintained signatures for common web attacks and automated
+                                scanners.
+                            </p>
+                        </div>
+                        <div className='grid gap-2 sm:grid-cols-2 xl:grid-cols-3'>
+                            {presets.map(([id, label]) => {
+                                const selected = policy.waf.presets.includes(id);
+                                return (
+                                    <div
+                                        className='flex items-center justify-between gap-3 rounded-xl border border-border/70 px-3.5 py-3 text-sm'
+                                        key={id}
+                                    >
+                                        <span>{label}</span>
+                                        <ToggleSwitch
+                                            isSelected={selected}
+                                            label={label}
+                                            onChange={(enabled) =>
+                                                onChange({
+                                                    ...policy,
+                                                    waf: {
+                                                        ...policy.waf,
+                                                        presets: enabled
+                                                            ? [...policy.waf.presets, id]
+                                                            : policy.waf.presets.filter(
+                                                                  (preset) => preset !== id
+                                                              ),
+                                                    },
+                                                })
+                                            }
+                                        />
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
-                    {policy.rate_limit.rules.map((rule, ruleIndex) => (
-                        <div
-                            className='overflow-hidden rounded-xl border border-border/70'
-                            key={rule.id}
-                        >
-                            <div className='flex flex-wrap items-center justify-between gap-3 bg-surface-secondary/25 px-4 py-3'>
-                                <Input
-                                    aria-label='Rate-limit rule name'
-                                    className='min-w-56 flex-1'
-                                    value={rule.name}
-                                    variant='secondary'
-                                    onChange={(event) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? { ...item, name: event.target.value }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <ToggleSwitch
-                                    isSelected={rule.enabled}
-                                    label='Enable rate-limit rule'
-                                    onChange={(enabled) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex ? { ...item, enabled } : item
-                                            )
-                                        )
-                                    }
-                                />
-                                <Button
-                                    isIconOnly
-                                    aria-label='Remove rate-limit rule'
-                                    variant='ghost'
-                                    onPress={() =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.filter(
-                                                (_, index) => index !== ruleIndex
-                                            )
-                                        )
-                                    }
-                                >
-                                    <Trash2 className='h-4 w-4 text-danger' />
-                                </Button>
+
+                    <div className='space-y-3'>
+                        <div className='flex flex-wrap items-start justify-between gap-3'>
+                            <div>
+                                <h3 className='text-sm font-semibold'>Custom rule groups</h3>
+                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                    Rules inside a group use AND or OR. Groups are evaluated in
+                                    order.
+                                </p>
                             </div>
-                            <div className='grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4'>
-                                <SelectField
-                                    label='Counter key'
-                                    options={[
-                                        { id: 'CLIENT_IP', label: 'Client IP' },
-                                        { id: 'CLIENT_IP_PATH', label: 'Client IP and path' },
-                                        { id: 'PATH', label: 'Path' },
-                                        { id: 'HEADER', label: 'Header value' },
-                                        { id: 'COOKIE', label: 'Cookie value' },
-                                        { id: 'GLOBAL', label: 'Entire site' },
-                                    ]}
-                                    value={rule.key}
-                                    variant='secondary'
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          key: value,
-                                                          key_name: ['HEADER', 'COOKIE'].includes(
-                                                              value
-                                                          )
-                                                              ? item.key_name
-                                                              : undefined,
-                                                      }
-                                                    : item
-                                            )
-                                        )
-                                    }
-                                />
-                                {['HEADER', 'COOKIE'].includes(rule.key) && (
-                                    <LabeledInput
-                                        label={
-                                            rule.key === 'HEADER' ? 'Header name' : 'Cookie name'
+                            <Button
+                                variant='secondary'
+                                onPress={() =>
+                                    updateWAFGroups([...policy.waf.groups, newWAFGroup()])
+                                }
+                            >
+                                <Plus className='mr-1.5 h-4 w-4' /> Add WAF group
+                            </Button>
+                        </div>
+                        {policy.waf.groups.length === 0 && (
+                            <div className='rounded-xl border border-dashed border-border px-5 py-8 text-center text-sm text-muted'>
+                                No custom WAF groups. Managed presets can still protect the site.
+                            </div>
+                        )}
+                        {policy.waf.groups.map((group, groupIndex) => (
+                            <div
+                                className='overflow-hidden rounded-2xl border border-border/70'
+                                key={group.id}
+                            >
+                                <div className='flex flex-col gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3 sm:flex-row sm:items-center'>
+                                    <Input
+                                        aria-label='WAF group name'
+                                        className='min-w-0 flex-1'
+                                        value={group.name}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            updateWAFGroup(groupIndex, {
+                                                ...group,
+                                                name: event.target.value,
+                                            })
                                         }
-                                        value={rule.key_name ?? ''}
-                                        onChange={(value) =>
-                                            updateRateRules(
-                                                policy.rate_limit.rules.map((item, index) =>
-                                                    index === ruleIndex
-                                                        ? { ...item, key_name: value }
+                                    />
+                                    <ToggleSwitch
+                                        isSelected={group.enabled}
+                                        label='Enable group'
+                                        onChange={(enabled) =>
+                                            updateWAFGroup(groupIndex, { ...group, enabled })
+                                        }
+                                    />
+                                    <Input
+                                        aria-label='Group rollout percentage'
+                                        className='w-24'
+                                        max={100}
+                                        min={1}
+                                        type='number'
+                                        value={String(group.rollout_percentage)}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            updateWAFGroup(groupIndex, {
+                                                ...group,
+                                                rollout_percentage: Number(event.target.value),
+                                            })
+                                        }
+                                    />
+                                    <Button
+                                        isIconOnly
+                                        aria-label='Remove WAF group'
+                                        variant='ghost'
+                                        onPress={() =>
+                                            updateWAFGroups(
+                                                policy.waf.groups.filter(
+                                                    (_, index) => index !== groupIndex
+                                                )
+                                            )
+                                        }
+                                    >
+                                        <Trash2 className='h-4 w-4 text-danger' />
+                                    </Button>
+                                </div>
+                                <div className='grid 2xl:grid-cols-[minmax(0,1.12fr)_minmax(340px,.88fr)]'>
+                                    <section className='min-w-0 border-b border-border 2xl:border-r 2xl:border-b-0'>
+                                        <div className='flex flex-wrap items-center justify-between gap-3 px-4 py-3'>
+                                            <div>
+                                                <p className='text-sm font-semibold'>
+                                                    1. Match rules
+                                                </p>
+                                                <p className='mt-0.5 text-xs text-muted'>
+                                                    Define which requests enter this group.
+                                                </p>
+                                            </div>
+                                            <SelectField
+                                                ariaLabel='WAF group operator'
+                                                className='min-w-40'
+                                                options={[
+                                                    { id: 'AND', label: 'Match all rules' },
+                                                    { id: 'OR', label: 'Match any rule' },
+                                                ]}
+                                                value={group.operator}
+                                                variant='secondary'
+                                                onChange={(value) =>
+                                                    updateWAFGroup(groupIndex, {
+                                                        ...group,
+                                                        operator: value,
+                                                    })
+                                                }
+                                            />
+                                        </div>
+                                        <div className='waf-rule-list border-t border-border'>
+                                            {group.rules.map((rule, ruleIndex) => (
+                                                <RuleRow
+                                                    key={rule.id}
+                                                    removeDisabled={group.rules.length === 1}
+                                                    rule={rule}
+                                                    onChange={(nextRule) =>
+                                                        updateWAFGroup(groupIndex, {
+                                                            ...group,
+                                                            rules: group.rules.map(
+                                                                (current, index) =>
+                                                                    index === ruleIndex
+                                                                        ? nextRule
+                                                                        : current
+                                                            ),
+                                                        })
+                                                    }
+                                                    onRemove={() =>
+                                                        updateWAFGroup(groupIndex, {
+                                                            ...group,
+                                                            rules: group.rules.filter(
+                                                                (_, index) => index !== ruleIndex
+                                                            ),
+                                                        })
+                                                    }
+                                                />
+                                            ))}
+                                        </div>
+                                        <div className='border-t border-border px-4 py-2.5'>
+                                            <Button
+                                                size='sm'
+                                                variant='ghost'
+                                                onPress={() =>
+                                                    updateWAFGroup(groupIndex, {
+                                                        ...group,
+                                                        rules: [...group.rules, newRule()],
+                                                    })
+                                                }
+                                            >
+                                                <Plus className='mr-1.5 h-3.5 w-3.5' /> Add rule
+                                            </Button>
+                                        </div>
+                                    </section>
+                                    <section className='min-w-0 bg-surface-secondary/10 p-4'>
+                                        <div className='mb-3'>
+                                            <p className='text-sm font-semibold'>
+                                                2. Execute action
+                                            </p>
+                                            <p className='mt-0.5 text-xs text-muted'>
+                                                Choose exactly what the edge does after a match.
+                                            </p>
+                                        </div>
+                                        <WAFActionEditor
+                                            defaultStatus={policy.waf.block_status}
+                                            group={group}
+                                            onChange={(nextGroup) =>
+                                                updateWAFGroup(groupIndex, nextGroup)
+                                            }
+                                        />
+                                    </section>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className='space-y-3 border-t border-border pt-6'>
+                        <div className='flex flex-wrap items-start justify-between gap-3'>
+                            <div>
+                                <h3 className='text-sm font-semibold'>Rule exceptions</h3>
+                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                    Skip named managed or custom rules for narrowly matched
+                                    requests.
+                                </p>
+                            </div>
+                            <Button
+                                variant='secondary'
+                                onPress={() =>
+                                    updateExceptions([...policy.waf.exceptions, newWAFException()])
+                                }
+                            >
+                                <Plus className='mr-1.5 h-4 w-4' /> Add exception
+                            </Button>
+                        </div>
+                        {policy.waf.exceptions.length === 0 && (
+                            <div className='rounded-xl border border-dashed border-border px-5 py-6 text-center text-sm text-muted'>
+                                No rule exceptions are configured.
+                            </div>
+                        )}
+                        {policy.waf.exceptions.map((exception, exceptionIndex) => (
+                            <div
+                                className='overflow-hidden rounded-xl border border-border/70'
+                                key={exception.id}
+                            >
+                                <div className='flex flex-wrap items-center gap-3 border-b border-border bg-surface-secondary/25 px-4 py-3'>
+                                    <Input
+                                        aria-label='Exception ID'
+                                        className='min-w-48 flex-1'
+                                        value={exception.id}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            updateExceptions(
+                                                policy.waf.exceptions.map((item, index) =>
+                                                    index === exceptionIndex
+                                                        ? { ...item, id: event.target.value }
                                                         : item
                                                 )
                                             )
                                         }
                                     />
-                                )}
-                                <LabeledInput
-                                    label='Requests'
-                                    min={1}
-                                    type='number'
-                                    value={String(rule.requests)}
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          requests: Number(value),
-                                                      }
-                                                    : item
+                                    <ToggleSwitch
+                                        isSelected={exception.enabled}
+                                        label='Enable exception'
+                                        onChange={(enabled) =>
+                                            updateExceptions(
+                                                policy.waf.exceptions.map((item, index) =>
+                                                    index === exceptionIndex
+                                                        ? { ...item, enabled }
+                                                        : item
+                                                )
                                             )
-                                        )
-                                    }
-                                />
-                                <LabeledInput
-                                    label='Window seconds'
-                                    max={3600}
-                                    min={1}
-                                    type='number'
-                                    value={String(rule.window_seconds)}
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          window_seconds: Number(value),
-                                                      }
-                                                    : item
+                                        }
+                                    />
+                                    <Button
+                                        isIconOnly
+                                        aria-label='Remove exception'
+                                        variant='ghost'
+                                        onPress={() =>
+                                            updateExceptions(
+                                                policy.waf.exceptions.filter(
+                                                    (_, index) => index !== exceptionIndex
+                                                )
                                             )
-                                        )
-                                    }
-                                />
-                                <LabeledInput
-                                    label='Burst allowance'
-                                    min={0}
-                                    type='number'
-                                    value={String(rule.burst)}
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? { ...item, burst: Number(value) }
-                                                    : item
+                                        }
+                                    >
+                                        <Trash2 className='h-4 w-4 text-danger' />
+                                    </Button>
+                                </div>
+                                <div className='space-y-4 p-4'>
+                                    <CSVInput
+                                        label='Rule IDs'
+                                        placeholder='SQL_INJECTION, custom-rule-id'
+                                        values={exception.rule_ids}
+                                        onChange={(ruleIds) =>
+                                            updateExceptions(
+                                                policy.waf.exceptions.map((item, index) =>
+                                                    index === exceptionIndex
+                                                        ? { ...item, rule_ids: ruleIds }
+                                                        : item
+                                                )
                                             )
-                                        )
-                                    }
-                                />
-                                <LabeledInput
-                                    label='Ban seconds'
-                                    min={0}
-                                    type='number'
-                                    value={String(rule.ban_seconds)}
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          ban_seconds: Number(value),
-                                                      }
-                                                    : item
+                                        }
+                                    />
+                                    <ConditionGroups
+                                        groupOperator={exception.conditions.group_operator}
+                                        groups={exception.conditions.groups}
+                                        onChange={(groups, groupOperator) =>
+                                            updateExceptions(
+                                                policy.waf.exceptions.map((item, index) =>
+                                                    index === exceptionIndex
+                                                        ? {
+                                                              ...item,
+                                                              conditions: {
+                                                                  groups,
+                                                                  group_operator: groupOperator,
+                                                              },
+                                                          }
+                                                        : item
+                                                )
                                             )
-                                        )
-                                    }
-                                />
-                                <LabeledInput
-                                    label='Response status'
-                                    max={599}
-                                    min={400}
-                                    type='number'
-                                    value={String(rule.status_code)}
-                                    onChange={(value) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          status_code: Number(value),
-                                                      }
-                                                    : item
-                                            )
-                                        )
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className='space-y-5 border-t border-border pt-6'>
+                        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                            <div>
+                                <h3 className='text-sm font-semibold'>Access control</h3>
+                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                    Enforce network, location, method and hotlink policies before
+                                    WAF evaluation.
+                                </p>
+                            </div>
+                            <ToggleSwitch
+                                isSelected={policy.access.enabled}
+                                label='Enable access control'
+                                onChange={(enabled) =>
+                                    onChange({ ...policy, access: { ...policy.access, enabled } })
+                                }
+                            />
+                        </div>
+
+                        <div className='grid gap-4 md:grid-cols-3'>
+                            <SelectField
+                                label='Operating mode'
+                                options={[
+                                    { id: 'BLOCK', label: 'Block violations' },
+                                    { id: 'MONITOR', label: 'Monitor only' },
+                                ]}
+                                value={policy.access.mode}
+                                variant='secondary'
+                                onChange={(value) =>
+                                    onChange({
+                                        ...policy,
+                                        access: { ...policy.access, mode: value },
+                                    })
+                                }
+                            />
+                            <LabeledInput
+                                label='Denied response status'
+                                max={599}
+                                min={400}
+                                type='number'
+                                value={String(policy.access.status_code)}
+                                onChange={(value) =>
+                                    onChange({
+                                        ...policy,
+                                        access: { ...policy.access, status_code: Number(value) },
+                                    })
+                                }
+                            />
+                            <ValueListAddField
+                                addLabel='Add proxy'
+                                dialogTitle='Add trusted proxy'
+                                emptyLabel='No trusted proxies'
+                                label='Trusted proxy CIDRs'
+                                placeholder='10.0.0.0/8'
+                                values={policy.access.trusted_proxies}
+                                onChange={(trustedProxies) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            trusted_proxies: trustedProxies,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+
+                        <div className='grid gap-4 md:grid-cols-2'>
+                            <ValueListAddField
+                                addLabel='Add address'
+                                dialogTitle='Add allowed IP or CIDR'
+                                emptyLabel='No allowed addresses'
+                                label='IP/CIDR allowlist'
+                                placeholder='192.0.2.10 or 2001:db8::/32'
+                                values={policy.access.ip_allowlist}
+                                onChange={(ipAllowlist) =>
+                                    onChange({
+                                        ...policy,
+                                        access: { ...policy.access, ip_allowlist: ipAllowlist },
+                                    })
+                                }
+                            />
+                            <ValueListAddField
+                                addLabel='Add address'
+                                dialogTitle='Add blocked IP or CIDR'
+                                emptyLabel='No blocked addresses'
+                                label='IP/CIDR blocklist'
+                                placeholder='198.51.100.0/24'
+                                values={policy.access.ip_blocklist}
+                                onChange={(ipBlocklist) =>
+                                    onChange({
+                                        ...policy,
+                                        access: { ...policy.access, ip_blocklist: ipBlocklist },
+                                    })
+                                }
+                            />
+                            <div className='space-y-1.5'>
+                                <div className='text-sm font-medium'>Allowed countries</div>
+                                <SearchableMultiAddField
+                                    addLabel='Add countries'
+                                    dialogSubtitle='Search ISO countries and select those allowed to access this site.'
+                                    dialogTitle='Select allowed countries'
+                                    emptyLabel='No country allowlist'
+                                    itemLabel='country'
+                                    options={includeSelectedOptions(
+                                        countryOptions,
+                                        policy.access.allowed_countries,
+                                        'Existing country code'
+                                    )}
+                                    searchPlaceholder='Search by country name or code'
+                                    selected={new Set(policy.access.allowed_countries)}
+                                    onChange={(allowedCountries) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                allowed_countries: Array.from(allowedCountries),
+                                            },
+                                        })
                                     }
                                 />
                             </div>
-                            <div className='border-t border-border p-4'>
-                                <ConditionGroups
-                                    groupOperator={rule.conditions.group_operator}
-                                    groups={rule.conditions.groups}
-                                    onChange={(groups, groupOperator) =>
-                                        updateRateRules(
-                                            policy.rate_limit.rules.map((item, index) =>
-                                                index === ruleIndex
-                                                    ? {
-                                                          ...item,
-                                                          conditions: {
-                                                              groups,
-                                                              group_operator: groupOperator,
-                                                          },
-                                                      }
-                                                    : item
-                                            )
-                                        )
+                            <div className='space-y-1.5'>
+                                <div className='text-sm font-medium'>Blocked countries</div>
+                                <SearchableMultiAddField
+                                    addLabel='Add countries'
+                                    dialogSubtitle='Search ISO countries and select those blocked from this site.'
+                                    dialogTitle='Select blocked countries'
+                                    emptyLabel='No blocked countries'
+                                    itemLabel='country'
+                                    options={includeSelectedOptions(
+                                        countryOptions,
+                                        policy.access.blocked_countries,
+                                        'Existing country code'
+                                    )}
+                                    searchPlaceholder='Search by country name or code'
+                                    selected={new Set(policy.access.blocked_countries)}
+                                    onChange={(blockedCountries) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                blocked_countries: Array.from(blockedCountries),
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                            <ValueListAddField
+                                addLabel='Add region'
+                                dialogTitle='Add allowed region'
+                                emptyLabel='No region allowlist'
+                                label='Allowed regions'
+                                hint='Use an ISO 3166-2 subdivision code.'
+                                placeholder='US-CA'
+                                values={policy.access.allowed_regions}
+                                normalize={(value) => value.trim().toUpperCase()}
+                                validate={(value) =>
+                                    /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
+                                        ? ''
+                                        : 'Enter an ISO 3166-2 code such as US-CA.'
+                                }
+                                onChange={(allowedRegions) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            allowed_regions: allowedRegions,
+                                        },
+                                    })
+                                }
+                            />
+                            <ValueListAddField
+                                addLabel='Add region'
+                                dialogTitle='Add blocked region'
+                                emptyLabel='No blocked regions'
+                                label='Blocked regions'
+                                hint='Use an ISO 3166-2 subdivision code.'
+                                placeholder='US-NY'
+                                values={policy.access.blocked_regions}
+                                normalize={(value) => value.trim().toUpperCase()}
+                                validate={(value) =>
+                                    /^[A-Z]{2}-[A-Z0-9]{1,3}$/.test(value)
+                                        ? ''
+                                        : 'Enter an ISO 3166-2 code such as US-NY.'
+                                }
+                                onChange={(blockedRegions) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            blocked_regions: blockedRegions,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+
+                        <div className='grid gap-4 md:grid-cols-2'>
+                            <div className='space-y-1.5'>
+                                <div className='text-sm font-medium'>Allowed HTTP methods</div>
+                                <SearchableMultiAddField
+                                    addLabel='Add methods'
+                                    dialogSubtitle='Select the HTTP methods allowed by this access policy.'
+                                    dialogTitle='Select allowed HTTP methods'
+                                    emptyLabel='All methods allowed by default'
+                                    itemLabel='method'
+                                    options={includeSelectedOptions(
+                                        httpMethodOptions,
+                                        policy.access.allowed_methods,
+                                        'Custom HTTP method'
+                                    )}
+                                    searchPlaceholder='Search HTTP methods'
+                                    selected={new Set(policy.access.allowed_methods)}
+                                    onChange={(allowedMethods) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                allowed_methods: Array.from(allowedMethods),
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                            <div className='space-y-1.5'>
+                                <div className='text-sm font-medium'>Blocked HTTP methods</div>
+                                <SearchableMultiAddField
+                                    addLabel='Add methods'
+                                    dialogSubtitle='Select the HTTP methods blocked by this access policy.'
+                                    dialogTitle='Select blocked HTTP methods'
+                                    emptyLabel='No blocked methods'
+                                    itemLabel='method'
+                                    options={includeSelectedOptions(
+                                        httpMethodOptions,
+                                        policy.access.blocked_methods,
+                                        'Custom HTTP method'
+                                    )}
+                                    searchPlaceholder='Search HTTP methods'
+                                    selected={new Set(policy.access.blocked_methods)}
+                                    onChange={(blockedMethods) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                blocked_methods: Array.from(blockedMethods),
+                                            },
+                                        })
                                     }
                                 />
                             </div>
                         </div>
-                    ))}
-                    <Button
-                        variant='secondary'
-                        onPress={() =>
-                            updateRateRules([...policy.rate_limit.rules, newRateLimitRule()])
-                        }
-                    >
-                        <Plus className='mr-1.5 h-4 w-4' /> Add CC rule
-                    </Button>
-                </div>
-            </div>
 
-            <div className='flex flex-col gap-3 border-t border-border bg-surface px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                <div className={`text-xs ${valid ? 'text-muted' : 'text-danger'}`}>
-                    {valid
-                        ? 'Saving publishes the security policy to online edge nodes.'
-                        : 'Fix invalid status codes, limits or empty rule groups before saving.'}
+                        <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
+                            <ValueListAddField
+                                addLabel='Add host'
+                                dialogTitle='Add allowed Referer host'
+                                emptyLabel='No Referer restrictions'
+                                label='Allowed Referer hosts'
+                                placeholder='example.com'
+                                values={policy.access.allowed_referer_hosts}
+                                normalize={(value) => value.trim().toLowerCase().replace(/\.$/, '')}
+                                validate={(value) =>
+                                    /[/:?#@\s]/.test(value)
+                                        ? 'Enter a hostname without a protocol, port or path.'
+                                        : ''
+                                }
+                                onChange={(allowedRefererHosts) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            allowed_referer_hosts: allowedRefererHosts,
+                                        },
+                                    })
+                                }
+                            />
+                            <div className='flex items-end pb-1'>
+                                <ToggleSwitch
+                                    isSelected={policy.access.allow_empty_referer}
+                                    label='Allow empty Referer'
+                                    onChange={(allowEmptyReferer) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                allow_empty_referer: allowEmptyReferer,
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                        </div>
+
+                        <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-[auto_minmax(220px,1fr)]'>
+                            <div className='flex items-end pb-1'>
+                                <ToggleSwitch
+                                    isSelected={policy.access.temporary_blocks}
+                                    label='Enforce temporary blocks'
+                                    onChange={(temporaryBlocks) =>
+                                        onChange({
+                                            ...policy,
+                                            access: {
+                                                ...policy.access,
+                                                temporary_blocks: temporaryBlocks,
+                                            },
+                                        })
+                                    }
+                                />
+                            </div>
+                            <SelectField
+                                label='Redis failure policy'
+                                options={[
+                                    { id: 'OPEN', label: 'Fail open' },
+                                    { id: 'CLOSED', label: 'Fail closed' },
+                                ]}
+                                value={policy.access.temporary_block_failure}
+                                variant='secondary'
+                                onChange={(value) =>
+                                    onChange({
+                                        ...policy,
+                                        access: {
+                                            ...policy.access,
+                                            temporary_block_failure: value,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                    </div>
+
+                    <div className='space-y-4 border-t border-border pt-6'>
+                        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                            <div>
+                                <div className='flex items-center gap-2'>
+                                    <Zap className='h-4 w-4 text-primary' />
+                                    <h3 className='text-sm font-semibold'>
+                                        CC and request rate protection
+                                    </h3>
+                                </div>
+                                <p className='mt-1 text-xs leading-5 text-muted'>
+                                    Apply fixed-window limits by client IP, path, Header, Cookie or
+                                    the entire site.
+                                </p>
+                            </div>
+                            <ToggleSwitch
+                                isSelected={policy.rate_limit.enabled}
+                                label='Enable CC protection'
+                                onChange={(enabled) =>
+                                    onChange({
+                                        ...policy,
+                                        rate_limit: { ...policy.rate_limit, enabled },
+                                    })
+                                }
+                            />
+                        </div>
+                        <div className='grid gap-4 rounded-xl border border-border/70 p-4 md:grid-cols-2'>
+                            <SelectField
+                                label='Counter backend'
+                                options={[
+                                    { id: 'LOCAL', label: 'Local node memory' },
+                                    { id: 'REDIS', label: 'Distributed Redis' },
+                                ]}
+                                value={policy.rate_limit.backend}
+                                variant='secondary'
+                                onChange={(value) =>
+                                    onChange({
+                                        ...policy,
+                                        rate_limit: {
+                                            ...policy.rate_limit,
+                                            backend: value,
+                                        },
+                                    })
+                                }
+                            />
+                            <SelectField
+                                label='Redis failure policy'
+                                options={[
+                                    { id: 'OPEN', label: 'Fail open' },
+                                    { id: 'CLOSED', label: 'Fail closed' },
+                                    { id: 'LOCAL', label: 'Fall back to local counters' },
+                                ]}
+                                value={policy.rate_limit.failure_mode}
+                                variant='secondary'
+                                onChange={(value) =>
+                                    onChange({
+                                        ...policy,
+                                        rate_limit: {
+                                            ...policy.rate_limit,
+                                            failure_mode: value,
+                                        },
+                                    })
+                                }
+                            />
+                        </div>
+                        {policy.rate_limit.rules.map((rule, ruleIndex) => (
+                            <div
+                                className='overflow-hidden rounded-xl border border-border/70'
+                                key={rule.id}
+                            >
+                                <div className='flex flex-wrap items-center justify-between gap-3 bg-surface-secondary/25 px-4 py-3'>
+                                    <Input
+                                        aria-label='Rate-limit rule name'
+                                        className='min-w-56 flex-1'
+                                        value={rule.name}
+                                        variant='secondary'
+                                        onChange={(event) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? { ...item, name: event.target.value }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <ToggleSwitch
+                                        isSelected={rule.enabled}
+                                        label='Enable rate-limit rule'
+                                        onChange={(enabled) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? { ...item, enabled }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <Button
+                                        isIconOnly
+                                        aria-label='Remove rate-limit rule'
+                                        variant='ghost'
+                                        onPress={() =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.filter(
+                                                    (_, index) => index !== ruleIndex
+                                                )
+                                            )
+                                        }
+                                    >
+                                        <Trash2 className='h-4 w-4 text-danger' />
+                                    </Button>
+                                </div>
+                                <div className='grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-4'>
+                                    <SelectField
+                                        label='Counter key'
+                                        options={[
+                                            { id: 'CLIENT_IP', label: 'Client IP' },
+                                            { id: 'CLIENT_IP_PATH', label: 'Client IP and path' },
+                                            { id: 'PATH', label: 'Path' },
+                                            { id: 'HEADER', label: 'Header value' },
+                                            { id: 'COOKIE', label: 'Cookie value' },
+                                            { id: 'GLOBAL', label: 'Entire site' },
+                                        ]}
+                                        value={rule.key}
+                                        variant='secondary'
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              key: value,
+                                                              key_name: [
+                                                                  'HEADER',
+                                                                  'COOKIE',
+                                                              ].includes(value)
+                                                                  ? item.key_name
+                                                                  : undefined,
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    {['HEADER', 'COOKIE'].includes(rule.key) && (
+                                        <LabeledInput
+                                            label={
+                                                rule.key === 'HEADER'
+                                                    ? 'Header name'
+                                                    : 'Cookie name'
+                                            }
+                                            value={rule.key_name ?? ''}
+                                            onChange={(value) =>
+                                                updateRateRules(
+                                                    policy.rate_limit.rules.map((item, index) =>
+                                                        index === ruleIndex
+                                                            ? { ...item, key_name: value }
+                                                            : item
+                                                    )
+                                                )
+                                            }
+                                        />
+                                    )}
+                                    <LabeledInput
+                                        label='Requests'
+                                        min={1}
+                                        type='number'
+                                        value={String(rule.requests)}
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              requests: Number(value),
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <LabeledInput
+                                        label='Window seconds'
+                                        max={3600}
+                                        min={1}
+                                        type='number'
+                                        value={String(rule.window_seconds)}
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              window_seconds: Number(value),
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <LabeledInput
+                                        label='Burst allowance'
+                                        min={0}
+                                        type='number'
+                                        value={String(rule.burst)}
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? { ...item, burst: Number(value) }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <LabeledInput
+                                        label='Ban seconds'
+                                        min={0}
+                                        type='number'
+                                        value={String(rule.ban_seconds)}
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              ban_seconds: Number(value),
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                    <LabeledInput
+                                        label='Response status'
+                                        max={599}
+                                        min={400}
+                                        type='number'
+                                        value={String(rule.status_code)}
+                                        onChange={(value) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              status_code: Number(value),
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                </div>
+                                <div className='border-t border-border p-4'>
+                                    <ConditionGroups
+                                        groupOperator={rule.conditions.group_operator}
+                                        groups={rule.conditions.groups}
+                                        onChange={(groups, groupOperator) =>
+                                            updateRateRules(
+                                                policy.rate_limit.rules.map((item, index) =>
+                                                    index === ruleIndex
+                                                        ? {
+                                                              ...item,
+                                                              conditions: {
+                                                                  groups,
+                                                                  group_operator: groupOperator,
+                                                              },
+                                                          }
+                                                        : item
+                                                )
+                                            )
+                                        }
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                        <Button
+                            variant='secondary'
+                            onPress={() =>
+                                updateRateRules([...policy.rate_limit.rules, newRateLimitRule()])
+                            }
+                        >
+                            <Plus className='mr-1.5 h-4 w-4' /> Add CC rule
+                        </Button>
+                    </div>
                 </div>
+            </ContentCard>
+            <SettingsActionBar
+                error={
+                    !valid
+                        ? 'Fix invalid status codes, limits or empty rule groups before saving.'
+                        : undefined
+                }
+                isDirty={isDirty}
+                isDiscardDisabled={saving}
+                onDiscard={onDiscard}
+            >
                 <Button isDisabled={saving || !valid} onPress={onSave}>
                     <Save className='mr-1.5 h-4 w-4' />{' '}
                     {saving ? 'Saving...' : 'Save security policy'}
                 </Button>
-            </div>
-        </ContentCard>
+            </SettingsActionBar>
+        </div>
     );
 }
