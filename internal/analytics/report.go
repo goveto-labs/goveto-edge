@@ -79,6 +79,7 @@ type NodeRequestLog struct {
 	SourceLogID         uint64    `json:"source_log_id"`
 	RequestID           string    `json:"request_id"`
 	NodeID              string    `json:"node_id"`
+	SiteID              string    `json:"site_id,omitempty"`
 	ConfigVersion       uint64    `json:"config_version"`
 	Hostname            string    `json:"hostname"`
 	Method              string    `json:"method"`
@@ -117,7 +118,7 @@ type RequestLogPage struct {
 	Total    int64            `json:"total"`
 }
 
-const requestLogColumns = `event_time, source_log_id, request_id, node_id::text, config_version,
+const requestLogColumns = `event_time, source_log_id, request_id, node_id::text, site_id::text, config_version,
 	hostname, method, scheme, protocol, path, query_string, host(client_ip), country, region,
 	status_code, request_header_bytes, request_body_bytes, response_header_bytes, response_body_bytes,
 	duration_us, upstream_address, upstream_status, handler_error, cache_status, content_type, file_extension,
@@ -129,7 +130,7 @@ type rowScanner interface {
 
 func scanRequestLog(row rowScanner, item *NodeRequestLog) error {
 	return row.Scan(
-		&item.EventTime, &item.SourceLogID, &item.RequestID, &item.NodeID, &item.ConfigVersion,
+		&item.EventTime, &item.SourceLogID, &item.RequestID, &item.NodeID, &item.SiteID, &item.ConfigVersion,
 		&item.Hostname, &item.Method, &item.Scheme, &item.Protocol, &item.Path, &item.QueryString,
 		&item.ClientIP, &item.Country, &item.Region, &item.StatusCode, &item.RequestHeaderBytes,
 		&item.RequestBodyBytes, &item.ResponseHeaderBytes, &item.ResponseBodyBytes, &item.DurationUS,
@@ -171,10 +172,11 @@ func (s *Store) SiteRequestLogs(ctx context.Context, clusterID, siteID, search s
 	if pageSize < 1 || pageSize > 100 {
 		pageSize = 25
 	}
+	siteID = strings.TrimSpace(siteID)
 	search = strings.TrimSpace(search)
-	filter := `cluster_id = $1 AND site_id = $2 AND ($3 = '' OR concat_ws(' ',
+	filter := `cluster_id = $1 AND ($2 = '' OR site_id::text = $2) AND ($3 = '' OR concat_ws(' ',
 		request_id, hostname, method, path, query_string, status_code::text, host(client_ip),
-		cache_status, upstream_address, referer, user_agent, waf_action, waf_rule_id, waf_source
+		cache_status, upstream_address, referer, user_agent, waf_action, waf_rule_id, waf_source, site_id::text
 	) ILIKE '%' || $3 || '%')`
 	result := RequestLogPage{Items: make([]NodeRequestLog, 0, pageSize), Page: page, PageSize: pageSize}
 	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM analytics.web_request_logs WHERE `+filter,

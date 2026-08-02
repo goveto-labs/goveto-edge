@@ -272,8 +272,10 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 	}
 	sort.Strings(ids)
 
-	routes := make([]any, 0, len(ids)*2)
-	errorRoutes := make([]any, 0)
+	routes := make([]any, 0, len(ids)*2+2)
+	errorRoutes := make([]any, 0, 1)
+	routes = append(routes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers"))
+	errorRoutes = append(errorRoutes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers_errors"))
 	loggerNames := make(map[string][]string, len(ids))
 	customLogs := map[string]any{
 		"default": map[string]any{
@@ -565,7 +567,12 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 
 		requestHeaders := cloneHeaders(originPolicy.Headers)
 		requestHeaders["Host"] = []string{"{goveto.origin.host}"}
-		reverseProxy["headers"] = map[string]any{"request": map[string]any{"set": requestHeaders}}
+		reverseProxy["headers"] = map[string]any{
+			"request": map[string]any{
+				"set":    requestHeaders,
+				"delete": []string{"Via"},
+			},
+		}
 		if deliveryConfigured {
 			applyDeliveryProxy(reverseProxy, deliveryPolicy)
 		}
@@ -1005,6 +1012,23 @@ func cloneHeaders(source map[string][]string) map[string][]string {
 		target[name] = append([]string(nil), values...)
 	}
 	return target
+}
+
+// stripCaddyIdentityHeadersRoute removes response headers that advertise Caddy
+// (Server: Caddy, Via: ... Caddy) from every response, including error pages.
+func stripCaddyIdentityHeadersRoute(id string) map[string]any {
+	return map[string]any{
+		"@id": id,
+		"handle": []any{
+			map[string]any{
+				"handler": "headers",
+				"response": map[string]any{
+					"deferred": true,
+					"delete":   []string{"Server", "Via"},
+				},
+			},
+		},
+	}
 }
 
 func inlineCACertificates(pemValues []string) ([]string, error) {

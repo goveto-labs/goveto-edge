@@ -131,7 +131,8 @@ function RequestDetails({ entry }: { entry: NodeRequestLog }) {
                 <DetailValue label='URL' mono value={requestURL(entry)} wide />
                 <DetailValue label='Protocol' value={entry.protocol || entry.scheme} />
                 <DetailValue label='Request ID' mono value={entry.request_id} />
-                <DetailValue label='Node ID' mono value={entry.node_id} wide />
+                <DetailValue label='Site ID' mono value={entry.site_id} />
+                <DetailValue label='Node ID' mono value={entry.node_id} />
                 <DetailValue label='Config version' mono value={entry.config_version} />
                 <DetailValue label='Source log ID' mono value={entry.source_log_id} />
             </DetailSection>
@@ -218,7 +219,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
             const items = await sites.list();
             setSiteItems(items);
             setSiteId((current) =>
-                items.some((item) => item.id === current) ? current : (items[0]?.id ?? '')
+                current === '' || items.some((item) => item.id === current) ? current : ''
             );
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
@@ -227,20 +228,21 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
 
     const loadLogs = useCallback(async () => {
         const sequence = ++requestSequence.current;
-        if (!clusterId || !activeSiteId) {
+        if (!clusterId || (embeddedSiteId && !activeSiteId)) {
             setLogs([]);
             setTotal(0);
             return;
         }
         setLoading(true);
         try {
-            const result = await analytics.siteLogs(activeSiteId, {
+            const result = await analytics.siteLogs({
+                site_id: activeSiteId || undefined,
                 page,
                 page_size: pageSize,
                 query: search || undefined,
             });
             if (sequence !== requestSequence.current) return;
-            const lastPage = Math.max(1, Math.ceil(result.total / result.page_size));
+            const lastPage = Math.max(1, Math.ceil(result.total / result.page_size) || 1);
             if (page > lastPage) {
                 setPage(lastPage);
                 return;
@@ -256,10 +258,19 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
         } finally {
             if (sequence === requestSequence.current) setLoading(false);
         }
-    }, [activeSiteId, analytics, clusterId, page, pageSize, search]);
+    }, [activeSiteId, analytics, clusterId, embeddedSiteId, page, pageSize, search]);
 
     useAutoRefresh(loadSites, Boolean(clusterId && !embeddedSiteId));
-    useAutoRefresh(loadLogs, Boolean(clusterId && activeSiteId));
+    useAutoRefresh(loadLogs, Boolean(clusterId && (!embeddedSiteId || activeSiteId)));
+
+    const siteLabel = useCallback(
+        (id?: string) => {
+            if (!id) return '-';
+            const match = siteItems.find((item) => item.id === id);
+            return match ? match.name : id;
+        },
+        [siteItems]
+    );
 
     const pageCount = Math.max(1, Math.ceil(total / pageSize));
     const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
@@ -304,15 +315,14 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                             className='w-full'
                             id='site-log-site'
                             label='Site'
-                            options={
-                                siteItems.length === 0
-                                    ? [{ id: '', label: 'No sites available' }]
-                                    : siteItems.map((site) => ({
-                                          id: site.id,
-                                          label: `${site.name} (${site.domains?.[0] || site.id})`,
-                                      }))
-                            }
-                            placeholder='Select a site'
+                            options={[
+                                { id: '', label: 'All sites' },
+                                ...siteItems.map((site) => ({
+                                    id: site.id,
+                                    label: `${site.name} (${site.domains?.[0] || site.id})`,
+                                })),
+                            ]}
+                            placeholder='All sites'
                             value={siteId}
                             variant='secondary'
                             onChange={(value) => {
@@ -345,7 +355,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         }}
                     />
                     <Button
-                        isDisabled={loading || !activeSiteId}
+                        isDisabled={loading || Boolean(embeddedSiteId && !activeSiteId)}
                         variant='secondary'
                         onPress={() => void loadLogs()}
                     >
@@ -359,14 +369,19 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                 aria-label='Site access logs'
                 className='[&_td]:py-2.5 [&_th]:tracking-normal'
                 empty={logs.length === 0}
-                emptyDescription='Requests received by the selected site will appear here.'
-                emptyTitle={activeSiteId ? 'No matching access logs' : 'Select a site'}
+                emptyDescription={
+                    activeSiteId
+                        ? 'Requests received by the selected site will appear here.'
+                        : 'Requests received across all sites will appear here.'
+                }
+                emptyTitle='No matching access logs'
                 loading={loading}
                 title={`${total.toLocaleString()} requests`}
             >
                 <thead>
                     <tr>
                         <th>Time</th>
+                        {!embeddedSiteId && !activeSiteId && <th>Site</th>}
                         <th>Request</th>
                         <th>Client</th>
                         <th>Status</th>
@@ -389,6 +404,16 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                                         {new Date(entry.event_time).toLocaleTimeString()}
                                     </div>
                                 </td>
+                                {!embeddedSiteId && !activeSiteId && (
+                                    <td className='max-w-40'>
+                                        <div className='truncate text-sm font-medium'>
+                                            {siteLabel(entry.site_id)}
+                                        </div>
+                                        <div className='truncate font-mono text-xs text-muted'>
+                                            {entry.site_id || '-'}
+                                        </div>
+                                    </td>
+                                )}
                                 <td className='max-w-[34rem]'>
                                     <div className='flex min-w-0 items-center gap-2'>
                                         <span className='shrink-0 font-mono text-xs font-semibold'>

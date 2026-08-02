@@ -134,7 +134,9 @@ func TestSiteVersionsOmitsPersistedTombstones(t *testing.T) {
 
 func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	ensureAgentLogSink(t)
+	var originVia string
 	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		originVia = r.Header.Get("Via")
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte("proxied:" + r.URL.Path))
 	}))
@@ -172,6 +174,15 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	if response.StatusCode != http.StatusOK || string(body) != "proxied:/hello" {
 		t.Fatalf("unexpected proxy response: status=%d body=%q", response.StatusCode, body)
 	}
+	if got := response.Header.Get("Server"); got != "" {
+		t.Fatalf("Server header should be stripped, got %q", got)
+	}
+	if got := response.Header.Get("Via"); got != "" {
+		t.Fatalf("Via header should be stripped, got %q", got)
+	}
+	if originVia != "" {
+		t.Fatalf("Via header should not be forwarded to origin, got %q", originVia)
+	}
 
 	unmatched, err := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/", nil)
 	if err != nil {
@@ -185,6 +196,9 @@ func TestApplyHTTPConfigProxiesMatchedHost(t *testing.T) {
 	defer unmatchedResponse.Body.Close()
 	if unmatchedResponse.StatusCode != http.StatusNotFound {
 		t.Fatalf("unmatched host status=%d, want 404", unmatchedResponse.StatusCode)
+	}
+	if got := unmatchedResponse.Header.Get("Server"); got != "" {
+		t.Fatalf("unmatched host Server header should be stripped, got %q", got)
 	}
 }
 
@@ -288,6 +302,16 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	}
 	if !strings.Contains(raw, `"output":"goveto_buffer"`) {
 		t.Fatalf("log buffer writer missing: %s", raw)
+	}
+	for _, expected := range []string{
+		`"@id":"goveto_strip_identity_headers"`,
+		`"@id":"goveto_strip_identity_headers_errors"`,
+		`"delete":["Server","Via"]`,
+		`"delete":["Via"]`,
+	} {
+		if !strings.Contains(raw, expected) {
+			t.Fatalf("caddy identity header stripping missing %s: %s", expected, raw)
+		}
 	}
 }
 

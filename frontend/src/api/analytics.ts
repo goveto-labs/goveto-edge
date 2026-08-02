@@ -101,14 +101,10 @@ export const analyticsApi = (clusterId: string) => ({
             clusterPath(clusterId, `/analytics/nodes/logs${buildQuery({ node_id: nodeId, limit })}`)
         ),
     siteLogs: (
-        siteId: string,
-        params: { page?: number; page_size?: number; query?: string } = {}
+        params: { site_id?: string; page?: number; page_size?: number; query?: string } = {}
     ) =>
         get<RequestLogPage>(
-            clusterPath(
-                clusterId,
-                `/analytics/sites/logs${buildQuery({ site_id: siteId, ...params })}`
-            )
+            clusterPath(clusterId, `/analytics/sites/logs${buildQuery(params)}`)
         ),
     wafStats: (siteId: string, from: string, to: string, limit = 100) =>
         get<WAFRuleStat[]>(

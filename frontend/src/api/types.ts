@@ -311,6 +311,7 @@ export interface NodeRequestLog {
     source_log_id: number;
     request_id: string;
     node_id: string;
+    site_id?: string;
     config_version: number;
     hostname: string;
     method: string;

@@ -107,10 +107,7 @@ func wafStats(s *analytics.Store) echo.HandlerFunc {
 
 func siteLogs(s *analytics.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		siteID := c.QueryParam("site_id")
-		if siteID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "site_id is required")
-		}
+		siteID := strings.TrimSpace(c.QueryParam("site_id"))
 		page := 1
 		if value, err := strconv.Atoi(c.QueryParam("page")); err == nil && value > 0 {
 			page = value
