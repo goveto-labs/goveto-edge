@@ -83,6 +83,36 @@ func TestValidateLogBatch(t *testing.T) {
 	}
 }
 
+func TestValidateLogBatchAllowsUnscopedCaddyLogs(t *testing.T) {
+	batch := edgeprotocol.AgentLogBatch{
+		FirstID: 1,
+		Through: 1,
+		Records: []edgeprotocol.LogRecord{{
+			ID:      1,
+			Type:    "caddy",
+			Payload: json.RawMessage(`{"level":"info","msg":"started"}`),
+		}},
+	}
+	if err := validateLogBatch(batch); err != nil {
+		t.Fatalf("unscoped Caddy runtime log was rejected: %v", err)
+	}
+}
+
+func TestValidateLogBatchRejectsUnscopedAccessLogs(t *testing.T) {
+	batch := edgeprotocol.AgentLogBatch{
+		FirstID: 1,
+		Through: 1,
+		Records: []edgeprotocol.LogRecord{{
+			ID:      1,
+			Type:    "access",
+			Payload: json.RawMessage(`{"status":200}`),
+		}},
+	}
+	if err := validateLogBatch(batch); err == nil {
+		t.Fatal("unscoped access log was accepted")
+	}
+}
+
 func TestDisconnectCancelsLocalSessionWithoutDatabase(t *testing.T) {
 	gateway := NewGateway(nil, nil, nil, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())

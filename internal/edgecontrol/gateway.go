@@ -377,7 +377,7 @@ func validateLogBatch(batch edgeprotocol.AgentLogBatch) error {
 	var actualBytes uint64
 	previous := first
 	for index, record := range batch.Records {
-		if (record.Type == "access" || record.Type == "caddy") && record.SiteID == "" {
+		if record.Type == "access" && record.SiteID == "" {
 			return errors.New("access log site_id is required")
 		}
 		encoded, err := json.Marshal(record)
