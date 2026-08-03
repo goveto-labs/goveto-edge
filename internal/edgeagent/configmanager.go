@@ -631,15 +631,16 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			for ruleIndex, rule := range cachePolicy.Rules {
 				cachedHandlers := append([]any(nil), handlers...)
 				cachedHandlers = append(cachedHandlers, map[string]any{
-					"handler":                    "goveto_cache_headers",
-					"site_id":                    id,
-					"x_cache":                    cachePolicy.ResponseHeaders.XCache,
-					"age":                        cachePolicy.ResponseHeaders.Age,
-					"stale_while_revalidate_ttl": staleWhileRevalidateTTL(cachePolicy),
-					"background_revalidate":      cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
-					"coalesce":                   cacheRequestCoalescing(cachePolicy),
-					"coalesce_headers":           cacheKeyHeaders(cachePolicy),
-					"coalesce_ignore_query":      !cacheKeyHasPart(cachePolicy.CacheKey, cachepolicy.CacheKeyPartQuery),
+					"handler":                      "goveto_cache_headers",
+					"site_id":                      id,
+					"ignore_request_cache_control": true,
+					"x_cache":                      cachePolicy.ResponseHeaders.XCache,
+					"age":                          cachePolicy.ResponseHeaders.Age,
+					"stale_while_revalidate_ttl":   staleWhileRevalidateTTL(cachePolicy),
+					"background_revalidate":        cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
+					"coalesce":                     cacheRequestCoalescing(cachePolicy),
+					"coalesce_headers":             cacheKeyHeaders(cachePolicy),
+					"coalesce_ignore_query":        !cacheKeyHasPart(cachePolicy.CacheKey, cachepolicy.CacheKeyPartQuery),
 				})
 				cachedHandlers = append(cachedHandlers,
 					cacheHandler,

@@ -61,9 +61,9 @@ func TestMatcherBypassesConfiguredRequestCacheControl(t *testing.T) {
 		Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{{
 			Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "ALL"}},
 		}}},
-		BypassCacheControl: []string{"no-store", "max-age=0"},
+		BypassCacheControl: []string{"no-cache", "no-store", "max-age=0"},
 	}
-	for _, value := range []string{"no-store", "public, max-age=0"} {
+	for _, value := range []string{"no-cache", "no-store", "public, max-age=0"} {
 		request := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
 		request.Header.Set("Cache-Control", value)
 		if m.Match(request) {

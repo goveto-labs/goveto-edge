@@ -51,7 +51,7 @@ var (
 )
 
 var ErrCapacity = errors.New("cache storage limit leaves no room for this response")
-var ErrUncacheable = errors.New("response cache directives prohibit shared storage")
+var ErrUncacheable = errors.New("response is not eligible for shared storage")
 
 type module struct{ core.Configuration }
 
@@ -389,6 +389,14 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 }
 
 func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, variedHeaders http.Header, etag string, duration time.Duration, realKey string) error {
+	status, err := cachedResponseStatus(value)
+	if err != nil {
+		p.corruptions.Add(1)
+		return fmt.Errorf("reject malformed cache response: %w", err)
+	}
+	if status == http.StatusNotModified {
+		return ErrUncacheable
+	}
 	if err := validateCachedResponse(value); err != nil {
 		p.corruptions.Add(1)
 		return fmt.Errorf("reject incomplete cache response: %w", err)
@@ -1350,6 +1358,17 @@ func validateCachedResponse(value []byte) error {
 	return validateCachedResponseReader(bytes.NewReader(value))
 }
 
+func cachedResponseStatus(value []byte) (int, error) {
+	response, err := http.ReadResponse(bufio.NewReader(bytes.NewReader(value)), nil)
+	if err != nil {
+		return 0, err
+	}
+	if response.Body != nil {
+		_ = response.Body.Close()
+	}
+	return response.StatusCode, nil
+}
+
 func validateCachedResponseReader(source io.Reader) error {
 	buffered := bufio.NewReader(source)
 	response, err := http.ReadResponse(buffered, nil)
@@ -1357,8 +1376,11 @@ func validateCachedResponseReader(source io.Reader) error {
 		return fmt.Errorf("read cached HTTP response: %w", err)
 	}
 	defer response.Body.Close()
+	if response.StatusCode == http.StatusNotModified {
+		return ErrUncacheable
+	}
 	noBody := response.Header.Get("X-Goveto-Origin-Method") == http.MethodHead ||
-		response.StatusCode == http.StatusNoContent || response.StatusCode == http.StatusNotModified
+		response.StatusCode == http.StatusNoContent
 	var bodyBytes int64
 	if response.Body != nil && !noBody {
 		bodyBytes, err = io.Copy(io.Discard, response.Body)

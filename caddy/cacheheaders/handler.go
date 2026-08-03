@@ -2,6 +2,7 @@ package cacheheaders
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -14,21 +15,22 @@ import (
 )
 
 type Handler struct {
-	XCache               bool           `json:"x_cache"`
-	Age                  bool           `json:"age"`
-	DefaultTTL           int            `json:"default_ttl"`
-	StatusTTL            map[string]int `json:"status_ttl,omitempty"`
-	StaleIfErrorTTL      int            `json:"stale_if_error_ttl,omitempty"`
-	StaleWhileTTL        int            `json:"stale_while_revalidate_ttl,omitempty"`
-	BackgroundRevalidate bool           `json:"background_revalidate,omitempty"`
-	ValidateUpstream     bool           `json:"validate_upstream,omitempty"`
-	SiteID               string         `json:"site_id,omitempty"`
-	Coalesce             bool           `json:"coalesce,omitempty"`
-	CoalesceHeaders      []string       `json:"coalesce_headers,omitempty"`
-	CoalesceIgnoreQuery  bool           `json:"coalesce_ignore_query,omitempty"`
-	OverrideClientTTL    bool           `json:"override_client_ttl,omitempty"`
-	ClientTTL            int            `json:"client_ttl,omitempty"`
-	BypassCacheControl   []string       `json:"bypass_cache_control,omitempty"`
+	XCache                    bool           `json:"x_cache"`
+	Age                       bool           `json:"age"`
+	DefaultTTL                int            `json:"default_ttl"`
+	StatusTTL                 map[string]int `json:"status_ttl,omitempty"`
+	StaleIfErrorTTL           int            `json:"stale_if_error_ttl,omitempty"`
+	StaleWhileTTL             int            `json:"stale_while_revalidate_ttl,omitempty"`
+	BackgroundRevalidate      bool           `json:"background_revalidate,omitempty"`
+	ValidateUpstream          bool           `json:"validate_upstream,omitempty"`
+	SiteID                    string         `json:"site_id,omitempty"`
+	Coalesce                  bool           `json:"coalesce,omitempty"`
+	CoalesceHeaders           []string       `json:"coalesce_headers,omitempty"`
+	CoalesceIgnoreQuery       bool           `json:"coalesce_ignore_query,omitempty"`
+	OverrideClientTTL         bool           `json:"override_client_ttl,omitempty"`
+	ClientTTL                 int            `json:"client_ttl,omitempty"`
+	BypassCacheControl        []string       `json:"bypass_cache_control,omitempty"`
+	IgnoreRequestCacheControl bool           `json:"ignore_request_cache_control,omitempty"`
 }
 
 var ErrIncompleteResponse = errors.New("upstream response ended before its declared content length")
@@ -56,6 +58,13 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// Explicit request bypass directives are handled by the route matcher before this handler.
+	if h.IgnoreRequestCacheControl && (requestCacheControl(r) != "" || r.Header.Get("Pragma") != "") {
+		r = r.Clone(r.Context())
+		r.Header = r.Header.Clone()
+		r.Header.Del("Cache-Control")
+		r.Header.Del("Pragma")
+	}
 	key := h.coalescingKey(r)
 	var unlock func()
 	if h.Coalesce {
@@ -124,9 +133,10 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 				unlock()
 				unlock = nil
 			}
-			func() {
+			request := detachedRevalidationRequest(r)
+			go func() {
 				defer finishRevalidation(key)
-				revalidate(r, next)
+				revalidate(request, next)
 			}()
 		}
 	}
@@ -322,9 +332,6 @@ func (w *responseWriter) WriteHeader(status int) {
 	}
 	if w.policy.XCache {
 		result := cacheResult(header.Get("Cache-Status"))
-		if result == "HIT" && responseIsStale(header) {
-			result = "STALE"
-		}
 		header.Set("X-Cache", result)
 		w.cacheState = result
 	}
@@ -356,6 +363,9 @@ func applyCacheTTL(header http.Header, edgeTTL int, policy Handler) {
 	if policy.StaleIfErrorTTL > 0 && !hasCacheDirective(value, "stale-if-error") {
 		value += ", stale-if-error=" + strconv.Itoa(policy.StaleIfErrorTTL)
 	}
+	// A cache rule starts a new edge freshness lifetime when this response is received.
+	header.Del("Age")
+	header.Del("Date")
 	header.Set("Cache-Control", value)
 }
 
@@ -397,29 +407,6 @@ func matchesConfiguredCacheControl(value string, configured []string) bool {
 		}
 	}
 	return false
-}
-
-func responseIsStale(header http.Header) bool {
-	age, err := strconv.Atoi(header.Get("Age"))
-	if err != nil {
-		return false
-	}
-	maxAge := -1
-	for _, part := range splitCacheControl(cacheControlValue(header)) {
-		pair := strings.SplitN(strings.TrimSpace(part), "=", 2)
-		if len(pair) != 2 {
-			continue
-		}
-		name := strings.ToLower(pair[0])
-		if name != "max-age" && name != "s-maxage" {
-			continue
-		}
-		if value, parseErr := strconv.Atoi(strings.Trim(pair[1], `"`)); parseErr == nil &&
-			(name == "s-maxage" || maxAge < 0) {
-			maxAge = value
-		}
-	}
-	return maxAge >= 0 && age >= maxAge
 }
 
 func normalizeContentRange(header http.Header) {
@@ -527,11 +514,15 @@ func (w *responseWriter) incomplete(method string) bool {
 	return err == nil && declared >= 0 && w.written != declared
 }
 
-func revalidate(request *http.Request, next caddyhttp.Handler) {
-	clone := request.Clone(request.Context())
+func detachedRevalidationRequest(request *http.Request) *http.Request {
+	clone := request.Clone(context.WithoutCancel(request.Context()))
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Cache-Control", "no-cache")
-	_ = next.ServeHTTP(&discardResponseWriter{header: http.Header{}}, clone)
+	return clone
+}
+
+func revalidate(request *http.Request, next caddyhttp.Handler) {
+	_ = next.ServeHTTP(&discardResponseWriter{header: http.Header{}}, request)
 }
 
 type discardResponseWriter struct{ header http.Header }
@@ -546,12 +537,27 @@ func cacheResult(value string) string {
 	case strings.Contains(lower, "fwd=stale"):
 		return "STALE"
 	case strings.Contains(lower, "hit"):
+		if ttl, ok := cacheStatusTTL(lower); ok && ttl <= 0 {
+			return "STALE"
+		}
 		return "HIT"
 	case strings.Contains(lower, "uri-miss") || strings.Contains(lower, "stored"):
 		return "MISS"
 	default:
 		return "BYPASS"
 	}
+}
+
+func cacheStatusTTL(value string) (int, bool) {
+	for _, part := range strings.Split(value, ";") {
+		name, raw, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok || !strings.EqualFold(name, "ttl") {
+			continue
+		}
+		ttl, err := strconv.Atoi(strings.TrimSpace(raw))
+		return ttl, err == nil
+	}
+	return 0, false
 }
 
 var _ caddyhttp.MiddlewareHandler = (*Handler)(nil)

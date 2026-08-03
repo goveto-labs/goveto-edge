@@ -314,6 +314,22 @@ func TestStrictResponseDirectivesAreNeverStored(t *testing.T) {
 	}
 }
 
+func TestNotModifiedResponseIsNeverStored(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	key := "GET-http-example.test-/asset.js"
+	response := []byte("HTTP/1.1 304 Not Modified\r\n" +
+		"Cache-Control: public, max-age=300\r\nEtag: \"v1\"\r\n\r\n")
+	if err := provider.SetMultiLevel(key, key, response, nil, `"v1"`, time.Minute, key); !errors.Is(err, ErrUncacheable) {
+		t.Fatalf("304 response error=%v, want ErrUncacheable", err)
+	}
+	if provider.Get(key) != nil || provider.Get(core.MappingKeyPrefix+key) != nil {
+		t.Fatal("304 response or its lookup mapping was stored")
+	}
+	if err := validateCachedResponse(response); !errors.Is(err, ErrUncacheable) {
+		t.Fatalf("stored 304 response validation error=%v, want ErrUncacheable", err)
+	}
+}
+
 func TestRuntimeCorruptionRemovesBodyAndMapping(t *testing.T) {
 	provider := newTestProvider(t, t.TempDir(), 0)
 	key := "GET-http-example.test-/asset"

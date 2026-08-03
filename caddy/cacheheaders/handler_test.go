@@ -14,6 +14,8 @@ import (
 func TestCacheResult(t *testing.T) {
 	for input, want := range map[string]string{
 		"Goveto; hit; ttl=10":          "HIT",
+		"Goveto; hit; ttl=0":           "STALE",
+		"Goveto; hit; ttl=-1":          "STALE",
 		"Goveto; fwd=uri-miss; stored": "MISS",
 		"Goveto; fwd=stale":            "STALE",
 		"":                             "BYPASS",
@@ -194,14 +196,18 @@ func TestNormalizeContentRangeCorrectsExclusiveEnd(t *testing.T) {
 	}
 }
 
-func TestResponseIsStaleUsesSharedMaxAge(t *testing.T) {
-	header := http.Header{"Age": {"3"}, "Cache-Control": {"public, max-age=10, s-maxage=2"}}
-	if !responseIsStale(header) {
-		t.Fatal("response should be stale at the shared cache")
+func TestApplyCacheTTLStartsNewEdgeFreshnessLifetime(t *testing.T) {
+	header := http.Header{
+		"Age":           {"3600"},
+		"Date":          {time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat)},
+		"Cache-Control": {"public, max-age=86400"},
 	}
-	header.Set("Age", "2")
-	if !responseIsStale(header) {
-		t.Fatal("response at its freshness boundary should be stale")
+	applyCacheTTL(header, 300, Handler{})
+	if header.Get("Age") != "" || header.Get("Date") != "" {
+		t.Fatalf("upstream cache age survived edge TTL override: %v", header)
+	}
+	if got := header.Get("Cache-Control"); got != "public, max-age=86400, s-maxage=300" {
+		t.Fatalf("Cache-Control=%q", got)
 	}
 }
 
@@ -224,28 +230,40 @@ func TestHandlerRejectsIncompleteUpstreamResponse(t *testing.T) {
 }
 
 func TestHandlerStartsDetachedSWRRevalidation(t *testing.T) {
-	done := make(chan struct{}, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, request *http.Request) error {
 		if hasCacheDirective(request.Header.Get("Cache-Control"), "no-cache") {
-			done <- struct{}{}
+			close(started)
+			<-release
 			return nil
 		}
 		w.Header().Set("Cache-Control", "public, max-age=1, stale-while-revalidate=30")
-		w.Header().Set("Cache-Status", "Goveto; hit")
+		w.Header().Set("Cache-Status", "Goveto; hit; ttl=-1")
 		w.Header().Set("Age", "2")
 		w.Header().Set("Content-Length", "2")
 		_, _ = w.Write([]byte("ok"))
 		return nil
 	})
 	handler := Handler{XCache: true, Age: true, StaleWhileTTL: 30, BackgroundRevalidate: true}
-	if err := handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/", nil), next); err != nil {
-		t.Fatal(err)
-	}
+	done := make(chan error, 1)
+	go func() {
+		done <- handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "http://example.test/", nil), next)
+	}()
 	select {
-	case <-done:
+	case <-started:
 	case <-time.After(time.Second):
 		t.Fatal("background revalidation was not started")
 	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("stale response waited for background revalidation")
+	}
+	close(release)
 }
 
 func TestHandlerTreatsLegacyPragmaNoCacheAsRevalidation(t *testing.T) {
@@ -259,6 +277,27 @@ func TestHandlerTreatsLegacyPragmaNoCacheAsRevalidation(t *testing.T) {
 	})
 	if err := (Handler{StaleWhileTTL: 30}).ServeHTTP(httptest.NewRecorder(), request, next); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestHandlerIgnoresExternalRequestCacheControlWhenConfigured(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	request.Header.Set("Cache-Control", "no-cache")
+	request.Header.Set("Pragma", "no-cache")
+	next := caddyhttp.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) error {
+		if got := request.Header.Get("Cache-Control"); got != "" {
+			t.Fatalf("request Cache-Control=%q, want empty", got)
+		}
+		if got := request.Header.Get("Pragma"); got != "" {
+			t.Fatalf("request Pragma=%q, want empty", got)
+		}
+		return nil
+	})
+	if err := (Handler{IgnoreRequestCacheControl: true}).ServeHTTP(httptest.NewRecorder(), request, next); err != nil {
+		t.Fatal(err)
+	}
+	if request.Header.Get("Cache-Control") != "no-cache" || request.Header.Get("Pragma") != "no-cache" {
+		t.Fatal("handler mutated the original request headers")
 	}
 }
 
@@ -276,7 +315,7 @@ func TestControlledSWRAllowsFollowersAndRunsOneRefresh(t *testing.T) {
 			return nil
 		}
 		w.Header().Set("Cache-Control", "public, max-age=1")
-		w.Header().Set("Cache-Status", "Goveto; hit")
+		w.Header().Set("Cache-Status", "Goveto; hit; ttl=-1")
 		w.Header().Set("Age", "2")
 		w.Header().Set("Content-Length", "2")
 		_, _ = w.Write([]byte("ok"))
@@ -314,10 +353,15 @@ func TestControlledSWRAllowsFollowersAndRunsOneRefresh(t *testing.T) {
 	if got := refreshes.Load(); got != 1 {
 		t.Fatalf("refreshes=%d, want 1", got)
 	}
-	close(release)
-	if err := <-firstDone; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("first stale response waited for revalidation")
 	}
+	close(release)
 }
 
 func TestInnerHandlerRemovesUpstreamSWRAndOuterRestoresPolicy(t *testing.T) {

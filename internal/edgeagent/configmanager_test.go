@@ -597,6 +597,7 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,
 		`"mode":"strict"`,
+		`"ignore_request_cache_control":true`,
 		`"disable_coalescing":true`,
 		`"coalesce":true`,
 		`"coalesce_headers":["Range","If-Range"]`,

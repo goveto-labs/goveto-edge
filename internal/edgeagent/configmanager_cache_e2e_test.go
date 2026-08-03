@@ -57,6 +57,10 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		switch r.URL.Path {
 		case "/coalesced":
 			time.Sleep(150 * time.Millisecond)
+		case "/upstream-aged":
+			w.Header().Set("Age", "3600")
+			w.Header().Set("Date", time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat))
+			w.Header().Set("Cache-Control", "public, max-age=86400")
 		case "/tagged":
 			w.Header().Set("Surrogate-Key", "group-a")
 		case "/no-store":
@@ -74,6 +78,13 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 				if r.URL.Path == "/no-cache" {
 					noCacheConditional.Add(1)
 				}
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+		case "/conditional-cacheable":
+			w.Header().Set("Cache-Control", "public, max-age=120")
+			w.Header().Set("ETag", `"conditional-v1"`)
+			if r.Header.Get("If-None-Match") == `"conditional-v1"` {
 				w.WriteHeader(http.StatusNotModified)
 				return
 			}
@@ -171,6 +182,15 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 			t.Fatalf("unexpected cache headers: first=%q second=%q", first.header.Get("X-Cache"), second.header.Get("X-Cache"))
 		}
 
+		agedFirst := requestEdge(t, port, config.Domains[0], http.MethodGet, "/upstream-aged", nil)
+		agedSecond := requestEdge(t, port, config.Domains[0], http.MethodGet, "/upstream-aged", nil)
+		if agedFirst.header.Get("X-Cache") != "MISS" || agedSecond.header.Get("X-Cache") != "HIT" ||
+			counters.count("GET /upstream-aged ") != 1 {
+			t.Fatalf("upstream Age poisoned edge freshness: first=%q second=%q status=%q origins=%d",
+				agedFirst.header.Get("X-Cache"), agedSecond.header.Get("X-Cache"),
+				agedSecond.header.Get("Cache-Status"), counters.count("GET /upstream-aged "))
+		}
+
 		requestEdge(t, port, config.Domains[0], http.MethodHead, "/head-first", nil)
 		getAfterHead := requestEdge(t, port, config.Domains[0], http.MethodGet, "/head-first", nil)
 		getAfterHeadHit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/head-first", nil)
@@ -210,9 +230,14 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 			t.Fatal("request Cache-Control no-store response changed shared storage")
 		}
 
+		requestNoCache := requestEdge(t, port, config.Domains[0], http.MethodGet, "/asset.css", http.Header{"Cache-Control": {"no-cache"}})
+		if requestNoCache.body != second.body || requestNoCache.header.Get("X-Cache") != "HIT" || counters.count("GET /asset.css ") != 1 {
+			t.Fatal("unconfigured request Cache-Control no-cache controlled cache reuse")
+		}
+
 		pragma := requestEdge(t, port, config.Domains[0], http.MethodGet, "/asset.css", http.Header{"Pragma": {"no-cache"}})
-		if pragma.body == second.body || counters.count("GET /asset.css ") != 2 {
-			t.Fatal("legacy Pragma no-cache did not revalidate the cached response")
+		if pragma.body != second.body || pragma.header.Get("X-Cache") != "HIT" || counters.count("GET /asset.css ") != 1 {
+			t.Fatal("unconfigured legacy Pragma no-cache controlled cache reuse")
 		}
 
 		spoofed := requestEdge(t, port, config.Domains[0], http.MethodPost, "/spoof-internal", nil)
@@ -245,6 +270,20 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		if counters.count("GET /no-cache ") != 2 || noCacheConditional.Load() != 0 ||
 			noCache.status != http.StatusOK || noCache.body == noCacheFirst.body {
 			t.Fatalf("no-cache response was reused: status=%d count=%d conditional=%d body=%q", noCache.status, counters.count("GET /no-cache "), noCacheConditional.Load(), noCache.body)
+		}
+
+		conditional := requestEdge(t, port, config.Domains[0], http.MethodGet, "/conditional-cacheable", http.Header{
+			"If-None-Match": {`"conditional-v1"`},
+		})
+		unconditional := requestEdge(t, port, config.Domains[0], http.MethodGet, "/conditional-cacheable", nil)
+		unconditionalHit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/conditional-cacheable", nil)
+		if conditional.status != http.StatusNotModified || unconditional.status != http.StatusOK ||
+			unconditional.body == "" || unconditionalHit.status != http.StatusOK ||
+			unconditionalHit.body != unconditional.body || unconditionalHit.header.Get("X-Cache") != "HIT" ||
+			counters.count("GET /conditional-cacheable ") != 2 {
+			t.Fatalf("conditional 304 poisoned shared cache: conditional=%d first=%d hit=%d body=%q hit_body=%q x-cache=%q origins=%d",
+				conditional.status, unconditional.status, unconditionalHit.status, unconditional.body,
+				unconditionalHit.body, unconditionalHit.header.Get("X-Cache"), counters.count("GET /conditional-cacheable "))
 		}
 
 		mustFirst := requestEdge(t, port, config.Domains[0], http.MethodGet, "/must-revalidate", nil)
@@ -336,14 +375,19 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		}
 
 		beforeInvalid := counters.count("GET /video ")
+		invalidResponses := make([]edgeResponse, 0, 2)
 		for range 2 {
 			invalid := requestEdge(t, port, config.Domains[0], http.MethodGet, "/video", http.Header{"Range": {"bytes=3000000-3000100"}})
+			invalidResponses = append(invalidResponses, invalid)
 			if invalid.status != http.StatusRequestedRangeNotSatisfiable {
 				t.Fatalf("unsatisfiable range status=%d", invalid.status)
 			}
 		}
-		if got := counters.count("GET /video "); got != beforeInvalid+2 {
-			t.Fatalf("416 response was cached: origins=%d want=%d", got, beforeInvalid+2)
+		if got := counters.count("GET /video "); got != beforeInvalid+1 ||
+			invalidResponses[0].header.Get("X-Cache") != "MISS" || invalidResponses[1].header.Get("X-Cache") != "HIT" {
+			t.Fatalf("cached full representation did not reproduce 416: origins=%d want=%d first_x_cache=%q second_x_cache=%q first_status=%q second_status=%q",
+				got, beforeInvalid+1, invalidResponses[0].header.Get("X-Cache"), invalidResponses[1].header.Get("X-Cache"),
+				invalidResponses[0].header.Get("Cache-Status"), invalidResponses[1].header.Get("Cache-Status"))
 		}
 
 		beforeIfRange := counters.count("GET /video ")
@@ -682,8 +726,77 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		requestEdge(t, port, config.Domains[0], http.MethodGet, "/app.css", nil)
 		if counters.count("GET /app.css ") != 2 {
 			t.Fatalf("outer AND expression should bypass cache")
+			}
+		})
+}
+
+func TestAgentCacheStaleETagRefreshReturnsRepresentation(t *testing.T) {
+	ensureAgentLogSink(t)
+	var originRequests atomic.Int32
+	var conditionalRequests atomic.Int32
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		count := originRequests.Add(1)
+		w.Header().Set("Cache-Control", "public, max-age=120")
+		w.Header().Set("ETag", `"asset-v1"`)
+		if strings.Contains(r.Header.Get("If-None-Match"), `"asset-v1"`) {
+			conditionalRequests.Add(1)
+			w.WriteHeader(http.StatusNotModified)
+			return
 		}
-	})
+		_, _ = fmt.Fprintf(w, "asset-body-%d", count)
+	}))
+	defer origin.Close()
+
+	port := freePort(t)
+	cacheDirectory := filepath.Join(t.TempDir(), "cache")
+	t.Cleanup(cachefs.OverrideDiskUsageForTesting(cacheDirectory, 1<<40, 0))
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
+	manager.nodeConfig = NodeConfig{
+		CacheDirectory:      cacheDirectory,
+		MaxSizeBytes:        64 << 20,
+		MaxDiskUsagePercent: 90,
+	}
+	defer manager.Stop()
+
+	cache := cachePolicyWithCatchAllRule()
+	cache.Rules[0].TTL.DefaultSeconds = 1
+	cache.Rules[0].TTL.Status["200"] = 1
+	cache.Rules[0].TTL.ClientSeconds = 1
+	cache.Stale.WhileRevalidateSeconds = 30
+	config := SiteConfig{
+		SiteID:   "cache-stale-304-site",
+		Version:  1,
+		Domains:  []string{"cache-stale-304.example.test"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
+		Origins:  []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
+		Cache:    toMap(t, cache),
+	}
+	if err := manager.ApplySite(config); err != nil {
+		t.Fatal(err)
+	}
+
+	first := requestEdge(t, port, config.Domains[0], http.MethodGet, "/assets/app.js", nil)
+	if first.status != http.StatusOK || first.body == "" {
+		t.Fatalf("failed to prime cached asset: status=%d body=%q", first.status, first.body)
+	}
+	time.Sleep(1100 * time.Millisecond)
+
+	stale := requestEdge(t, port, config.Domains[0], http.MethodGet, "/assets/app.js", nil)
+	if stale.status != http.StatusOK || stale.body != first.body || stale.header.Get("X-Cache") != "STALE" {
+		t.Fatalf("stale ETag response was not served: status=%d body=%q want=%q x-cache=%q origins=%d conditional=%d stats=%#v",
+			stale.status, stale.body, first.body, stale.header.Get("X-Cache"), originRequests.Load(),
+			conditionalRequests.Load(), cachefs.Stats(cacheDirectory))
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for originRequests.Load() < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	time.Sleep(50 * time.Millisecond)
+	hit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/assets/app.js", nil)
+	if hit.status != http.StatusOK || hit.body == "" || hit.body == first.body || originRequests.Load() != 2 {
+		t.Fatalf("refreshed representation was not served: status=%d body=%q first=%q x-cache=%q origins=%d conditional=%d",
+			hit.status, hit.body, first.body, hit.header.Get("X-Cache"), originRequests.Load(), conditionalRequests.Load())
+	}
 }
 
 func TestAgentCacheCompressionSharesObjectAcrossAcceptEncoding(t *testing.T) {
