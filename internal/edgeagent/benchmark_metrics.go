@@ -37,17 +37,35 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 	mux.HandleFunc("GET /metrics", func(response http.ResponseWriter, _ *http.Request) {
 		var memory runtime.MemStats
 		runtime.ReadMemStats(&memory)
-		queueStats, queueErr := queue.Stats()
-		cacheStats := cachefs.Stats(configs.Get().CacheDirectory)
+		var queueStats LogQueueStats
+		var queueErr error
+		if queue != nil {
+			queueStats, queueErr = queue.Stats()
+		}
+		cacheDirectory := ""
+		if configs != nil {
+			cacheDirectory = configs.Get().CacheDirectory
+		}
+		cacheStats := cachefs.Stats(cacheDirectory)
 		payload := map[string]any{
 			"heap_bytes": memory.HeapAlloc, "total_alloc_bytes": memory.TotalAlloc,
 			"heap_inuse_bytes": memory.HeapInuse, "heap_idle_bytes": memory.HeapIdle,
 			"heap_released_bytes": memory.HeapReleased,
 			"gc_count":            memory.NumGC, "goroutines": runtime.NumGoroutine(),
 			"cache_hits": cacheStats.Hits, "cache_misses": cacheStats.Misses,
-			"cache_evictions": cacheStats.Evictions,
+			"cache_evictions":                cacheStats.Evictions,
+			"cache_write_queue_depth":        cacheStats.WriteQueueDepth,
+			"cache_write_queue_bytes":        cacheStats.WriteQueueBytes,
+			"cache_write_queue_depth_max":    cacheStats.WriteQueueDepthMax,
+			"cache_write_queue_bytes_max":    cacheStats.WriteQueueBytesMax,
+			"cache_write_queue_rejections":   cacheStats.WriteQueueRejections,
+			"cache_write_batches":            cacheStats.WriteBatches,
+			"cache_write_objects_committed":  cacheStats.WriteObjectsCommitted,
+			"cache_average_write_batch_size": cacheStats.AverageWriteBatchSize,
+			"cache_write_commit_latency_ms":  cacheStats.WriteCommitLatencyMS,
+			"cache_inflight_writes":          cacheStats.InflightWrites,
 		}
-		if queueErr == nil {
+		if queue != nil && queueErr == nil {
 			payload["log_queue_bytes"] = queueStats.Bytes
 			payload["log_queue_records"] = queueStats.Records
 			payload["log_buffer_bytes"] = queueStats.MemoryBufferBytes
@@ -62,11 +80,30 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 			if !queueStats.LastPersistSuccess.IsZero() {
 				payload["last_log_persist_success"] = queueStats.LastPersistSuccess
 			}
-		} else {
+		} else if queueErr != nil {
 			payload["queue_error"] = queueErr.Error()
 		}
 		response.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(response).Encode(payload)
+	})
+	mux.HandleFunc("POST /cache/drain", func(response http.ResponseWriter, _ *http.Request) {
+		if configs == nil {
+			http.Error(response, "cache configuration is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		cachefs.Drain(configs.Get().CacheDirectory)
+		response.WriteHeader(http.StatusNoContent)
+	})
+	mux.HandleFunc("POST /cache/reset", func(response http.ResponseWriter, _ *http.Request) {
+		if configs == nil {
+			http.Error(response, "cache configuration is unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if err := cachefs.ResetPath(configs.Get().CacheDirectory); err != nil {
+			http.Error(response, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		response.WriteHeader(http.StatusNoContent)
 	})
 	mux.HandleFunc("POST /gc", func(response http.ResponseWriter, _ *http.Request) {
 		gcMu.Lock()
@@ -76,12 +113,16 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 	})
 	mux.HandleFunc("GET /variant", func(response http.ResponseWriter, _ *http.Request) {
 		variant := "control"
-		if queue.benchmarkAccessLogs.Load() {
+		if queue != nil && queue.benchmarkAccessLogs.Load() {
 			variant = "full"
 		}
 		_ = json.NewEncoder(response).Encode(map[string]string{"variant": variant})
 	})
 	mux.HandleFunc("POST /variant", func(response http.ResponseWriter, request *http.Request) {
+		if queue == nil {
+			http.Error(response, "log queue is unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		variant := request.URL.Query().Get("value")
 		if variant != "full" && variant != "control" {
 			http.Error(response, "variant must be full or control", http.StatusBadRequest)

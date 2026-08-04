@@ -141,6 +141,8 @@ func run(args []string) error {
 	host := flags.String("host", "", "HTTP Host and TLS server name")
 	output := flags.String("output", "benchmark-results", "artifact output directory")
 	baseline := flags.String("baseline", "", "baseline report.json")
+	minBaselineRPSRatio := flags.Float64("min-baseline-rps-ratio", 0, "optional minimum current/baseline RPS ratio")
+	maxBaselineAllocationRatio := flags.Float64("max-baseline-allocation-ratio", 0, "optional maximum current/baseline allocation ratio")
 	control := flags.String("control", "", "matching control-variant report.json")
 	variant := flags.String("variant", string(agentbench.VariantFull), "benchmark variant: full or control")
 	requireCompleteAccessLogs := flags.Bool("require-complete-access-logs", false, "require zero access log loss and a drained queue")
@@ -170,6 +172,10 @@ func run(args []string) error {
 	maxLoadCPU := flags.Float64("max-load-cpu", 85, "maximum load generator CPU percent before marking the result saturated")
 	maxAgentRSS := flags.Uint64("max-agent-rss", 0, "maximum Edge Agent RSS bytes allowed during the run")
 	maxAgentRSSGrowth := flags.Uint64("max-agent-rss-growth", 0, "maximum Edge Agent RSS growth from the run baseline")
+	minRPS := flags.Float64("min-rps", 0, "minimum requests per second required in every run")
+	maxP99 := flags.Float64("max-p99", 0, "maximum p99 latency in milliseconds allowed in every run")
+	maxAllocationBytesPerRequest := flags.Uint64("max-allocation-bytes-per-request", 0, "maximum allocated bytes per request")
+	requireCacheWritesDrained := flags.Bool("require-cache-writes-drained", false, "drain cache writes and require an empty write queue with no rejections")
 	var expectedHeaders headerFlags
 	var allowedHeaders multiHeaderFlags
 	var maxHeaderRatios headerRatioFlags
@@ -191,6 +197,9 @@ func run(args []string) error {
 	}
 	if *targetURL == "" {
 		return errors.New("--url is required")
+	}
+	if *minBaselineRPSRatio < 0 || *maxBaselineAllocationRatio < 0 {
+		return errors.New("baseline ratios cannot be negative")
 	}
 	selectedSuite := agentbench.Suite(*suite)
 	if !validSuite(selectedSuite) {
@@ -243,7 +252,9 @@ func run(args []string) error {
 		MaxLoadCPUPercent:      *maxLoadCPU,
 		MaxAgentRSSBytes:       *maxAgentRSS,
 		MaxAgentRSSGrowthBytes: *maxAgentRSSGrowth,
-		Variant:                agentbench.Variant(*variant), RequireCompleteAccessLogs: *requireCompleteAccessLogs,
+		MinRPS:                 *minRPS, MaxP99MS: *maxP99, MaxAllocationBytesPerRequest: *maxAllocationBytesPerRequest,
+		Variant: agentbench.Variant(*variant), RequireCompleteAccessLogs: *requireCompleteAccessLogs,
+		RequireCacheWritesDrained: *requireCacheWritesDrained,
 	})
 	if err != nil {
 		return err
@@ -254,6 +265,7 @@ func run(args []string) error {
 	}
 	if baselineReport != nil {
 		decision := agentbench.Compare(report, *baselineReport)
+		decision = agentbench.ApplyBaselineRatioGates(decision, report, *baselineReport, *minBaselineRPSRatio, *maxBaselineAllocationRatio)
 		report.Baseline = &decision
 	}
 	if controlReport != nil {

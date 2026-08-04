@@ -152,6 +152,23 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		if config.MaxAgentRSSGrowthBytes > 0 && run.Resources.RSSBytesGrowth > config.MaxAgentRSSGrowthBytes {
 			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS grew by %d bytes, want at most %d", run.Index, run.Resources.RSSBytesGrowth, config.MaxAgentRSSGrowthBytes))
 		}
+		if config.MinRPS > 0 && run.Metrics.RPS < config.MinRPS {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d RPS %.2f is below %.2f", run.Index, run.Metrics.RPS, config.MinRPS))
+		}
+		if config.MaxP99MS > 0 && run.Metrics.P99MS > config.MaxP99MS {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d p99 %.2f ms exceeds %.2f ms", run.Index, run.Metrics.P99MS, config.MaxP99MS))
+		}
+		if config.MaxAllocationBytesPerRequest > 0 && run.Resources.AllocationBytesPerRequest > float64(config.MaxAllocationBytesPerRequest) {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d allocated %.2f bytes/request, want at most %d", run.Index, run.Resources.AllocationBytesPerRequest, config.MaxAllocationBytesPerRequest))
+		}
+		if config.RequireCacheWritesDrained {
+			if run.Resources.CacheWriteQueueDepthEnd != 0 || run.Resources.CacheWriteQueueBytesEnd != 0 || run.Resources.CacheInflightWritesEnd != 0 {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d cache writes did not drain (queue=%d/%d inflight=%d)", run.Index, run.Resources.CacheWriteQueueDepthEnd, run.Resources.CacheWriteQueueBytesEnd, run.Resources.CacheInflightWritesEnd))
+			}
+			if run.Resources.CacheWriteRejectionsDelta != 0 {
+				validity.addReason(ResultProductFail, fmt.Sprintf("run %d rejected %d cache writes", run.Index, run.Resources.CacheWriteRejectionsDelta))
+			}
+		}
 		if config.Cooldown > 0 {
 			checkCooldownResources(&validity, run)
 		}
@@ -254,6 +271,48 @@ func Compare(current, baseline Report) BaselineDecision {
 		decision.Passed = decision.Passed && comparison.Passed
 	}
 	return decision
+}
+
+// ApplyBaselineRatioGates adds opt-in improvement targets to a compatible baseline decision.
+func ApplyBaselineRatioGates(decision BaselineDecision, current, baseline Report, minRPSRatio, maxAllocationRatio float64) BaselineDecision {
+	if decision.Reason != "" {
+		return decision
+	}
+	if minRPSRatio > 0 {
+		comparison := MetricComparison{
+			Metric: "rps_ratio", Baseline: baseline.Summary.RPS, Current: current.Summary.RPS,
+			ChangePercent: percentChange(current.Summary.RPS, baseline.Summary.RPS),
+			LimitPercent:  (1 - minRPSRatio) * 100,
+			Passed:        baseline.Summary.RPS == 0 || current.Summary.RPS >= baseline.Summary.RPS*minRPSRatio,
+		}
+		decision.Comparisons = append(decision.Comparisons, comparison)
+		decision.Passed = decision.Passed && comparison.Passed
+	}
+	if maxAllocationRatio > 0 {
+		baselineAllocation := medianAllocationBytesPerRequest(baseline.Runs)
+		currentAllocation := medianAllocationBytesPerRequest(current.Runs)
+		comparison := MetricComparison{
+			Metric: "allocation_bytes_per_request_ratio", Baseline: baselineAllocation, Current: currentAllocation,
+			ChangePercent: percentChange(currentAllocation, baselineAllocation),
+			LimitPercent:  (maxAllocationRatio - 1) * 100,
+			Passed:        baselineAllocation == 0 || currentAllocation <= baselineAllocation*maxAllocationRatio,
+		}
+		decision.Comparisons = append(decision.Comparisons, comparison)
+		decision.Passed = decision.Passed && comparison.Passed
+	}
+	return decision
+}
+
+func medianAllocationBytesPerRequest(runs []Run) float64 {
+	values := make([]float64, 0, len(runs))
+	for _, run := range runs {
+		values = append(values, run.Resources.AllocationBytesPerRequest)
+	}
+	if len(values) == 0 {
+		return 0
+	}
+	sort.Float64s(values)
+	return values[len(values)/2]
 }
 
 func CompareControl(full, control Report) ControlDecision {

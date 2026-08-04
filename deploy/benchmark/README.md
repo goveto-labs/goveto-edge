@@ -87,7 +87,7 @@ load10 baselines.
 Use `--protocols "h1 h2 h3"` to select protocols, `--run-id NAME` to name the
 result directory, `--baseline-run RUN_ID` to compare against the matching case
 from a prior run, and `--cleanup` to stop containers after the run. Baseline
-comparison requires schema 1.2 and an exact runner, architecture, suite,
+comparison requires schema 1.3 and an exact runner, architecture, suite,
 scenario, protocol, concurrency, and connection-mode match. Run
 `script/run_agent_benchmark.sh --help` for all options.
 
@@ -132,8 +132,19 @@ and heap sample. Cache eviction gates RSS growth from the case baseline instead
 of absolute process RSS. Rate-limit screening requires every
 measured response to be 429. Its 120 second Capacity case accepts only 200/429,
 requires at least one 429, and permits at most 200 successful responses per
-repetition. Every HTTP status is counted in schema 1.2 reports. A run invalidated
-only by the fixed 5% RPS CV threshold is repeated once with identical settings.
+repetition. Every HTTP status is counted in schema 1.3 reports. Cache reports
+also include write queue depth and bytes, queue rejections, batches, committed
+objects, average batch size, commit latency, inflight writes, total allocation,
+and allocated bytes per request. A run invalidated only by the fixed 5% RPS CV
+threshold is repeated once with identical settings.
+
+The focused cache matrix drains and resets the cache before every cold-write
+and mixed case. Cold c32/c128 cases require at least 200 RPS with p99 below one
+second; mixed c32/c128 cases require at least 1,000 RPS with p99 below one
+second. All cache cases require the write queue to drain without rejections.
+Direct `agent-bench` runs can add `--min-rps`, `--max-p99`,
+`--max-allocation-bytes-per-request`, `--require-cache-writes-drained`,
+`--min-baseline-rps-ratio`, and `--max-baseline-allocation-ratio` gates.
 
 ## H3 prerequisite
 
@@ -159,7 +170,9 @@ default it resets only this Compose project's benchmark volumes. Pass
 The mock Gateway uses TLS 1.3 client authentication and the production JSON gRPC
 stream. The benchmark-only telemetry listener exposes Agent CPU, memory, disk,
 connection, cache, heap, GC, goroutine, and log-queue measurements to the load
-container while the load generator remains pinned to separate CPUs.
+container while the load generator remains pinned to separate CPUs. Its
+`POST /cache/drain` and `POST /cache/reset` controls are available only on this
+listener and are not part of the product HTTP API.
 
 Fixed-runner results are comparable only within the same runner and architecture.
 Capacity cases run serially so shared CPU, disk, network, and latency

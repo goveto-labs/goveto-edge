@@ -58,6 +58,12 @@ func (Handler) CaddyModule() caddy.ModuleInfo {
 }
 
 func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	// Souin enables its GraphQL body hashing whenever custom HTTP verbs are
+	// configured. A server request still carries a non-nil empty Body, which
+	// otherwise makes Souin allocate a copy buffer on every bodyless cache hit.
+	if r.ContentLength == 0 && len(r.TransferEncoding) == 0 {
+		r.Body = nil
+	}
 	// Explicit request bypass directives are handled by the route matcher before this handler.
 	if h.IgnoreRequestCacheControl && (requestCacheControl(r) != "" || r.Header.Get("Pragma") != "") {
 		r = r.Clone(r.Context())

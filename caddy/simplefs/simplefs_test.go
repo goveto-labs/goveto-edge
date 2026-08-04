@@ -5,11 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -507,10 +510,215 @@ func TestLongCacheKeyUsesBoundedBodyFileName(t *testing.T) {
 	provider.mu.Lock()
 	path := string(provider.items[key].value)
 	provider.mu.Unlock()
-	if len(filepath.Base(path)) != len(bodyPrefix)+sha256.Size*2 {
+	if len(filepath.Base(path)) != len(bodyPrefix)+sha256.Size*4+1 {
 		t.Fatalf("cache body filename length=%d", len(filepath.Base(path)))
 	}
 	if provider.Get(key) == nil {
 		t.Fatal("long-key response was not readable")
+	}
+}
+
+func TestConcurrentPreparedWritesShareOneIndexCommit(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	const count = 32
+	writes := make([]*pendingWrite, count)
+	for index := range count {
+		key := fmt.Sprintf("GET-http-example.test-/batch/%d", index)
+		value := cachedResponse(strings.Repeat("body", 32))
+		temporary, size, checksum, err := writeCompressedTemporary(filepath.Join(provider.path, bodyFileName(key)), value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Remove(temporary) })
+		writes[index] = &pendingWrite{
+			baseKey: key, variedKey: key, temporaryPath: temporary,
+			finalPath:      filepath.Join(provider.path, contentBodyFileName(key, checksum)),
+			compressedSize: size, originalSize: uint64(len(value)), checksum: checksum,
+			duration: time.Minute, realKey: key, done: make(chan error, 1),
+		}
+	}
+
+	writesBefore := provider.indexWrites.Load()
+	start := make(chan struct{})
+	errorsByIndex := make([]error, count)
+	var group sync.WaitGroup
+	for index := range count {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			<-start
+			errorsByIndex[index] = provider.enqueueWrite(writes[index])
+		}()
+	}
+	close(start)
+	group.Wait()
+	for index, err := range errorsByIndex {
+		if err != nil {
+			t.Fatalf("write %d failed: %v", index, err)
+		}
+	}
+	if writes := provider.indexWrites.Load() - writesBefore; writes != 1 {
+		t.Fatalf("index writes=%d, want one batch commit", writes)
+	}
+	if provider.objectsCommitted.Load() != count || provider.writeBatches.Load() != 1 {
+		t.Fatalf("objects=%d batches=%d", provider.objectsCommitted.Load(), provider.writeBatches.Load())
+	}
+}
+
+func TestBatchCommitFailureDoesNotPublishObject(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	key := "GET-http-example.test-/failed-batch"
+	value := cachedResponse("body")
+	temporary, size, checksum, err := writeCompressedTemporary(filepath.Join(provider.path, bodyFileName(key)), value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finalPath := filepath.Join(provider.path, contentBodyFileName(key, checksum))
+	provider.closeIndex()
+	err = provider.enqueueWrite(&pendingWrite{
+		baseKey: key, variedKey: key, temporaryPath: temporary, finalPath: finalPath,
+		compressedSize: size, originalSize: uint64(len(value)), checksum: checksum,
+		duration: time.Minute, realKey: key, done: make(chan error, 1),
+	})
+	if err == nil {
+		t.Fatal("write with a closed index succeeded")
+	}
+	provider.mu.RLock()
+	_, bodyExists := provider.items[key]
+	_, mappingExists := provider.items[core.MappingKeyPrefix+key]
+	provider.mu.RUnlock()
+	if bodyExists || mappingExists {
+		t.Fatalf("failed transaction published state: body=%v mapping=%v", bodyExists, mappingExists)
+	}
+	if _, statErr := os.Stat(finalPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("failed transaction left final file: %v", statErr)
+	}
+}
+
+func TestWriteQueueRejectsAtObjectLimit(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	provider.batchMu.Lock()
+	provider.pending = make([]*pendingWrite, writeQueueMaxObjects)
+	provider.flushing = true
+	provider.batchMu.Unlock()
+	err := provider.enqueueWrite(&pendingWrite{compressedSize: 1, done: make(chan error, 1)})
+	if !errors.Is(err, ErrWriteQueueFull) {
+		t.Fatalf("queue error=%v, want ErrWriteQueueFull", err)
+	}
+	if provider.queueRejections.Load() != 1 || provider.rejections.Load() != 1 {
+		t.Fatalf("queue rejections=%d total rejections=%d", provider.queueRejections.Load(), provider.rejections.Load())
+	}
+	provider.batchMu.Lock()
+	provider.pending = nil
+	provider.flushing = false
+	provider.batchMu.Unlock()
+}
+
+func TestResetPathClearsWriteStatisticsAfterCommit(t *testing.T) {
+	directory := t.TempDir()
+	provider := newTestProvider(t, directory, 0)
+	providers.Store(provider.path, provider)
+	t.Cleanup(func() { providers.Delete(provider.path) })
+
+	provider.queueDepth.Store(1)
+	provider.queueBytes.Store(2)
+	provider.queueDepthMax.Store(3)
+	provider.queueBytesMax.Store(4)
+	provider.queueRejections.Store(5)
+	provider.writeBatches.Store(6)
+	provider.objectsCommitted.Store(7)
+	provider.commitNanos.Store(8)
+	provider.inflightWrites.Store(9)
+
+	if err := ResetPath(directory); err != nil {
+		t.Fatal(err)
+	}
+	stats := Stats(directory)
+	if stats.WriteQueueDepth != 0 || stats.WriteQueueBytes != 0 || stats.WriteQueueDepthMax != 0 || stats.WriteQueueBytesMax != 0 ||
+		stats.WriteQueueRejections != 0 || stats.WriteBatches != 0 || stats.WriteObjectsCommitted != 0 ||
+		stats.WriteCommitLatencyMS != 0 || stats.InflightWrites != 0 {
+		t.Fatalf("write statistics were not reset: %+v", stats)
+	}
+}
+
+func TestExpiredReadDoesNotPublishDeletionWhenIndexCommitFails(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	key := "GET-http-example.test-/expired"
+	value := cachedResponse("body")
+	if err := provider.SetMultiLevel(key, key, value, nil, "", time.Millisecond, key); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+
+	provider.mu.RLock()
+	item := provider.items[key]
+	provider.mu.RUnlock()
+	provider.closeIndex()
+	if got := provider.Get(key); got != nil {
+		t.Fatal("expired object remained readable")
+	}
+	provider.mu.RLock()
+	retained, ok := provider.items[key]
+	provider.mu.RUnlock()
+	if !ok || retained.generation != item.generation {
+		t.Fatal("failed index transaction published the deletion in memory")
+	}
+	if _, err := os.Stat(string(item.value)); err != nil {
+		t.Fatalf("failed index transaction removed the cache file: %v", err)
+	}
+}
+
+func TestConcurrentMixedKeyReadsRemainComplete(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	const keyCount = 256
+	body := strings.Repeat("x", 16<<10)
+	response := cachedResponse(body)
+
+	var writers sync.WaitGroup
+	writeErrors := make(chan error, keyCount)
+	for index := range keyCount {
+		writers.Add(1)
+		go func() {
+			defer writers.Done()
+			key := fmt.Sprintf("GET-http-example.test-/mixed/%d", index)
+			writeErrors <- provider.SetMultiLevel(key, key, response, nil, "", time.Minute, key)
+		}()
+	}
+	writers.Wait()
+	close(writeErrors)
+	for err := range writeErrors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	const readerCount = 128
+	const readsPerReader = 80
+	readErrors := make(chan error, readerCount)
+	var readers sync.WaitGroup
+	for reader := range readerCount {
+		readers.Add(1)
+		go func() {
+			defer readers.Done()
+			for offset := range readsPerReader {
+				key := fmt.Sprintf("GET-http-example.test-/mixed/%d", (reader+offset)%keyCount)
+				fresh, _ := provider.GetMultiLevel(key, &http.Request{Header: http.Header{}}, &core.Revalidator{})
+				if fresh == nil {
+					readErrors <- fmt.Errorf("key %q missed", key)
+					return
+				}
+				got, err := io.ReadAll(fresh.Body)
+				_ = fresh.Body.Close()
+				if err != nil || string(got) != body {
+					readErrors <- fmt.Errorf("key %q bytes=%d err=%v", key, len(got), err)
+					return
+				}
+			}
+		}()
+	}
+	readers.Wait()
+	close(readErrors)
+	for err := range readErrors {
+		t.Fatal(err)
 	}
 }

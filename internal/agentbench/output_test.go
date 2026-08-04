@@ -1,6 +1,7 @@
 package agentbench
 
 import (
+	"encoding/csv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -40,5 +41,41 @@ func TestReadReportRejectsLegacySchema(t *testing.T) {
 	_, err := ReadReport(path)
 	if err == nil || !strings.Contains(err.Error(), "unsupported") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestWriteCSVKeepsCacheTelemetryColumnsAligned(t *testing.T) {
+	directory := t.TempDir()
+	path := filepath.Join(directory, "timeseries.csv")
+	report := Report{Runs: []Run{{Index: 1, Samples: []TimeSeriesPoint{{
+		At: time.Unix(1, 0), CacheWriteQueueDepthMax: 17, CacheWriteQueueBytesMax: 19,
+	}}}}}
+	if err := writeCSV(path, report); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	records, err := csv.NewReader(file).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || len(records[0]) != len(records[1]) {
+		t.Fatalf("CSV dimensions=%v", []int{len(records), len(records[0]), len(records[1])})
+	}
+	columns := make(map[string]int, len(records[0]))
+	for index, name := range records[0] {
+		columns[name] = index
+	}
+	for name, want := range map[string]string{
+		"cache_write_queue_depth_max": "17",
+		"cache_write_queue_bytes_max": "19",
+	} {
+		index, ok := columns[name]
+		if !ok || records[1][index] != want {
+			t.Fatalf("column %q=%q present=%v, want %q", name, records[1][index], ok, want)
+		}
 	}
 }

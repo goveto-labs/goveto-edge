@@ -1,6 +1,7 @@
 .DS_Store
 .env
 *.local
+*.test
 .data
 .agents
 static/agent/*

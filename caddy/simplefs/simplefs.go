@@ -5,6 +5,7 @@ package simplefs
 import (
 	"bufio"
 	"bytes"
+	"container/heap"
 	"container/list"
 	"crypto/sha256"
 	"encoding/binary"
@@ -48,10 +49,12 @@ var (
 	indexMetaBucket   = []byte("meta")
 	indexVersionKey   = []byte("version")
 	indexUsedBytesKey = []byte("used_bytes")
+	responseDecoders  = sync.Pool{New: func() any { return newResponseDecoder() }}
 )
 
 var ErrCapacity = errors.New("cache storage limit leaves no room for this response")
 var ErrUncacheable = errors.New("response is not eligible for shared storage")
+var ErrWriteQueueFull = errors.New("cache write queue is full")
 
 type module struct{ core.Configuration }
 
@@ -119,6 +122,8 @@ func Enforce(path string, auto bool, maxBytes uint64, maxDiskUsagePercent int) e
 	if !ok {
 		return nil
 	}
+	provider.operationMu.Lock()
+	defer provider.operationMu.Unlock()
 	return provider.ensureSpace(0, limits{
 		auto:                auto,
 		maxBytes:            maxBytes,
@@ -134,24 +139,110 @@ func Stats(path string) Statistics {
 		if !ok || !pathContains(path, provider.path) {
 			return true
 		}
-		provider.mu.Lock()
+		provider.mu.RLock()
 		for _, item := range provider.items {
 			if item.file {
 				result.Entries++
 			}
 		}
-		provider.mu.Unlock()
+		provider.mu.RUnlock()
 		result.Hits += provider.hits.Load()
 		result.Misses += provider.misses.Load()
 		result.StaleHits += provider.staleHits.Load()
 		result.Evictions += provider.evictions.Load()
 		result.RejectedWrites += provider.rejections.Load()
 		result.Corruptions += provider.corruptions.Load()
+		result.WriteQueueDepth += provider.queueDepth.Load()
+		result.WriteQueueBytes += provider.queueBytes.Load()
+		result.WriteQueueDepthMax = max(result.WriteQueueDepthMax, provider.queueDepthMax.Load())
+		result.WriteQueueBytesMax = max(result.WriteQueueBytesMax, provider.queueBytesMax.Load())
+		result.WriteQueueRejections += provider.queueRejections.Load()
+		result.WriteBatches += provider.writeBatches.Load()
+		result.WriteObjectsCommitted += provider.objectsCommitted.Load()
+		result.WriteCommitLatencyMS += float64(provider.commitNanos.Load()) / float64(time.Millisecond)
+		result.InflightWrites += provider.inflightWrites.Load()
 		return true
 	})
 	if total := result.Hits + result.Misses; total > 0 {
 		result.HitRate = float64(result.Hits) / float64(total)
 	}
+	if result.WriteBatches > 0 {
+		result.AverageWriteBatchSize = float64(result.WriteObjectsCommitted) / float64(result.WriteBatches)
+		result.WriteCommitLatencyMS /= float64(result.WriteBatches)
+	}
+	return result
+}
+
+// Drain waits until every cache write below path has committed or failed.
+func Drain(path string) {
+	active := providersForPath(path)
+	for _, provider := range active {
+		provider.operationMu.Lock()
+	}
+	defer func() {
+		for index := len(active) - 1; index >= 0; index-- {
+			active[index].operationMu.Unlock()
+		}
+	}()
+	for _, provider := range active {
+		provider.drain()
+	}
+}
+
+// ResetPath clears active cache providers below path without unregistering them.
+func ResetPath(path string) error {
+	active := providersForPath(path)
+	for _, provider := range active {
+		provider.operationMu.Lock()
+	}
+	defer func() {
+		for index := len(active) - 1; index >= 0; index-- {
+			active[index].operationMu.Unlock()
+		}
+	}()
+	var result error
+	for _, provider := range active {
+		provider.drain()
+		provider.capacityMu.Lock()
+		provider.mu.Lock()
+		keys := make([]string, 0, len(provider.items))
+		for key := range provider.items {
+			keys = append(keys, key)
+		}
+		_, obsolete, err := provider.deleteKeysLocked(keys)
+		provider.mu.Unlock()
+		provider.capacityMu.Unlock()
+		if err == nil {
+			removeFiles(obsolete)
+			provider.resetWriteStatistics()
+		}
+		result = errors.Join(result, err)
+	}
+	return result
+}
+
+func (p *provider) resetWriteStatistics() {
+	p.queueDepth.Store(0)
+	p.queueBytes.Store(0)
+	p.queueDepthMax.Store(0)
+	p.queueBytesMax.Store(0)
+	p.queueRejections.Store(0)
+	p.writeBatches.Store(0)
+	p.objectsCommitted.Store(0)
+	p.commitNanos.Store(0)
+	p.inflightWrites.Store(0)
+}
+
+func providersForPath(path string) []*provider {
+	result := make([]*provider, 0)
+	providers.Range(func(_, value any) bool {
+		provider, ok := value.(*provider)
+		if ok && pathContains(path, provider.path) {
+			result = append(result, provider)
+		}
+		return true
+	})
+	sort.Slice(result, func(i, j int) bool { return result[i].path < result[j].path })
 	return result
 }
 
@@ -175,7 +266,66 @@ type cacheItem struct {
 	compressedSize uint64
 	originalSize   uint64
 	checksum       [sha256.Size]byte
+	modifiedAt     int64
 	lru            *list.Element
+}
+
+type responseDecoder struct {
+	source     bytes.Reader
+	compressed *lz4.Reader
+	buffered   *bufio.Reader
+}
+
+func newResponseDecoder() *responseDecoder {
+	decoder := new(responseDecoder)
+	decoder.compressed = lz4.NewReader(&decoder.source)
+	decoder.buffered = bufio.NewReader(decoder.compressed)
+	return decoder
+}
+
+func acquireResponseDecoder(value []byte) *responseDecoder {
+	decoder := responseDecoders.Get().(*responseDecoder)
+	decoder.source.Reset(value)
+	decoder.compressed.Reset(&decoder.source)
+	decoder.buffered.Reset(decoder.compressed)
+	return decoder
+}
+
+func releaseResponseDecoder(decoder *responseDecoder) {
+	decoder.source.Reset(nil)
+	decoder.compressed.Reset(&decoder.source)
+	decoder.buffered.Reset(decoder.compressed)
+	responseDecoders.Put(decoder)
+}
+
+type pooledResponseBody struct {
+	body    io.ReadCloser
+	decoder *responseDecoder
+	once    sync.Once
+}
+
+func (b *pooledResponseBody) Read(target []byte) (int, error) {
+	count, err := b.body.Read(target)
+	if err != nil {
+		if !errors.Is(err, io.EOF) {
+			_ = b.body.Close()
+		}
+		b.release()
+	}
+	return count, err
+}
+
+func (b *pooledResponseBody) Close() error {
+	err := b.body.Close()
+	b.release()
+	return err
+}
+
+func (b *pooledResponseBody) release() {
+	b.once.Do(func() {
+		releaseResponseDecoder(b.decoder)
+		b.decoder = nil
+	})
 }
 
 type diskItem struct {
@@ -186,17 +336,28 @@ type diskItem struct {
 	CompressedSize uint64    `json:"compressed_size,omitempty"`
 	OriginalSize   uint64    `json:"original_size,omitempty"`
 	Checksum       []byte    `json:"checksum,omitempty"`
+	ModifiedAt     int64     `json:"modified_at,omitempty"`
 }
 
 type Statistics struct {
-	Entries        uint64  `json:"entries"`
-	Hits           uint64  `json:"hits"`
-	Misses         uint64  `json:"misses"`
-	StaleHits      uint64  `json:"stale_hits"`
-	Evictions      uint64  `json:"evictions"`
-	RejectedWrites uint64  `json:"rejected_writes"`
-	Corruptions    uint64  `json:"corruptions"`
-	HitRate        float64 `json:"hit_rate"`
+	Entries               uint64  `json:"entries"`
+	Hits                  uint64  `json:"hits"`
+	Misses                uint64  `json:"misses"`
+	StaleHits             uint64  `json:"stale_hits"`
+	Evictions             uint64  `json:"evictions"`
+	RejectedWrites        uint64  `json:"rejected_writes"`
+	Corruptions           uint64  `json:"corruptions"`
+	HitRate               float64 `json:"hit_rate"`
+	WriteQueueDepth       uint64  `json:"write_queue_depth"`
+	WriteQueueBytes       uint64  `json:"write_queue_bytes"`
+	WriteQueueDepthMax    uint64  `json:"write_queue_depth_max"`
+	WriteQueueBytesMax    uint64  `json:"write_queue_bytes_max"`
+	WriteQueueRejections  uint64  `json:"write_queue_rejections"`
+	WriteBatches          uint64  `json:"write_batches"`
+	WriteObjectsCommitted uint64  `json:"write_objects_committed"`
+	AverageWriteBatchSize float64 `json:"average_write_batch_size"`
+	WriteCommitLatencyMS  float64 `json:"write_commit_latency_ms"`
+	InflightWrites        uint64  `json:"inflight_writes"`
 }
 
 type diskUsageFunc func(string) (*disk.UsageStat, error)
@@ -232,29 +393,48 @@ func diskUsageForProvider(path string) diskUsageFunc {
 }
 
 type provider struct {
-	mu          sync.Mutex
-	capacityMu  sync.Mutex
-	items       map[string]cacheItem
-	groups      map[string]map[string]struct{}
-	lru         list.List
-	index       *bolt.DB
-	dirtyItems  map[string]struct{}
-	dirtyGroups map[string]struct{}
-	path        string
-	size        int
-	stale       time.Duration
-	limits      limits
-	logger      core.Logger
-	diskUsage   diskUsageFunc
-	hits        atomic.Uint64
-	misses      atomic.Uint64
-	staleHits   atomic.Uint64
-	evictions   atomic.Uint64
-	rejections  atomic.Uint64
-	corruptions atomic.Uint64
-	indexWrites atomic.Uint64
-	cacheUsed   atomic.Uint64
-	nextVersion uint64
+	mu               sync.RWMutex
+	capacityMu       sync.Mutex
+	operationMu      sync.RWMutex
+	batchMu          sync.Mutex
+	batchCond        *sync.Cond
+	batchWake        chan struct{}
+	pending          []*pendingWrite
+	pendingBytes     uint64
+	flushing         bool
+	items            map[string]cacheItem
+	groups           map[string]map[string]struct{}
+	variantMappings  map[string]map[string]struct{}
+	itemGroups       map[string]map[string]struct{}
+	expirations      expirationHeap
+	lru              list.List
+	index            *bolt.DB
+	dirtyItems       map[string]struct{}
+	dirtyGroups      map[string]struct{}
+	path             string
+	size             int
+	stale            time.Duration
+	limits           limits
+	logger           core.Logger
+	diskUsage        diskUsageFunc
+	hits             atomic.Uint64
+	misses           atomic.Uint64
+	staleHits        atomic.Uint64
+	evictions        atomic.Uint64
+	rejections       atomic.Uint64
+	corruptions      atomic.Uint64
+	indexWrites      atomic.Uint64
+	cacheUsed        atomic.Uint64
+	queueDepth       atomic.Uint64
+	queueBytes       atomic.Uint64
+	queueDepthMax    atomic.Uint64
+	queueBytesMax    atomic.Uint64
+	queueRejections  atomic.Uint64
+	writeBatches     atomic.Uint64
+	objectsCommitted atomic.Uint64
+	commitNanos      atomic.Uint64
+	inflightWrites   atomic.Uint64
+	nextVersion      uint64
 }
 
 func newProvider(config core.CacheProvider, logger core.Logger, stale time.Duration) (*provider, error) {
@@ -292,17 +472,22 @@ func buildProvider(config core.CacheProvider, logger core.Logger, stale time.Dur
 		return nil, err
 	}
 	provider := &provider{
-		items:       map[string]cacheItem{},
-		groups:      map[string]map[string]struct{}{},
-		dirtyItems:  map[string]struct{}{},
-		dirtyGroups: map[string]struct{}{},
-		path:        path,
-		size:        size,
-		stale:       stale,
-		limits:      configured,
-		logger:      logger,
-		diskUsage:   diskUsageForProvider(path),
+		items:           map[string]cacheItem{},
+		groups:          map[string]map[string]struct{}{},
+		variantMappings: map[string]map[string]struct{}{},
+		itemGroups:      map[string]map[string]struct{}{},
+		batchWake:       make(chan struct{}, 1),
+		dirtyItems:      map[string]struct{}{},
+		dirtyGroups:     map[string]struct{}{},
+		path:            path,
+		size:            size,
+		stale:           stale,
+		limits:          configured,
+		logger:          logger,
+		diskUsage:       diskUsageForProvider(path),
 	}
+	provider.batchCond = sync.NewCond(&provider.batchMu)
+	heap.Init(&provider.expirations)
 	return provider, nil
 }
 
@@ -311,12 +496,13 @@ func (p *provider) Uuid() string { return fmt.Sprintf("%s-%d", p.path, p.size) }
 func (p *provider) Init() error  { return nil }
 
 func (p *provider) MapKeys(prefix string) map[string]string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pruneExpiredLocked(time.Now())
+	now := time.Now()
+	p.pruneExpired(now)
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	result := map[string]string{}
 	for key, item := range p.items {
-		if strings.HasPrefix(key, prefix) {
+		if (item.expiresAt.IsZero() || item.expiresAt.After(now)) && strings.HasPrefix(key, prefix) {
 			result[strings.TrimPrefix(key, prefix)] = string(item.value)
 		}
 	}
@@ -324,40 +510,144 @@ func (p *provider) MapKeys(prefix string) map[string]string {
 }
 
 func (p *provider) ListKeys() []string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.pruneExpiredLocked(time.Now())
+	now := time.Now()
+	p.pruneExpired(now)
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 	result := make([]string, 0, len(p.items))
-	for key := range p.items {
-		result = append(result, key)
+	for key, item := range p.items {
+		if item.expiresAt.IsZero() || item.expiresAt.After(now) {
+			result = append(result, key)
+		}
 	}
 	sort.Strings(result)
 	return result
 }
 
 func (p *provider) Get(key string) []byte {
-	p.mu.Lock()
-	item, ok := p.itemLocked(key, time.Now())
-	p.mu.Unlock()
+	value, _ := p.get(key)
+	return value
+}
+
+func (p *provider) get(key string) ([]byte, uint64) {
+	now := time.Now()
+	p.mu.RLock()
+	item, ok := p.items[key]
 	if !ok {
-		return nil
+		p.mu.RUnlock()
+		return nil, 0
+	}
+	if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
+		p.mu.RUnlock()
+		p.removeExpired(key, item.generation, now)
+		return nil, 0
 	}
 	if !item.file {
-		return item.value
+		p.mu.RUnlock()
+		p.touchItem(key, item.generation, now, 0)
+		return item.value, 0
 	}
-	value, err := readCachedObjectFile(string(item.value), item.compressedSize, item.checksum)
+	file, err := os.Open(string(item.value))
+	p.mu.RUnlock()
 	if err != nil {
-		p.mu.Lock()
-		current, exists := p.items[key]
-		if exists && current.generation == item.generation {
-			p.deleteLocked(key)
-			_ = p.persistIndexLocked()
-			p.corruptions.Add(1)
-		}
-		p.mu.Unlock()
-		return nil
+		p.removeCorrupt(key, item.generation)
+		return nil, 0
 	}
-	return value
+	value, modifiedAt, err := readCachedObjectFile(file, item.compressedSize, item.checksum, item.modifiedAt)
+	_ = file.Close()
+	if err != nil {
+		p.removeCorrupt(key, item.generation)
+		return nil, 0
+	}
+	p.touchItem(key, item.generation, now, modifiedAt)
+	return value, item.originalSize
+}
+
+func (p *provider) touchItem(key string, generation uint64, now time.Time, modifiedAt int64) {
+	p.mu.RLock()
+	item, ok := p.items[key]
+	needsUpdate := ok && item.generation == generation && (now.Sub(item.lastAccess) >= time.Second || (modifiedAt != 0 && modifiedAt != item.modifiedAt))
+	p.mu.RUnlock()
+	if !needsUpdate || !p.mu.TryLock() {
+		return
+	}
+	defer p.mu.Unlock()
+	item, ok = p.items[key]
+	if !ok || item.generation != generation {
+		return
+	}
+	if now.Sub(item.lastAccess) >= time.Second {
+		item.lastAccess = now
+		if item.lru != nil {
+			p.lru.MoveToBack(item.lru)
+		}
+	}
+	if modifiedAt != 0 {
+		item.modifiedAt = modifiedAt
+	}
+	p.items[key] = item
+	p.dirtyItems[key] = struct{}{}
+}
+
+func (p *provider) removeExpired(key string, generation uint64, now time.Time) {
+	p.deleteItemIf(key, func(item cacheItem) bool {
+		return item.generation == generation && !item.expiresAt.IsZero() && !item.expiresAt.After(now)
+	})
+}
+
+func (p *provider) removeCorrupt(key string, generation uint64) {
+	p.deleteItemIf(key, func(item cacheItem) bool { return item.generation == generation })
+	p.corruptions.Add(1)
+}
+
+func (p *provider) removeInvalidMapping(key string, value []byte) {
+	p.deleteItemIf(key, func(item cacheItem) bool { return !item.file && bytes.Equal(item.value, value) })
+}
+
+func (p *provider) deleteItemIf(key string, match func(cacheItem) bool) {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
+	p.capacityMu.Lock()
+	defer p.capacityMu.Unlock()
+	p.mu.Lock()
+	item, ok := p.items[key]
+	if !ok || !match(item) {
+		p.mu.Unlock()
+		return
+	}
+	state := newBatchState(p)
+	state.deleteItem(p, key)
+	err := p.persistBatchLocked(state)
+	if err == nil {
+		p.applyBatchLocked(state)
+	}
+	p.mu.Unlock()
+	if err == nil {
+		removeFiles(state.obsoleteFiles)
+	}
+}
+
+func (p *provider) pruneExpired(now time.Time) {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
+	p.capacityMu.Lock()
+	defer p.capacityMu.Unlock()
+	p.mu.Lock()
+	state := newBatchState(p)
+	state.stageExpired(p, now)
+	var err error
+	if len(state.items) > 0 {
+		err = p.persistBatchLocked(state)
+		if err == nil {
+			p.applyBatchLocked(state)
+		} else {
+			state.restoreExpiry(p)
+		}
+	}
+	p.mu.Unlock()
+	if err == nil {
+		removeFiles(state.obsoleteFiles)
+	}
 }
 
 func (p *provider) GetMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response) {
@@ -368,15 +658,12 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 		return nil, nil
 	}
 	if _, err := core.DecodeMapping(mapping); err != nil {
-		p.mu.Lock()
-		p.deleteLocked(mappingKey)
-		_ = p.persistIndexLocked()
-		p.mu.Unlock()
+		p.removeInvalidMapping(mappingKey, mapping)
 		p.corruptions.Add(1)
 		p.misses.Add(1)
 		return nil, nil
 	}
-	fresh, stale, _ := core.MappingElection(p, mapping, request, validator, p.logger)
+	fresh, stale, _ := p.mappingElection(mapping, request, validator)
 	if fresh == nil && stale == nil {
 		p.misses.Add(1)
 	} else {
@@ -388,7 +675,68 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 	return fresh, stale
 }
 
+func (p *provider) mappingElection(value []byte, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, err error) {
+	mapping, err := core.DecodeMapping(value)
+	if err != nil {
+		return nil, nil, err
+	}
+	disableVary, _ := request.Context().Value(core.DISABLE_VARY_CTX).(bool)
+	for key, index := range mapping.GetMapping() {
+		if !disableVary {
+			matched := true
+			for name, values := range index.GetVariedHeaders() {
+				if request.Header.Get(name) != strings.Join(values.GetHeaderValue(), ", ") {
+					matched = false
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+		}
+
+		core.ValidateETagFromHeader(index.GetEtag(), validator)
+		if !validator.Matched {
+			continue
+		}
+		if time.Until(index.GetFreshTime().AsTime()) > 0 {
+			fresh, err = p.readHTTPResponse(key, request)
+			if fresh != nil || err != nil {
+				return fresh, nil, err
+			}
+		}
+		if time.Until(index.GetStaleTime().AsTime()) > 0 {
+			stale, err = p.readHTTPResponse(key, request)
+			if stale != nil || err != nil {
+				return nil, stale, err
+			}
+		}
+	}
+	return nil, nil, nil
+}
+
+func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Response, error) {
+	compressed, _ := p.get(key)
+	if compressed == nil {
+		return nil, nil
+	}
+	decoder := acquireResponseDecoder(compressed)
+	response, err := http.ReadResponse(decoder.buffered, request)
+	if err != nil {
+		releaseResponseDecoder(decoder)
+		return nil, err
+	}
+	if response.Body == nil || response.Body == http.NoBody {
+		releaseResponseDecoder(decoder)
+		return response, nil
+	}
+	response.Body = &pooledResponseBody{body: response.Body, decoder: decoder}
+	return response, nil
+}
+
 func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, variedHeaders http.Header, etag string, duration time.Duration, realKey string) error {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
 	status, err := cachedResponseStatus(value)
 	if err != nil {
 		p.corruptions.Add(1)
@@ -404,94 +752,73 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 	if cacheResponseHasDirective(value, "private", "no-store", "no-cache", "must-revalidate") {
 		return ErrUncacheable
 	}
-	path := filepath.Join(p.path, bodyFileName(variedKey))
-	temporaryPath, compressedSize, checksum, err := writeCompressedTemporary(path, value)
+	temporaryTarget := filepath.Join(p.path, bodyFileName(variedKey))
+	temporaryPath, compressedSize, checksum, err := writeCompressedTemporary(temporaryTarget, value)
 	if err != nil {
 		return err
 	}
 	defer os.Remove(temporaryPath)
-	p.capacityMu.Lock()
-	defer p.capacityMu.Unlock()
-	incoming := compressedSize
-	if info, err := os.Stat(path); err == nil && uint64(info.Size()) < incoming {
-		incoming -= uint64(info.Size())
-	} else if err == nil {
-		incoming = 0
+	write := &pendingWrite{
+		baseKey: baseKey, variedKey: variedKey, temporaryPath: temporaryPath,
+		finalPath:      filepath.Join(p.path, contentBodyFileName(variedKey, checksum)),
+		compressedSize: compressedSize, originalSize: uint64(len(value)), checksum: checksum,
+		groups: surrogateGroups(value), variedHeaders: variedHeaders.Clone(), etag: etag,
+		duration: duration, realKey: realKey, done: make(chan error, 1),
 	}
-	if err := p.ensureSpaceLockedWithTransient(incoming, p.limits, compressedSize); err != nil {
-		return err
-	}
-	if err := os.Rename(temporaryPath, path); err != nil {
-		if errors.Is(err, syscall.ENOSPC) {
-			p.rejections.Add(1)
-		}
-		return err
-	}
-	if directory, openErr := os.Open(p.path); openErr == nil {
-		err = directory.Sync()
-		_ = directory.Close()
-		if err != nil {
-			return err
-		}
-	}
-
-	now := time.Now()
-	p.mu.Lock()
-	p.setFileLocked(variedKey, path, duration+p.stale, now, compressedSize, uint64(len(value)), checksum)
-	mappingKey := core.MappingKeyPrefix + baseKey
-	previous, _ := p.itemLocked(mappingKey, now)
-	mapping, err := core.MappingUpdater(
-		variedKey,
-		previous.value,
-		p.logger,
-		now,
-		now.Add(duration),
-		now.Add(duration+p.stale),
-		variedHeaders,
-		etag,
-		realKey,
-	)
-	if err == nil {
-		p.setLocked(mappingKey, mapping, duration+p.stale, false, now)
-		for _, group := range surrogateGroups(value) {
-			if p.groups[group] == nil {
-				p.groups[group] = map[string]struct{}{}
-			}
-			p.groups[group][variedKey] = struct{}{}
-			p.groups[group][mappingKey] = struct{}{}
-			p.dirtyGroups[group] = struct{}{}
-		}
-		err = p.persistIndexLocked()
-		if err != nil {
-			p.recordRejectedWrite(err)
-			p.deleteLocked(variedKey)
-			_ = p.persistIndexLocked()
-		}
-	} else {
-		p.deleteLocked(variedKey)
-		p.deleteLocked(mappingKey)
-		if persistErr := p.persistIndexLocked(); persistErr != nil {
-			p.recordRejectedWrite(persistErr)
-			err = errors.Join(err, persistErr)
-		}
-	}
-	p.mu.Unlock()
-	return err
+	return p.enqueueWrite(write)
 }
 
 func (p *provider) Set(key string, value []byte, duration time.Duration) error {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
 	p.mu.Lock()
-	p.setLocked(key, value, duration, false, time.Now())
-	err := p.persistIndexLocked()
+	state := newBatchState(p)
+	now := time.Now()
+	if old, ok := state.getItem(p, key); ok && old.file {
+		state.used -= old.compressedSize
+		state.obsoleteFiles[string(old.value)] = struct{}{}
+	}
+	expiresAt := time.Time{}
+	if duration > 0 {
+		expiresAt = now.Add(duration)
+	}
+	p.nextVersion++
+	item := cacheItem{value: value, expiresAt: expiresAt, lastAccess: now, generation: p.nextVersion}
+	if strings.HasPrefix(key, core.MappingKeyPrefix) {
+		state.stageMapping(p, key, &item)
+	} else {
+		state.items[key] = stagedItem{item: item, present: true}
+	}
+	err := p.persistBatchLocked(state)
+	if err == nil {
+		p.applyBatchLocked(state)
+	}
 	p.mu.Unlock()
+	if err == nil {
+		for path := range state.obsoleteFiles {
+			_ = os.Remove(path)
+		}
+	}
 	return err
 }
 
 func (p *provider) Delete(key string) {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
 	p.mu.Lock()
-	p.deleteLocked(key)
-	_ = p.persistIndexLocked()
+	state := newBatchState(p)
+	state.deleteItem(p, key)
+	committed := len(state.items) == 0
+	if len(state.items) > 0 && p.persistBatchLocked(state) == nil {
+		p.applyBatchLocked(state)
+		committed = true
+	}
 	p.mu.Unlock()
+	if committed {
+		for path := range state.obsoleteFiles {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 func (p *provider) DeleteMany(expression string) {
@@ -499,23 +826,42 @@ func (p *provider) DeleteMany(expression string) {
 	if err != nil {
 		return
 	}
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
 	p.mu.Lock()
+	state := newBatchState(p)
 	for key := range p.items {
 		if matcher.MatchString(key) || strings.HasPrefix(key, expression) {
-			p.deleteLocked(key)
+			state.deleteItem(p, key)
 		}
 	}
-	_ = p.persistIndexLocked()
+	committed := len(state.items) == 0
+	if len(state.items) > 0 && p.persistBatchLocked(state) == nil {
+		p.applyBatchLocked(state)
+		committed = true
+	}
 	p.mu.Unlock()
+	if committed {
+		for path := range state.obsoleteFiles {
+			_ = os.Remove(path)
+		}
+	}
 }
 
 func (p *provider) Reset() error {
+	p.operationMu.Lock()
+	defer p.operationMu.Unlock()
+	p.drain()
 	p.mu.Lock()
+	keys := make([]string, 0, len(p.items))
 	for key := range p.items {
-		p.deleteLocked(key)
+		keys = append(keys, key)
 	}
-	err := p.persistIndexLocked()
+	_, obsolete, err := p.deleteKeysLocked(keys)
 	p.mu.Unlock()
+	if err == nil {
+		removeFiles(obsolete)
+	}
 	providers.Delete(p.path)
 	return err
 }
@@ -549,73 +895,78 @@ func Purge(path, purgeType string, hosts, values []string) (int, error) {
 		return 0, fmt.Errorf("cache provider %q is not active", path)
 	}
 	provider := value.(*provider)
+	provider.operationMu.Lock()
+	defer provider.operationMu.Unlock()
+	provider.drain()
 	provider.mu.Lock()
-	defer provider.mu.Unlock()
-
+	var keys []string
 	if purgeType == "ALL" {
-		count := provider.objectCountLocked()
 		for key := range provider.items {
-			provider.deleteLocked(key)
+			keys = append(keys, key)
 		}
-		return count, provider.persistIndexLocked()
-	}
-	if purgeType == "TAG" {
-		count := 0
+	} else if purgeType == "TAG" {
+		seen := map[string]struct{}{}
 		for _, group := range values {
 			for key := range provider.groups[group] {
-				if item, exists := provider.items[key]; exists {
-					provider.deleteLocked(key)
-					if item.file {
-						count++
-					}
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					keys = append(keys, key)
 				}
 			}
-			delete(provider.groups, group)
 		}
-		return count, provider.persistIndexLocked()
+	} else {
+		markers, markerErr := purgeMarkers(hosts, values)
+		if markerErr != nil {
+			provider.mu.Unlock()
+			return 0, markerErr
+		}
+		for key := range provider.items {
+			for _, marker := range markers {
+				index := strings.Index(key, marker)
+				if index < 0 || (index > 0 && key[index-1] != '-') {
+					continue
+				}
+				remainder := key[index+len(marker):]
+				if purgeType == "PREFIX" || remainder == "" || strings.HasPrefix(remainder, "-") {
+					keys = append(keys, key)
+					break
+				}
+			}
+		}
 	}
+	count, obsolete, err := provider.deleteKeysLocked(keys)
+	provider.mu.Unlock()
+	if err == nil {
+		removeFiles(obsolete)
+	}
+	return count, err
+}
 
-	markers, err := purgeMarkers(hosts, values)
-	if err != nil {
-		return 0, err
-	}
+func (p *provider) deleteKeysLocked(keys []string) (int, map[string]struct{}, error) {
+	state := newBatchState(p)
 	count := 0
-	for key := range provider.items {
-		matched := false
-		for _, marker := range markers {
-			index := strings.Index(key, marker)
-			if index < 0 || (index > 0 && key[index-1] != '-') {
-				continue
-			}
-			if purgeType == "PREFIX" {
-				matched = true
-				break
-			}
-			remainder := key[index+len(marker):]
-			if remainder == "" || strings.HasPrefix(remainder, "-") {
-				matched = true
-				break
-			}
-		}
-		if matched {
-			item := provider.items[key]
-			provider.deleteLocked(key)
+	for _, key := range keys {
+		if item, ok := state.getItem(p, key); ok {
 			if item.file {
 				count++
 			}
+			state.deleteItem(p, key)
 		}
 	}
-	return count, provider.persistIndexLocked()
+	if len(state.items) == 0 {
+		return count, nil, nil
+	}
+	if err := p.persistBatchLocked(state); err != nil {
+		return 0, nil, err
+	}
+	p.applyBatchLocked(state)
+	return count, state.obsoleteFiles, nil
 }
 
-func (p *provider) objectCountLocked() int {
-	count := 0
-	for _, item := range p.items {
-		if item.file {
-			count++
-		}
+func removeFiles(paths map[string]struct{}) {
+	for path := range paths {
+		_ = os.Remove(path)
 	}
-	return count
 }
 
 func samePath(left, right string) bool {
@@ -681,13 +1032,24 @@ func (p *provider) ensureSpaceLocked(incoming uint64, configured limits) error {
 
 func (p *provider) ensureSpaceLockedWithTransient(incoming uint64, configured limits, transient uint64) error {
 	p.mu.Lock()
-	pruned := p.pruneExpiredLocked(time.Now())
+	state := newBatchState(p)
+	state.stageExpired(p, time.Now())
 	var pruneErr error
-	if pruned {
-		pruneErr = p.persistIndexLocked()
+	if len(state.items) > 0 {
+		pruneErr = p.persistBatchLocked(state)
+		if pruneErr == nil {
+			p.applyBatchLocked(state)
+		} else {
+			state.restoreExpiry(p)
+		}
 		p.recordRejectedWrite(pruneErr)
 	}
 	p.mu.Unlock()
+	if pruneErr == nil {
+		for path := range state.obsoleteFiles {
+			_ = os.Remove(path)
+		}
+	}
 	if pruneErr != nil {
 		return pruneErr
 	}
@@ -751,111 +1113,36 @@ func (p *provider) evictBytes(required uint64) (uint64, error) {
 		return 0, nil
 	}
 	p.mu.Lock()
-	var freed, evicted uint64
-	for freed < required {
-		oldest := p.lru.Front()
-		if oldest == nil {
-			break
-		}
-		key := oldest.Value.(string)
-		item, ok := p.items[key]
+	state := newBatchState(p)
+	var freed uint64
+	for element := p.lru.Front(); element != nil && freed < required; element = element.Next() {
+		key := element.Value.(string)
+		item, ok := state.getItem(p, key)
 		if !ok || !item.file {
-			p.lru.Remove(oldest)
 			continue
 		}
-		if err := os.Remove(string(item.value)); err != nil && !errors.Is(err, os.ErrNotExist) {
-			break
-		}
 		freed += item.compressedSize
-		evicted++
-		p.forgetItemLocked(key, item)
+		state.deleteItem(p, key)
+		state.evicted++
 	}
 	var err error
-	if evicted > 0 {
-		p.repairMappingsLocked()
-		err = p.persistIndexLocked()
+	if state.evicted > 0 {
+		err = p.persistBatchLocked(state)
+		if err == nil {
+			p.applyBatchLocked(state)
+		}
 	}
 	p.mu.Unlock()
-	p.evictions.Add(evicted)
+	if err != nil {
+		return 0, err
+	}
+	for path := range state.obsoleteFiles {
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return freed, removeErr
+		}
+	}
+	p.evictions.Add(state.evicted)
 	return freed, err
-}
-
-func (p *provider) itemLocked(key string, now time.Time) (cacheItem, bool) {
-	item, ok := p.items[key]
-	if !ok {
-		return cacheItem{}, false
-	}
-	if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
-		p.deleteLocked(key)
-		return cacheItem{}, false
-	}
-	item.lastAccess = now
-	if item.lru != nil {
-		p.lru.MoveToBack(item.lru)
-	}
-	p.items[key] = item
-	p.dirtyItems[key] = struct{}{}
-	return item, true
-}
-
-func (p *provider) setLocked(key string, value []byte, duration time.Duration, file bool, now time.Time) {
-	if file {
-		panic("use setFileLocked for cache objects")
-	}
-	if old, ok := p.items[key]; ok {
-		if old.file {
-			_ = os.Remove(string(old.value))
-			if old.compressedSize > 0 {
-				p.cacheUsed.Add(^uint64(old.compressedSize - 1))
-			}
-		}
-		p.removeItemAccountingLocked(old)
-	}
-	expiresAt := time.Time{}
-	if duration > 0 {
-		expiresAt = now.Add(duration)
-	}
-	p.nextVersion++
-	p.items[key] = cacheItem{
-		value: value, expiresAt: expiresAt, lastAccess: now, file: file, generation: p.nextVersion,
-	}
-	p.dirtyItems[key] = struct{}{}
-}
-
-func (p *provider) setFileLocked(key, path string, duration time.Duration, now time.Time, compressedSize, originalSize uint64, checksum [sha256.Size]byte) {
-	if old, ok := p.items[key]; ok {
-		if old.file && string(old.value) != path {
-			_ = os.Remove(string(old.value))
-		}
-		p.removeItemAccountingLocked(old)
-		if old.file && old.compressedSize > 0 {
-			p.cacheUsed.Add(^uint64(old.compressedSize - 1))
-		}
-	}
-	expiresAt := time.Time{}
-	if duration > 0 {
-		expiresAt = now.Add(duration)
-	}
-	p.nextVersion++
-	item := cacheItem{
-		value: []byte(path), expiresAt: expiresAt, lastAccess: now, file: true, generation: p.nextVersion,
-		compressedSize: compressedSize, originalSize: originalSize, checksum: checksum,
-	}
-	item.lru = p.lru.PushBack(key)
-	p.items[key] = item
-	p.cacheUsed.Add(compressedSize)
-	p.dirtyItems[key] = struct{}{}
-}
-
-func (p *provider) deleteLocked(key string) {
-	item, ok := p.items[key]
-	if !ok {
-		return
-	}
-	p.deleteItemLocked(key, item)
-	if item.file {
-		p.removeVariantFromMappingsLocked(key)
-	}
 }
 
 func (p *provider) deleteItemLocked(key string, item cacheItem) {
@@ -867,18 +1154,18 @@ func (p *provider) deleteItemLocked(key string, item cacheItem) {
 
 func (p *provider) forgetItemLocked(key string, item cacheItem) {
 	delete(p.items, key)
+	p.removeReverseMappingLocked(key, item)
 	p.removeItemAccountingLocked(item)
 	p.dirtyItems[key] = struct{}{}
-	for group, keys := range p.groups {
-		if _, ok := keys[key]; !ok {
-			continue
-		}
+	for group := range p.itemGroups[key] {
+		keys := p.groups[group]
 		delete(keys, key)
 		p.dirtyGroups[group] = struct{}{}
 		if len(keys) == 0 {
 			delete(p.groups, group)
 		}
 	}
+	delete(p.itemGroups, key)
 	if item.file && item.compressedSize > 0 {
 		p.cacheUsed.Add(^uint64(item.compressedSize - 1))
 	}
@@ -891,8 +1178,9 @@ func (p *provider) removeItemAccountingLocked(item cacheItem) {
 }
 
 func (p *provider) removeVariantFromMappingsLocked(variedKey string) {
-	for key, item := range p.items {
-		if item.file || !strings.HasPrefix(key, core.MappingKeyPrefix) {
+	for key := range cloneSet(p.variantMappings[variedKey]) {
+		item, ok := p.items[key]
+		if !ok {
 			continue
 		}
 		mapping, err := core.DecodeMapping(item.value)
@@ -912,10 +1200,12 @@ func (p *provider) removeVariantFromMappingsLocked(variedKey string) {
 			p.deleteItemLocked(key, item)
 			continue
 		}
+		p.removeReverseMappingLocked(key, item)
 		item.value = value
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
+		p.addReverseMappingLocked(key, item)
 		p.dirtyItems[key] = struct{}{}
 	}
 }
@@ -952,24 +1242,15 @@ func (p *provider) repairMappingsLocked() bool {
 			p.deleteItemLocked(key, item)
 			continue
 		}
+		p.removeReverseMappingLocked(key, item)
 		item.value = value
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
+		p.addReverseMappingLocked(key, item)
 		p.dirtyItems[key] = struct{}{}
 	}
 	return repaired
-}
-
-func (p *provider) pruneExpiredLocked(now time.Time) bool {
-	pruned := false
-	for key, item := range p.items {
-		if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
-			p.deleteLocked(key)
-			pruned = true
-		}
-	}
-	return pruned
 }
 
 func (p *provider) loadIndex() error {
@@ -1030,6 +1311,9 @@ func (p *provider) loadIndex() error {
 					value: item.Value, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
 					generation: p.nextVersion,
 				}
+				if !item.ExpiresAt.IsZero() {
+					heap.Push(&p.expirations, expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion})
+				}
 				return nil
 			}
 			if filepath.Base(item.File) != item.File || item.File == indexName {
@@ -1054,11 +1338,18 @@ func (p *provider) loadIndex() error {
 			}
 			validFiles[item.File] = struct{}{}
 			p.nextVersion++
+			modifiedAt := item.ModifiedAt
+			if info, statErr := os.Stat(path); statErr == nil {
+				modifiedAt = info.ModTime().UnixNano()
+			}
 			loaded := cacheItem{
 				value: []byte(path), file: true, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
-				generation: p.nextVersion, compressedSize: uint64(len(compressed)), originalSize: originalSize, checksum: checksum,
+				generation: p.nextVersion, compressedSize: uint64(len(compressed)), originalSize: originalSize, checksum: checksum, modifiedAt: modifiedAt,
 			}
 			p.items[key] = loaded
+			if !item.ExpiresAt.IsZero() {
+				heap.Push(&p.expirations, expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion})
+			}
 			p.cacheUsed.Add(loaded.compressedSize)
 			return nil
 		}); err != nil {
@@ -1082,6 +1373,10 @@ func (p *provider) loadIndex() error {
 					p.groups[group] = map[string]struct{}{}
 				}
 				p.groups[group][key] = struct{}{}
+				if p.itemGroups[key] == nil {
+					p.itemGroups[key] = map[string]struct{}{}
+				}
+				p.itemGroups[key][group] = struct{}{}
 			}
 			return nil
 		})
@@ -1102,6 +1397,9 @@ func (p *provider) loadIndex() error {
 		item := p.items[key]
 		item.lru = p.lru.PushBack(key)
 		p.items[key] = item
+	}
+	for key, item := range p.items {
+		p.addReverseMappingLocked(key, item)
 	}
 	if p.repairMappingsLocked() {
 		repaired = true
@@ -1132,16 +1430,7 @@ func (p *provider) persistIndexLocked() error {
 				}
 				continue
 			}
-			diskValue := diskItem{ExpiresAt: item.expiresAt, LastAccess: item.lastAccess}
-			if item.file {
-				diskValue.File = filepath.Base(string(item.value))
-				diskValue.CompressedSize = item.compressedSize
-				diskValue.OriginalSize = item.originalSize
-				diskValue.Checksum = item.checksum[:]
-			} else {
-				diskValue.Value = item.value
-			}
-			encoded, err := json.Marshal(diskValue)
+			encoded, err := encodeDiskItem(item)
 			if err != nil {
 				return err
 			}
@@ -1298,18 +1587,29 @@ func (r *countingReader) Read(target []byte) (int, error) {
 	return count, err
 }
 
-func readCachedObjectFile(path string, expectedSize uint64, expectedChecksum [sha256.Size]byte) ([]byte, error) {
-	compressed, err := os.ReadFile(path)
+func readCachedObjectFile(file *os.File, expectedSize uint64, expectedChecksum [sha256.Size]byte, expectedModifiedAt int64) ([]byte, int64, error) {
+	info, err := file.Stat()
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	if uint64(len(compressed)) != expectedSize {
-		return nil, errors.New("cache object size does not match metadata")
+	if uint64(info.Size()) != expectedSize || expectedSize > uint64(^uint(0)>>1) {
+		return nil, 0, errors.New("cache object size does not match metadata")
 	}
-	if checksum := sha256.Sum256(compressed); checksum != expectedChecksum {
-		return nil, errors.New("cache object checksum does not match metadata")
+	compressed := make([]byte, int(expectedSize))
+	if _, err = io.ReadFull(file, compressed); err != nil {
+		return nil, 0, err
 	}
-	return compressed, nil
+	var extra [1]byte
+	if count, readErr := file.Read(extra[:]); count != 0 || (readErr != nil && !errors.Is(readErr, io.EOF)) {
+		return nil, 0, errors.New("cache object contains unexpected trailing data")
+	}
+	modifiedAt := info.ModTime().UnixNano()
+	if modifiedAt != expectedModifiedAt {
+		if checksum := sha256.Sum256(compressed); checksum != expectedChecksum {
+			return nil, 0, errors.New("cache object checksum does not match metadata")
+		}
+	}
+	return compressed, modifiedAt, nil
 }
 
 func writeCompressedTemporary(target string, value []byte) (path string, size uint64, checksum [sha256.Size]byte, err error) {
@@ -1328,6 +1628,10 @@ func writeCompressedTemporary(target string, value []byte) (path string, size ui
 	}
 	hash := sha256.New()
 	writer := lz4.NewWriter(io.MultiWriter(temporary, hash))
+	if err = writer.Apply(lz4.BlockSizeOption(lz4.Block64Kb), lz4.ConcurrencyOption(1)); err != nil {
+		cleanup()
+		return "", 0, checksum, err
+	}
 	if _, err = writer.Write(value); err != nil {
 		_ = writer.Close()
 		cleanup()

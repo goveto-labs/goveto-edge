@@ -2,14 +2,49 @@ package cacheheaders
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 )
+
+func TestHandlerNormalizesOnlyDefinitelyBodylessRequests(t *testing.T) {
+	handler := Handler{}
+	for _, test := range []struct {
+		name    string
+		request *http.Request
+		wantNil bool
+	}{
+		{name: "empty get", request: httptest.NewRequest(http.MethodGet, "http://example.test/", nil), wantNil: true},
+		{name: "post body", request: httptest.NewRequest(http.MethodPost, "http://example.test/", strings.NewReader("body"))},
+		{name: "chunked", request: func() *http.Request {
+			request := httptest.NewRequest(http.MethodPost, "http://example.test/", io.NopCloser(strings.NewReader("body")))
+			request.ContentLength = -1
+			request.TransferEncoding = []string{"chunked"}
+			return request
+		}()},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			observedNil := false
+			next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, request *http.Request) error {
+				observedNil = request.Body == nil
+				w.WriteHeader(http.StatusNoContent)
+				return nil
+			})
+			if err := handler.ServeHTTP(httptest.NewRecorder(), test.request, next); err != nil {
+				t.Fatal(err)
+			}
+			if observedNil != test.wantNil {
+				t.Fatalf("body nil=%v, want %v", observedNil, test.wantNil)
+			}
+		})
+	}
+}
 
 func TestCacheResult(t *testing.T) {
 	for input, want := range map[string]string{

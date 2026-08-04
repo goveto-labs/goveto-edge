@@ -188,6 +188,23 @@ func TestCompareControlRequiresNinetyPercentThroughput(t *testing.T) {
 	}
 }
 
+func TestOptionalBaselineRatioGates(t *testing.T) {
+	baseline := Report{RunnerID: "agent8", Platform: Platform{Architecture: "amd64"}, Scenario: Scenario{Suite: SuiteCapacity, Name: "cold", Protocol: ProtocolH1, Concurrency: 32}, Summary: Metrics{RPS: 20}, Runs: []Run{{Resources: ResourceSummary{AllocationBytesPerRequest: 1000}}}}
+	current := baseline
+	current.Summary.RPS = 199
+	current.Runs = []Run{{Resources: ResourceSummary{AllocationBytesPerRequest: 701}}}
+	decision := ApplyBaselineRatioGates(Compare(current, baseline), current, baseline, 10, 0.7)
+	if decision.Passed {
+		t.Fatalf("ratio gates passed below their boundaries: %+v", decision)
+	}
+	current.Summary.RPS = 200
+	current.Runs[0].Resources.AllocationBytesPerRequest = 700
+	decision = ApplyBaselineRatioGates(Compare(current, baseline), current, baseline, 10, 0.7)
+	if !decision.Passed {
+		t.Fatalf("ratio gate boundaries failed: %+v", decision)
+	}
+}
+
 func TestCompleteAccessLogGateChecksDropsDrainAndCommits(t *testing.T) {
 	config := Config{RequireCompleteAccessLogs: true}
 	run := Run{Index: 1, Metrics: Metrics{Successes: 10}, Resources: ResourceSummary{CommittedRecordsDelta: 9, BufferRecordsEnd: 1, MemoryDroppedLogsDelta: 1}}
@@ -199,5 +216,44 @@ func TestCompleteAccessLogGateChecksDropsDrainAndCommits(t *testing.T) {
 	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
 	if !validity.Valid || len(validity.Reasons) != 0 {
 		t.Fatalf("complete access logs were rejected: %#v", validity)
+	}
+}
+
+func TestPerformanceAndCacheWriteGates(t *testing.T) {
+	config := Config{MinRPS: 200, MaxP99MS: 1000, MaxAllocationBytesPerRequest: 120000, RequireCacheWritesDrained: true}
+	run := Run{Index: 1, Metrics: Metrics{RPS: 199, P99MS: 1001}, Resources: ResourceSummary{
+		AllocationBytesPerRequest: 120001, CacheWriteQueueDepthEnd: 1,
+		CacheWriteQueueBytesEnd: 2, CacheInflightWritesEnd: 1, CacheWriteRejectionsDelta: 1,
+	}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 5 {
+		t.Fatalf("performance gates=%+v", validity)
+	}
+	run.Metrics.RPS = 200
+	run.Metrics.P99MS = 1000
+	run.Resources = ResourceSummary{AllocationBytesPerRequest: 120000}
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if !validity.Valid {
+		t.Fatalf("boundary-valid performance result failed: %+v", validity)
+	}
+}
+
+func TestApplyNaturalEndDoesNotEraseTelemetryAfterFailedCapture(t *testing.T) {
+	summary := ResourceSummary{
+		QueueBytesEnd: 11, TotalAllocBytes: 100, AllocationBytesPerRequest: 25,
+		CacheWriteQueueDepthEnd: 2, CacheWriteQueueDepthMax: 3,
+	}
+	applyNaturalEnd(&summary, TimeSeriesPoint{Requests: 4})
+	if summary.QueueBytesEnd != 11 || summary.TotalAllocBytes != 100 || summary.AllocationBytesPerRequest != 25 ||
+		summary.CacheWriteQueueDepthEnd != 2 || summary.CacheWriteQueueDepthMax != 3 {
+		t.Fatalf("failed telemetry capture erased the prior summary: %+v", summary)
+	}
+
+	summary.totalAllocStart = 100
+	applyNaturalEnd(&summary, TimeSeriesPoint{
+		Requests: 4, TotalAllocBytes: 200, CacheWriteQueueDepthMax: 5, telemetryCaptured: true,
+	})
+	if summary.AllocatedBytes != 100 || summary.AllocationBytesPerRequest != 25 || summary.CacheWriteQueueDepthMax != 5 {
+		t.Fatalf("successful telemetry capture was not applied: %+v", summary)
 	}
 }

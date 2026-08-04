@@ -28,6 +28,7 @@ reuse_environment=false
 cleanup=false
 dry_run=false
 baseline_run=""
+case_filter=""
 result_dir=""
 summary_file=""
 last_status=""
@@ -67,6 +68,7 @@ Options:
   --cache-duration <duration> Full/cache measurement per repeat (default: 15s)
   --cache-repeats <count>     Full/cache measurement repeats (default: 3)
   --baseline-run <run-id>     Compare each case with the same case from this run
+  --case-filter <regex>       Run only case names matching this Bash regex
   --reuse-environment         Keep benchmark volumes and credentials
   --cleanup                   Stop containers after the run
   --dry-run                   Print all expanded cases without running Docker
@@ -94,6 +96,7 @@ while (($# > 0)); do
     --cache-duration) cache_duration="${2:-}"; shift 2 ;;
     --cache-repeats) cache_repeats="${2:-}"; shift 2 ;;
     --baseline-run) baseline_run="${2:-}"; shift 2 ;;
+    --case-filter) case_filter="${2:-}"; shift 2 ;;
     --reuse-environment) reuse_environment=true; shift ;;
     --cleanup) cleanup=true; shift ;;
     --dry-run) dry_run=true; shift ;;
@@ -221,6 +224,10 @@ run_case() {
   shift 4
   local output container_output started status baseline_report container_baseline
   local -a baseline_args=()
+
+  if [[ -n "$case_filter" && ! "$name" =~ $case_filter ]]; then
+	return
+  fi
 
   if $dry_run; then
     printf '%-10s %-42s protocol=%s\n' "$phase" "$name" "$protocol"
@@ -392,7 +399,8 @@ run_cache_benchmark() {
   local protocol size concurrency name key match path
   local -a common_args
   common_args=(--suite capacity --insecure-skip-verify \
-    --warmup "$cache_warmup" --duration "$cache_duration" --repeats "$cache_repeats")
+    --warmup "$cache_warmup" --duration "$cache_duration" --repeats "$cache_repeats" \
+    --require-cache-writes-drained)
 
   # Hot read throughput across object sizes and the normal concurrency ladder.
   for protocol in $protocols; do
@@ -456,14 +464,19 @@ run_cache_benchmark() {
   for protocol in $protocols; do
     for size in 1024 16384 1048576; do
       for concurrency in 1 32 128; do
+        reset_benchmark_cache
         name="cache-cold-${size}b-${protocol}-c${concurrency}"
         key="cache:$name"
+        local -a cold_gates=()
+        if [[ "$concurrency" == "32" || "$concurrency" == "128" ]]; then
+          cold_gates+=(--min-rps 200 --max-p99 1000)
+        fi
         run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
           --protocol "$protocol" --scenario "cache-cold-${size}b" \
           --url "https://agent:8444/bytes/$size?cache_bench=cold-$run_id-$size" \
           --host cache.benchmark.example.test --concurrency "$concurrency" --unique-query \
           --expected-sha256 "$(sha256_zeros "$size")" --expected-header X-Cache=MISS \
-          --capture-header X-Cache --min-cache-misses 1
+          --capture-header X-Cache --min-cache-misses 1 "${cold_gates[@]}"
       done
     done
   done
@@ -471,6 +484,7 @@ run_cache_benchmark() {
   # A bounded key set starts cold on every repetition, then transitions to hits.
   for protocol in $protocols; do
     for concurrency in 32 128; do
+      reset_benchmark_cache
       name="cache-mixed-256keys-16k-${protocol}-c${concurrency}"
       key="cache:$name"
       run_case cache "$key" "$name" "$protocol" \
@@ -482,7 +496,8 @@ run_cache_benchmark() {
         --unique-query-namespace "mixed-$run_id-$protocol-c$concurrency" \
         --expected-sha256 "$(sha256_zeros 16384)" \
         --allowed-header X-Cache=MISS --allowed-header X-Cache=HIT \
-        --capture-header X-Cache --min-cache-hits 1 --min-cache-misses 1
+        --capture-header X-Cache --min-cache-hits 1 --min-cache-misses 1 \
+        --min-rps 1000 --max-p99 1000 --require-cache-writes-drained
     done
   done
 
@@ -514,6 +529,12 @@ run_cache_benchmark() {
       --unique-query --unique-query-cardinality 2 --min-cache-misses 1 --min-cache-evictions 1 \
       --max-agent-rss-growth 536870912 --cooldown 60s
   fi
+}
+
+reset_benchmark_cache() {
+  $dry_run && return
+  curl -fsS -X POST http://127.0.0.1:19900/cache/drain >/dev/null || die "cache drain failed"
+  curl -fsS -X POST http://127.0.0.1:19900/cache/reset >/dev/null || die "cache reset failed"
 }
 
 capture_small_reuse_profile() {
@@ -742,7 +763,9 @@ setup_environment() {
   command -v docker >/dev/null 2>&1 || die "docker is required"
   command -v go >/dev/null 2>&1 || die "go is required"
   command -v jq >/dev/null 2>&1 || die "jq is required"
-	[[ "$mode" != "small-reuse" ]] || command -v curl >/dev/null 2>&1 || die "curl is required for small-reuse profiles"
+  if [[ "$mode" == "small-reuse" || "$mode" == "cache" || "$mode" == "full" ]]; then
+    command -v curl >/dev/null 2>&1 || die "curl is required for benchmark control endpoints"
+  fi
   docker compose version >/dev/null 2>&1 || die "docker compose is required"
   docker_cpus="$(docker info --format '{{.NCPU}}' 2>/dev/null)"
   [[ "$docker_cpus" =~ ^[0-9]+$ ]] || die "cannot determine Docker CPU count"

@@ -84,8 +84,9 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
 			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes,
+			MinRPS: config.MinRPS, MaxP99MS: config.MaxP99MS, MaxAllocationBytesPerRequest: config.MaxAllocationBytesPerRequest,
 			PostCooldownGC: config.AgentGCURL != "" && config.Cooldown > 0,
-			Variant:        config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs,
+			Variant:        config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs, RequireCacheWritesDrained: config.RequireCacheWritesDrained,
 		},
 	}
 	var loadCPUMax float64
@@ -175,6 +176,11 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	if err = cleanup(); err != nil {
 		state.recordCleanupError(err)
 	}
+	if config.RequireCacheWritesDrained {
+		if drainErr := triggerCacheControl(ctx, config.AgentMetricsURL, "/cache/drain"); drainErr != nil {
+			environmentErrors = append(environmentErrors, drainErr.Error())
+		}
+	}
 	if config.Cooldown > 0 {
 		timer := time.NewTimer(config.Cooldown)
 		select {
@@ -194,6 +200,11 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	if !naturalEnd.At.IsZero() {
 		samples = append(samples, naturalEnd)
 		applyNaturalEnd(&resources, naturalEnd)
+	}
+	if config.MaxAllocationBytesPerRequest > 0 || config.RequireCacheWritesDrained || config.RequireCompleteAccessLogs {
+		if !resources.telemetryBaselineCaptured || !naturalEnd.telemetryCaptured {
+			environmentErrors = append(environmentErrors, "required benchmark telemetry was unavailable at the measurement boundary")
+		}
 	}
 	if config.AgentGCURL != "" && config.Cooldown > 0 {
 		if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
@@ -363,7 +374,7 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		result.headers[http.CanonicalHeaderKey(name)] = response.Header.Get(name)
 	}
 	if readErr != nil {
-		result.err = fmt.Errorf("read response: %w", readErr)
+		result.err = fmt.Errorf("read response: %w (bytes=%d content_length=%d x_cache=%q)", readErr, written, response.ContentLength, response.Header.Get("X-Cache"))
 		return result
 	}
 	if !statusOK {
@@ -379,7 +390,7 @@ func executeRequest(ctx context.Context, client *http.Client, config Config, seq
 		return result
 	}
 	if digest != nil && !strings.EqualFold(hex.EncodeToString(digest.Sum(nil)), config.ExpectedSHA256) {
-		result.err = fmt.Errorf("response SHA-256 mismatch")
+		result.err = fmt.Errorf("response SHA-256 mismatch (got=%s bytes=%d content_length=%d x_cache=%q)", hex.EncodeToString(digest.Sum(nil)), written, response.ContentLength, response.Header.Get("X-Cache"))
 		return result
 	}
 	for name, expected := range config.ExpectedHeaders {
@@ -835,6 +846,7 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 		telemetryBaseline, err = fetchTelemetry(ctx, metricsClient, metricsURL)
 		hasTelemetryBaseline = err == nil
 		if hasTelemetryBaseline {
+			summary.telemetryBaselineCaptured = true
 			previousTelemetry = telemetryBaseline
 			summary.HeapBytesStart = telemetryBaseline.HeapBytes
 			summary.HeapInuseBytesStart = telemetryBaseline.HeapInuseBytes
@@ -845,6 +857,10 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 			summary.diskDroppedLogsStart = telemetryBaseline.DiskDroppedLogs
 			summary.committedBatchesStart = telemetryBaseline.CommittedBatches
 			summary.committedRecordsStart = telemetryBaseline.CommittedRecords
+			summary.totalAllocStart = telemetryBaseline.TotalAlloc
+			summary.cacheWriteRejectionsStart = telemetryBaseline.CacheWriteRejections
+			summary.cacheWriteBatchesStart = telemetryBaseline.CacheWriteBatches
+			summary.cacheWriteObjectsStart = telemetryBaseline.CacheWriteObjects
 		}
 	}
 	baselineAt = time.Now()
@@ -921,6 +937,7 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 			}
 			if metricsURL != "" {
 				if telemetry, err := fetchTelemetry(ctx, metricsClient, metricsURL); err == nil {
+					point.telemetryCaptured = true
 					point.HeapBytes = telemetry.HeapBytes
 					point.HeapInuseBytes = telemetry.HeapInuseBytes
 					point.HeapIdleBytes = telemetry.HeapIdleBytes
@@ -947,6 +964,17 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 						point.CacheMisses = counterDelta(telemetry.CacheMisses, telemetryBaseline.CacheMisses)
 						point.CacheEvictions = counterDelta(telemetry.CacheEvictions, telemetryBaseline.CacheEvictions)
 					}
+					point.TotalAllocBytes = telemetry.TotalAlloc
+					point.CacheWriteQueueDepth = telemetry.CacheWriteQueueDepth
+					point.CacheWriteQueueBytes = telemetry.CacheWriteQueueBytes
+					point.CacheWriteQueueDepthMax = telemetry.CacheWriteQueueDepthMax
+					point.CacheWriteQueueBytesMax = telemetry.CacheWriteQueueBytesMax
+					point.CacheWriteRejections = telemetry.CacheWriteRejections
+					point.CacheWriteBatches = telemetry.CacheWriteBatches
+					point.CacheWriteObjects = telemetry.CacheWriteObjects
+					point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
+					point.CacheWriteCommitLatencyMS = telemetry.CacheWriteCommitLatencyMS
+					point.CacheInflightWrites = telemetry.CacheInflightWrites
 					allocationElapsed := time.Since(previousTelemetryAt).Seconds()
 					if hasTelemetryBaseline && allocationElapsed > 0 && telemetry.TotalAlloc >= previousTelemetry.TotalAlloc {
 						point.AllocationRate = float64(telemetry.TotalAlloc-previousTelemetry.TotalAlloc) / allocationElapsed
@@ -976,6 +1004,11 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					summary.CacheHitsDelta = point.CacheHits
 					summary.CacheMissesDelta = point.CacheMisses
 					summary.CacheEvictionsDelta = point.CacheEvictions
+					summary.TotalAllocBytes = point.TotalAllocBytes
+					summary.CacheWriteQueueDepthMax = max(summary.CacheWriteQueueDepthMax, point.CacheWriteQueueDepthMax)
+					summary.CacheWriteQueueBytesMax = max(summary.CacheWriteQueueBytesMax, point.CacheWriteQueueBytesMax)
+					summary.CacheAverageWriteBatchSize = point.CacheAverageWriteBatchSize
+					summary.CacheWriteCommitLatencyMS = point.CacheWriteCommitLatencyMS
 				}
 			}
 			points = append(points, point)
@@ -991,28 +1024,38 @@ func counterDelta(current, baseline uint64) uint64 {
 }
 
 type telemetrySample struct {
-	HeapBytes          uint64    `json:"heap_bytes"`
-	HeapInuseBytes     uint64    `json:"heap_inuse_bytes"`
-	HeapIdleBytes      uint64    `json:"heap_idle_bytes"`
-	HeapReleasedBytes  uint64    `json:"heap_released_bytes"`
-	TotalAlloc         uint64    `json:"total_alloc_bytes"`
-	GCCount            uint32    `json:"gc_count"`
-	Goroutines         int       `json:"goroutines"`
-	QueueBytes         uint64    `json:"log_queue_bytes"`
-	QueueRecords       uint64    `json:"log_queue_records"`
-	BufferBytes        uint64    `json:"log_buffer_bytes"`
-	BufferRecords      uint64    `json:"log_buffer_records"`
-	DroppedLogs        uint64    `json:"dropped_logs"`
-	MemoryDroppedLogs  uint64    `json:"memory_dropped_logs"`
-	DiskDroppedLogs    uint64    `json:"disk_dropped_logs"`
-	CommittedBatches   uint64    `json:"committed_log_batches"`
-	CommittedRecords   uint64    `json:"committed_log_records"`
-	AverageBatchSize   float64   `json:"average_log_batch_size"`
-	LastPersistError   string    `json:"last_log_persist_error"`
-	LastPersistSuccess time.Time `json:"last_log_persist_success,omitempty"`
-	CacheHits          uint64    `json:"cache_hits"`
-	CacheMisses        uint64    `json:"cache_misses"`
-	CacheEvictions     uint64    `json:"cache_evictions"`
+	HeapBytes                  uint64    `json:"heap_bytes"`
+	HeapInuseBytes             uint64    `json:"heap_inuse_bytes"`
+	HeapIdleBytes              uint64    `json:"heap_idle_bytes"`
+	HeapReleasedBytes          uint64    `json:"heap_released_bytes"`
+	TotalAlloc                 uint64    `json:"total_alloc_bytes"`
+	GCCount                    uint32    `json:"gc_count"`
+	Goroutines                 int       `json:"goroutines"`
+	QueueBytes                 uint64    `json:"log_queue_bytes"`
+	QueueRecords               uint64    `json:"log_queue_records"`
+	BufferBytes                uint64    `json:"log_buffer_bytes"`
+	BufferRecords              uint64    `json:"log_buffer_records"`
+	DroppedLogs                uint64    `json:"dropped_logs"`
+	MemoryDroppedLogs          uint64    `json:"memory_dropped_logs"`
+	DiskDroppedLogs            uint64    `json:"disk_dropped_logs"`
+	CommittedBatches           uint64    `json:"committed_log_batches"`
+	CommittedRecords           uint64    `json:"committed_log_records"`
+	AverageBatchSize           float64   `json:"average_log_batch_size"`
+	LastPersistError           string    `json:"last_log_persist_error"`
+	LastPersistSuccess         time.Time `json:"last_log_persist_success,omitempty"`
+	CacheHits                  uint64    `json:"cache_hits"`
+	CacheMisses                uint64    `json:"cache_misses"`
+	CacheEvictions             uint64    `json:"cache_evictions"`
+	CacheWriteQueueDepth       uint64    `json:"cache_write_queue_depth"`
+	CacheWriteQueueBytes       uint64    `json:"cache_write_queue_bytes"`
+	CacheWriteQueueDepthMax    uint64    `json:"cache_write_queue_depth_max"`
+	CacheWriteQueueBytesMax    uint64    `json:"cache_write_queue_bytes_max"`
+	CacheWriteRejections       uint64    `json:"cache_write_queue_rejections"`
+	CacheWriteBatches          uint64    `json:"cache_write_batches"`
+	CacheWriteObjects          uint64    `json:"cache_write_objects_committed"`
+	CacheAverageWriteBatchSize float64   `json:"cache_average_write_batch_size"`
+	CacheWriteCommitLatencyMS  float64   `json:"cache_write_commit_latency_ms"`
+	CacheInflightWrites        uint64    `json:"cache_inflight_writes"`
 }
 
 func captureResourcePoint(pid int32, metricsURL string, state *runState, phase string) TimeSeriesPoint {
@@ -1039,6 +1082,7 @@ func captureResourcePoint(pid int32, metricsURL string, state *runState, phase s
 		requestContext, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
 		if telemetry, err := fetchTelemetry(requestContext, &http.Client{Timeout: 2 * time.Second}, metricsURL); err == nil {
+			point.telemetryCaptured = true
 			point.HeapBytes = telemetry.HeapBytes
 			point.HeapInuseBytes = telemetry.HeapInuseBytes
 			point.HeapIdleBytes = telemetry.HeapIdleBytes
@@ -1053,6 +1097,17 @@ func captureResourcePoint(pid int32, metricsURL string, state *runState, phase s
 			point.DiskDroppedLogs = telemetry.DiskDroppedLogs
 			point.CommittedBatches = telemetry.CommittedBatches
 			point.CommittedRecords = telemetry.CommittedRecords
+			point.TotalAllocBytes = telemetry.TotalAlloc
+			point.CacheWriteQueueDepth = telemetry.CacheWriteQueueDepth
+			point.CacheWriteQueueBytes = telemetry.CacheWriteQueueBytes
+			point.CacheWriteQueueDepthMax = telemetry.CacheWriteQueueDepthMax
+			point.CacheWriteQueueBytesMax = telemetry.CacheWriteQueueBytesMax
+			point.CacheWriteRejections = telemetry.CacheWriteRejections
+			point.CacheWriteBatches = telemetry.CacheWriteBatches
+			point.CacheWriteObjects = telemetry.CacheWriteObjects
+			point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
+			point.CacheWriteCommitLatencyMS = telemetry.CacheWriteCommitLatencyMS
+			point.CacheInflightWrites = telemetry.CacheInflightWrites
 		}
 	}
 	return point
@@ -1077,10 +1132,32 @@ func applyNaturalEnd(summary *ResourceSummary, point TimeSeriesPoint) {
 	if point.Goroutines > 0 {
 		summary.GoroutinesEnd = point.Goroutines
 	}
+	if !point.telemetryCaptured {
+		return
+	}
 	summary.QueueBytesEnd = point.QueueBytes
 	summary.QueueRecordsEnd = point.QueueRecords
 	summary.BufferBytesEnd = point.BufferBytes
 	summary.BufferRecordsEnd = point.BufferRecords
+	summary.TotalAllocBytes = point.TotalAllocBytes
+	summary.AllocatedBytes = counterDelta(point.TotalAllocBytes, summary.totalAllocStart)
+	if point.Requests > 0 {
+		summary.AllocationBytesPerRequest = float64(summary.AllocatedBytes) / float64(point.Requests)
+	}
+	summary.CacheWriteQueueDepthEnd = point.CacheWriteQueueDepth
+	summary.CacheWriteQueueBytesEnd = point.CacheWriteQueueBytes
+	summary.CacheInflightWritesEnd = point.CacheInflightWrites
+	summary.CacheWriteQueueDepthMax = max(summary.CacheWriteQueueDepthMax, point.CacheWriteQueueDepthMax)
+	summary.CacheWriteQueueBytesMax = max(summary.CacheWriteQueueBytesMax, point.CacheWriteQueueBytesMax)
+	summary.CacheWriteRejectionsDelta = counterDelta(point.CacheWriteRejections, summary.cacheWriteRejectionsStart)
+	summary.CacheWriteBatchesDelta = counterDelta(point.CacheWriteBatches, summary.cacheWriteBatchesStart)
+	summary.CacheWriteObjectsDelta = counterDelta(point.CacheWriteObjects, summary.cacheWriteObjectsStart)
+	if summary.CacheWriteBatchesDelta > 0 {
+		summary.CacheAverageWriteBatchSize = float64(summary.CacheWriteObjectsDelta) / float64(summary.CacheWriteBatchesDelta)
+	} else {
+		summary.CacheAverageWriteBatchSize = point.CacheAverageWriteBatchSize
+	}
+	summary.CacheWriteCommitLatencyMS = point.CacheWriteCommitLatencyMS
 	summary.MemoryDroppedLogsDelta = counterDelta(point.MemoryDroppedLogs, summary.memoryDroppedLogsStart)
 	summary.DiskDroppedLogsDelta = counterDelta(point.DiskDroppedLogs, summary.diskDroppedLogsStart)
 	summary.CommittedBatchesDelta = counterDelta(point.CommittedBatches, summary.committedBatchesStart)
@@ -1109,6 +1186,30 @@ func setBenchmarkVariant(ctx context.Context, metricsURL string, variant Variant
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("set benchmark variant: status %d", response.StatusCode)
+	}
+	return nil
+}
+
+func triggerCacheControl(ctx context.Context, metricsURL, path string) error {
+	if metricsURL == "" {
+		return errors.New("cache write drain requires agent metrics URL")
+	}
+	endpoint, err := url.Parse(metricsURL)
+	if err != nil {
+		return fmt.Errorf("parse cache control URL: %w", err)
+	}
+	endpoint.Path = path
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), nil)
+	if err != nil {
+		return fmt.Errorf("create cache control request: %w", err)
+	}
+	response, err := (&http.Client{Timeout: 30 * time.Second}).Do(request)
+	if err != nil {
+		return fmt.Errorf("cache control %s: %w", path, err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("cache control %s returned status %d", path, response.StatusCode)
 	}
 	return nil
 }
