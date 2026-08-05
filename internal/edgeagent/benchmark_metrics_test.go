@@ -2,6 +2,7 @@ package edgeagent
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -53,6 +54,22 @@ func TestBenchmarkMetricsGCRequiresPostAndCompletes(t *testing.T) {
 	handler.ServeHTTP(post, httptest.NewRequest(http.MethodPost, "/gc", nil))
 	if post.Code != http.StatusNoContent {
 		t.Fatalf("POST /gc status=%d", post.Code)
+	}
+}
+
+func TestBenchmarkMetricsExposeGoroutineProfile(t *testing.T) {
+	handler := benchmarkMetricsHandler(nil, nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/debug/pprof/goroutine?debug=1", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("goroutine profile status=%d", response.Code)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) == 0 {
+		t.Fatal("goroutine profile was empty")
 	}
 }
 

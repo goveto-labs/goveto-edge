@@ -882,6 +882,7 @@ func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig Node
 	}
 
 	configuration := map[string]any{
+		"SurrogateKeyDisabled": true,
 		"DefaultCache": map[string]any{
 			"allowed_http_verbs": verbs,
 			"cache_name":         "Goveto-" + siteID,

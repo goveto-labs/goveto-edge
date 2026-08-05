@@ -137,5 +137,6 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 	mux.HandleFunc("GET /debug/pprof/profile", httppprof.Profile)
 	mux.Handle("GET /debug/pprof/mutex", httppprof.Handler("mutex"))
 	mux.Handle("GET /debug/pprof/allocs", httppprof.Handler("allocs"))
+	mux.Handle("GET /debug/pprof/goroutine", httppprof.Handler("goroutine"))
 	return mux
 }

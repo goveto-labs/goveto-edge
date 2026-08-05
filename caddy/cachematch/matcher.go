@@ -9,6 +9,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"goveto-edge/internal/cacherange"
 	"goveto-edge/internal/policy"
 )
 
@@ -47,9 +48,11 @@ func (m Matcher) Match(r *http.Request) bool {
 		return false
 	}
 	if value := strings.Join(r.Header.Values("Range"), ","); value != "" {
-		if !m.CacheRangeRequests || r.Header.Get("If-Range") != "" || !cacheableRange(value) {
+		start, end, ok := parseCacheableRange(value)
+		if !m.CacheRangeRequests || r.Header.Get("If-Range") != "" || !ok {
 			return false
 		}
+		*r = *r.WithContext(cacherange.WithContext(r.Context(), cacherange.Spec{Start: start, End: end}))
 	}
 	groupMatches := make([]bool, len(m.Conditions.Groups))
 	for gi, group := range m.Conditions.Groups {
@@ -77,23 +80,28 @@ func matchesCacheControl(values, configured []string) bool {
 }
 
 func cacheableRange(value string) bool {
+	_, _, ok := parseCacheableRange(value)
+	return ok
+}
+
+func parseCacheableRange(value string) (uint64, uint64, bool) {
 	unit, interval, ok := strings.Cut(strings.TrimSpace(value), "=")
 	if !ok || !strings.EqualFold(strings.TrimSpace(unit), "bytes") || strings.Contains(interval, ",") {
-		return false
+		return 0, 0, false
 	}
 	startText, endText, ok := strings.Cut(strings.TrimSpace(interval), "-")
 	if !ok || startText == "" {
-		return false
+		return 0, 0, false
 	}
 	start, err := strconv.ParseUint(strings.TrimSpace(startText), 10, 64)
 	if err != nil {
-		return false
+		return 0, 0, false
 	}
 	if strings.TrimSpace(endText) == "" {
-		return false
+		return 0, 0, false
 	}
 	end, err := strconv.ParseUint(strings.TrimSpace(endText), 10, 64)
-	return err == nil && end >= start
+	return start, end, err == nil && end >= start
 }
 
 func (Matcher) matchRule(requestPath string, rule policy.CacheConditionRule, compiled *regexp.Regexp) bool {

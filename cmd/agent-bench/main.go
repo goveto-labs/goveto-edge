@@ -172,6 +172,7 @@ func run(args []string) error {
 	maxLoadCPU := flags.Float64("max-load-cpu", 85, "maximum load generator CPU percent before marking the result saturated")
 	maxAgentRSS := flags.Uint64("max-agent-rss", 0, "maximum Edge Agent RSS bytes allowed during the run")
 	maxAgentRSSGrowth := flags.Uint64("max-agent-rss-growth", 0, "maximum Edge Agent RSS growth from the run baseline")
+	maxAgentGoroutineGrowth := flags.Int("max-agent-goroutine-growth", 0, "maximum Edge Agent goroutine growth from pre-warmup through cooldown")
 	minRPS := flags.Float64("min-rps", 0, "minimum requests per second required in every run")
 	maxP99 := flags.Float64("max-p99", 0, "maximum p99 latency in milliseconds allowed in every run")
 	maxAllocationBytesPerRequest := flags.Uint64("max-allocation-bytes-per-request", 0, "maximum allocated bytes per request")
@@ -201,6 +202,9 @@ func run(args []string) error {
 	if *minBaselineRPSRatio < 0 || *maxBaselineAllocationRatio < 0 {
 		return errors.New("baseline ratios cannot be negative")
 	}
+	if *maxAgentGoroutineGrowth < 0 {
+		return errors.New("max-agent-goroutine-growth cannot be negative")
+	}
 	selectedSuite := agentbench.Suite(*suite)
 	if !validSuite(selectedSuite) {
 		return fmt.Errorf("invalid suite %q", *suite)
@@ -220,7 +224,7 @@ func run(args []string) error {
 	}
 	var baselineReport *agentbench.Report
 	if *baseline != "" {
-		loaded, readErr := agentbench.ReadReport(*baseline)
+		loaded, readErr := agentbench.ReadBaselineReport(*baseline)
 		if readErr != nil {
 			return fmt.Errorf("read baseline: %w", readErr)
 		}
@@ -248,11 +252,12 @@ func run(args []string) error {
 		Cooldown: *cooldown, CapacityProbe: *capacityProbe,
 		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, AgentGCURL: *agentGCURL, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
-		MaxCapturedValues:      *maxCapturedValues,
-		MaxLoadCPUPercent:      *maxLoadCPU,
-		MaxAgentRSSBytes:       *maxAgentRSS,
-		MaxAgentRSSGrowthBytes: *maxAgentRSSGrowth,
-		MinRPS:                 *minRPS, MaxP99MS: *maxP99, MaxAllocationBytesPerRequest: *maxAllocationBytesPerRequest,
+		MaxCapturedValues:       *maxCapturedValues,
+		MaxLoadCPUPercent:       *maxLoadCPU,
+		MaxAgentRSSBytes:        *maxAgentRSS,
+		MaxAgentRSSGrowthBytes:  *maxAgentRSSGrowth,
+		MaxAgentGoroutineGrowth: *maxAgentGoroutineGrowth,
+		MinRPS:                  *minRPS, MaxP99MS: *maxP99, MaxAllocationBytesPerRequest: *maxAllocationBytesPerRequest,
 		Variant: agentbench.Variant(*variant), RequireCompleteAccessLogs: *requireCompleteAccessLogs,
 		RequireCacheWritesDrained: *requireCacheWritesDrained,
 	})

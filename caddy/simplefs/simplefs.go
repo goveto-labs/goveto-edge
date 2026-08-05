@@ -33,6 +33,7 @@ import (
 	"github.com/shirou/gopsutil/v4/disk"
 	bolt "go.etcd.io/bbolt"
 	"google.golang.org/protobuf/proto"
+	"goveto-edge/internal/cacherange"
 )
 
 const (
@@ -50,6 +51,7 @@ var (
 	indexVersionKey   = []byte("version")
 	indexUsedBytesKey = []byte("used_bytes")
 	responseDecoders  = sync.Pool{New: func() any { return newResponseDecoder() }}
+	decodeMapping     = core.DecodeMapping
 )
 
 var ErrCapacity = errors.New("cache storage limit leaves no room for this response")
@@ -302,6 +304,50 @@ type pooledResponseBody struct {
 	body    io.ReadCloser
 	decoder *responseDecoder
 	once    sync.Once
+}
+
+type rangedResponseBody struct {
+	body      io.ReadCloser
+	skip      uint64
+	remaining uint64
+	closed    bool
+}
+
+func (b *rangedResponseBody) Read(target []byte) (int, error) {
+	if b.closed {
+		return 0, io.EOF
+	}
+	if b.skip > 0 {
+		if _, err := io.CopyN(io.Discard, b.body, int64(b.skip)); err != nil {
+			_ = b.Close()
+			return 0, err
+		}
+		b.skip = 0
+	}
+	if b.remaining == 0 {
+		_ = b.Close()
+		return 0, io.EOF
+	}
+	if uint64(len(target)) > b.remaining {
+		target = target[:b.remaining]
+	}
+	count, err := b.body.Read(target)
+	b.remaining -= uint64(count)
+	if err != nil || b.remaining == 0 {
+		closeErr := b.Close()
+		if err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}
+	return count, err
+}
+
+func (b *rangedResponseBody) Close() error {
+	if b.closed {
+		return nil
+	}
+	b.closed = true
+	return b.body.Close()
 }
 
 func (b *pooledResponseBody) Read(target []byte) (int, error) {
@@ -657,13 +703,14 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 		p.misses.Add(1)
 		return nil, nil
 	}
-	if _, err := core.DecodeMapping(mapping); err != nil {
+	decoded, err := decodeMapping(mapping)
+	if err != nil || decoded.GetMapping() == nil {
 		p.removeInvalidMapping(mappingKey, mapping)
 		p.corruptions.Add(1)
 		p.misses.Add(1)
 		return nil, nil
 	}
-	fresh, stale, _ := p.mappingElection(mapping, request, validator)
+	fresh, stale, _ := p.mappingElection(decoded, request, validator)
 	if fresh == nil && stale == nil {
 		p.misses.Add(1)
 	} else {
@@ -675,11 +722,7 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 	return fresh, stale
 }
 
-func (p *provider) mappingElection(value []byte, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, err error) {
-	mapping, err := core.DecodeMapping(value)
-	if err != nil {
-		return nil, nil, err
-	}
+func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, err error) {
 	disableVary, _ := request.Context().Value(core.DISABLE_VARY_CTX).(bool)
 	for key, index := range mapping.GetMapping() {
 		if !disableVary {
@@ -731,7 +774,73 @@ func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Re
 		return response, nil
 	}
 	response.Body = &pooledResponseBody{body: response.Body, decoder: decoder}
+	if requested, ok := cacherange.FromContext(request.Context()); ok {
+		if err = applyCachedRange(response, requested); err != nil {
+			_ = response.Body.Close()
+			return nil, err
+		}
+	}
 	return response, nil
+}
+
+const storedLengthHeader = "X-Souin-Stored-Length"
+
+func applyCachedRange(response *http.Response, requested cacherange.Spec) error {
+	bodyStart, bodyEnd, total, ok := cachedBodyRange(response)
+	if !ok {
+		return nil
+	}
+	if requested.Start >= total {
+		_ = response.Body.Close()
+		response.Body = http.NoBody
+		response.StatusCode = http.StatusRequestedRangeNotSatisfiable
+		response.Status = "416 Requested Range Not Satisfiable"
+		response.ContentLength = 0
+		response.Header.Set("Accept-Ranges", "bytes")
+		response.Header.Set("Content-Range", "bytes */"+strconv.FormatUint(total, 10))
+		response.Header.Set("Content-Length", "0")
+		response.Header.Set(storedLengthHeader, "0")
+		return nil
+	}
+	end := min(requested.End, total-1)
+	if requested.Start < bodyStart || requested.Start > bodyEnd || end > bodyEnd {
+		return nil
+	}
+	length := end - requested.Start + 1
+	response.Body = &rangedResponseBody{body: response.Body, skip: requested.Start - bodyStart, remaining: length}
+	response.StatusCode = http.StatusPartialContent
+	response.Status = "206 Partial Content"
+	response.ContentLength = int64(length)
+	response.Header.Set("Accept-Ranges", "bytes")
+	response.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", requested.Start, end, total))
+	response.Header.Set("Content-Length", strconv.FormatUint(length, 10))
+	response.Header.Set(storedLengthHeader, strconv.FormatUint(length, 10))
+	return nil
+}
+
+func cachedBodyRange(response *http.Response) (start, end, total uint64, ok bool) {
+	if response.StatusCode == http.StatusPartialContent {
+		value := strings.TrimSpace(response.Header.Get("Content-Range"))
+		unit, interval, found := strings.Cut(value, " ")
+		bounds, totalText, foundTotal := strings.Cut(interval, "/")
+		startText, endText, foundBounds := strings.Cut(bounds, "-")
+		if !found || !foundTotal || !foundBounds || !strings.EqualFold(unit, "bytes") || totalText == "*" {
+			return 0, 0, 0, false
+		}
+		start, _ = strconv.ParseUint(startText, 10, 64)
+		end, _ = strconv.ParseUint(endText, 10, 64)
+		total, _ = strconv.ParseUint(totalText, 10, 64)
+		return start, end, total, total > 0 && start <= end && end < total
+	}
+	length := response.Header.Get(storedLengthHeader)
+	if length == "" {
+		length = response.Header.Get("Content-Length")
+	}
+	total, err := strconv.ParseUint(length, 10, 64)
+	if err != nil || total == 0 {
+		return 0, 0, 0, false
+	}
+	return 0, total - 1, total, true
 }
 
 func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, variedHeaders http.Header, etag string, duration time.Duration, realKey string) error {

@@ -3,11 +3,15 @@ package edgeagent
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 	"time"
 
 	_ "github.com/darkweak/souin/plugins/caddy"
+	"github.com/shirou/gopsutil/v4/process"
 
 	_ "goveto-edge/caddy/cacheheaders"
 	_ "goveto-edge/caddy/cachematch"
@@ -445,6 +450,81 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("concurrent unique misses release resources", func(t *testing.T) {
+		debug.FreeOSMemory()
+		baselineGoroutines := runtime.NumGoroutine()
+		currentProcess, err := process.NewProcess(int32(os.Getpid()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		baselineMemory, err := currentProcess.MemoryInfo()
+		if err != nil {
+			t.Fatal(err)
+		}
+		baselineStats := cachefs.Stats(manager.nodeConfig.CacheDirectory)
+
+		const requests = 512
+		jobs := make(chan int)
+		requestErrors := make(chan error, requests)
+		var workers sync.WaitGroup
+		for range 64 {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for sequence := range jobs {
+					request, requestErr := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/unique-miss?_bench="+strconv.Itoa(sequence), nil)
+					if requestErr == nil {
+						request.Host = config.Domains[0]
+						var response *http.Response
+						response, requestErr = http.DefaultClient.Do(request)
+						if requestErr == nil {
+							_, requestErr = io.Copy(io.Discard, response.Body)
+							requestErr = errors.Join(requestErr, response.Body.Close())
+							if response.StatusCode != http.StatusOK {
+								requestErr = errors.Join(requestErr, fmt.Errorf("status %d", response.StatusCode))
+							}
+						}
+					}
+					if requestErr != nil {
+						requestErrors <- requestErr
+					}
+				}
+			}()
+		}
+		for sequence := range requests {
+			jobs <- sequence
+		}
+		close(jobs)
+		workers.Wait()
+		close(requestErrors)
+		for requestErr := range requestErrors {
+			t.Errorf("unique MISS request failed: %v", requestErr)
+		}
+
+		cachefs.Drain(manager.nodeConfig.CacheDirectory)
+		debug.FreeOSMemory()
+		finalMemory, err := currentProcess.MemoryInfo()
+		if err != nil {
+			t.Fatal(err)
+		}
+		finalStats := cachefs.Stats(manager.nodeConfig.CacheDirectory)
+		if growth := runtime.NumGoroutine() - baselineGoroutines; growth > 256 {
+			t.Errorf("goroutine growth=%d, want at most 256", growth)
+		}
+		if finalMemory.RSS > baselineMemory.RSS+256<<20 {
+			t.Errorf("RSS growth=%d, want at most %d", finalMemory.RSS-baselineMemory.RSS, 256<<20)
+		}
+		if misses := finalStats.Misses - baselineStats.Misses; misses < requests {
+			t.Errorf("MISS delta=%d, want at least %d", misses, requests)
+		}
+		if finalStats.WriteQueueDepth != 0 || finalStats.WriteQueueBytes != 0 || finalStats.InflightWrites != 0 {
+			t.Errorf("cache writes did not drain: depth=%d bytes=%d inflight=%d", finalStats.WriteQueueDepth, finalStats.WriteQueueBytes, finalStats.InflightWrites)
+		}
+		if finalStats.RejectedWrites != baselineStats.RejectedWrites || finalStats.WriteQueueRejections != baselineStats.WriteQueueRejections {
+			t.Errorf("cache rejected writes: capacity=%d queue=%d", finalStats.RejectedWrites-baselineStats.RejectedWrites, finalStats.WriteQueueRejections-baselineStats.WriteQueueRejections)
+		}
+	})
+
 	t.Run("URL prefix tag and all purge change actual cache contents", func(t *testing.T) {
 		primeCache(t, counters, port, config.Domains[0], "/purge/url")
 		result, err := manager.PurgeDetailed(edgeprotocol.PurgeRequest{SiteID: config.SiteID, Type: "URL", Values: []string{"/purge/url"}})
@@ -726,8 +806,8 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		requestEdge(t, port, config.Domains[0], http.MethodGet, "/app.css", nil)
 		if counters.count("GET /app.css ") != 2 {
 			t.Fatalf("outer AND expression should bypass cache")
-			}
-		})
+		}
+	})
 }
 
 func TestAgentCacheStaleETagRefreshReturnsRepresentation(t *testing.T) {

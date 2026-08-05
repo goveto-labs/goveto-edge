@@ -152,6 +152,9 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		if config.MaxAgentRSSGrowthBytes > 0 && run.Resources.RSSBytesGrowth > config.MaxAgentRSSGrowthBytes {
 			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent RSS grew by %d bytes, want at most %d", run.Index, run.Resources.RSSBytesGrowth, config.MaxAgentRSSGrowthBytes))
 		}
+		if config.MaxAgentGoroutineGrowth > 0 && run.Resources.GoroutinesCooldownGrowth > config.MaxAgentGoroutineGrowth {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d agent goroutines grew by %d from pre-warmup to cooldown end, want at most %d", run.Index, run.Resources.GoroutinesCooldownGrowth, config.MaxAgentGoroutineGrowth))
+		}
 		if config.MinRPS > 0 && run.Metrics.RPS < config.MinRPS {
 			validity.addReason(ResultProductFail, fmt.Sprintf("run %d RPS %.2f is below %.2f", run.Index, run.Metrics.RPS, config.MinRPS))
 		}

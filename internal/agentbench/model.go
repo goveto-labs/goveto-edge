@@ -2,7 +2,7 @@ package agentbench
 
 import "time"
 
-const SchemaVersion = "1.3"
+const SchemaVersion = "1.4"
 
 type Protocol string
 
@@ -69,6 +69,7 @@ type Config struct {
 	MaxLoadCPUPercent            float64
 	MaxAgentRSSBytes             uint64
 	MaxAgentRSSGrowthBytes       uint64
+	MaxAgentGoroutineGrowth      int
 	MinRPS                       float64
 	MaxP99MS                     float64
 	MaxAllocationBytesPerRequest uint64
@@ -127,6 +128,7 @@ type Scenario struct {
 	CaptureHeaders               []string                      `json:"capture_headers,omitempty"`
 	UniqueQuery                  bool                          `json:"unique_query,omitempty"`
 	UniqueQueryCardinality       int                           `json:"unique_query_cardinality,omitempty"`
+	UniqueQueryNamespace         string                        `json:"unique_query_namespace,omitempty"`
 	CooldownMS                   int64                         `json:"cooldown_ms,omitempty"`
 	CapacityProbe                bool                          `json:"capacity_probe,omitempty"`
 	MinCacheHits                 uint64                        `json:"min_cache_hits,omitempty"`
@@ -136,6 +138,7 @@ type Scenario struct {
 	MaxLoadCPUPercent            float64                       `json:"max_load_cpu_percent,omitempty"`
 	MaxAgentRSSBytes             uint64                        `json:"max_agent_rss_bytes,omitempty"`
 	MaxAgentRSSGrowthBytes       uint64                        `json:"max_agent_rss_growth_bytes,omitempty"`
+	MaxAgentGoroutineGrowth      int                           `json:"max_agent_goroutine_growth,omitempty"`
 	MinRPS                       float64                       `json:"min_rps,omitempty"`
 	MaxP99MS                     float64                       `json:"max_p99_ms,omitempty"`
 	MaxAllocationBytesPerRequest uint64                        `json:"max_allocation_bytes_per_request,omitempty"`
@@ -177,6 +180,8 @@ type Metrics struct {
 }
 
 type ResourceSummary struct {
+	RSSBytesPreWarmup          uint64     `json:"rss_bytes_pre_warmup,omitempty"`
+	GoroutinesPreWarmup        int        `json:"goroutines_pre_warmup,omitempty"`
 	RSSBytesStart              uint64     `json:"rss_bytes_start,omitempty"`
 	FDsStart                   int32      `json:"fds_start,omitempty"`
 	ConnectionsStart           int        `json:"connections_start,omitempty"`
@@ -227,6 +232,7 @@ type ResourceSummary struct {
 	CacheAverageWriteBatchSize float64    `json:"cache_average_write_batch_size,omitempty"`
 	CacheWriteCommitLatencyMS  float64    `json:"cache_write_commit_latency_ms,omitempty"`
 	RSSBytesEnd                uint64     `json:"rss_bytes_end,omitempty"`
+	RSSBytesCooldownGrowth     uint64     `json:"rss_bytes_cooldown_growth,omitempty"`
 	FDsEnd                     int32      `json:"fds_end,omitempty"`
 	ConnectionsEnd             int        `json:"connections_end,omitempty"`
 	HeapBytesEnd               uint64     `json:"heap_bytes_end,omitempty"`
@@ -239,6 +245,7 @@ type ResourceSummary struct {
 	HeapIdleBytesPostGC        uint64     `json:"heap_idle_bytes_post_gc,omitempty"`
 	HeapReleasedBytesPostGC    uint64     `json:"heap_released_bytes_post_gc,omitempty"`
 	GoroutinesEnd              int        `json:"goroutines_end,omitempty"`
+	GoroutinesCooldownGrowth   int        `json:"goroutines_cooldown_growth,omitempty"`
 	QueueBytesEnd              uint64     `json:"log_queue_bytes_end,omitempty"`
 	QueueRecordsEnd            uint64     `json:"log_queue_records_end,omitempty"`
 	BufferBytesEnd             uint64     `json:"log_buffer_bytes_end,omitempty"`

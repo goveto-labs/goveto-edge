@@ -20,6 +20,7 @@ import (
 	"github.com/pierrec/lz4/v4"
 	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
+	"goveto-edge/internal/cacherange"
 )
 
 func newTestProvider(t *testing.T, directory string, stale time.Duration) *provider {
@@ -130,6 +131,130 @@ func TestMultiLevelKeepsResponseBodyForStaleWindow(t *testing.T) {
 	_ = stale.Body.Close()
 }
 
+func TestCachedRangeResponseReadsOnlyRequestedBytes(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	body := "0123456789abcdefghijklmnopqrstuvwxyz"
+	if err := provider.SetMultiLevel("key", "key", cachedResponse(body), nil, "", time.Minute, "key"); err != nil {
+		t.Fatal(err)
+	}
+	request := &http.Request{Header: http.Header{}}
+	request = request.WithContext(cacherange.WithContext(request.Context(), cacherange.Spec{Start: 10, End: 19}))
+	fresh, _ := provider.GetMultiLevel("key", request, &core.Revalidator{})
+	if fresh == nil {
+		t.Fatal("range cache lookup missed")
+	}
+	got, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != body[10:20] {
+		t.Fatalf("range body = %q, want %q", got, body[10:20])
+	}
+	if fresh.StatusCode != http.StatusPartialContent || fresh.ContentLength != 10 || fresh.Header.Get("Content-Range") != "bytes 10-19/36" || fresh.Header.Get("Accept-Ranges") != "bytes" || fresh.Header.Get(storedLengthHeader) != "10" {
+		t.Fatalf("range response = status %d length %d headers %#v", fresh.StatusCode, fresh.ContentLength, fresh.Header)
+	}
+}
+
+func TestCachedRangeClampsEndAndRejectsUnsatisfiableStart(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	body := "0123456789"
+	if err := provider.SetMultiLevel("key", "key", cachedResponse(body), nil, "", time.Minute, "key"); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		name       string
+		spec       cacherange.Spec
+		wantStatus int
+		wantBody   string
+		wantRange  string
+		wantLength int64
+	}{
+		{name: "end beyond object", spec: cacherange.Spec{Start: 7, End: 100}, wantStatus: http.StatusPartialContent, wantBody: "789", wantRange: "bytes 7-9/10", wantLength: 3},
+		{name: "start beyond object", spec: cacherange.Spec{Start: 10, End: 20}, wantStatus: http.StatusRequestedRangeNotSatisfiable, wantRange: "bytes */10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := (&http.Request{Header: http.Header{}}).WithContext(cacherange.WithContext(t.Context(), test.spec))
+			fresh, _ := provider.GetMultiLevel("key", request, &core.Revalidator{})
+			if fresh == nil {
+				t.Fatal("range cache lookup missed")
+			}
+			got, err := io.ReadAll(fresh.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fresh.StatusCode != test.wantStatus || string(got) != test.wantBody || fresh.Header.Get("Content-Range") != test.wantRange || fresh.ContentLength != test.wantLength {
+				t.Fatalf("response = status %d body %q range %q length %d", fresh.StatusCode, got, fresh.Header.Get("Content-Range"), fresh.ContentLength)
+			}
+		})
+	}
+}
+
+func TestCachedRangeEarlyCloseReleasesDecoder(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	if err := provider.SetMultiLevel("key", "key", cachedResponse(strings.Repeat("x", 128)), nil, "", time.Minute, "key"); err != nil {
+		t.Fatal(err)
+	}
+	request := (&http.Request{Header: http.Header{}}).WithContext(cacherange.WithContext(t.Context(), cacherange.Spec{Start: 32, End: 63}))
+	fresh, _ := provider.GetMultiLevel("key", request, &core.Revalidator{})
+	ranged, ok := fresh.Body.(*rangedResponseBody)
+	if !ok {
+		t.Fatalf("range body type = %T", fresh.Body)
+	}
+	pooled, ok := ranged.body.(*pooledResponseBody)
+	if !ok {
+		t.Fatalf("underlying body type = %T", ranged.body)
+	}
+	buffer := make([]byte, 1)
+	if _, err := fresh.Body.Read(buffer); err != nil {
+		t.Fatal(err)
+	}
+	if err := fresh.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if pooled.decoder != nil || !ranged.closed {
+		t.Fatal("early close did not release the pooled decoder")
+	}
+}
+
+func TestCachedPartialResponseUsesAbsoluteRangeOffsets(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	response := []byte("HTTP/1.1 206 Partial Content\r\nContent-Length: 10\r\nContent-Range: bytes 100-109/1000\r\n\r\nabcdefghij")
+	if err := provider.SetMultiLevel("key", "key", response, nil, "", time.Minute, "key"); err != nil {
+		t.Fatal(err)
+	}
+	request := (&http.Request{Header: http.Header{}}).WithContext(cacherange.WithContext(t.Context(), cacherange.Spec{Start: 103, End: 106}))
+	fresh, _ := provider.GetMultiLevel("key", request, &core.Revalidator{})
+	got, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "defg" || fresh.Header.Get("Content-Range") != "bytes 103-106/1000" {
+		t.Fatalf("partial cached range = %q, %q", got, fresh.Header.Get("Content-Range"))
+	}
+}
+
+func TestNonRangeCacheHitPreservesFullResponseAndDecodesMappingOnce(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	if err := provider.SetMultiLevel("key", "key", cachedResponse("complete"), nil, "", time.Minute, "key"); err != nil {
+		t.Fatal(err)
+	}
+	original := decodeMapping
+	count := 0
+	decodeMapping = func(value []byte) (*core.StorageMapper, error) {
+		count++
+		return original(value)
+	}
+	t.Cleanup(func() { decodeMapping = original })
+	fresh, _ := provider.GetMultiLevel("key", &http.Request{Header: http.Header{}}, &core.Revalidator{})
+	got, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "complete" || fresh.StatusCode != http.StatusOK || count != 1 {
+		t.Fatalf("full hit = status %d body %q mapping decodes %d", fresh.StatusCode, got, count)
+	}
+}
+
 func TestStartupRemovesOrphanWithoutScanningOnWrites(t *testing.T) {
 	directory := t.TempDir()
 	old := filepath.Join(directory, bodyPrefix+"orphan")
@@ -159,6 +284,28 @@ func TestIndexRestoresCacheAcrossProviderRestart(t *testing.T) {
 		t.Fatalf("cache index did not restore the response: keys=%v corruptions=%d", restarted.ListKeys(), restarted.corruptions.Load())
 	}
 	defer fresh.Body.Close()
+}
+
+func TestTagIndexPersistsAcrossProviderRestart(t *testing.T) {
+	directory := t.TempDir()
+	key := "GET-http-example.test-/tagged"
+	response := []byte("HTTP/1.1 200 OK\r\nCache-Control: public, max-age=60\r\nContent-Length: 4\r\nSurrogate-Key: group-a\r\n\r\nbody")
+	first := newTestProvider(t, directory, time.Minute)
+	if err := first.SetMultiLevel(key, key, response, nil, "", time.Minute, key); err != nil {
+		t.Fatal(err)
+	}
+	first.closeIndex()
+
+	restarted := newTestProvider(t, directory, time.Minute)
+	providers.Store(directory, restarted)
+	t.Cleanup(func() { providers.Delete(directory) })
+	removed, err := Purge(directory, "TAG", nil, []string{"group-a"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 || restarted.Get(key) != nil || restarted.Get(core.MappingKeyPrefix+key) != nil {
+		t.Fatalf("persisted TAG purge removed=%d body=%v mapping=%v", removed, restarted.Get(key) != nil, restarted.Get(core.MappingKeyPrefix+key) != nil)
+	}
 }
 
 func TestOverwritingCacheObjectReplacesUsedBytes(t *testing.T) {
@@ -359,6 +506,21 @@ func TestRuntimeCorruptionRemovesBodyAndMapping(t *testing.T) {
 	}
 	if provider.corruptions.Load() != 1 {
 		t.Fatalf("corruptions=%d, want 1", provider.corruptions.Load())
+	}
+}
+
+func TestEmptyMappingIsRemovedAsCorruption(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	mappingKey := core.MappingKeyPrefix + "key"
+	if err := provider.Set(mappingKey, []byte{}, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+	fresh, stale := provider.GetMultiLevel("key", &http.Request{Header: http.Header{}}, &core.Revalidator{})
+	if fresh != nil || stale != nil {
+		t.Fatal("empty mapping was served")
+	}
+	if provider.Get(mappingKey) != nil || provider.corruptions.Load() != 1 || provider.misses.Load() != 1 {
+		t.Fatalf("empty mapping recovery: mapping=%v corruptions=%d misses=%d", provider.Get(mappingKey) != nil, provider.corruptions.Load(), provider.misses.Load())
 	}
 }
 
@@ -578,7 +740,7 @@ func TestBatchCommitFailureDoesNotPublishObject(t *testing.T) {
 	err = provider.enqueueWrite(&pendingWrite{
 		baseKey: key, variedKey: key, temporaryPath: temporary, finalPath: finalPath,
 		compressedSize: size, originalSize: uint64(len(value)), checksum: checksum,
-		duration: time.Minute, realKey: key, done: make(chan error, 1),
+		groups: []string{"group-a"}, duration: time.Minute, realKey: key, done: make(chan error, 1),
 	})
 	if err == nil {
 		t.Fatal("write with a closed index succeeded")
@@ -589,6 +751,9 @@ func TestBatchCommitFailureDoesNotPublishObject(t *testing.T) {
 	provider.mu.RUnlock()
 	if bodyExists || mappingExists {
 		t.Fatalf("failed transaction published state: body=%v mapping=%v", bodyExists, mappingExists)
+	}
+	if len(provider.groups["group-a"]) != 0 || len(provider.itemGroups[key]) != 0 {
+		t.Fatal("failed transaction published surrogate tag indexes")
 	}
 	if _, statErr := os.Stat(finalPath); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("failed transaction left final file: %v", statErr)

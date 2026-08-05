@@ -13,6 +13,17 @@ import (
 )
 
 func ReadReport(path string) (Report, error) {
+	return readReport(path, map[string]struct{}{SchemaVersion: {}})
+}
+
+// ReadBaselineReport accepts report schemas that contain the scenario and
+// throughput fields used by Compare. New artifacts are always written with
+// SchemaVersion.
+func ReadBaselineReport(path string) (Report, error) {
+	return readReport(path, map[string]struct{}{"1.2": {}, "1.3": {}, SchemaVersion: {}})
+}
+
+func readReport(path string, supported map[string]struct{}) (Report, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Report{}, err
@@ -24,7 +35,7 @@ func ReadReport(path string) (Report, error) {
 	if report.SchemaVersion == "" {
 		return Report{}, fmt.Errorf("report has no schema_version")
 	}
-	if report.SchemaVersion != SchemaVersion {
+	if _, ok := supported[report.SchemaVersion]; !ok {
 		return Report{}, fmt.Errorf("unsupported report schema_version %q", report.SchemaVersion)
 	}
 	return report, nil

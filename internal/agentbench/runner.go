@@ -79,11 +79,11 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			ExpectedSHA256: config.ExpectedSHA256, ExpectedHeaders: config.ExpectedHeaders,
 			AllowedHeaders: config.AllowedHeaders, MaxHeaderRatios: config.MaxHeaderRatios,
 			RequestHeaders: config.RequestHeaders, CaptureHeaders: config.CaptureHeaders, UniqueQuery: config.UniqueQuery,
-			UniqueQueryCardinality: config.UniqueQueryCardinality,
-			CooldownMS:             config.Cooldown.Milliseconds(), CapacityProbe: config.CapacityProbe,
+			UniqueQueryCardinality: config.UniqueQueryCardinality, UniqueQueryNamespace: config.UniqueQueryNamespace,
+			CooldownMS: config.Cooldown.Milliseconds(), CapacityProbe: config.CapacityProbe,
 			MinCacheHits: config.MinCacheHits, MinCacheMisses: config.MinCacheMisses, MinCacheEvictions: config.MinCacheEvictions,
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
-			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes,
+			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes, MaxAgentGoroutineGrowth: config.MaxAgentGoroutineGrowth,
 			MinRPS: config.MinRPS, MaxP99MS: config.MaxP99MS, MaxAllocationBytesPerRequest: config.MaxAllocationBytesPerRequest,
 			PostCooldownGC: config.AgentGCURL != "" && config.Cooldown > 0,
 			Variant:        config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs, RequireCacheWritesDrained: config.RequireCacheWritesDrained,
@@ -133,6 +133,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	var requestSequence atomic.Uint64
 	warmupState := &runState{cleanupOnly: true}
 	var environmentErrors []string
+	preWarmup := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, nil, "pre_warmup")
 
 	if config.Warmup > 0 {
 		warmContext, cancel := context.WithTimeout(ctx, config.Warmup)
@@ -173,6 +174,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	// flight to complete under the normal per-request timeout.
 	runWorkersWithRequestContext(dispatchContext, measureContext, config, client, state, &requestSequence, sharedQUIC)
 	stopDispatch()
+	measurementEnd := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "measurement_end")
 	if err = cleanup(); err != nil {
 		state.recordCleanupError(err)
 	}
@@ -196,15 +198,35 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	}
 	cancelSampling()
 	<-samplesDone
+	if !preWarmup.At.IsZero() {
+		samples = append([]TimeSeriesPoint{preWarmup}, samples...)
+		resources.RSSBytesPreWarmup = preWarmup.RSSBytes
+		resources.GoroutinesPreWarmup = preWarmup.Goroutines
+	}
+	if !measurementEnd.At.IsZero() {
+		samples = append(samples, measurementEnd)
+	}
 	naturalEnd := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "cooldown_end")
 	if !naturalEnd.At.IsZero() {
 		samples = append(samples, naturalEnd)
 		applyNaturalEnd(&resources, naturalEnd)
+		if preWarmup.RSSBytes > 0 && naturalEnd.RSSBytes > preWarmup.RSSBytes {
+			resources.RSSBytesCooldownGrowth = naturalEnd.RSSBytes - preWarmup.RSSBytes
+		}
+		if preWarmup.Goroutines > 0 && naturalEnd.Goroutines > preWarmup.Goroutines {
+			resources.GoroutinesCooldownGrowth = naturalEnd.Goroutines - preWarmup.Goroutines
+		}
 	}
-	if config.MaxAllocationBytesPerRequest > 0 || config.RequireCacheWritesDrained || config.RequireCompleteAccessLogs {
+	if config.MaxAllocationBytesPerRequest > 0 && !measurementEnd.telemetryCaptured {
+		environmentErrors = append(environmentErrors, "allocation telemetry was unavailable at the measurement boundary")
+	}
+	if config.MaxAgentGoroutineGrowth > 0 || config.RequireCacheWritesDrained || config.RequireCompleteAccessLogs {
 		if !resources.telemetryBaselineCaptured || !naturalEnd.telemetryCaptured {
 			environmentErrors = append(environmentErrors, "required benchmark telemetry was unavailable at the measurement boundary")
 		}
+	}
+	if config.MaxAgentGoroutineGrowth > 0 && preWarmup.Goroutines == 0 {
+		environmentErrors = append(environmentErrors, "pre-warmup goroutine telemetry was unavailable")
 	}
 	if config.AgentGCURL != "" && config.Cooldown > 0 {
 		if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
@@ -235,6 +257,13 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	if resources.RSSBytesMax > resources.RSSBytesStart {
 		resources.RSSBytesGrowth = resources.RSSBytesMax - resources.RSSBytesStart
 	}
+	if measurementEnd.telemetryCaptured {
+		resources.AllocatedBytes = counterDelta(measurementEnd.TotalAllocBytes, resources.totalAllocStart)
+		if measurementEnd.Requests > 0 {
+			resources.AllocationBytesPerRequest = float64(resources.AllocatedBytes) / float64(measurementEnd.Requests)
+		}
+	}
+	sort.Slice(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
 	metrics, failures, errorCounts := state.metrics(config.Duration)
 	return Run{Index: index, StartedAt: started, Metrics: metrics, Resources: resources, Samples: samples, Errors: failures, ErrorCounts: errorCounts, CleanupErrors: state.cleanupErrorSamples(), EnvironmentErrors: environmentErrors}, loadCPUMax, nil
 }

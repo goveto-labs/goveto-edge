@@ -31,9 +31,9 @@ type SelectionPolicy struct {
 	available func(*reverseproxy.Upstream) bool
 }
 
-func init() { caddy.RegisterModule(SelectionPolicy{}) }
+func init() { caddy.RegisterModule(&SelectionPolicy{}) }
 
-func (SelectionPolicy) CaddyModule() caddy.ModuleInfo {
+func (*SelectionPolicy) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID:  "http.reverse_proxy.selection_policies.goveto_origin",
 		New: func() caddy.Module { return new(SelectionPolicy) },

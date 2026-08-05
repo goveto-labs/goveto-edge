@@ -223,7 +223,16 @@ run_case() {
   local phase="$1" key="$2" name="$3" protocol="$4"
   shift 4
   local output container_output started status baseline_report container_baseline
-  local -a baseline_args=()
+  local -a baseline_args=() case_args=("$@")
+  local has_unique_query=false attempt_namespace=""
+
+  for argument in "${case_args[@]}"; do
+    [[ "$argument" != "--unique-query" ]] || has_unique_query=true
+  done
+  if [[ "$phase" == "cache" && "$has_unique_query" == "true" ]]; then
+    attempt_namespace="attempt-$run_id-$name"
+    case_args+=(--unique-query-namespace "$attempt_namespace-1")
+  fi
 
   if [[ -n "$case_filter" && ! "$name" =~ $case_filter ]]; then
 	return
@@ -246,8 +255,11 @@ run_case() {
   if [[ -n "$baseline_run" ]]; then
     baseline_report="$RESULTS_ROOT/$baseline_run/$phase/$name/report.json"
     container_baseline="/results/$baseline_run/$phase/$name/report.json"
-    [[ -s "$baseline_report" ]] || die "baseline case is missing: $baseline_report"
-    baseline_args=(--baseline "$container_baseline")
+    if [[ -s "$baseline_report" ]]; then
+      baseline_args=(--baseline "$container_baseline")
+    elif [[ "$name" != "cache-unique-miss-soak-h1" ]]; then
+      die "baseline case is missing: $baseline_report"
+    fi
   fi
   mkdir -p "$output"
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -256,7 +268,7 @@ run_case() {
       --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
       --agent-gc-url http://agent:9900/gc \
       --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
-      --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
+      --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "${case_args[@]}" 2>&1 | tee "$output/run.log"; then
     :
   else
     : # Read the typed result from report.json below.
@@ -269,11 +281,17 @@ run_case() {
   ' "$output/report.json" >/dev/null; then
     cp "$output/report.json" "$output/report.cv-invalid-attempt-1.json"
     echo "[$phase] $name: retrying once after isolated RPS CV invalidation"
+    if [[ "$phase" == "cache" ]]; then
+      reset_benchmark_cache
+      if [[ "$has_unique_query" == "true" ]]; then
+        case_args=("$@" --unique-query-namespace "$attempt_namespace-2")
+      fi
+    fi
     if compose --profile run run --rm load agent-bench run \
         --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
         --agent-gc-url http://agent:9900/gc \
         --agent-binary /usr/local/bin/edge-agent --max-load-cpu "$max_load_cpu" \
-        --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "$@" 2>&1 | tee "$output/run.log"; then
+        --runner-id "$runner" --output "$container_output" "${baseline_args[@]}" "${case_args[@]}" 2>&1 | tee "$output/run.log"; then
       :
     else
       :
@@ -408,13 +426,22 @@ run_cache_benchmark() {
       for concurrency in 1 8 32 128; do
         name="cache-hot-${size}b-${protocol}-c${concurrency}"
         key="cache:$name"
+        local -a hot_allocation_gate=()
+        if [[ "$size" == "1024" ]]; then
+          if [[ "$protocol" == "h1" ]]; then
+            hot_allocation_gate+=(--max-allocation-bytes-per-request 65536)
+          else
+            hot_allocation_gate+=(--max-allocation-bytes-per-request 81920)
+          fi
+        fi
         run_case cache "$key" "$name" "$protocol" "${common_args[@]}" \
           --protocol "$protocol" --scenario "cache-hot-${size}b" \
           --url "https://agent:8444/bytes/$size?cache_bench=hot-$run_id-$size" \
           --host cache.benchmark.example.test --concurrency "$concurrency" \
           --expected-sha256 "$(sha256_zeros "$size")" \
           --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
-          --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+          --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1 \
+          "${hot_allocation_gate[@]}"
       done
     done
   done
@@ -456,11 +483,13 @@ run_cache_benchmark() {
         --expected-header "Content-Range=bytes 0-65535/1048576" \
         --expected-sha256 "$(sha256_zeros 65536)" \
         --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
-        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1 \
+        --min-baseline-rps-ratio 0.9
     done
   done
 
   # Unique keys isolate cache write/miss throughput from hit throughput.
+  restart_cache_agent_group cold
   for protocol in $protocols; do
     for size in 1024 16384 1048576; do
       for concurrency in 1 32 128; do
@@ -482,6 +511,7 @@ run_cache_benchmark() {
   done
 
   # A bounded key set starts cold on every repetition, then transitions to hits.
+  restart_cache_agent_group mixed
   for protocol in $protocols; do
     for concurrency in 32 128; do
       reset_benchmark_cache
@@ -502,6 +532,7 @@ run_cache_benchmark() {
   done
 
   # Every cold burst must collapse to one upstream response, including c512.
+  restart_cache_agent_group coalescing
   for protocol in $protocols; do
     for concurrency in 32 128 512; do
       name="cache-coalescing-${protocol}-c${concurrency}"
@@ -514,13 +545,15 @@ run_cache_benchmark() {
         --host cache.benchmark.example.test --insecure-skip-verify --concurrency "$concurrency" \
         --skip-warmup --duration "$cache_duration" --repeats 1 \
         --expected-sha256 "$(sha256_zeros 16384)" --capture-header X-Origin-Requests \
-        --max-captured-values 1 --min-cache-hits 1 --min-cache-misses 1 "${coalescing_args[@]}"
+        --max-captured-values 1 --min-cache-hits 1 --min-cache-misses 1 \
+        --min-baseline-rps-ratio 0.9 "${coalescing_args[@]}"
     done
   done
 
   # Keep capacity enforcement in the focused suite so write churn is measured
   # together with actual disk eviction and bounded RSS growth.
   if has_protocol "$protocols" h1; then
+    restart_cache_agent_group eviction
     purge_eviction_keys
     run_case cache cache:cache-eviction-16m-h1 cache-eviction-16m-h1 h1 \
       --suite capacity --protocol h1 --scenario cache-eviction-16m-h1 \
@@ -529,6 +562,28 @@ run_cache_benchmark() {
       --unique-query --unique-query-cardinality 2 --min-cache-misses 1 --min-cache-evictions 1 \
       --max-agent-rss-growth 536870912 --cooldown 60s
   fi
+
+  # Isolate sustained unique MISS stability from the throughput groups.
+  if has_protocol "$protocols" h1; then
+    restart_cache_agent_group miss-soak
+    reset_benchmark_cache
+    run_case cache cache:cache-unique-miss-soak-h1 cache-unique-miss-soak-h1 h1 \
+      --suite soak --protocol h1 --scenario cache-unique-miss-soak \
+      --url "https://agent:8444/bytes/1024?cache_bench=miss-soak-$run_id" \
+      --host cache.benchmark.example.test --insecure-skip-verify --concurrency 32 \
+      --skip-warmup --duration 60s --repeats 1 --unique-query \
+      --expected-sha256 "$(sha256_zeros 1024)" --expected-header X-Cache=MISS \
+      --capture-header X-Cache --min-cache-misses 1 --require-cache-writes-drained \
+      --max-agent-rss-growth 268435456 --max-agent-goroutine-growth 256 --cooldown 30s
+  fi
+}
+
+restart_cache_agent_group() {
+  local group="$1"
+  echo "Restarting Edge Agent before cache $group group..."
+  $dry_run && return
+  compose restart agent >/dev/null
+  wait_for_agent || die "Edge Agent did not recover before cache $group group"
 }
 
 reset_benchmark_cache() {
@@ -559,6 +614,7 @@ capture_small_reuse_profile() {
     curl -fsS "http://127.0.0.1:19900/debug/pprof/profile?seconds=30" -o "$output/cpu.pprof" || true
     curl -fsS http://127.0.0.1:19900/debug/pprof/mutex -o "$output/mutex.pprof" || true
     curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs.pprof" || true
+    curl -fsS 'http://127.0.0.1:19900/debug/pprof/goroutine?debug=1' -o "$output/goroutine.txt" || true
   fi
   wait "$load_pid" || true
   $ready || die "benchmark variant did not become ready for $variant profiling"

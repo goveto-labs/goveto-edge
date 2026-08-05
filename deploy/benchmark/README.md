@@ -87,7 +87,8 @@ load10 baselines.
 Use `--protocols "h1 h2 h3"` to select protocols, `--run-id NAME` to name the
 result directory, `--baseline-run RUN_ID` to compare against the matching case
 from a prior run, and `--cleanup` to stop containers after the run. Baseline
-comparison requires schema 1.3 and an exact runner, architecture, suite,
+new reports use schema 1.4. Baseline comparison accepts compatible schema 1.2,
+1.3, and 1.4 reports and requires an exact runner, architecture, suite,
 scenario, protocol, concurrency, and connection-mode match. Run
 `script/run_agent_benchmark.sh --help` for all options.
 
@@ -132,7 +133,7 @@ and heap sample. Cache eviction gates RSS growth from the case baseline instead
 of absolute process RSS. Rate-limit screening requires every
 measured response to be 429. Its 120 second Capacity case accepts only 200/429,
 requires at least one 429, and permits at most 200 successful responses per
-repetition. Every HTTP status is counted in schema 1.3 reports. Cache reports
+repetition. Every HTTP status is counted in schema 1.4 reports. Cache reports
 also include write queue depth and bytes, queue rejections, batches, committed
 objects, average batch size, commit latency, inflight writes, total allocation,
 and allocated bytes per request. A run invalidated only by the fixed 5% RPS CV

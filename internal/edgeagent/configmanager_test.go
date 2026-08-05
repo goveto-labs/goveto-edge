@@ -593,6 +593,7 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	}
 	text := string(encoded)
 	for _, expected := range []string{
+		`"SurrogateKeyDisabled":true`,
 		`"path":"/var/cache/goveto/site-1"`,
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,

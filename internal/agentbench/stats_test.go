@@ -101,6 +101,23 @@ func TestValidateResourceExpectationsUsesPostGCAndRelativeRSS(t *testing.T) {
 	}
 }
 
+func TestValidateResourceExpectationsEnforcesPreWarmupGoroutineGrowth(t *testing.T) {
+	run := Run{Index: 1, Resources: ResourceSummary{
+		GoroutinesPreWarmup: 100, GoroutinesEnd: 357, GoroutinesCooldownGrowth: 257,
+	}}
+	config := Config{MaxAgentGoroutineGrowth: 256}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if validity.Valid || validity.Status != ResultProductFail {
+		t.Fatalf("goroutine growth limit was not enforced: %+v", validity)
+	}
+	run.Resources.GoroutinesEnd = 356
+	run.Resources.GoroutinesCooldownGrowth = 256
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, config)
+	if !validity.Valid {
+		t.Fatalf("boundary-valid goroutine growth failed: %+v", validity)
+	}
+}
+
 func TestValidateResourceExpectationsCleanupErrorsRemainProductFailures(t *testing.T) {
 	run := Run{Index: 1, CleanupErrors: []string{"close QUIC: failed"}}
 	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultTargetSaturated}, []Run{run}, Config{})

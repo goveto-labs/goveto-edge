@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"testing"
 
+	"goveto-edge/internal/cacherange"
 	"goveto-edge/internal/policy"
 )
 
@@ -53,6 +54,25 @@ func TestCacheableRangeAcceptsSingleStartRangesOnly(t *testing.T) {
 		if cacheableRange(value) {
 			t.Fatalf("range %q should bypass cache", value)
 		}
+	}
+}
+
+func TestMatcherStoresValidatedRangeInRequestContext(t *testing.T) {
+	m := Matcher{
+		CacheRangeRequests: true,
+		Conditions: policy.CacheConditions{GroupOperator: "OR", Groups: []policy.CacheConditionGroup{
+			{Operator: "OR", Rules: []policy.CacheConditionRule{{Type: "ALL"}}},
+		}},
+		compiled: [][]*regexp.Regexp{{nil}},
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/video", nil)
+	request.Header.Set("Range", "bytes=12-34")
+	if !m.Match(request) {
+		t.Fatal("validated range did not match")
+	}
+	spec, ok := cacherange.FromContext(request.Context())
+	if !ok || spec.Start != 12 || spec.End != 34 {
+		t.Fatalf("cached range = %#v, %v", spec, ok)
 	}
 }
 
