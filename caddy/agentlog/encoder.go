@@ -1,7 +1,7 @@
 package agentlog
 
 import (
-	"net"
+	"net/http"
 	"net/netip"
 	"strings"
 	"sync/atomic"
@@ -40,7 +40,7 @@ func (AccessEncoder) CaddyModule() caddy.ModuleInfo {
 func (encoder *AccessEncoder) Provision(caddy.Context) error {
 	headers := make(map[string]struct{}, len(encoder.RedactedHeaders))
 	for _, header := range encoder.RedactedHeaders {
-		if header = strings.ToLower(strings.TrimSpace(header)); header != "" {
+		if header = http.CanonicalHeaderKey(strings.TrimSpace(header)); header != "" {
 			headers[header] = struct{}{}
 		}
 	}
@@ -53,29 +53,49 @@ func (encoder *AccessEncoder) Provision(caddy.Context) error {
 
 type accessPrivacyEncoder struct {
 	zapcore.Encoder
-	prefix          string
+	context         accessContext
 	redactedHeaders map[string]struct{}
 }
 
+type accessContext uint8
+
+const (
+	accessContextRoot accessContext = iota
+	accessContextRequest
+	accessContextRequestHeaders
+	accessContextResponseHeaders
+	accessContextOther
+)
+
 func (encoder accessPrivacyEncoder) AddObject(key string, marshaler zapcore.ObjectMarshaler) error {
-	encoder.prefix += key + ">"
+	switch {
+	case encoder.context == accessContextRoot && key == "request":
+		encoder.context = accessContextRequest
+	case encoder.context == accessContextRoot && key == "resp_headers":
+		encoder.context = accessContextResponseHeaders
+	case encoder.context == accessContextRequest && key == "headers":
+		encoder.context = accessContextRequestHeaders
+	default:
+		encoder.context = accessContextOther
+	}
 	return encoder.Encoder.AddObject(key, accessObjectMarshaler{encoder: encoder, marshaler: marshaler})
 }
 
 func (encoder accessPrivacyEncoder) AddString(key, value string) {
-	switch encoder.prefix + key {
-	case "request>uri":
-		value, _, _ = strings.Cut(value, "?")
-	case "request>client_ip", "request>remote_ip":
-		value = maskIP(value)
+	if encoder.context == accessContextRequest {
+		switch key {
+		case "uri":
+			value, _, _ = strings.Cut(value, "?")
+		case "client_ip", "remote_ip":
+			value = maskIP(value)
+		}
 	}
 	encoder.Encoder.AddString(key, value)
 }
 
 func (encoder accessPrivacyEncoder) AddArray(key string, marshaler zapcore.ArrayMarshaler) error {
-	path := encoder.prefix + key
-	if strings.HasPrefix(path, "request>headers>") || strings.HasPrefix(path, "resp_headers>") {
-		if _, redact := encoder.redactedHeaders[strings.ToLower(key)]; redact {
+	if encoder.context == accessContextRequestHeaders || encoder.context == accessContextResponseHeaders {
+		if _, redact := encoder.redactedHeaders[http.CanonicalHeaderKey(key)]; redact {
 			return encoder.Encoder.AddArray(key, zapcore.ArrayMarshalerFunc(func(array zapcore.ArrayEncoder) error {
 				array.AppendString("[REDACTED]")
 				return nil
@@ -86,7 +106,7 @@ func (encoder accessPrivacyEncoder) AddArray(key string, marshaler zapcore.Array
 }
 
 func (encoder accessPrivacyEncoder) Clone() zapcore.Encoder {
-	return accessPrivacyEncoder{Encoder: encoder.Encoder.Clone(), prefix: encoder.prefix, redactedHeaders: encoder.redactedHeaders}
+	return accessPrivacyEncoder{Encoder: encoder.Encoder.Clone(), context: encoder.context, redactedHeaders: encoder.redactedHeaders}
 }
 
 func (encoder accessPrivacyEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
@@ -110,13 +130,14 @@ func (marshaler accessObjectMarshaler) MarshalLogObject(zapcore.ObjectEncoder) e
 }
 
 func maskIP(value string) string {
-	host := strings.Trim(value, "[]")
-	if parsedHost, _, err := net.SplitHostPort(value); err == nil {
-		host = parsedHost
-	}
-	ip, err := netip.ParseAddr(strings.Trim(host, "[]"))
-	if err != nil {
-		return value
+	var ip netip.Addr
+	if address, err := netip.ParseAddrPort(value); err == nil {
+		ip = address.Addr()
+	} else {
+		ip, err = netip.ParseAddr(strings.Trim(value, "[]"))
+		if err != nil {
+			return value
+		}
 	}
 	ip = ip.Unmap()
 	bits := 48

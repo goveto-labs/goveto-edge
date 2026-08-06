@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"net/http"
 	"os"
@@ -94,6 +95,73 @@ func TestObjectFormatUsesRawAndLZ4Chunks(t *testing.T) {
 	}
 }
 
+func TestObjectFormatReadsLegacyChunkSize(t *testing.T) {
+	value := cachedResponse(strings.Repeat("legacy", 50_000))
+	encoded := encodeRawObjectForTest(value, legacyChunkSize)
+	path := filepath.Join(t.TempDir(), "legacy")
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader, err := newObjectReader(file, uint64(len(encoded)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.release()
+	got, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(got, value) {
+		t.Fatalf("legacy object decode bytes=%d err=%v", len(got), err)
+	}
+	if reader.chunkSize != legacyChunkSize {
+		t.Fatalf("legacy chunk size=%d", reader.chunkSize)
+	}
+}
+
+func TestObjectFormatRejectsIrregularChunkBoundaries(t *testing.T) {
+	value := bytes.Repeat([]byte{'x'}, objectChunkSize+1)
+	encoded := encodeRawObjectForTest(value, objectChunkSize)
+	tableEnd := objectHeaderSize + 2*objectEntrySize
+	first := encoded[objectHeaderSize:]
+	second := encoded[objectHeaderSize+objectEntrySize:]
+	binary.BigEndian.PutUint32(first[12:16], 1)
+	binary.BigEndian.PutUint32(first[16:20], 1)
+	binary.BigEndian.PutUint64(second[4:12], uint64(tableEnd+1))
+	binary.BigEndian.PutUint32(second[12:16], objectChunkSize)
+	binary.BigEndian.PutUint32(second[16:20], objectChunkSize)
+	if _, err := readObjectLayout(bytes.NewReader(encoded), uint64(len(encoded))); err == nil {
+		t.Fatal("accepted object with a short non-final chunk")
+	}
+}
+
+func encodeRawObjectForTest(value []byte, chunkSize int) []byte {
+	count := (len(value) + chunkSize - 1) / chunkSize
+	headerSize := objectHeaderSize + count*objectEntrySize
+	encoded := make([]byte, headerSize+len(value))
+	copy(encoded, objectMagic)
+	binary.BigEndian.PutUint16(encoded[8:10], objectVersion)
+	binary.BigEndian.PutUint32(encoded[12:16], uint32(chunkSize))
+	binary.BigEndian.PutUint64(encoded[16:24], uint64(len(value)))
+	binary.BigEndian.PutUint32(encoded[24:28], uint32(count))
+	offset := headerSize
+	for index := range count {
+		start := index * chunkSize
+		end := min(start+chunkSize, len(value))
+		entry := encoded[objectHeaderSize+index*objectEntrySize:]
+		entry[0] = codecRaw
+		binary.BigEndian.PutUint64(entry[4:12], uint64(offset))
+		binary.BigEndian.PutUint32(entry[12:16], uint32(end-start))
+		binary.BigEndian.PutUint32(entry[16:20], uint32(end-start))
+		binary.BigEndian.PutUint32(entry[20:24], crc32.Checksum(value[start:end], crcTable))
+		copy(encoded[offset:], value[start:end])
+		offset += end - start
+	}
+	return encoded
+}
+
 func TestObjectFormatRejectsTouchedChunkCRC(t *testing.T) {
 	value := bytes.Repeat([]byte("raw-data-"), 1024)
 	path, size, _, err := writeCompressedTemporary(filepath.Join(t.TempDir(), "crc"), value)
@@ -133,6 +201,78 @@ func FuzzObjectTableDecoder(f *testing.F) {
 	f.Fuzz(func(t *testing.T, value []byte) {
 		_, _ = newObjectReader(bytes.NewReader(value), uint64(len(value)))
 	})
+}
+
+func BenchmarkProviderCacheHit(b *testing.B) {
+	for _, test := range []struct {
+		name      string
+		body      string
+		rangeSpec *cacherange.Spec
+	}{
+		{name: "hot-1k", body: strings.Repeat("x", 1<<10)},
+		{name: "range-64k-of-1m", body: strings.Repeat("x", 1<<20), rangeSpec: &cacherange.Spec{Start: 0, End: (64 << 10) - 1}},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			directory := b.TempDir()
+			restore := OverrideDiskUsageForTesting(directory, 1<<40, 0)
+			defer restore()
+			provider, err := newProvider(core.CacheProvider{
+				Path: directory, Configuration: map[string]any{"auto_max_size": false, "max_size_bytes": 8 << 20},
+			}, zap.NewNop().Sugar(), 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer provider.closeIndex()
+			if err = provider.SetMultiLevel("key", "key", cachedResponse(test.body), nil, "", time.Minute, "key"); err != nil {
+				b.Fatal(err)
+			}
+			request := &http.Request{Header: http.Header{}}
+			if test.rangeSpec != nil {
+				request = request.WithContext(cacherange.WithContext(b.Context(), *test.rangeSpec))
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for range b.N {
+				fresh, _ := provider.GetMultiLevel("key", request, &core.Revalidator{})
+				if fresh == nil {
+					b.Fatal("cache miss")
+				}
+				if _, err = io.Copy(io.Discard, fresh.Body); err != nil {
+					b.Fatal(err)
+				}
+				if err = fresh.Body.Close(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkProviderUniqueWrite(b *testing.B) {
+	for _, size := range []int{1 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("body-%d", size), func(b *testing.B) {
+			directory := b.TempDir()
+			restore := OverrideDiskUsageForTesting(directory, 1<<40, 0)
+			defer restore()
+			provider, err := newProvider(core.CacheProvider{
+				Path: directory, Configuration: map[string]any{"auto_max_size": false, "max_size_bytes": 8 << 20},
+			}, zap.NewNop().Sugar(), 0)
+			if err != nil {
+				b.Fatal(err)
+			}
+			defer provider.closeIndex()
+			response := cachedResponse(strings.Repeat("x", size))
+			b.SetBytes(int64(size))
+			b.ReportAllocs()
+			b.ResetTimer()
+			for index := range b.N {
+				key := fmt.Sprintf("key-%d", index)
+				if err = provider.SetMultiLevel(key, key, response, nil, "", time.Minute, key); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 func TestLegacyCacheDirectoryIsDiscarded(t *testing.T) {
@@ -365,7 +505,7 @@ func TestCachedPartialResponseUsesAbsoluteRangeOffsets(t *testing.T) {
 	}
 }
 
-func TestNonRangeCacheHitPreservesFullResponseAndDecodesMappingOnce(t *testing.T) {
+func TestNonRangeCacheHitPreservesFullResponseWithoutRepeatedMappingDecode(t *testing.T) {
 	provider := newTestProvider(t, t.TempDir(), 0)
 	if err := provider.SetMultiLevel("key", "key", cachedResponse("complete"), nil, "", time.Minute, "key"); err != nil {
 		t.Fatal(err)
@@ -382,7 +522,10 @@ func TestNonRangeCacheHitPreservesFullResponseAndDecodesMappingOnce(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != "complete" || fresh.StatusCode != http.StatusOK || count != 1 {
+	second, _ := provider.GetMultiLevel("key", &http.Request{Header: http.Header{}}, &core.Revalidator{})
+	_, secondErr := io.Copy(io.Discard, second.Body)
+	_ = second.Body.Close()
+	if string(got) != "complete" || fresh.StatusCode != http.StatusOK || secondErr != nil || count != 0 {
 		t.Fatalf("full hit = status %d body %q mapping decodes %d", fresh.StatusCode, got, count)
 	}
 }

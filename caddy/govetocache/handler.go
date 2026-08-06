@@ -301,7 +301,7 @@ func (h *Handler) handleNotModified(w http.ResponseWriter, request *http.Request
 
 func (h *Handler) serveCached(w http.ResponseWriter, response *http.Response, result, key string, metadata ...simplefs.LookupMetadata) error {
 	defer response.Body.Close()
-	header := response.Header.Clone()
+	header := response.Header
 	if h.SurrogateKeyHeader != "" && !strings.EqualFold(h.SurrogateKeyHeader, "Surrogate-Key") {
 		header.Del("Surrogate-Key")
 	}
@@ -315,7 +315,7 @@ func (h *Handler) serveCached(w http.ResponseWriter, response *http.Response, re
 		}
 	}
 	h.setResultHeaders(header, result, key, ttl)
-	copyHeader(w.Header(), header)
+	transferHeader(w.Header(), header)
 	w.WriteHeader(response.StatusCode)
 	if response.Body != http.NoBody {
 		_, err := io.Copy(w, response.Body)
@@ -594,10 +594,11 @@ func writeBadGateway(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusBadGateway)
 }
 
-func copyHeader(target, source http.Header) {
+// transferHeader moves ownership of source's value slices to the response writer.
+func transferHeader(target, source http.Header) {
 	clear(target)
 	for name, values := range source {
-		target[name] = append([]string(nil), values...)
+		target[name] = values
 	}
 }
 
@@ -790,7 +791,7 @@ func (w *capturedResponse) WriteResponse(target http.ResponseWriter) error {
 	if _, err := w.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	copyHeader(target.Header(), w.header)
+	transferHeader(target.Header(), w.header)
 	target.WriteHeader(w.Status())
 	_, err := io.Copy(target, w)
 	return err

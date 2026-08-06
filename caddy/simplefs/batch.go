@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -27,6 +28,8 @@ const (
 	writeQueueMaxObjects = 256
 	writeQueueMaxBytes   = 256 << 20
 )
+
+var checksumBuffers = sync.Pool{New: func() any { return make([]byte, 32<<10) }}
 
 type pendingWrite struct {
 	baseKey        string
@@ -167,8 +170,11 @@ func mappingVariants(item cacheItem) map[string]struct{} {
 	if item.file {
 		return result
 	}
-	mapping, err := core.DecodeMapping(item.value)
-	if err != nil || mapping.GetMapping() == nil {
+	mapping := item.mapping
+	if mapping == nil {
+		mapping, _ = core.DecodeMapping(item.value)
+	}
+	if mapping == nil || mapping.GetMapping() == nil {
 		return result
 	}
 	for key := range mapping.Mapping {
@@ -187,6 +193,9 @@ func (s *batchState) stageMapping(p *provider, key string, item *cacheItem) {
 	if item == nil {
 		s.items[key] = stagedItem{}
 		return
+	}
+	if item.mapping == nil {
+		item.mapping, _ = core.DecodeMapping(item.value)
 	}
 	for variant := range mappingVariants(*item) {
 		s.mappingsForVariant(p, variant)[key] = struct{}{}
@@ -222,6 +231,7 @@ func (s *batchState) removeVariantFromMapping(p *provider, mappingKey, variedKey
 	}
 	p.nextVersion++
 	item.value = encoded
+	item.mapping = mapping
 	item.generation = p.nextVersion
 	s.stageMapping(p, mappingKey, &item)
 }
@@ -420,9 +430,10 @@ func (p *provider) flushBatch(batch []*pendingWrite) []error {
 			oldPhysical = old.physicalSize
 		}
 		p.nextVersion++
-		body := cacheItem{value: []byte(write.finalPath), file: true, expiresAt: now.Add(write.duration + p.stale), lastAccess: now, generation: p.nextVersion, compressedSize: write.compressedSize, physicalSize: write.physicalSize, originalSize: write.originalSize, checksum: write.checksum, modifiedAt: write.modifiedAt}
+		body := cacheItem{value: []byte(write.finalPath), file: true, object: new(cachedObjectState), expiresAt: now.Add(write.duration + p.stale), lastAccess: now, generation: p.nextVersion, compressedSize: write.compressedSize, physicalSize: write.physicalSize, originalSize: write.originalSize, checksum: write.checksum, modifiedAt: write.modifiedAt}
 		body.accountedSize = accountedItemSize(write.variedKey, body)
 		mappingItem := cacheItem{value: mapping, expiresAt: now.Add(write.duration + p.stale), lastAccess: now}
+		mappingItem.mapping, _ = core.DecodeMapping(mapping)
 		mappingItem.accountedSize = accountedItemSize(mappingKey, mappingItem)
 		oldMapping, _ := state.getItem(p, mappingKey)
 		neededAccounted := state.used - min(state.used, oldAccounted) - min(state.used-min(state.used, oldAccounted), oldMapping.accountedSize) + body.accountedSize + mappingItem.accountedSize
@@ -598,7 +609,9 @@ func checksumFile(path string) ([sha256.Size]byte, error) {
 	}
 	defer file.Close()
 	hash := sha256.New()
-	if _, err = io.Copy(hash, file); err != nil {
+	buffer := checksumBuffers.Get().([]byte)
+	defer checksumBuffers.Put(buffer)
+	if _, err = io.CopyBuffer(hash, file, buffer); err != nil {
 		return result, err
 	}
 	copy(result[:], hash.Sum(nil))

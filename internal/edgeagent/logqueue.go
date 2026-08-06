@@ -87,7 +87,7 @@ type LogQueueStats struct {
 
 func OpenLogQueue(path string, maxBytes ...uint64) (*LogQueue, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{
-		Timeout: time.Second, NoFreelistSync: true, NoSync: true,
+		Timeout: time.Second, NoFreelistSync: true, NoSync: true, FreelistType: bolt.FreelistMapType,
 	})
 	if err != nil {
 		return nil, err

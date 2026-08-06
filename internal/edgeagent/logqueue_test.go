@@ -51,6 +51,17 @@ func TestLogQueuePersistsUntilAck(t *testing.T) {
 	}
 }
 
+func TestLogQueueUsesHashmapFreelistForChurn(t *testing.T) {
+	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	if queue.db.FreelistType != bolt.FreelistMapType {
+		t.Fatalf("freelist type=%q, want %q", queue.db.FreelistType, bolt.FreelistMapType)
+	}
+}
+
 func TestLogQueueRebuildsUnsupportedRecordFormat(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "logs.db")
 	db, err := bolt.Open(path, 0o600, nil)

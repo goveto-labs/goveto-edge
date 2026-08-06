@@ -58,7 +58,15 @@ type queueWriter struct {
 }
 
 func (w *queueWriter) Write(data []byte) (int, error) {
-	for _, line := range bytes.Split(data, []byte{'\n'}) {
+	originalSize := len(data)
+	for len(data) > 0 {
+		line := data
+		if newline := bytes.IndexByte(data, '\n'); newline >= 0 {
+			line = data[:newline]
+			data = data[newline+1:]
+		} else {
+			data = nil
+		}
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
@@ -67,7 +75,7 @@ func (w *queueWriter) Write(data []byte) (int, error) {
 			return 0, fmt.Errorf("buffer caddy log: %w", err)
 		}
 	}
-	return len(data), nil
+	return originalSize, nil
 }
 func (*queueWriter) Close() error { return nil }
 

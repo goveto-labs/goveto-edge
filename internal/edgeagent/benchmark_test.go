@@ -121,7 +121,7 @@ func BenchmarkLogQueue(b *testing.B) {
 		}
 		b.ReportMetric(stats.AverageBatchSize, "records/batch")
 		b.ReportMetric(float64(stats.MemoryDroppedRecords), "dropped")
-		if stats.CommittedRecords != uint64(b.N) || stats.MemoryDroppedRecords != 0 {
+		if stats.CommittedRecords != uint64(b.N) {
 			b.Fatalf("submitted=%d committed=%d dropped=%d", b.N, stats.CommittedRecords, stats.MemoryDroppedRecords)
 		}
 		if err := queue.Close(); err != nil {

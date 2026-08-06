@@ -102,13 +102,13 @@ func (s *Storage) Lookup(key string, request *http.Request) (fresh, stale *http.
 
 func (s *Storage) LookupEntry(key string, request *http.Request) (fresh, stale *http.Response, metadata LookupMetadata) {
 	validator := &core.Revalidator{Matched: true}
-	fresh, stale, index := s.provider.getMultiLevel(key, request, validator)
+	fresh, stale, index, storageKey := s.provider.getMultiLevel(key, request, validator)
 	if index != nil {
 		metadata.StoredAt = index.StoredAt
 		metadata.FreshUntil = index.GetFreshTime()
 		metadata.StaleUntil = index.GetStaleTime()
 		metadata.Headers = index.Revalidated.Clone()
-		metadata.StorageKey = index.StorageKey
+		metadata.StorageKey = storageKey
 	}
 	return fresh, stale, metadata
 }

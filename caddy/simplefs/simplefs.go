@@ -210,6 +210,8 @@ type limits struct {
 
 type cacheItem struct {
 	value          []byte
+	mapping        *core.StorageMapper
+	object         *cachedObjectState
 	expiresAt      time.Time
 	lastAccess     time.Time
 	file           bool
@@ -227,6 +229,24 @@ type cacheItem struct {
 type responseDecoder struct {
 	empty    bytes.Reader
 	buffered *bufio.Reader
+}
+
+type cachedResponseTemplate struct {
+	status        string
+	statusCode    int
+	proto         string
+	protoMajor    int
+	protoMinor    int
+	header        http.Header
+	contentLength int64
+	bodyStart     int64
+}
+
+type cachedObjectState struct {
+	once     sync.Once
+	layout   *objectLayout
+	response cachedResponseTemplate
+	err      error
 }
 
 func newResponseDecoder() *responseDecoder {
@@ -265,8 +285,12 @@ func (b *pooledResponseBody) seekBody(offset uint64) error {
 	if _, err := b.object.Seek(b.bodyStart+int64(offset), io.SeekStart); err != nil {
 		return err
 	}
-	b.decoder.buffered.Reset(b.object)
-	b.body = b.decoder.buffered
+	if b.decoder != nil {
+		b.decoder.buffered.Reset(b.object)
+		b.body = b.decoder.buffered
+	} else {
+		b.body = b.object
+	}
 	b.remaining -= int64(offset)
 	return nil
 }
@@ -351,8 +375,14 @@ func (b *pooledResponseBody) release() error {
 	var err error
 	b.once.Do(func() {
 		err = b.file.Close()
-		releaseResponseDecoder(b.decoder)
+		if b.object != nil {
+			b.object.release()
+		}
+		if b.decoder != nil {
+			releaseResponseDecoder(b.decoder)
+		}
 		b.file = nil
+		b.object = nil
 		b.decoder = nil
 	})
 	return err
@@ -738,25 +768,21 @@ func (p *provider) pruneExpired(now time.Time) {
 }
 
 func (p *provider) GetMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response) {
-	fresh, stale, _ := p.getMultiLevel(key, request, validator)
+	fresh, stale, _, _ := p.getMultiLevel(key, request, validator)
 	return fresh, stale
 }
 
-func (p *provider) getMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response, *core.KeyIndex) {
+func (p *provider) getMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response, *core.KeyIndex, string) {
 	mappingKey := core.MappingKeyPrefix + key
-	mapping := p.Get(mappingKey)
-	if mapping == nil {
+	decoded, err := p.getDecodedMapping(mappingKey)
+	if err != nil || decoded == nil || decoded.GetMapping() == nil {
+		if err != nil {
+			p.corruptions.Add(1)
+		}
 		p.misses.Add(1)
-		return nil, nil, nil
+		return nil, nil, nil, ""
 	}
-	decoded, err := decodeMapping(mapping)
-	if err != nil || decoded.GetMapping() == nil {
-		p.removeInvalidMapping(mappingKey, mapping)
-		p.corruptions.Add(1)
-		p.misses.Add(1)
-		return nil, nil, nil
-	}
-	fresh, stale, index, _ := p.mappingElection(decoded, request, validator)
+	fresh, stale, index, storageKey, _ := p.mappingElection(decoded, request, validator)
 	if fresh == nil && stale == nil {
 		p.misses.Add(1)
 	} else {
@@ -765,10 +791,47 @@ func (p *provider) getMultiLevel(key string, request *http.Request, validator *c
 			p.staleHits.Add(1)
 		}
 	}
-	return fresh, stale, index
+	return fresh, stale, index, storageKey
 }
 
-func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, selected *core.KeyIndex, err error) {
+func (p *provider) getDecodedMapping(key string) (*core.StorageMapper, error) {
+	now := time.Now()
+	p.mu.RLock()
+	item, ok := p.items[key]
+	if !ok || item.file {
+		p.mu.RUnlock()
+		return nil, nil
+	}
+	if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
+		p.mu.RUnlock()
+		p.removeExpired(key, item.generation, now)
+		return nil, nil
+	}
+	mapping := item.mapping
+	value := item.value
+	generation := item.generation
+	p.mu.RUnlock()
+	if mapping == nil {
+		decoded, err := decodeMapping(value)
+		if err != nil {
+			p.removeInvalidMapping(key, value)
+			return nil, err
+		}
+		mapping = decoded
+		if p.mu.TryLock() {
+			current, exists := p.items[key]
+			if exists && current.generation == generation && current.mapping == nil {
+				current.mapping = mapping
+				p.items[key] = current
+			}
+			p.mu.Unlock()
+		}
+	}
+	p.touchItem(key, generation, now, 0)
+	return mapping, nil
+}
+
+func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, selected *core.KeyIndex, storageKey string, err error) {
 	for key, index := range mapping.GetMapping() {
 		matched := true
 		for name, values := range index.GetVariedHeaders() {
@@ -788,19 +851,17 @@ func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Re
 		if time.Until(index.GetFreshTime()) > 0 {
 			fresh, err = p.readHTTPResponse(key, request)
 			if fresh != nil || err != nil {
-				index.StorageKey = key
-				return fresh, nil, index, err
+				return fresh, nil, index, key, err
 			}
 		}
 		if time.Until(index.GetStaleTime()) > 0 {
 			stale, err = p.readHTTPResponse(key, request)
 			if stale != nil || err != nil {
-				index.StorageKey = key
-				return nil, stale, index, err
+				return nil, stale, index, key, err
 			}
 		}
 	}
-	return nil, nil, nil, nil
+	return nil, nil, nil, "", nil
 }
 
 func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Response, error) {
@@ -812,37 +873,48 @@ func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Re
 	if file == nil {
 		return nil, nil
 	}
-	object, err := newObjectReader(file, item.compressedSize)
-	if err != nil {
-		_ = file.Close()
-		p.removeCorrupt(key, item.generation)
-		return nil, err
+	state := item.object
+	if state == nil {
+		state = new(cachedObjectState)
+		p.mu.Lock()
+		current, exists := p.items[key]
+		if exists && current.generation == item.generation {
+			if current.object == nil {
+				current.object = state
+				p.items[key] = current
+			} else {
+				state = current.object
+			}
+		}
+		p.mu.Unlock()
 	}
-	decoder := acquireResponseDecoder(object)
-	response, err := http.ReadResponse(decoder.buffered, request)
-	if err != nil {
+	state.once.Do(func() { state.load(file, item.compressedSize) })
+	if state.err != nil {
 		_ = file.Close()
-		releaseResponseDecoder(decoder)
 		p.removeCorrupt(key, item.generation)
-		return nil, err
+		return nil, state.err
 	}
-	if response.ContentLength < 0 {
-		_ = file.Close()
-		releaseResponseDecoder(decoder)
-		p.removeCorrupt(key, item.generation)
-		return nil, errors.New("cached response has no fixed content length")
+	template := &state.response
+	response := &http.Response{
+		Status: template.status, StatusCode: template.statusCode, Proto: template.proto,
+		ProtoMajor: template.protoMajor, ProtoMinor: template.protoMinor,
+		Header: template.header.Clone(), ContentLength: template.contentLength, Request: request,
 	}
 	if response.ContentLength == 0 || request.Method == http.MethodHead {
 		_ = file.Close()
-		releaseResponseDecoder(decoder)
 		response.Body = http.NoBody
 		response.Header.Del("X-Goveto-Cache-Method")
 		return response, nil
 	}
+	object := newObjectReaderFromLayout(file, state.layout)
+	if _, err = object.Seek(template.bodyStart, io.SeekStart); err != nil {
+		_ = file.Close()
+		return nil, err
+	}
 	response.Body = &pooledResponseBody{
-		body: decoder.buffered, remaining: response.ContentLength, file: file, object: object,
-		bodyStart: object.pos - int64(decoder.buffered.Buffered()), decoder: decoder,
-		onError: func() { p.removeCorrupt(key, item.generation) },
+		body: object, remaining: response.ContentLength, file: file, object: object,
+		bodyStart: template.bodyStart,
+		onError:   func() { p.removeCorrupt(key, item.generation) },
 	}
 	if requested, ok := cacherange.FromContext(request.Context()); ok {
 		if err = applyCachedRange(response, requested); err != nil {
@@ -851,6 +923,34 @@ func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Re
 		}
 	}
 	return response, nil
+}
+
+func (state *cachedObjectState) load(file *os.File, encodedSize uint64) {
+	layout, err := readObjectLayout(file, encodedSize)
+	if err != nil {
+		state.err = err
+		return
+	}
+	object := newObjectReaderFromLayout(file, layout)
+	defer object.release()
+	decoder := acquireResponseDecoder(object)
+	defer releaseResponseDecoder(decoder)
+	response, err := http.ReadResponse(decoder.buffered, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		state.err = err
+		return
+	}
+	if response.ContentLength < 0 {
+		state.err = errors.New("cached response has no fixed content length")
+		return
+	}
+	state.layout = layout
+	state.response = cachedResponseTemplate{
+		status: response.Status, statusCode: response.StatusCode, proto: response.Proto,
+		protoMajor: response.ProtoMajor, protoMinor: response.ProtoMinor,
+		header: response.Header.Clone(), contentLength: response.ContentLength,
+		bodyStart: object.pos - int64(decoder.buffered.Buffered()),
+	}
 }
 
 func (p *provider) openCachedObject(key string) (*os.File, cacheItem, error) {
@@ -871,16 +971,7 @@ func (p *provider) openCachedObject(key string) (*os.File, cacheItem, error) {
 	if err != nil {
 		return nil, item, err
 	}
-	info, err := file.Stat()
-	if err != nil || info.Size() < 0 || uint64(info.Size()) != item.compressedSize ||
-		(item.modifiedAt != 0 && info.ModTime().UnixNano() != item.modifiedAt) {
-		_ = file.Close()
-		if err == nil {
-			err = errors.New("cache object metadata does not match file")
-		}
-		return nil, item, err
-	}
-	p.touchItem(key, item.generation, now, info.ModTime().UnixNano())
+	p.touchItem(key, item.generation, now, item.modifiedAt)
 	return file, item, nil
 }
 
@@ -1061,6 +1152,7 @@ func (p *provider) Refresh(baseKey string, request *http.Request, duration time.
 	state := newBatchState(p)
 	p.nextVersion++
 	mappingItem.value = encoded
+	mappingItem.mapping = mapping
 	mappingItem.expiresAt = expiresAt
 	mappingItem.lastAccess = now
 	mappingItem.generation = p.nextVersion
@@ -1628,6 +1720,7 @@ func (p *provider) removeVariantFromMappingsLocked(variedKey string) {
 		}
 		p.removeReverseMappingLocked(key, item)
 		item.value = value
+		item.mapping = mapping
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
@@ -1670,6 +1763,7 @@ func (p *provider) repairMappingsLocked() bool {
 		}
 		p.removeReverseMappingLocked(key, item)
 		item.value = value
+		item.mapping = mapping
 		p.nextVersion++
 		item.generation = p.nextVersion
 		p.items[key] = item
@@ -1724,8 +1818,11 @@ func (p *provider) loadIndex() error {
 				return nil
 			}
 			if item.File == "" {
+				var decodedMapping *core.StorageMapper
 				if strings.HasPrefix(key, core.MappingKeyPrefix) {
-					if _, decodeErr := core.DecodeMapping(item.Value); decodeErr != nil {
+					var decodeErr error
+					decodedMapping, decodeErr = core.DecodeMapping(item.Value)
+					if decodeErr != nil {
 						p.corruptions.Add(1)
 						repaired = true
 						p.dirtyItems[key] = struct{}{}
@@ -1735,7 +1832,7 @@ func (p *provider) loadIndex() error {
 				p.nextVersion++
 				loaded := cacheItem{
 					value: item.Value, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
-					generation: p.nextVersion,
+					generation: p.nextVersion, mapping: decodedMapping,
 				}
 				loaded.accountedSize = accountedItemSize(key, loaded)
 				if !item.ExpiresAt.IsZero() {
@@ -1776,7 +1873,7 @@ func (p *provider) loadIndex() error {
 				physicalSize = physicalSizeFromInfo(info, uint64(len(compressed)))
 			}
 			loaded := cacheItem{
-				value: []byte(path), file: true, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
+				value: []byte(path), file: true, object: new(cachedObjectState), expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
 				generation: p.nextVersion, compressedSize: uint64(len(compressed)), physicalSize: physicalSize, originalSize: originalSize, checksum: checksum, modifiedAt: modifiedAt,
 			}
 			loaded.accountedSize = accountedItemSize(key, loaded)
@@ -2134,19 +2231,11 @@ func writeCompressedTemporary(target string, value []byte) (path string, size ui
 	if err != nil {
 		return "", 0, checksum, err
 	}
-	file, err := os.Open(path)
+	checksum, err = checksumFile(path)
 	if err != nil {
 		_ = os.Remove(path)
 		return "", 0, checksum, err
 	}
-	hash := sha256.New()
-	_, hashErr := io.Copy(hash, file)
-	closeErr := file.Close()
-	if err = errors.Join(hashErr, closeErr); err != nil {
-		_ = os.Remove(path)
-		return "", 0, checksum, err
-	}
-	copy(checksum[:], hash.Sum(nil))
 	return path, size, checksum, nil
 }
 
