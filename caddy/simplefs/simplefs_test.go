@@ -16,10 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/darkweak/storages/core"
-	"github.com/pierrec/lz4/v4"
 	bolt "go.etcd.io/bbolt"
 	"go.uber.org/zap"
+	core "goveto-edge/internal/cachecore"
 	"goveto-edge/internal/cacherange"
 )
 
@@ -45,26 +44,159 @@ func cachedResponse(body string) []byte {
 		strconv.Itoa(len(body)) + "\r\n\r\n" + body)
 }
 
-func TestCompressedResponseValidationPreservesStorageEncoding(t *testing.T) {
+func TestResponseValidationPreservesStorageEncoding(t *testing.T) {
 	want := cachedResponse("body")
-	compressed := new(bytes.Buffer)
-	writer := lz4.NewWriter(compressed)
-	if _, err := writer.Write(want); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(t.TempDir(), "response.lz4")
-	if err := os.WriteFile(path, compressed.Bytes(), 0o600); err != nil {
+	target := filepath.Join(t.TempDir(), "response")
+	path, _, _, err := writeCompressedTemporary(target, want)
+	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := readCachedResponseFile(path)
 	if err != nil {
 		t.Fatalf("valid compressed response rejected: %v", err)
 	}
-	if !bytes.Equal(got, compressed.Bytes()) {
-		t.Fatal("readCachedResponseFile() altered the LZ4 storage representation")
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, onDisk) {
+		t.Fatal("readCachedResponseFile() altered the storage representation")
+	}
+}
+
+func TestObjectFormatUsesRawAndLZ4Chunks(t *testing.T) {
+	random := make([]byte, objectChunkSize)
+	var state uint32 = 1
+	for index := range random {
+		state = state*1664525 + 1013904223
+		random[index] = byte(state >> 24)
+	}
+	value := append(random, bytes.Repeat([]byte("x"), objectChunkSize)...)
+	path, size, _, err := writeCompressedTemporary(filepath.Join(t.TempDir(), "mixed"), value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	reader, err := newObjectReader(file, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.chunks) != 2 || reader.chunks[0].codec != codecRaw || reader.chunks[1].codec != codecLZ4 {
+		t.Fatalf("unexpected codecs: %#v", reader.chunks)
+	}
+	decoded, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(decoded, value) {
+		t.Fatalf("mixed object decode bytes=%d err=%v", len(decoded), err)
+	}
+}
+
+func TestObjectFormatRejectsTouchedChunkCRC(t *testing.T) {
+	value := bytes.Repeat([]byte("raw-data-"), 1024)
+	path, size, _, err := writeCompressedTemporary(filepath.Join(t.TempDir(), "crc"), value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := newObjectReader(file, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := reader.chunks[0]
+	byteValue := []byte{0}
+	if _, err = file.ReadAt(byteValue, int64(chunk.offset)); err != nil {
+		t.Fatal(err)
+	}
+	byteValue[0] ^= 0xff
+	if _, err = file.WriteAt(byteValue, int64(chunk.offset)); err != nil {
+		t.Fatal(err)
+	}
+	reader, err = newObjectReader(file, size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = io.ReadAll(reader); err == nil || !strings.Contains(err.Error(), "checksum") {
+		t.Fatalf("corrupt chunk error=%v", err)
+	}
+	_ = file.Close()
+}
+
+func FuzzObjectTableDecoder(f *testing.F) {
+	f.Add([]byte(objectMagic + "\x00\x01"))
+	f.Add(make([]byte, objectHeaderSize))
+	f.Fuzz(func(t *testing.T, value []byte) {
+		_, _ = newObjectReader(bytes.NewReader(value), uint64(len(value)))
+	})
+}
+
+func TestLegacyCacheDirectoryIsDiscarded(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "site")
+	if err := os.Mkdir(directory, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, indexName), []byte("legacy"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	provider := newTestProvider(t, directory, 0)
+	if provider.bodyEntries.Load() != 0 {
+		t.Fatal("legacy entries were loaded")
+	}
+	marker, err := os.ReadFile(filepath.Join(directory, formatMarkerName))
+	if err != nil || string(marker) != formatMarkerValue {
+		t.Fatalf("format marker=%q err=%v", marker, err)
+	}
+	entries, err := filepath.Glob(filepath.Join(filepath.Dir(directory), ".goveto-cache-discarded-*"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("discarded directories=%v err=%v", entries, err)
+	}
+}
+
+func TestStorageSharesProviderUntilLastRelease(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "shared")
+	t.Cleanup(OverrideDiskUsageForTesting(directory, 1<<40, 0))
+	config := Config{Path: directory, MaxSizeBytes: 1 << 20, MaxDiskUsagePercent: 90}
+	first, err := Acquire(config, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Acquire(config, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.provider != second.provider || first.provider.refs != 2 {
+		t.Fatal("same path did not share one provider")
+	}
+	if err = first.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := providers.Load(first.provider.path); !ok || second.provider.index == nil {
+		t.Fatal("first release closed a shared provider")
+	}
+	if err = second.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := providers.Load(first.provider.path); ok || second.provider.index != nil {
+		t.Fatal("last release did not close the provider")
+	}
+}
+
+func TestStorageInitializationFailureDoesNotRegisterProvider(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "not-a-directory")
+	if err := os.WriteFile(path, []byte("file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Acquire(Config{Path: path}, zap.NewNop().Sugar()); err == nil {
+		t.Fatal("storage initialized on a regular file")
+	}
+	if _, ok := providers.Load(path); ok {
+		t.Fatal("failed storage was registered")
 	}
 }
 
@@ -150,7 +282,7 @@ func TestCachedRangeResponseReadsOnlyRequestedBytes(t *testing.T) {
 	if string(got) != body[10:20] {
 		t.Fatalf("range body = %q, want %q", got, body[10:20])
 	}
-	if fresh.StatusCode != http.StatusPartialContent || fresh.ContentLength != 10 || fresh.Header.Get("Content-Range") != "bytes 10-19/36" || fresh.Header.Get("Accept-Ranges") != "bytes" || fresh.Header.Get(storedLengthHeader) != "10" {
+	if fresh.StatusCode != http.StatusPartialContent || fresh.ContentLength != 10 || fresh.Header.Get("Content-Range") != "bytes 10-19/36" || fresh.Header.Get("Accept-Ranges") != "bytes" {
 		t.Fatalf("range response = status %d length %d headers %#v", fresh.StatusCode, fresh.ContentLength, fresh.Header)
 	}
 }
@@ -319,7 +451,7 @@ func TestOverwritingCacheObjectReplacesUsedBytes(t *testing.T) {
 	}
 
 	provider.mu.Lock()
-	want := provider.items[key].compressedSize
+	want := provider.items[key].accountedSize + provider.items[core.MappingKeyPrefix+key].accountedSize
 	provider.mu.Unlock()
 	if got := provider.cacheUsed.Load(); got != want {
 		t.Fatalf("cache used bytes after overwrite = %d, want current object size %d", got, want)
@@ -556,17 +688,14 @@ func TestBatchEvictionRemovesEnoughLRUObjectsWithOneIndexWrite(t *testing.T) {
 		item.lastAccess = time.Unix(int64(index+1), 0)
 		provider.items[key] = item
 	}
-	firstInfo, err := os.Stat(string(provider.items[keys[0]].value))
+	firstSize := provider.items[keys[0]].accountedSize
 	provider.mu.Unlock()
-	if err != nil {
-		t.Fatal(err)
-	}
 	writesBefore := provider.indexWrites.Load()
-	freed, err := provider.evictBytes(uint64(firstInfo.Size()) + 1)
+	freed, err := provider.evictBytes(firstSize + 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if freed <= uint64(firstInfo.Size()) || provider.evictions.Load() != 2 {
+	if freed <= firstSize || provider.evictions.Load() != 2 {
 		t.Fatalf("batch eviction freed=%d evictions=%d", freed, provider.evictions.Load())
 	}
 	if writes := provider.indexWrites.Load() - writesBefore; writes != 1 {
@@ -835,6 +964,7 @@ func TestExpiredReadDoesNotPublishDeletionWhenIndexCommitFails(t *testing.T) {
 
 func TestConcurrentMixedKeyReadsRemainComplete(t *testing.T) {
 	provider := newTestProvider(t, t.TempDir(), 0)
+	provider.limits.maxBytes = 8 << 20
 	const keyCount = 256
 	body := strings.Repeat("x", 16<<10)
 	response := cachedResponse(body)
@@ -885,5 +1015,141 @@ func TestConcurrentMixedKeyReadsRemainComplete(t *testing.T) {
 	close(readErrors)
 	for err := range readErrors {
 		t.Fatal(err)
+	}
+}
+
+func TestCachedRangeStopsBeforeFollowingObjectChunk(t *testing.T) {
+	payload := make([]byte, 256<<10)
+	var value uint32 = 1
+	for index := range payload {
+		value = value*1664525 + 1013904223
+		payload[index] = byte(value >> 24)
+	}
+	responseBytes := append([]byte("HTTP/1.1 200 OK\r\nContent-Length: "+strconv.Itoa(len(payload))+"\r\n\r\n"), payload...)
+	target := filepath.Join(t.TempDir(), "range")
+	path, size, _, err := writeCompressedTemporary(target, responseBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	object, err := newObjectReader(bytes.NewReader(encoded), size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted := &countingReader{Reader: object}
+	decoder := acquireResponseDecoder(counted)
+	parsed, err := http.ReadResponse(decoder.buffered, &http.Request{Method: http.MethodGet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := os.Open(filepath.Join(t.TempDir(), "owner"))
+	if err == nil {
+		t.Fatal("owner file unexpectedly existed")
+	}
+	ownerPath := filepath.Join(t.TempDir(), "owner")
+	if err = os.WriteFile(ownerPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, err = os.Open(ownerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed.Body = &pooledResponseBody{body: decoder.buffered, remaining: parsed.ContentLength, file: file, decoder: decoder}
+	if err = applyCachedRange(parsed, cacherange.Spec{Start: 0, End: 1023}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(parsed.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload[:1024]) {
+		t.Fatal("range body mismatch")
+	}
+	if counted.Bytes >= uint64(len(responseBytes)) || counted.Bytes > 80<<10 {
+		t.Fatalf("range consumed %d of %d logical bytes", counted.Bytes, len(responseBytes))
+	}
+}
+
+func TestExpirationHeapRemainsBoundedAcrossOverwrites(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	for index := range 100 {
+		if err := provider.SetMultiLevel("key", "key", cachedResponse(strconv.Itoa(index)), nil, "", time.Hour, "key"); err != nil {
+			t.Fatal(err)
+		}
+		if len(provider.expirations) != 2 {
+			t.Fatalf("overwrite %d left %d expiration entries", index, len(provider.expirations))
+		}
+	}
+	stats := Statistics{BodyEntries: provider.bodyEntries.Load(), MappingEntries: provider.mappingEntries.Load(), ExpirationEntries: provider.expirationEntries.Load()}
+	if stats.BodyEntries != 1 || stats.MappingEntries != 1 || stats.ExpirationEntries != 2 {
+		t.Fatalf("unexpected O(1) counters: %#v", stats)
+	}
+	provider.Delete("key")
+	if len(provider.expirations) != 0 || provider.expirationEntries.Load() != 0 {
+		t.Fatal("deletion left expiration entries")
+	}
+}
+
+func TestCapacityChurnReusesBoltPagesAndKeepsCountersBounded(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	provider.limits.maxBytes = 128 << 10
+	const writesPerRound = 240
+	indexPath := filepath.Join(provider.path, indexName)
+
+	indexSizes := make([]int64, 0, 2)
+	for round := range 2 {
+		for index := range writesPerRound {
+			key := fmt.Sprintf("GET-http-example.test-/churn/%d/%d", round, index)
+			if err := provider.SetMultiLevel(key, key, cachedResponse(strings.Repeat("x", 1024)), nil, "", time.Hour, key); err != nil {
+				t.Fatal(err)
+			}
+		}
+		info, err := os.Stat(indexPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		indexSizes = append(indexSizes, info.Size())
+		bodyCount := provider.bodyEntries.Load()
+		mappingCount := provider.mappingEntries.Load()
+		if bodyCount == 0 || mappingCount == 0 || provider.cacheUsed.Load() > provider.limits.maxBytes {
+			t.Fatalf("round %d counters exceed capacity: body=%d mapping=%d accounted=%d max=%d", round, bodyCount, mappingCount, provider.cacheUsed.Load(), provider.limits.maxBytes)
+		}
+		if got, want := provider.expirationEntries.Load(), bodyCount+mappingCount; got != want {
+			t.Fatalf("round %d expiration entries=%d, want %d", round, got, want)
+		}
+	}
+	if growth := indexSizes[1] - indexSizes[0]; growth > 64<<20 {
+		t.Fatalf("second steady-state churn round grew Bolt by %d bytes; background compaction is required", growth)
+	}
+}
+
+func TestResetReplacesAndShrinksBoltIndex(t *testing.T) {
+	provider := newTestProvider(t, t.TempDir(), 0)
+	provider.limits.maxBytes = 4 << 20
+	for index := range 100 {
+		key := fmt.Sprintf("GET-http-example.test-/reset/%d", index)
+		if err := provider.SetMultiLevel(key, key, cachedResponse(strings.Repeat("x", 1024)), nil, "", time.Hour, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.Stat(filepath.Join(provider.path, indexName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = provider.Reset(); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(filepath.Join(provider.path, indexName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Size() >= before.Size() {
+		t.Fatalf("reset index size=%d, want less than %d", after.Size(), before.Size())
+	}
+	if len(provider.items) != 0 || len(provider.expirations) != 0 || provider.cacheUsed.Load() != 0 || provider.physicalUsed.Load() != 0 || provider.bodyEntries.Load() != 0 || provider.mappingEntries.Load() != 0 {
+		t.Fatal("reset retained cache index state")
 	}
 }

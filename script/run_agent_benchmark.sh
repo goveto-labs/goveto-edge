@@ -13,6 +13,7 @@ readonly COMPOSE_PROJECT="goveto-edge-benchmark"
 readonly STATE_DIR="$REPO_ROOT/deploy/benchmark/state"
 readonly RESULTS_ROOT="$REPO_ROOT/deploy/benchmark/results"
 readonly MIN_UDP_BUFFER=7500000
+readonly OFFICIAL_CACHE_BASELINE="20260803T025637Z"
 
 mode="quick"
 runner="default"
@@ -28,6 +29,7 @@ reuse_environment=false
 cleanup=false
 dry_run=false
 baseline_run=""
+establish_baseline=false
 case_filter=""
 result_dir=""
 summary_file=""
@@ -68,6 +70,7 @@ Options:
   --cache-duration <duration> Full/cache measurement per repeat (default: 15s)
   --cache-repeats <count>     Full/cache measurement repeats (default: 3)
   --baseline-run <run-id>     Compare each case with the same case from this run
+  --establish-baseline        Explicitly create the first cache/full baseline
   --case-filter <regex>       Run only case names matching this Bash regex
   --reuse-environment         Keep benchmark volumes and credentials
   --cleanup                   Stop containers after the run
@@ -96,6 +99,7 @@ while (($# > 0)); do
     --cache-duration) cache_duration="${2:-}"; shift 2 ;;
     --cache-repeats) cache_repeats="${2:-}"; shift 2 ;;
     --baseline-run) baseline_run="${2:-}"; shift 2 ;;
+    --establish-baseline) establish_baseline=true; shift ;;
     --case-filter) case_filter="${2:-}"; shift 2 ;;
     --reuse-environment) reuse_environment=true; shift ;;
     --cleanup) cleanup=true; shift ;;
@@ -112,6 +116,12 @@ case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;;
 [[ "$mode" != "small-reuse" || "$runner" == "26c-agent8" ]] || die "small-reuse mode requires --runner 26c-agent8"
 [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid run-id"
 [[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
+if $establish_baseline && [[ -n "$baseline_run" ]]; then
+  die "--establish-baseline cannot be combined with --baseline-run"
+fi
+if [[ ( "$mode" == "cache" || "$mode" == "full" ) && -z "$baseline_run" ]] && ! $establish_baseline; then
+  baseline_run="$OFFICIAL_CACHE_BASELINE"
+fi
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
 [[ "$cache_repeats" =~ ^[1-9][0-9]*$ ]] || die "cache-repeats must be a positive integer"
 for protocol in $protocols $soak_protocols; do
@@ -235,7 +245,7 @@ run_case() {
   fi
 
   if [[ -n "$case_filter" && ! "$name" =~ $case_filter ]]; then
-	return
+    return
   fi
 
   if $dry_run; then
@@ -253,13 +263,15 @@ run_case() {
   output="$result_dir/$phase/$name"
   container_output="/results/$run_id/$phase/$name"
   if [[ -n "$baseline_run" ]]; then
-    baseline_report="$RESULTS_ROOT/$baseline_run/$phase/$name/report.json"
-    container_baseline="/results/$baseline_run/$phase/$name/report.json"
+    baseline_report="$result_dir/baseline/$baseline_run/$phase/$name/report.json"
+    container_baseline="/results/$run_id/baseline/$baseline_run/$phase/$name/report.json"
     if [[ -s "$baseline_report" ]]; then
-      baseline_args=(--baseline "$container_baseline")
-    elif [[ "$name" != "cache-unique-miss-soak-h1" ]]; then
+      baseline_args=(--baseline-run "$container_baseline")
+    else
       die "baseline case is missing: $baseline_report"
     fi
+  elif $establish_baseline; then
+    baseline_args=(--establish-baseline)
   fi
   mkdir -p "$output"
   started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -470,7 +482,7 @@ run_cache_benchmark() {
     done
   done
 
-  # Cacheable fixed ranges have distinct storage keys and should become hot.
+  # Cacheable fixed ranges share the complete cached object and should become hot.
   for protocol in $protocols; do
     for concurrency in 32 128; do
       name="cache-range-64k-of-1m-${protocol}-c${concurrency}"
@@ -574,7 +586,8 @@ run_cache_benchmark() {
       --skip-warmup --duration 60s --repeats 1 --unique-query \
       --expected-sha256 "$(sha256_zeros 1024)" --expected-header X-Cache=MISS \
       --capture-header X-Cache --min-cache-misses 1 --require-cache-writes-drained \
-      --max-agent-rss-growth 268435456 --max-agent-goroutine-growth 256 --cooldown 30s
+      --max-agent-rss-growth 268435456 --max-agent-goroutine-growth 256 --cooldown 30s \
+      --post-cooldown-cache-reset
   fi
 }
 
@@ -618,6 +631,65 @@ capture_small_reuse_profile() {
   fi
   wait "$load_pid" || true
   $ready || die "benchmark variant did not become ready for $variant profiling"
+}
+
+capture_cache_profile() {
+  local profile="$1" output="$result_dir/profiles/cache-$profile"
+  local container_output="/results/$run_id/profiles/cache-$profile/load"
+  local load_pid ready=false url scenario
+  local -a request_args=()
+
+  case "$profile" in
+    hot-1k)
+      scenario="cache-profile-hot-1k"
+      url="https://agent:8444/bytes/1024?cache_bench=profile-hot-$run_id"
+      ;;
+    range)
+      scenario="cache-profile-range"
+      url="https://agent:8444/bytes/1048576?cache_bench=profile-range-$run_id"
+      request_args+=(--header Range=bytes=0-65535 --expected-status 206)
+      ;;
+    unique-miss)
+      scenario="cache-profile-unique-miss"
+      url="https://agent:8444/bytes/1024?cache_bench=profile-miss-$run_id"
+      request_args+=(--unique-query --unique-query-namespace "profile-miss-$run_id")
+      ;;
+    *) die "unknown cache profile: $profile" ;;
+  esac
+
+  mkdir -p "$output"
+  curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs-before.pprof" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/heap -o "$output/heap-before.pprof" || true
+  compose --profile run run --rm load agent-bench run \
+    --suite capacity --variant full --protocol h1 --scenario "$scenario" \
+    --url "$url" --host cache.benchmark.example.test --insecure-skip-verify \
+    --concurrency 32 --warmup 2s --duration 35s --repeats 1 \
+    --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+    --runner-id "$runner" --establish-baseline --output "$container_output" \
+    "${request_args[@]}" > "$output/load.log" 2>&1 &
+  load_pid=$!
+  for _attempt in $(seq 1 20); do
+    if curl -fsS http://127.0.0.1:19900/variant | jq -e '.variant == "full"' >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  if $ready; then
+    curl -fsS "http://127.0.0.1:19900/debug/pprof/profile?seconds=30" -o "$output/cpu.pprof" || true
+  fi
+  wait "$load_pid" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs-after.pprof" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/heap -o "$output/heap-after.pprof" || true
+  $ready || die "benchmark variant did not become ready for cache $profile profiling"
+}
+
+capture_cache_profiles() {
+  local profile
+  for profile in hot-1k range unique-miss; do
+    reset_benchmark_cache
+    capture_cache_profile "$profile"
+  done
 }
 
 run_origin_capacity() {
@@ -830,11 +902,6 @@ setup_environment() {
     ((docker_cpus >= 26)) || die "$runner requires at least 26 Docker CPUs"
   fi
 
-  result_dir="$RESULTS_ROOT/$run_id"
-  summary_file="$result_dir/matrix.tsv"
-  mkdir -p "$result_dir"
-  printf 'phase\tscenario\tprotocol\tstatus\treason\tresult_directory\n' > "$summary_file"
-
   if ! $reuse_environment; then
     compose down --volumes --remove-orphans >/dev/null 2>&1 || true
     (cd "$REPO_ROOT" && go run ./cmd/agent-bench-pki --output "$STATE_DIR")
@@ -853,6 +920,33 @@ setup_environment() {
     die "hardware benchmark failed"
 }
 
+prepare_results() {
+  result_dir="$RESULTS_ROOT/$run_id"
+  summary_file="$result_dir/matrix.tsv"
+  mkdir -p "$result_dir"
+  printf 'phase\tscenario\tprotocol\tstatus\treason\tresult_directory\n' > "$summary_file"
+  [[ -n "$baseline_run" ]] || return
+
+  local source="$RESULTS_ROOT/$baseline_run" destination="$result_dir/baseline/$baseline_run"
+  [[ -d "$source" ]] || die "baseline run is missing: $source"
+  mkdir -p "$destination"
+  : > "$result_dir/baseline-artifacts.sha256"
+  local report relative target hash
+  while IFS= read -r -d '' report; do
+    relative="${report#"$source"/}"
+    target="$destination/$relative"
+    mkdir -p "$(dirname "$target")"
+    cp "$report" "$target"
+    if command -v sha256sum >/dev/null 2>&1; then
+      hash="$(sha256sum "$target" | awk '{print $1}')"
+    else
+      hash="$(shasum -a 256 "$target" | awk '{print $1}')"
+    fi
+    printf '%s  %s\n' "$hash" "$relative" >> "$result_dir/baseline-artifacts.sha256"
+  done < <(find "$source" -type f -name report.json -print0)
+  [[ -s "$result_dir/baseline-artifacts.sha256" ]] || die "baseline run contains no report.json artifacts: $source"
+}
+
 print_summary() {
   echo "Benchmark complete: mode=$mode runner=$runner"
   if $dry_run; then
@@ -866,6 +960,7 @@ print_summary() {
 }
 
 if ! $dry_run; then
+  prepare_results
   setup_environment
 fi
 
@@ -892,6 +987,9 @@ fi
 if [[ "$mode" == "cache" ]]; then
   echo "Running focused cache performance and concurrency suite..."
   run_cache_benchmark
+  if ! $dry_run; then
+    capture_cache_profiles
+  fi
   print_summary
   (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
   exit
@@ -908,6 +1006,9 @@ if [[ "$mode" == "full" ]]; then
   run_cdn_suite capacity capacity 30s 120s 3
   echo "Starting complete cache performance and concurrency stage..."
   run_cache_benchmark
+  if ! $dry_run; then
+    capture_cache_profiles
+  fi
   echo "Starting long stability stage..."
   run_soak
 fi

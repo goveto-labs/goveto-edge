@@ -8,6 +8,11 @@ import (
 	"time"
 )
 
+const (
+	maxPostResetHeapGrowth = uint64(32 << 20)
+	maxPostResetRSSGrowth  = uint64(64 << 20)
+)
+
 func Percentile(values []time.Duration, percentile float64) time.Duration {
 	if len(values) == 0 {
 		return 0
@@ -175,6 +180,9 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 		if config.Cooldown > 0 {
 			checkCooldownResources(&validity, run)
 		}
+		if config.PostCooldownCacheReset {
+			checkPostResetResources(&validity, run)
+		}
 		if config.RequireCompleteAccessLogs {
 			if run.Resources.MemoryDroppedLogsDelta != 0 || run.Resources.DiskDroppedLogsDelta != 0 {
 				validity.addReason(ResultProductFail, fmt.Sprintf("run %d dropped access logs (memory=%d disk=%d)", run.Index, run.Resources.MemoryDroppedLogsDelta, run.Resources.DiskDroppedLogsDelta))
@@ -189,6 +197,22 @@ func ValidateResourceExpectations(validity Validity, runs []Run, config Config) 
 	}
 	validity.Valid = len(validity.Reasons) == 0 || validity.Status == ResultTargetSaturated
 	return validity
+}
+
+func checkPostResetResources(validity *Validity, run Run) {
+	checks := []struct {
+		name       string
+		start, end uint64
+		growth     uint64
+	}{
+		{name: "heap bytes", start: run.Resources.HeapBytesStart, end: run.Resources.HeapBytesPostResetGC, growth: maxPostResetHeapGrowth},
+		{name: "RSS bytes", start: run.Resources.RSSBytesPreWarmup, end: run.Resources.RSSBytesPostResetGC, growth: maxPostResetRSSGrowth},
+	}
+	for _, check := range checks {
+		if check.start > 0 && check.end > check.start+check.growth {
+			validity.addReason(ResultProductFail, fmt.Sprintf("run %d post-reset %s ended at %d, baseline %d, limit %d", run.Index, check.name, check.end, check.start, check.start+check.growth))
+		}
+	}
 }
 
 func checkCooldownResources(validity *Validity, run Run) {

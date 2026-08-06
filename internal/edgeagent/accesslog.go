@@ -14,7 +14,7 @@ const (
 	defaultAccessLogBufferRecords = 16_384
 	defaultAccessLogBatchBytes    = uint64(1 << 20)
 	defaultAccessLogBatchRecords  = 512
-	defaultAccessLogFlushInterval = 10 * time.Millisecond
+	defaultAccessLogFlushInterval = 100 * time.Millisecond
 	accessDropReportInterval      = time.Minute
 )
 
@@ -229,7 +229,14 @@ func (q *LogQueue) accessBatchReady() bool {
 }
 
 func (q *LogQueue) persistAccessBatch(ctx context.Context, raw []queuedAccessRecord) bool {
-	processed := make([]LogRecord, 0, len(raw))
+	processed := q.accessProcessed[:0]
+	if cap(processed) < len(raw) {
+		processed = make([]LogRecord, 0, len(raw))
+	}
+	defer func() {
+		clear(processed)
+		q.accessProcessed = processed[:0]
+	}()
 	for _, queued := range raw {
 		record := queued.record
 		payload, keep := record.Payload, false

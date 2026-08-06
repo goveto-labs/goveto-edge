@@ -48,7 +48,7 @@ func TestReadReportRejectsLegacySchema(t *testing.T) {
 }
 
 func TestReadBaselineReportAcceptsComparableLegacySchemas(t *testing.T) {
-	for _, schema := range []string{"1.2", "1.3", SchemaVersion} {
+	for _, schema := range []string{"1.2", "1.3", "1.4", SchemaVersion} {
 		path := filepath.Join(t.TempDir(), "report.json")
 		if err := os.WriteFile(path, []byte(`{"schema_version":"`+schema+`"}`), 0600); err != nil {
 			t.Fatal(err)

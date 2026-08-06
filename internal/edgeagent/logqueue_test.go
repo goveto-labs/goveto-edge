@@ -623,6 +623,13 @@ func TestAccessPipelineConcurrentEnqueue(t *testing.T) {
 	}
 }
 
+func TestDefaultAccessLogBatchingWaitsUpToOneHundredMilliseconds(t *testing.T) {
+	config := defaultAccessLogConfig()
+	if config.FlushInterval != 100*time.Millisecond || config.BatchRecords != 512 || config.BatchBytes != 1<<20 {
+		t.Fatalf("unexpected access log batching defaults: %#v", config)
+	}
+}
+
 func TestAgentLogSinkUsesSiteMetadataForAccessClassification(t *testing.T) {
 	queue, err := OpenLogQueue(filepath.Join(t.TempDir(), "logs.db"))
 	if err != nil {

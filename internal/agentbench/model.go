@@ -2,7 +2,7 @@ package agentbench
 
 import "time"
 
-const SchemaVersion = "1.4"
+const SchemaVersion = "1.5"
 
 type Protocol string
 
@@ -61,6 +61,7 @@ type Config struct {
 	AgentPID                     int32
 	AgentMetricsURL              string
 	AgentGCURL                   string
+	PostCooldownCacheReset       bool
 	SampleInterval               time.Duration
 	MinCacheHits                 uint64
 	MinCacheMisses               uint64
@@ -79,19 +80,22 @@ type Config struct {
 }
 
 type Report struct {
-	SchemaVersion string            `json:"schema_version"`
-	RunnerID      string            `json:"runner_id"`
-	GeneratedAt   time.Time         `json:"generated_at"`
-	Commit        string            `json:"commit,omitempty"`
-	BinarySHA256  string            `json:"agent_binary_sha256,omitempty"`
-	Platform      Platform          `json:"platform"`
-	Scenario      Scenario          `json:"scenario"`
-	Runs          []Run             `json:"runs"`
-	Summary       Metrics           `json:"summary"`
-	Validity      Validity          `json:"validity"`
-	ErrorCounts   map[string]uint64 `json:"error_counts,omitempty"`
-	Baseline      *BaselineDecision `json:"baseline,omitempty"`
-	Control       *ControlDecision  `json:"control,omitempty"`
+	SchemaVersion          string            `json:"schema_version"`
+	RunnerID               string            `json:"runner_id"`
+	GeneratedAt            time.Time         `json:"generated_at"`
+	Commit                 string            `json:"commit,omitempty"`
+	BinarySHA256           string            `json:"agent_binary_sha256,omitempty"`
+	Platform               Platform          `json:"platform"`
+	Scenario               Scenario          `json:"scenario"`
+	Runs                   []Run             `json:"runs"`
+	Summary                Metrics           `json:"summary"`
+	Validity               Validity          `json:"validity"`
+	ErrorCounts            map[string]uint64 `json:"error_counts,omitempty"`
+	Baseline               *BaselineDecision `json:"baseline,omitempty"`
+	BaselineRunID          string            `json:"baseline_run_id,omitempty"`
+	BaselineCommit         string            `json:"baseline_commit,omitempty"`
+	BaselineArtifactSHA256 string            `json:"baseline_artifact_sha256,omitempty"`
+	Control                *ControlDecision  `json:"control,omitempty"`
 }
 
 type Platform struct {
@@ -144,6 +148,7 @@ type Scenario struct {
 	MaxAllocationBytesPerRequest uint64                        `json:"max_allocation_bytes_per_request,omitempty"`
 	RequireCacheWritesDrained    bool                          `json:"require_cache_writes_drained,omitempty"`
 	PostCooldownGC               bool                          `json:"post_cooldown_gc,omitempty"`
+	PostCooldownCacheReset       bool                          `json:"post_cooldown_cache_reset,omitempty"`
 	Variant                      Variant                       `json:"variant"`
 	RequireCompleteAccessLogs    bool                          `json:"require_complete_access_logs,omitempty"`
 }
@@ -221,6 +226,7 @@ type ResourceSummary struct {
 	TotalAllocBytes            uint64     `json:"total_alloc_bytes,omitempty"`
 	AllocatedBytes             uint64     `json:"allocated_bytes,omitempty"`
 	AllocationBytesPerRequest  float64    `json:"allocation_bytes_per_request,omitempty"`
+	SettledTotalAllocBytes     uint64     `json:"settled_total_alloc_bytes,omitempty"`
 	CacheWriteQueueDepthMax    uint64     `json:"cache_write_queue_depth_max,omitempty"`
 	CacheWriteQueueBytesMax    uint64     `json:"cache_write_queue_bytes_max,omitempty"`
 	CacheWriteQueueDepthEnd    uint64     `json:"cache_write_queue_depth_end,omitempty"`
@@ -244,6 +250,19 @@ type ResourceSummary struct {
 	HeapInuseBytesPostGC       uint64     `json:"heap_inuse_bytes_post_gc,omitempty"`
 	HeapIdleBytesPostGC        uint64     `json:"heap_idle_bytes_post_gc,omitempty"`
 	HeapReleasedBytesPostGC    uint64     `json:"heap_released_bytes_post_gc,omitempty"`
+	RSSBytesPostResetGC        uint64     `json:"rss_bytes_post_reset_gc,omitempty"`
+	HeapBytesPostResetGC       uint64     `json:"heap_bytes_post_reset_gc,omitempty"`
+	HeapInuseBytesPostResetGC  uint64     `json:"heap_inuse_bytes_post_reset_gc,omitempty"`
+	HeapIdleBytesPostResetGC   uint64     `json:"heap_idle_bytes_post_reset_gc,omitempty"`
+	HeapReleasedPostResetGC    uint64     `json:"heap_released_bytes_post_reset_gc,omitempty"`
+	CacheBodyEntriesEnd        uint64     `json:"cache_body_entries_end,omitempty"`
+	CacheMappingEntriesEnd     uint64     `json:"cache_mapping_entries_end,omitempty"`
+	CacheExpirationEntriesEnd  uint64     `json:"cache_expiration_entries_end,omitempty"`
+	CacheAccountedBytesEnd     uint64     `json:"cache_accounted_bytes_end,omitempty"`
+	CachePhysicalBytesEnd      uint64     `json:"cache_physical_bytes_end,omitempty"`
+	CacheIndexBytesEnd         uint64     `json:"cache_index_bytes_end,omitempty"`
+	CacheIndexFreePagesEnd     uint64     `json:"cache_index_free_pages_end,omitempty"`
+	CacheIndexPendingPagesEnd  uint64     `json:"cache_index_pending_pages_end,omitempty"`
 	GoroutinesEnd              int        `json:"goroutines_end,omitempty"`
 	GoroutinesCooldownGrowth   int        `json:"goroutines_cooldown_growth,omitempty"`
 	QueueBytesEnd              uint64     `json:"log_queue_bytes_end,omitempty"`
@@ -304,6 +323,14 @@ type TimeSeriesPoint struct {
 	CacheAverageWriteBatchSize float64    `json:"cache_average_write_batch_size,omitempty"`
 	CacheWriteCommitLatencyMS  float64    `json:"cache_write_commit_latency_ms,omitempty"`
 	CacheInflightWrites        uint64     `json:"cache_inflight_writes,omitempty"`
+	CacheBodyEntries           uint64     `json:"cache_body_entries,omitempty"`
+	CacheMappingEntries        uint64     `json:"cache_mapping_entries,omitempty"`
+	CacheExpirationEntries     uint64     `json:"cache_expiration_entries,omitempty"`
+	CacheAccountedBytes        uint64     `json:"cache_accounted_bytes,omitempty"`
+	CachePhysicalBytes         uint64     `json:"cache_physical_bytes,omitempty"`
+	CacheIndexBytes            uint64     `json:"cache_index_bytes,omitempty"`
+	CacheIndexFreePages        uint64     `json:"cache_index_free_pages,omitempty"`
+	CacheIndexPendingPages     uint64     `json:"cache_index_pending_pages,omitempty"`
 	telemetryCaptured          bool
 }
 

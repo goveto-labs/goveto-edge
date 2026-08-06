@@ -101,6 +101,23 @@ func TestValidateResourceExpectationsUsesPostGCAndRelativeRSS(t *testing.T) {
 	}
 }
 
+func TestValidateResourceExpectationsEnforcesPostResetRecovery(t *testing.T) {
+	run := Run{Index: 1, Resources: ResourceSummary{
+		RSSBytesPreWarmup: 100 << 20, RSSBytesPostResetGC: 165 << 20,
+		HeapBytesStart: 50 << 20, HeapBytesPostResetGC: 83 << 20,
+	}}
+	validity := ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{PostCooldownCacheReset: true})
+	if validity.Valid || validity.Status != ResultProductFail || len(validity.Reasons) != 2 {
+		t.Fatalf("post-reset recovery limits were not enforced: %+v", validity)
+	}
+	run.Resources.RSSBytesPostResetGC = 164 << 20
+	run.Resources.HeapBytesPostResetGC = 82 << 20
+	validity = ValidateResourceExpectations(Validity{Valid: true, Status: ResultPass}, []Run{run}, Config{PostCooldownCacheReset: true})
+	if !validity.Valid {
+		t.Fatalf("post-reset recovery boundary failed: %+v", validity)
+	}
+}
+
 func TestValidateResourceExpectationsEnforcesPreWarmupGoroutineGrowth(t *testing.T) {
 	run := Run{Index: 1, Resources: ResourceSummary{
 		GoroutinesPreWarmup: 100, GoroutinesEnd: 357, GoroutinesCooldownGrowth: 257,

@@ -297,7 +297,7 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	if !strings.Contains(raw, `"host_header":"origin.internal"`) || !strings.Contains(raw, `"Host":["{goveto.origin.host}"]`) {
 		t.Fatalf("host header missing: %s", raw)
 	}
-	if !strings.Contains(raw, `"handler":"cache"`) {
+	if !strings.Contains(raw, `"handler":"goveto_cache"`) {
 		t.Fatalf("cache handler missing: %s", raw)
 	}
 	if !strings.Contains(raw, `"output":"goveto_buffer"`) {
@@ -548,7 +548,7 @@ func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
 	}
 }
 
-func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
+func TestCacheConfigUsesNativeHandlerWithoutInternalAPI(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Cache = enabledCachePolicy(t)
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
@@ -556,8 +556,8 @@ func TestCacheConfigEnablesSiteScopedPurgeAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	if !strings.Contains(text, `"basepath":"/__goveto/cache/`+config.SiteID+`"`) || !strings.Contains(text, `"enable":true`) {
-		t.Fatalf("site-scoped Souin purge API missing from config: %s", text)
+	if !strings.Contains(text, `"handler":"goveto_cache"`) {
+		t.Fatalf("native cache handler config is invalid: %s", text)
 	}
 }
 
@@ -570,7 +570,7 @@ func TestCacheConfigSkipsCacheRoutesWhenRulesAreEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	if strings.Contains(text, `"handler":"cache"`) || strings.Contains(text, `"@id":"site_site-1_cache_`) {
+	if strings.Contains(text, `"handler":"goveto_cache"`) || strings.Contains(text, `"@id":"site_site-1_cache_`) {
 		t.Fatalf("empty cache rules generated cache routes: %s", text)
 	}
 }
@@ -593,25 +593,14 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	}
 	text := string(encoded)
 	for _, expected := range []string{
-		`"SurrogateKeyDisabled":true`,
+		`"handler":"goveto_cache"`,
 		`"path":"/var/cache/goveto/site-1"`,
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,
-		`"mode":"strict"`,
-		`"ignore_request_cache_control":true`,
-		`"disable_coalescing":true`,
 		`"coalesce":true`,
-		`"coalesce_headers":["Range","If-Range"]`,
-		`"allowed_http_verbs":["GET","HEAD"]`,
-		`"disable_body":true`,
-		`"disable_query":false`,
-		`"disable_scheme":true`,
-		`"disable_host":false`,
-		`"disable_method":false`,
+		`"key_parts":["METHOD","HOST","PATH","QUERY"]`,
 		`"cache_range_requests":true`,
-		`"max_cacheable_body_bytes":67108864`,
-		`"headers":["Range","If-Range"]`,
-		`"stale":"86400s"`,
+		`"max_body_bytes":67108864`,
 		`"stale_while_revalidate_ttl":30`,
 	} {
 		if !strings.Contains(text, expected) {
@@ -643,13 +632,10 @@ func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
 	}
 	text := string(encoded)
 	for _, expected := range []string{
-		`"allowed_http_verbs":["GET","POST"]`,
 		`"method":["GET","POST"]`,
-		`"disable_body":true`,
-		`"disable_query":true`,
-		`"disable_scheme":true`,
-		`"headers":["Accept-Language","Range","If-Range"]`,
-		`"hash":true`,
+		`"key_parts":["METHOD","HOST","PATH"]`,
+		`"key_headers":["Accept-Language"]`,
+		`"hash_key":true`,
 		`"override_client_ttl":true`,
 		`"client_ttl":60`,
 		`"bypass_cache_control":["max-age=0","no-store"]`,

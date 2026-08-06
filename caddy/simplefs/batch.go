@@ -1,7 +1,6 @@
 package simplefs
 
 import (
-	"bytes"
 	"container/heap"
 	"crypto/sha256"
 	"encoding/binary"
@@ -17,9 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/darkweak/storages/core"
 	bolt "go.etcd.io/bbolt"
-	"google.golang.org/protobuf/proto"
+	core "goveto-edge/internal/cachecore"
 )
 
 const (
@@ -36,6 +34,7 @@ type pendingWrite struct {
 	temporaryPath  string
 	finalPath      string
 	compressedSize uint64
+	physicalSize   uint64
 	originalSize   uint64
 	checksum       [32]byte
 	modifiedAt     int64
@@ -51,18 +50,30 @@ type expirationEntry struct {
 	at         time.Time
 	key        string
 	generation uint64
+	index      int
 }
 
-type expirationHeap []expirationEntry
+type expirationHeap []*expirationEntry
 
 func (h expirationHeap) Len() int           { return len(h) }
 func (h expirationHeap) Less(i, j int) bool { return h[i].at.Before(h[j].at) }
-func (h expirationHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *expirationHeap) Push(value any)    { *h = append(*h, value.(expirationEntry)) }
+func (h expirationHeap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+	h[i].index = i
+	h[j].index = j
+}
+func (h *expirationHeap) Push(value any) {
+	entry := value.(*expirationEntry)
+	entry.index = len(*h)
+	*h = append(*h, entry)
+}
 func (h *expirationHeap) Pop() any {
 	old := *h
-	last := old[len(old)-1]
-	*h = old[:len(old)-1]
+	index := len(old) - 1
+	last := old[index]
+	old[index] = nil
+	*h = old[:index]
+	last.index = -1
 	return last
 }
 
@@ -77,9 +88,10 @@ type batchState struct {
 	variantMappings map[string]map[string]struct{}
 	itemGroups      map[string]map[string]struct{}
 	used            uint64
+	physical        uint64
 	obsoleteFiles   map[string]struct{}
 	evicted         uint64
-	poppedExpiry    []expirationEntry
+	poppedExpiry    []*expirationEntry
 }
 
 func newBatchState(p *provider) *batchState {
@@ -89,6 +101,7 @@ func newBatchState(p *provider) *batchState {
 		variantMappings: make(map[string]map[string]struct{}),
 		itemGroups:      make(map[string]map[string]struct{}),
 		used:            p.cacheUsed.Load(),
+		physical:        p.physicalUsed.Load(),
 		obsoleteFiles:   make(map[string]struct{}),
 	}
 }
@@ -166,6 +179,7 @@ func mappingVariants(item cacheItem) map[string]struct{} {
 
 func (s *batchState) stageMapping(p *provider, key string, item *cacheItem) {
 	if old, ok := s.getItem(p, key); ok {
+		s.used -= min(s.used, old.accountedSize)
 		for variant := range mappingVariants(old) {
 			delete(s.mappingsForVariant(p, variant), key)
 		}
@@ -177,6 +191,8 @@ func (s *batchState) stageMapping(p *provider, key string, item *cacheItem) {
 	for variant := range mappingVariants(*item) {
 		s.mappingsForVariant(p, variant)[key] = struct{}{}
 	}
+	item.accountedSize = accountedItemSize(key, *item)
+	s.used += item.accountedSize
 	s.items[key] = stagedItem{item: *item, present: true}
 }
 
@@ -199,7 +215,7 @@ func (s *batchState) removeVariantFromMapping(p *provider, mappingKey, variedKey
 		s.stageMapping(p, mappingKey, nil)
 		return
 	}
-	encoded, err := proto.Marshal(mapping)
+	encoded, err := core.EncodeMapping(mapping)
 	if err != nil {
 		s.stageMapping(p, mappingKey, nil)
 		return
@@ -216,10 +232,9 @@ func (s *batchState) deleteItem(p *provider, key string) {
 		return
 	}
 	s.removeItemGroups(p, key)
+	s.used -= min(s.used, item.accountedSize)
+	s.physical -= min(s.physical, item.physicalSize)
 	if item.file {
-		if item.compressedSize <= s.used {
-			s.used -= item.compressedSize
-		}
 		s.obsoleteFiles[string(item.value)] = struct{}{}
 		mappings := cloneSet(s.mappingsForVariant(p, key))
 		for mappingKey := range mappings {
@@ -233,7 +248,7 @@ func (s *batchState) deleteItem(p *provider, key string) {
 
 func (s *batchState) stageExpired(p *provider, now time.Time) {
 	for p.expirations.Len() > 0 && !p.expirations[0].at.After(now) {
-		entry := heap.Pop(&p.expirations).(expirationEntry)
+		entry := heap.Pop(&p.expirations).(*expirationEntry)
 		s.poppedExpiry = append(s.poppedExpiry, entry)
 		item, ok := p.items[entry.key]
 		if !ok || item.generation != entry.generation || item.expiresAt.After(now) {
@@ -373,9 +388,12 @@ func (p *provider) flushBatch(batch []*pendingWrite) []error {
 	state.stageExpired(p, time.Now())
 	transient := uint64(0)
 	for _, write := range batch {
-		transient += write.compressedSize
+		if write.physicalSize == 0 {
+			write.physicalSize = physicalFileSize(write.temporaryPath, write.compressedSize)
+		}
+		transient += write.physicalSize
 	}
-	_, available, err := p.capacityAvailable(p.limits, transient)
+	budget, err := p.capacityAvailable(p.limits, transient)
 	if err != nil {
 		state.restoreExpiry(p)
 		for index := range results {
@@ -389,25 +407,34 @@ func (p *provider) flushBatch(batch []*pendingWrite) []error {
 		now := time.Now()
 		mappingKey := core.MappingKeyPrefix + write.baseKey
 		previous, _ := state.getItem(p, mappingKey)
-		mapping, mapErr := core.MappingUpdater(write.variedKey, previous.value, p.logger, now, now.Add(write.duration), now.Add(write.duration+p.stale), write.variedHeaders, write.etag, write.realKey)
+		mapping, mapErr := core.MappingUpdater(write.variedKey, previous.value, now, now.Add(write.duration), now.Add(write.duration+p.stale), write.variedHeaders, write.etag, write.realKey)
 		if mapErr != nil {
 			results[index] = mapErr
 			continue
 		}
 		old, oldExists := state.getItem(p, write.variedKey)
-		oldSize := uint64(0)
+		oldAccounted := uint64(0)
+		oldPhysical := uint64(0)
 		if oldExists && old.file {
-			oldSize = old.compressedSize
+			oldAccounted = old.accountedSize
+			oldPhysical = old.physicalSize
 		}
-		if write.compressedSize > available {
+		p.nextVersion++
+		body := cacheItem{value: []byte(write.finalPath), file: true, expiresAt: now.Add(write.duration + p.stale), lastAccess: now, generation: p.nextVersion, compressedSize: write.compressedSize, physicalSize: write.physicalSize, originalSize: write.originalSize, checksum: write.checksum, modifiedAt: write.modifiedAt}
+		body.accountedSize = accountedItemSize(write.variedKey, body)
+		mappingItem := cacheItem{value: mapping, expiresAt: now.Add(write.duration + p.stale), lastAccess: now}
+		mappingItem.accountedSize = accountedItemSize(mappingKey, mappingItem)
+		oldMapping, _ := state.getItem(p, mappingKey)
+		neededAccounted := state.used - min(state.used, oldAccounted) - min(state.used-min(state.used, oldAccounted), oldMapping.accountedSize) + body.accountedSize + mappingItem.accountedSize
+		neededPhysical := state.physical - min(state.physical, oldPhysical) + body.physicalSize
+		if body.accountedSize+mappingItem.accountedSize > budget.accountedAvailable || body.physicalSize > budget.physicalAvailable {
 			results[index] = ErrCapacity
 			p.rejections.Add(1)
 			continue
 		}
-		needed := state.used - min(state.used, oldSize) + write.compressedSize
 		protectedForWrite := cloneSet(protected)
 		protectedForWrite[write.variedKey] = struct{}{}
-		candidates, enough := state.evictionCandidates(p, protectedForWrite, needed, available)
+		candidates, enough := state.evictionCandidates(p, protectedForWrite, neededAccounted, budget.accountedAvailable, neededPhysical, budget.physicalAvailable)
 		if !enough {
 			results[index] = ErrCapacity
 			p.rejections.Add(1)
@@ -418,23 +445,23 @@ func (p *provider) flushBatch(batch []*pendingWrite) []error {
 			state.evicted++
 		}
 
-		p.nextVersion++
-		body := cacheItem{value: []byte(write.finalPath), file: true, expiresAt: now.Add(write.duration + p.stale), lastAccess: now, generation: p.nextVersion, compressedSize: write.compressedSize, originalSize: write.originalSize, checksum: write.checksum, modifiedAt: write.modifiedAt}
 		if oldExists {
 			state.removeItemGroups(p, write.variedKey)
 			if old.file {
-				state.used -= old.compressedSize
+				state.used -= min(state.used, old.accountedSize)
+				state.physical -= min(state.physical, old.physicalSize)
 				if string(old.value) != write.finalPath {
 					state.obsoleteFiles[string(old.value)] = struct{}{}
 				}
 			}
 		}
-		state.used += write.compressedSize
+		state.used += body.accountedSize
+		state.physical += body.physicalSize
 		state.items[write.variedKey] = stagedItem{item: body, present: true}
 		protected[write.variedKey] = struct{}{}
 
 		p.nextVersion++
-		mappingItem := cacheItem{value: mapping, expiresAt: now.Add(write.duration + p.stale), lastAccess: now, generation: p.nextVersion}
+		mappingItem.generation = p.nextVersion
 		state.stageMapping(p, mappingKey, &mappingItem)
 		for _, group := range write.groups {
 			state.addItemGroup(p, write.variedKey, group)
@@ -493,12 +520,14 @@ func (p *provider) flushBatch(batch []*pendingWrite) []error {
 	return results
 }
 
-func (s *batchState) evictionCandidates(p *provider, protected map[string]struct{}, needed, available uint64) ([]string, bool) {
-	if needed <= available {
+func (s *batchState) evictionCandidates(p *provider, protected map[string]struct{}, neededAccounted, accountedAvailable, neededPhysical, physicalAvailable uint64) ([]string, bool) {
+	if neededAccounted <= accountedAvailable && neededPhysical <= physicalAvailable {
 		return nil, true
 	}
-	required := needed - available
-	var freed uint64
+	requiredAccounted := neededAccounted - min(neededAccounted, accountedAvailable)
+	requiredPhysical := neededPhysical - min(neededPhysical, physicalAvailable)
+	var freedAccounted uint64
+	var freedPhysical uint64
 	candidates := make([]string, 0)
 	for element := p.lru.Front(); element != nil; element = element.Next() {
 		key := element.Value.(string)
@@ -510,8 +539,9 @@ func (s *batchState) evictionCandidates(p *provider, protected map[string]struct
 			continue
 		}
 		candidates = append(candidates, key)
-		freed += item.compressedSize
-		if freed >= required {
+		freedAccounted += item.accountedSize
+		freedPhysical += item.physicalSize
+		if freedAccounted >= requiredAccounted && freedPhysical >= requiredPhysical {
 			return candidates, true
 		}
 	}
@@ -556,16 +586,23 @@ func installBatchFiles(directory string, writes []*pendingWrite) (map[string]str
 }
 
 func fileChecksumMatches(path string, expected [32]byte) (bool, error) {
+	actual, err := checksumFile(path)
+	return actual == expected, err
+}
+
+func checksumFile(path string) ([sha256.Size]byte, error) {
+	var result [sha256.Size]byte
 	file, err := os.Open(path)
 	if err != nil {
-		return false, err
+		return result, err
 	}
 	defer file.Close()
 	hash := sha256.New()
 	if _, err = io.Copy(hash, file); err != nil {
-		return false, err
+		return result, err
 	}
-	return bytes.Equal(hash.Sum(nil), expected[:]), nil
+	copy(result[:], hash.Sum(nil))
+	return result, nil
 }
 
 func (p *provider) persistBatchLocked(state *batchState) error {
@@ -649,11 +686,13 @@ func (p *provider) applyBatchLocked(state *batchState) {
 		if item.file {
 			item.lru = p.lru.PushBack(key)
 		}
+		if !item.expiresAt.IsZero() {
+			item.expiration = &expirationEntry{at: item.expiresAt, key: key, generation: item.generation, index: -1}
+			heap.Push(&p.expirations, item.expiration)
+		}
 		p.items[key] = item
 		p.addReverseMappingLocked(key, item)
-		if !item.expiresAt.IsZero() {
-			heap.Push(&p.expirations, expirationEntry{at: item.expiresAt, key: key, generation: item.generation})
-		}
+		p.addItemAccountingLocked(item)
 	}
 	for group, keys := range state.groups {
 		for key := range p.groups[group] {
@@ -675,6 +714,8 @@ func (p *provider) applyBatchLocked(state *batchState) {
 		}
 	}
 	p.cacheUsed.Store(state.used)
+	p.physicalUsed.Store(state.physical)
+	p.expirationEntries.Store(uint64(len(p.expirations)))
 	clear(p.dirtyItems)
 	clear(p.dirtyGroups)
 }
@@ -705,6 +746,36 @@ func (p *provider) removeReverseMappingLocked(mappingKey string, item cacheItem)
 
 func contentBodyFileName(key string, checksum [32]byte) string {
 	return fmt.Sprintf("%s%x-%x", bodyPrefix, checksumKey(key), checksum)
+}
+
+func accountedItemSize(key string, item cacheItem) uint64 {
+	size := itemIndexOverhead + uint64(len(key)) + uint64(len(item.value))
+	if item.file {
+		size += item.physicalSize
+	}
+	return size
+}
+
+func physicalFileSize(path string, logical uint64) uint64 {
+	info, err := os.Stat(path)
+	if err != nil {
+		return roundUp4K(logical)
+	}
+	return physicalSizeFromInfo(info, logical)
+}
+
+func physicalSizeFromInfo(info os.FileInfo, logical uint64) uint64 {
+	if stat, ok := info.Sys().(*syscall.Stat_t); ok && stat.Blocks > 0 {
+		return uint64(stat.Blocks) * 512
+	}
+	return roundUp4K(logical)
+}
+
+func roundUp4K(value uint64) uint64 {
+	if value == 0 {
+		return 0
+	}
+	return (value + 4095) &^ uint64(4095)
 }
 
 func checksumKey(key string) [32]byte { return sha256.Sum256([]byte(key)) }

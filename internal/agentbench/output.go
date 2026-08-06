@@ -20,7 +20,7 @@ func ReadReport(path string) (Report, error) {
 // throughput fields used by Compare. New artifacts are always written with
 // SchemaVersion.
 func ReadBaselineReport(path string) (Report, error) {
-	return readReport(path, map[string]struct{}{"1.2": {}, "1.3": {}, SchemaVersion: {}})
+	return readReport(path, map[string]struct{}{"1.2": {}, "1.3": {}, "1.4": {}, SchemaVersion: {}})
 }
 
 func readReport(path string, supported map[string]struct{}) (Report, error) {
@@ -163,7 +163,7 @@ func writeCSV(path string, report Report) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-	if err := writer.Write([]string{"run", "at", "phase", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "heap_inuse_bytes", "heap_idle_bytes", "heap_released_bytes", "allocation_bytes_per_second", "total_alloc_bytes", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions", "cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_queue_depth_max", "cache_write_queue_bytes_max", "cache_write_rejections", "cache_write_batches", "cache_write_objects_committed", "cache_average_write_batch_size", "cache_write_commit_latency_ms", "cache_inflight_writes", "log_buffer_bytes", "log_buffer_records", "memory_dropped_logs", "disk_dropped_logs", "committed_log_batches", "committed_log_records", "average_log_batch_size", "last_log_persist_error", "last_log_persist_success"}); err != nil {
+	if err := writer.Write([]string{"run", "at", "phase", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "heap_inuse_bytes", "heap_idle_bytes", "heap_released_bytes", "allocation_bytes_per_second", "total_alloc_bytes", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions", "cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_queue_depth_max", "cache_write_queue_bytes_max", "cache_write_rejections", "cache_write_batches", "cache_write_objects_committed", "cache_average_write_batch_size", "cache_write_commit_latency_ms", "cache_inflight_writes", "cache_body_entries", "cache_mapping_entries", "cache_expiration_entries", "cache_accounted_bytes", "cache_physical_bytes", "cache_index_bytes", "cache_index_free_pages", "cache_index_pending_pages", "log_buffer_bytes", "log_buffer_records", "memory_dropped_logs", "disk_dropped_logs", "committed_log_batches", "committed_log_records", "average_log_batch_size", "last_log_persist_error", "last_log_persist_success"}); err != nil {
 		return err
 	}
 	for _, run := range report.Runs {
@@ -179,6 +179,9 @@ func writeCSV(path string, report Report) error {
 				strconv.FormatUint(point.CacheWriteQueueBytesMax, 10), strconv.FormatUint(point.CacheWriteRejections, 10),
 				strconv.FormatUint(point.CacheWriteBatches, 10), strconv.FormatUint(point.CacheWriteObjects, 10), formatFloat(point.CacheAverageWriteBatchSize),
 				formatFloat(point.CacheWriteCommitLatencyMS), strconv.FormatUint(point.CacheInflightWrites, 10),
+				strconv.FormatUint(point.CacheBodyEntries, 10), strconv.FormatUint(point.CacheMappingEntries, 10), strconv.FormatUint(point.CacheExpirationEntries, 10),
+				strconv.FormatUint(point.CacheAccountedBytes, 10), strconv.FormatUint(point.CachePhysicalBytes, 10), strconv.FormatUint(point.CacheIndexBytes, 10),
+				strconv.FormatUint(point.CacheIndexFreePages, 10), strconv.FormatUint(point.CacheIndexPendingPages, 10),
 				strconv.FormatUint(point.BufferBytes, 10), strconv.FormatUint(point.BufferRecords, 10), strconv.FormatUint(point.MemoryDroppedLogs, 10),
 				strconv.FormatUint(point.DiskDroppedLogs, 10), strconv.FormatUint(point.CommittedBatches, 10), strconv.FormatUint(point.CommittedRecords, 10),
 				formatFloat(point.AverageBatchSize), point.LastPersistError, formatOptionalTime(point.LastPersistSuccess),

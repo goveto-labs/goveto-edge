@@ -19,12 +19,11 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/darkweak/souin/plugins/caddy"
 	"github.com/shirou/gopsutil/v4/process"
 
-	_ "goveto-edge/caddy/cacheheaders"
 	_ "goveto-edge/caddy/cachematch"
 	_ "goveto-edge/caddy/cachepurge"
+	_ "goveto-edge/caddy/govetocache"
 	cachefs "goveto-edge/caddy/simplefs"
 	_ "goveto-edge/caddy/waf"
 	"goveto-edge/internal/edgeprotocol"
@@ -353,8 +352,8 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 			t.Fatalf("range cache mismatch: content-range=%q origins=%d", first.header.Get("Content-Range"), counters.count("GET /video "))
 		}
 		other := requestEdge(t, port, config.Domains[0], http.MethodGet, "/video", http.Header{"Range": {"bytes=300-399"}})
-		if other.body != string(video[300:400]) || counters.count("GET /video ") != 2 {
-			t.Fatal("distinct byte ranges shared a cache entry")
+		if other.body != string(video[300:400]) || counters.count("GET /video ") != 1 {
+			t.Fatal("distinct byte ranges did not share the complete cached object")
 		}
 
 		beforeOpen := counters.count("GET /video ")
@@ -388,10 +387,10 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 				t.Fatalf("unsatisfiable range status=%d", invalid.status)
 			}
 		}
-		if got := counters.count("GET /video "); got != beforeInvalid+1 ||
-			invalidResponses[0].header.Get("X-Cache") != "MISS" || invalidResponses[1].header.Get("X-Cache") != "HIT" {
+		if got := counters.count("GET /video "); got != beforeInvalid ||
+			invalidResponses[0].header.Get("X-Cache") != "HIT" || invalidResponses[1].header.Get("X-Cache") != "HIT" {
 			t.Fatalf("cached full representation did not reproduce 416: origins=%d want=%d first_x_cache=%q second_x_cache=%q first_status=%q second_status=%q",
-				got, beforeInvalid+1, invalidResponses[0].header.Get("X-Cache"), invalidResponses[1].header.Get("X-Cache"),
+				got, beforeInvalid, invalidResponses[0].header.Get("X-Cache"), invalidResponses[1].header.Get("X-Cache"),
 				invalidResponses[0].header.Get("Cache-Status"), invalidResponses[1].header.Get("Cache-Status"))
 		}
 
@@ -415,7 +414,7 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		beforeFull := counters.count("GET /video ")
 		full := requestEdge(t, port, config.Domains[0], http.MethodGet, "/video", nil)
 		fullHit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/video", nil)
-		if len(full.body) != len(video) || fullHit.header.Get("X-Cache") != "HIT" || counters.count("GET /video ") != beforeFull+1 {
+		if len(full.body) != len(video) || full.header.Get("X-Cache") != "HIT" || fullHit.header.Get("X-Cache") != "HIT" || counters.count("GET /video ") != beforeFull {
 			t.Fatalf("large full object was not cached: size=%d x-cache=%q origins=%d", len(full.body), fullHit.header.Get("X-Cache"), counters.count("GET /video "))
 		}
 
@@ -873,8 +872,8 @@ func TestAgentCacheStaleETagRefreshReturnsRepresentation(t *testing.T) {
 	}
 	time.Sleep(50 * time.Millisecond)
 	hit := requestEdge(t, port, config.Domains[0], http.MethodGet, "/assets/app.js", nil)
-	if hit.status != http.StatusOK || hit.body == "" || hit.body == first.body || originRequests.Load() != 2 {
-		t.Fatalf("refreshed representation was not served: status=%d body=%q first=%q x-cache=%q origins=%d conditional=%d",
+	if hit.status != http.StatusOK || hit.body != first.body || originRequests.Load() != 2 || conditionalRequests.Load() != 1 {
+		t.Fatalf("304 refresh did not preserve the cached representation: status=%d body=%q first=%q x-cache=%q origins=%d conditional=%d",
 			hit.status, hit.body, first.body, hit.header.Get("X-Cache"), originRequests.Load(), conditionalRequests.Load())
 	}
 }
@@ -958,7 +957,8 @@ func requestEdge(t *testing.T, port int, host, method, path string, headers http
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("read response body: %v (status=%d bytes=%d content-length=%d encoding=%q headers=%v)",
+			err, response.StatusCode, len(body), response.ContentLength, response.Header.Get("Content-Encoding"), response.Header)
 	}
 	return edgeResponse{status: response.StatusCode, body: string(body), header: response.Header.Clone()}
 }

@@ -1,5 +1,4 @@
-// Package simplefs provides Souin with a disk-backed cache whose byte budget
-// follows the node cache policy instead of a fixed, externally reported limit.
+// Package simplefs provides Goveto's disk-backed HTTP cache storage.
 package simplefs
 
 import (
@@ -26,22 +25,20 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/caddyserver/caddy/v2"
-	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/darkweak/storages/core"
-	"github.com/pierrec/lz4/v4"
 	"github.com/shirou/gopsutil/v4/disk"
 	bolt "go.etcd.io/bbolt"
-	"google.golang.org/protobuf/proto"
+	core "goveto-edge/internal/cachecore"
 	"goveto-edge/internal/cacherange"
 )
 
 const (
-	moduleName   = "simplefs"
-	indexName    = ".goveto-cache-index.db"
-	oldIndexName = ".goveto-cache-index.json"
-	bodyPrefix   = "body-"
-	indexVersion = 2
+	indexName         = ".goveto-cache-index.db"
+	oldIndexName      = ".goveto-cache-index.json"
+	formatMarkerName  = ".goveto-cache-format"
+	formatMarkerValue = "goveto-http-cache-v1\n"
+	bodyPrefix        = "body-"
+	indexVersion      = 3
+	itemIndexOverhead = uint64(512)
 )
 
 var (
@@ -58,60 +55,7 @@ var ErrCapacity = errors.New("cache storage limit leaves no room for this respon
 var ErrUncacheable = errors.New("response is not eligible for shared storage")
 var ErrWriteQueueFull = errors.New("cache write queue is full")
 
-type module struct{ core.Configuration }
-
-func init() { caddy.RegisterModule(module{}) }
-
-func (module) CaddyModule() caddy.ModuleInfo {
-	return caddy.ModuleInfo{
-		ID:  "storages.cache." + moduleName,
-		New: func() caddy.Module { return new(module) },
-	}
-}
-
-func (m *module) Provision(ctx caddy.Context) error {
-	candidate, err := buildProvider(m.Provider, ctx.Logger(m).Sugar(), m.Stale)
-	if err != nil {
-		return err
-	}
-	if value, ok := providers.Load(candidate.path); ok {
-		if existing, valid := value.(*provider); valid {
-			updateProvider(existing, candidate)
-			core.RegisterStorage(existing)
-			return nil
-		}
-	}
-	registeredName := candidate.Name() + "-" + candidate.Uuid()
-	if existing, ok := core.GetRegisteredStorer(registeredName).(*provider); ok {
-		updateProvider(existing, candidate)
-		return nil
-	}
-	if err = candidate.loadIndex(); err != nil {
-		return err
-	}
-	core.RegisterStorage(candidate)
-	providers.Store(candidate.path, candidate)
-	return nil
-}
-
-func updateProvider(existing, candidate *provider) {
-	existing.capacityMu.Lock()
-	existing.limits = candidate.limits
-	existing.stale = candidate.stale
-	existing.diskUsage = candidate.diskUsage
-	existing.capacityMu.Unlock()
-	providers.Store(existing.path, existing)
-}
-
-func (*module) ServeHTTP(rw http.ResponseWriter, request *http.Request, next caddyhttp.Handler) error {
-	return next.ServeHTTP(rw, request)
-}
-
-var (
-	_         caddy.Provisioner           = (*module)(nil)
-	_         caddyhttp.MiddlewareHandler = (*module)(nil)
-	providers sync.Map
-)
+var providers sync.Map
 
 // Enforce applies the latest node policy even when no new cache object is
 // being written. Cache writers also enforce the same policy before each write.
@@ -141,13 +85,22 @@ func Stats(path string) Statistics {
 		if !ok || !pathContains(path, provider.path) {
 			return true
 		}
-		provider.mu.RLock()
-		for _, item := range provider.items {
-			if item.file {
-				result.Entries++
+		result.BodyEntries += provider.bodyEntries.Load()
+		result.MappingEntries += provider.mappingEntries.Load()
+		result.ExpirationEntries += provider.expirationEntries.Load()
+		result.Entries += provider.bodyEntries.Load()
+		result.AccountedBytes += provider.cacheUsed.Load()
+		result.PhysicalBytes += provider.physicalUsed.Load()
+		provider.operationMu.RLock()
+		if provider.index != nil {
+			if info, err := os.Stat(provider.index.Path()); err == nil && info.Size() > 0 {
+				result.IndexBytes += uint64(info.Size())
 			}
+			indexStats := provider.index.Stats()
+			result.IndexFreePages += uint64(max(indexStats.FreePageN, 0))
+			result.IndexPendingPages += uint64(max(indexStats.PendingPageN, 0))
 		}
-		provider.mu.RUnlock()
+		provider.operationMu.RUnlock()
 		result.Hits += provider.hits.Load()
 		result.Misses += provider.misses.Load()
 		result.StaleHits += provider.staleHits.Load()
@@ -207,11 +160,7 @@ func ResetPath(path string) error {
 		provider.drain()
 		provider.capacityMu.Lock()
 		provider.mu.Lock()
-		keys := make([]string, 0, len(provider.items))
-		for key := range provider.items {
-			keys = append(keys, key)
-		}
-		_, obsolete, err := provider.deleteKeysLocked(keys)
+		obsolete, err := provider.resetLocked()
 		provider.mu.Unlock()
 		provider.capacityMu.Unlock()
 		if err == nil {
@@ -266,44 +215,60 @@ type cacheItem struct {
 	file           bool
 	generation     uint64
 	compressedSize uint64
+	physicalSize   uint64
+	accountedSize  uint64
 	originalSize   uint64
 	checksum       [sha256.Size]byte
 	modifiedAt     int64
 	lru            *list.Element
+	expiration     *expirationEntry
 }
 
 type responseDecoder struct {
-	source     bytes.Reader
-	compressed *lz4.Reader
-	buffered   *bufio.Reader
+	empty    bytes.Reader
+	buffered *bufio.Reader
 }
 
 func newResponseDecoder() *responseDecoder {
 	decoder := new(responseDecoder)
-	decoder.compressed = lz4.NewReader(&decoder.source)
-	decoder.buffered = bufio.NewReader(decoder.compressed)
+	decoder.buffered = bufio.NewReader(&decoder.empty)
 	return decoder
 }
 
-func acquireResponseDecoder(value []byte) *responseDecoder {
+func acquireResponseDecoder(source io.Reader) *responseDecoder {
 	decoder := responseDecoders.Get().(*responseDecoder)
-	decoder.source.Reset(value)
-	decoder.compressed.Reset(&decoder.source)
-	decoder.buffered.Reset(decoder.compressed)
+	decoder.buffered.Reset(source)
 	return decoder
 }
 
 func releaseResponseDecoder(decoder *responseDecoder) {
-	decoder.source.Reset(nil)
-	decoder.compressed.Reset(&decoder.source)
-	decoder.buffered.Reset(decoder.compressed)
+	decoder.empty.Reset(nil)
+	decoder.buffered.Reset(&decoder.empty)
 	responseDecoders.Put(decoder)
 }
 
 type pooledResponseBody struct {
-	body    io.ReadCloser
-	decoder *responseDecoder
-	once    sync.Once
+	body      io.Reader
+	remaining int64
+	file      *os.File
+	object    *objectReader
+	bodyStart int64
+	decoder   *responseDecoder
+	onError   func()
+	once      sync.Once
+}
+
+func (b *pooledResponseBody) seekBody(offset uint64) error {
+	if b.object == nil || offset > uint64(b.remaining) {
+		return errors.New("cached body seek is unavailable")
+	}
+	if _, err := b.object.Seek(b.bodyStart+int64(offset), io.SeekStart); err != nil {
+		return err
+	}
+	b.decoder.buffered.Reset(b.object)
+	b.body = b.decoder.buffered
+	b.remaining -= int64(offset)
+	return nil
 }
 
 type rangedResponseBody struct {
@@ -351,27 +316,46 @@ func (b *rangedResponseBody) Close() error {
 }
 
 func (b *pooledResponseBody) Read(target []byte) (int, error) {
+	if b.remaining == 0 {
+		_ = b.release()
+		return 0, io.EOF
+	}
+	if int64(len(target)) > b.remaining {
+		target = target[:b.remaining]
+	}
 	count, err := b.body.Read(target)
-	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			_ = b.body.Close()
+	b.remaining -= int64(count)
+	if errors.Is(err, io.EOF) && b.remaining > 0 {
+		err = io.ErrUnexpectedEOF
+	}
+	if b.remaining == 0 {
+		if errors.Is(err, io.EOF) {
+			err = nil
 		}
-		b.release()
+		_ = b.release()
+	} else if err != nil {
+		if b.onError != nil {
+			b.onError()
+			b.onError = nil
+		}
+		_ = b.release()
 	}
 	return count, err
 }
 
 func (b *pooledResponseBody) Close() error {
-	err := b.body.Close()
-	b.release()
-	return err
+	return b.release()
 }
 
-func (b *pooledResponseBody) release() {
+func (b *pooledResponseBody) release() error {
+	var err error
 	b.once.Do(func() {
+		err = b.file.Close()
 		releaseResponseDecoder(b.decoder)
+		b.file = nil
 		b.decoder = nil
 	})
+	return err
 }
 
 type diskItem struct {
@@ -387,6 +371,14 @@ type diskItem struct {
 
 type Statistics struct {
 	Entries               uint64  `json:"entries"`
+	BodyEntries           uint64  `json:"body_entries"`
+	MappingEntries        uint64  `json:"mapping_entries"`
+	ExpirationEntries     uint64  `json:"expiration_entries"`
+	AccountedBytes        uint64  `json:"accounted_bytes"`
+	PhysicalBytes         uint64  `json:"physical_bytes"`
+	IndexBytes            uint64  `json:"index_bytes"`
+	IndexFreePages        uint64  `json:"index_free_pages"`
+	IndexPendingPages     uint64  `json:"index_pending_pages"`
 	Hits                  uint64  `json:"hits"`
 	Misses                uint64  `json:"misses"`
 	StaleHits             uint64  `json:"stale_hits"`
@@ -439,53 +431,61 @@ func diskUsageForProvider(path string) diskUsageFunc {
 }
 
 type provider struct {
-	mu               sync.RWMutex
-	capacityMu       sync.Mutex
-	operationMu      sync.RWMutex
-	batchMu          sync.Mutex
-	batchCond        *sync.Cond
-	batchWake        chan struct{}
-	pending          []*pendingWrite
-	pendingBytes     uint64
-	flushing         bool
-	items            map[string]cacheItem
-	groups           map[string]map[string]struct{}
-	variantMappings  map[string]map[string]struct{}
-	itemGroups       map[string]map[string]struct{}
-	expirations      expirationHeap
-	lru              list.List
-	index            *bolt.DB
-	dirtyItems       map[string]struct{}
-	dirtyGroups      map[string]struct{}
-	path             string
-	size             int
-	stale            time.Duration
-	limits           limits
-	logger           core.Logger
-	diskUsage        diskUsageFunc
-	hits             atomic.Uint64
-	misses           atomic.Uint64
-	staleHits        atomic.Uint64
-	evictions        atomic.Uint64
-	rejections       atomic.Uint64
-	corruptions      atomic.Uint64
-	indexWrites      atomic.Uint64
-	cacheUsed        atomic.Uint64
-	queueDepth       atomic.Uint64
-	queueBytes       atomic.Uint64
-	queueDepthMax    atomic.Uint64
-	queueBytesMax    atomic.Uint64
-	queueRejections  atomic.Uint64
-	writeBatches     atomic.Uint64
-	objectsCommitted atomic.Uint64
-	commitNanos      atomic.Uint64
-	inflightWrites   atomic.Uint64
-	nextVersion      uint64
+	mu                sync.RWMutex
+	capacityMu        sync.Mutex
+	operationMu       sync.RWMutex
+	batchMu           sync.Mutex
+	batchCond         *sync.Cond
+	batchWake         chan struct{}
+	pending           []*pendingWrite
+	pendingBytes      uint64
+	flushing          bool
+	items             map[string]cacheItem
+	groups            map[string]map[string]struct{}
+	variantMappings   map[string]map[string]struct{}
+	itemGroups        map[string]map[string]struct{}
+	expirations       expirationHeap
+	lru               list.List
+	index             *bolt.DB
+	dirtyItems        map[string]struct{}
+	dirtyGroups       map[string]struct{}
+	path              string
+	size              int
+	stale             time.Duration
+	limits            limits
+	logger            core.Logger
+	diskUsage         diskUsageFunc
+	hits              atomic.Uint64
+	misses            atomic.Uint64
+	staleHits         atomic.Uint64
+	evictions         atomic.Uint64
+	rejections        atomic.Uint64
+	corruptions       atomic.Uint64
+	indexWrites       atomic.Uint64
+	cacheUsed         atomic.Uint64
+	physicalUsed      atomic.Uint64
+	bodyEntries       atomic.Uint64
+	mappingEntries    atomic.Uint64
+	expirationEntries atomic.Uint64
+	queueDepth        atomic.Uint64
+	queueBytes        atomic.Uint64
+	queueDepthMax     atomic.Uint64
+	queueBytesMax     atomic.Uint64
+	queueRejections   atomic.Uint64
+	writeBatches      atomic.Uint64
+	objectsCommitted  atomic.Uint64
+	commitNanos       atomic.Uint64
+	inflightWrites    atomic.Uint64
+	nextVersion       uint64
+	refs              int
 }
 
-func newProvider(config core.CacheProvider, logger core.Logger, stale time.Duration) (*provider, error) {
+func newProvider(config core.Config, logger core.Logger, stale time.Duration) (*provider, error) {
 	provider, err := buildProvider(config, logger, stale)
 	if err != nil {
+		return nil, err
+	}
+	if err = prepareCacheDirectory(provider.path); err != nil {
 		return nil, err
 	}
 	if err = provider.loadIndex(); err != nil {
@@ -494,18 +494,59 @@ func newProvider(config core.CacheProvider, logger core.Logger, stale time.Durat
 	return provider, nil
 }
 
-func buildProvider(config core.CacheProvider, logger core.Logger, stale time.Duration) (*provider, error) {
+func prepareCacheDirectory(path string) error {
+	marker := filepath.Join(path, formatMarkerName)
+	if value, err := os.ReadFile(marker); err == nil {
+		if string(value) == formatMarkerValue {
+			return nil
+		}
+		return fmt.Errorf("unsupported cache directory format marker %q", strings.TrimSpace(string(value)))
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return atomicWriteFile(marker, []byte(formatMarkerValue), 0o640)
+	}
+	discarded := filepath.Join(filepath.Dir(path), ".goveto-cache-discarded-"+filepath.Base(path)+"-"+strconv.FormatInt(time.Now().UnixNano(), 10))
+	if err = os.Rename(path, discarded); err != nil {
+		return fmt.Errorf("isolate legacy cache directory: %w", err)
+	}
+	if err = os.Mkdir(path, 0o750); err != nil {
+		_ = os.Rename(discarded, path)
+		return err
+	}
+	if err = atomicWriteFile(marker, []byte(formatMarkerValue), 0o640); err != nil {
+		_ = os.Remove(path)
+		_ = os.Rename(discarded, path)
+		return err
+	}
+	if err = os.RemoveAll(discarded); err != nil {
+		return fmt.Errorf("remove isolated legacy cache directory: %w", err)
+	}
+	return nil
+}
+
+func buildProvider(config core.Config, logger core.Logger, stale time.Duration) (*provider, error) {
 	path := config.Path
-	configured := limits{auto: true, maxDiskUsagePercent: 80}
+	configured := limits{
+		auto:                config.AutoMaxSize,
+		maxBytes:            config.MaxSizeBytes,
+		maxDiskUsagePercent: normalizePercent(config.MaxDiskUsagePercent),
+	}
+	if config.MaxDiskUsagePercent == 0 {
+		configured.maxDiskUsagePercent = 80
+	}
 	size := 0
 	if raw, ok := config.Configuration.(map[string]any); ok {
 		path = stringValue(raw["path"], path)
 		size = intValue(raw["size"], 0)
 		configured.auto = boolValue(raw["auto_max_size"], true)
 		configured.maxBytes = uint64Value(raw["max_size_bytes"], 0)
-		configured.maxDiskUsagePercent = normalizePercent(
-			intValue(raw["max_disk_usage_percent"], 80),
-		)
+		configured.maxDiskUsagePercent = normalizePercent(intValue(raw["max_disk_usage_percent"], 80))
 	}
 	if path == "" {
 		var err error
@@ -537,7 +578,7 @@ func buildProvider(config core.CacheProvider, logger core.Logger, stale time.Dur
 	return provider, nil
 }
 
-func (p *provider) Name() string { return "SIMPLEFS" }
+func (p *provider) Name() string { return "goveto-disk" }
 func (p *provider) Uuid() string { return fmt.Sprintf("%s-%d", p.path, p.size) }
 func (p *provider) Init() error  { return nil }
 
@@ -697,20 +738,25 @@ func (p *provider) pruneExpired(now time.Time) {
 }
 
 func (p *provider) GetMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response) {
+	fresh, stale, _ := p.getMultiLevel(key, request, validator)
+	return fresh, stale
+}
+
+func (p *provider) getMultiLevel(key string, request *http.Request, validator *core.Revalidator) (*http.Response, *http.Response, *core.KeyIndex) {
 	mappingKey := core.MappingKeyPrefix + key
 	mapping := p.Get(mappingKey)
 	if mapping == nil {
 		p.misses.Add(1)
-		return nil, nil
+		return nil, nil, nil
 	}
 	decoded, err := decodeMapping(mapping)
 	if err != nil || decoded.GetMapping() == nil {
 		p.removeInvalidMapping(mappingKey, mapping)
 		p.corruptions.Add(1)
 		p.misses.Add(1)
-		return nil, nil
+		return nil, nil, nil
 	}
-	fresh, stale, _ := p.mappingElection(decoded, request, validator)
+	fresh, stale, index, _ := p.mappingElection(decoded, request, validator)
 	if fresh == nil && stale == nil {
 		p.misses.Add(1)
 	} else {
@@ -719,61 +765,85 @@ func (p *provider) GetMultiLevel(key string, request *http.Request, validator *c
 			p.staleHits.Add(1)
 		}
 	}
-	return fresh, stale
+	return fresh, stale, index
 }
 
-func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, err error) {
-	disableVary, _ := request.Context().Value(core.DISABLE_VARY_CTX).(bool)
+func (p *provider) mappingElection(mapping *core.StorageMapper, request *http.Request, validator *core.Revalidator) (fresh, stale *http.Response, selected *core.KeyIndex, err error) {
 	for key, index := range mapping.GetMapping() {
-		if !disableVary {
-			matched := true
-			for name, values := range index.GetVariedHeaders() {
-				if request.Header.Get(name) != strings.Join(values.GetHeaderValue(), ", ") {
-					matched = false
-					break
-				}
+		matched := true
+		for name, values := range index.GetVariedHeaders() {
+			if request.Header.Get(name) != strings.Join(values.GetHeaderValue(), ", ") {
+				matched = false
+				break
 			}
-			if !matched {
-				continue
-			}
+		}
+		if !matched {
+			continue
 		}
 
 		core.ValidateETagFromHeader(index.GetEtag(), validator)
 		if !validator.Matched {
 			continue
 		}
-		if time.Until(index.GetFreshTime().AsTime()) > 0 {
+		if time.Until(index.GetFreshTime()) > 0 {
 			fresh, err = p.readHTTPResponse(key, request)
 			if fresh != nil || err != nil {
-				return fresh, nil, err
+				index.StorageKey = key
+				return fresh, nil, index, err
 			}
 		}
-		if time.Until(index.GetStaleTime().AsTime()) > 0 {
+		if time.Until(index.GetStaleTime()) > 0 {
 			stale, err = p.readHTTPResponse(key, request)
 			if stale != nil || err != nil {
-				return nil, stale, err
+				index.StorageKey = key
+				return nil, stale, index, err
 			}
 		}
 	}
-	return nil, nil, nil
+	return nil, nil, nil, nil
 }
 
 func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Response, error) {
-	compressed, _ := p.get(key)
-	if compressed == nil {
+	file, item, err := p.openCachedObject(key)
+	if err != nil {
+		p.removeCorrupt(key, item.generation)
 		return nil, nil
 	}
-	decoder := acquireResponseDecoder(compressed)
-	response, err := http.ReadResponse(decoder.buffered, request)
+	if file == nil {
+		return nil, nil
+	}
+	object, err := newObjectReader(file, item.compressedSize)
 	if err != nil {
-		releaseResponseDecoder(decoder)
+		_ = file.Close()
+		p.removeCorrupt(key, item.generation)
 		return nil, err
 	}
-	if response.Body == nil || response.Body == http.NoBody {
+	decoder := acquireResponseDecoder(object)
+	response, err := http.ReadResponse(decoder.buffered, request)
+	if err != nil {
+		_ = file.Close()
 		releaseResponseDecoder(decoder)
+		p.removeCorrupt(key, item.generation)
+		return nil, err
+	}
+	if response.ContentLength < 0 {
+		_ = file.Close()
+		releaseResponseDecoder(decoder)
+		p.removeCorrupt(key, item.generation)
+		return nil, errors.New("cached response has no fixed content length")
+	}
+	if response.ContentLength == 0 || request.Method == http.MethodHead {
+		_ = file.Close()
+		releaseResponseDecoder(decoder)
+		response.Body = http.NoBody
+		response.Header.Del("X-Goveto-Cache-Method")
 		return response, nil
 	}
-	response.Body = &pooledResponseBody{body: response.Body, decoder: decoder}
+	response.Body = &pooledResponseBody{
+		body: decoder.buffered, remaining: response.ContentLength, file: file, object: object,
+		bodyStart: object.pos - int64(decoder.buffered.Buffered()), decoder: decoder,
+		onError: func() { p.removeCorrupt(key, item.generation) },
+	}
 	if requested, ok := cacherange.FromContext(request.Context()); ok {
 		if err = applyCachedRange(response, requested); err != nil {
 			_ = response.Body.Close()
@@ -783,7 +853,36 @@ func (p *provider) readHTTPResponse(key string, request *http.Request) (*http.Re
 	return response, nil
 }
 
-const storedLengthHeader = "X-Souin-Stored-Length"
+func (p *provider) openCachedObject(key string) (*os.File, cacheItem, error) {
+	now := time.Now()
+	p.mu.RLock()
+	item, ok := p.items[key]
+	if !ok || !item.file {
+		p.mu.RUnlock()
+		return nil, cacheItem{}, nil
+	}
+	if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
+		p.mu.RUnlock()
+		p.removeExpired(key, item.generation, now)
+		return nil, item, nil
+	}
+	file, err := os.Open(string(item.value))
+	p.mu.RUnlock()
+	if err != nil {
+		return nil, item, err
+	}
+	info, err := file.Stat()
+	if err != nil || info.Size() < 0 || uint64(info.Size()) != item.compressedSize ||
+		(item.modifiedAt != 0 && info.ModTime().UnixNano() != item.modifiedAt) {
+		_ = file.Close()
+		if err == nil {
+			err = errors.New("cache object metadata does not match file")
+		}
+		return nil, item, err
+	}
+	p.touchItem(key, item.generation, now, info.ModTime().UnixNano())
+	return file, item, nil
+}
 
 func applyCachedRange(response *http.Response, requested cacherange.Spec) error {
 	bodyStart, bodyEnd, total, ok := cachedBodyRange(response)
@@ -799,7 +898,6 @@ func applyCachedRange(response *http.Response, requested cacherange.Spec) error 
 		response.Header.Set("Accept-Ranges", "bytes")
 		response.Header.Set("Content-Range", "bytes */"+strconv.FormatUint(total, 10))
 		response.Header.Set("Content-Length", "0")
-		response.Header.Set(storedLengthHeader, "0")
 		return nil
 	}
 	end := min(requested.End, total-1)
@@ -807,14 +905,20 @@ func applyCachedRange(response *http.Response, requested cacherange.Spec) error 
 		return nil
 	}
 	length := end - requested.Start + 1
-	response.Body = &rangedResponseBody{body: response.Body, skip: requested.Start - bodyStart, remaining: length}
+	skip := requested.Start - bodyStart
+	if pooled, ok := response.Body.(*pooledResponseBody); ok && pooled.object != nil {
+		if err := pooled.seekBody(skip); err != nil {
+			return err
+		}
+		skip = 0
+	}
+	response.Body = &rangedResponseBody{body: response.Body, skip: skip, remaining: length}
 	response.StatusCode = http.StatusPartialContent
 	response.Status = "206 Partial Content"
 	response.ContentLength = int64(length)
 	response.Header.Set("Accept-Ranges", "bytes")
 	response.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", requested.Start, end, total))
 	response.Header.Set("Content-Length", strconv.FormatUint(length, 10))
-	response.Header.Set(storedLengthHeader, strconv.FormatUint(length, 10))
 	return nil
 }
 
@@ -832,10 +936,7 @@ func cachedBodyRange(response *http.Response) (start, end, total uint64, ok bool
 		total, _ = strconv.ParseUint(totalText, 10, 64)
 		return start, end, total, total > 0 && start <= end && end < total
 	}
-	length := response.Header.Get(storedLengthHeader)
-	if length == "" {
-		length = response.Header.Get("Content-Length")
-	}
+	length := response.Header.Get("Content-Length")
 	total, err := strconv.ParseUint(length, 10, 64)
 	if err != nil || total == 0 {
 		return 0, 0, 0, false
@@ -867,14 +968,113 @@ func (p *provider) SetMultiLevel(baseKey, variedKey string, value []byte, varied
 		return err
 	}
 	defer os.Remove(temporaryPath)
+	physicalSize := physicalFileSize(temporaryPath, compressedSize)
 	write := &pendingWrite{
 		baseKey: baseKey, variedKey: variedKey, temporaryPath: temporaryPath,
 		finalPath:      filepath.Join(p.path, contentBodyFileName(variedKey, checksum)),
-		compressedSize: compressedSize, originalSize: uint64(len(value)), checksum: checksum,
+		compressedSize: compressedSize, physicalSize: physicalSize, originalSize: uint64(len(value)), checksum: checksum,
 		groups: surrogateGroups(value), variedHeaders: variedHeaders.Clone(), etag: etag,
 		duration: duration, realKey: realKey, done: make(chan error, 1),
 	}
 	return p.enqueueWrite(write)
+}
+
+func (p *provider) SetMultiLevelStream(baseKey, variedKey string, source io.Reader, originalSize uint64, groups []string, variedHeaders http.Header, etag string, duration time.Duration, realKey string) error {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
+	temporaryTarget := filepath.Join(p.path, bodyFileName(variedKey))
+	temporaryPath, encodedSize, err := writeObjectReader(temporaryTarget, source, originalSize)
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temporaryPath)
+	checksum, err := checksumFile(temporaryPath)
+	if err != nil {
+		return err
+	}
+	write := &pendingWrite{
+		baseKey: baseKey, variedKey: variedKey, temporaryPath: temporaryPath,
+		finalPath:      filepath.Join(p.path, contentBodyFileName(variedKey, checksum)),
+		compressedSize: encodedSize, physicalSize: physicalFileSize(temporaryPath, encodedSize),
+		originalSize: originalSize, checksum: checksum, groups: append([]string(nil), groups...),
+		variedHeaders: variedHeaders.Clone(), etag: etag, duration: duration, realKey: realKey, done: make(chan error, 1),
+	}
+	return p.enqueueWrite(write)
+}
+
+func (p *provider) Refresh(baseKey string, request *http.Request, duration time.Duration, update http.Header) bool {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	mappingKey := core.MappingKeyPrefix + baseKey
+	mappingItem, ok := p.items[mappingKey]
+	if !ok || mappingItem.file {
+		return false
+	}
+	mapping, err := core.DecodeMapping(mappingItem.value)
+	if err != nil {
+		return false
+	}
+	var variedKey string
+	for key, index := range mapping.GetMapping() {
+		matched := true
+		for name, values := range index.GetVariedHeaders() {
+			if request.Header.Get(name) != strings.Join(values.GetHeaderValue(), ", ") {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			variedKey = key
+			now := time.Now()
+			index.StoredAt = now
+			index.FreshTime = now.Add(duration)
+			index.StaleTime = now.Add(duration + p.stale)
+			if index.Revalidated == nil {
+				index.Revalidated = http.Header{}
+			}
+			for _, name := range []string{"Cache-Control", "Content-Location", "Date", "ETag", "Expires", "Last-Modified", "Vary"} {
+				if values, exists := update[name]; exists {
+					index.Revalidated[name] = append([]string(nil), values...)
+				}
+			}
+			if etag := index.Revalidated.Get("ETag"); etag != "" {
+				index.ETag = etag
+			}
+			break
+		}
+	}
+	if variedKey == "" {
+		return false
+	}
+	body, ok := p.items[variedKey]
+	if !ok || !body.file {
+		return false
+	}
+	encoded, err := core.EncodeMapping(mapping)
+	if err != nil {
+		return false
+	}
+	now := time.Now()
+	expiresAt := now.Add(duration + p.stale)
+	state := newBatchState(p)
+	p.nextVersion++
+	mappingItem.value = encoded
+	mappingItem.expiresAt = expiresAt
+	mappingItem.lastAccess = now
+	mappingItem.generation = p.nextVersion
+	state.stageMapping(p, mappingKey, &mappingItem)
+	p.nextVersion++
+	body.expiresAt = expiresAt
+	body.lastAccess = now
+	body.generation = p.nextVersion
+	state.items[variedKey] = stagedItem{item: body, present: true}
+	if err = p.persistBatchLocked(state); err != nil {
+		return false
+	}
+	p.applyBatchLocked(state)
+	return true
 }
 
 func (p *provider) Set(key string, value []byte, duration time.Duration) error {
@@ -884,7 +1084,8 @@ func (p *provider) Set(key string, value []byte, duration time.Duration) error {
 	state := newBatchState(p)
 	now := time.Now()
 	if old, ok := state.getItem(p, key); ok && old.file {
-		state.used -= old.compressedSize
+		state.used -= min(state.used, old.accountedSize)
+		state.physical -= min(state.physical, old.physicalSize)
 		state.obsoleteFiles[string(old.value)] = struct{}{}
 	}
 	expiresAt := time.Time{}
@@ -896,6 +1097,12 @@ func (p *provider) Set(key string, value []byte, duration time.Duration) error {
 	if strings.HasPrefix(key, core.MappingKeyPrefix) {
 		state.stageMapping(p, key, &item)
 	} else {
+		if old, ok := state.getItem(p, key); ok {
+			state.used -= min(state.used, old.accountedSize)
+			state.physical -= min(state.physical, old.physicalSize)
+		}
+		item.accountedSize = accountedItemSize(key, item)
+		state.used += item.accountedSize
 		state.items[key] = stagedItem{item: item, present: true}
 	}
 	err := p.persistBatchLocked(state)
@@ -961,12 +1168,10 @@ func (p *provider) Reset() error {
 	p.operationMu.Lock()
 	defer p.operationMu.Unlock()
 	p.drain()
+	p.capacityMu.Lock()
+	defer p.capacityMu.Unlock()
 	p.mu.Lock()
-	keys := make([]string, 0, len(p.items))
-	for key := range p.items {
-		keys = append(keys, key)
-	}
-	_, obsolete, err := p.deleteKeysLocked(keys)
+	obsolete, err := p.resetLocked()
 	p.mu.Unlock()
 	if err == nil {
 		removeFiles(obsolete)
@@ -991,14 +1196,14 @@ func Purge(path, purgeType string, hosts, values []string) (int, error) {
 	}
 	value, ok := providers.Load(path)
 	if !ok {
-		for _, storer := range core.GetRegisteredStorers() {
-			candidate, candidateOK := storer.(*provider)
-			if candidateOK && samePath(candidate.path, path) {
+		providers.Range(func(_, candidateValue any) bool {
+			candidate := candidateValue.(*provider)
+			if samePath(candidate.path, path) {
 				value, ok = candidate, true
-				providers.Store(path, candidate)
-				break
+				return false
 			}
-		}
+			return true
+		})
 	}
 	if !ok {
 		return 0, fmt.Errorf("cache provider %q is not active", path)
@@ -1007,13 +1212,20 @@ func Purge(path, purgeType string, hosts, values []string) (int, error) {
 	provider.operationMu.Lock()
 	defer provider.operationMu.Unlock()
 	provider.drain()
+	provider.capacityMu.Lock()
+	defer provider.capacityMu.Unlock()
 	provider.mu.Lock()
-	var keys []string
 	if purgeType == "ALL" {
-		for key := range provider.items {
-			keys = append(keys, key)
+		count := int(provider.bodyEntries.Load())
+		obsolete, resetErr := provider.resetLocked()
+		provider.mu.Unlock()
+		if resetErr == nil {
+			removeFiles(obsolete)
 		}
-	} else if purgeType == "TAG" {
+		return count, resetErr
+	}
+	var keys []string
+	if purgeType == "TAG" {
 		seen := map[string]struct{}{}
 		for _, group := range values {
 			for key := range provider.groups[group] {
@@ -1042,6 +1254,23 @@ func Purge(path, purgeType string, hosts, values []string) (int, error) {
 				}
 			}
 		}
+		for mappingKey, item := range provider.items {
+			if item.file || !strings.HasPrefix(mappingKey, core.MappingKeyPrefix) {
+				continue
+			}
+			mapping, decodeErr := core.DecodeMapping(item.value)
+			if decodeErr != nil {
+				continue
+			}
+			for variedKey, index := range mapping.GetMapping() {
+				for _, marker := range markers {
+					if purgeKeyMatches(index.GetRealKey(), marker, purgeType) {
+						keys = append(keys, variedKey)
+						break
+					}
+				}
+			}
+		}
 	}
 	count, obsolete, err := provider.deleteKeysLocked(keys)
 	provider.mu.Unlock()
@@ -1049,6 +1278,15 @@ func Purge(path, purgeType string, hosts, values []string) (int, error) {
 		removeFiles(obsolete)
 	}
 	return count, err
+}
+
+func purgeKeyMatches(key, marker, purgeType string) bool {
+	index := strings.Index(key, marker)
+	if index < 0 || (index > 0 && key[index-1] != '-') {
+		return false
+	}
+	remainder := key[index+len(marker):]
+	return purgeType == "PREFIX" || remainder == "" || strings.HasPrefix(remainder, "-")
 }
 
 func (p *provider) deleteKeysLocked(keys []string) (int, map[string]struct{}, error) {
@@ -1070,6 +1308,37 @@ func (p *provider) deleteKeysLocked(keys []string) (int, map[string]struct{}, er
 	}
 	p.applyBatchLocked(state)
 	return count, state.obsoleteFiles, nil
+}
+
+func (p *provider) resetLocked() (map[string]struct{}, error) {
+	obsolete := make(map[string]struct{}, int(p.bodyEntries.Load()))
+	for _, item := range p.items {
+		if item.file {
+			obsolete[string(item.value)] = struct{}{}
+		}
+	}
+	if err := p.replaceWithEmptyIndexLocked(); err != nil {
+		return nil, err
+	}
+	p.items = map[string]cacheItem{}
+	p.groups = map[string]map[string]struct{}{}
+	p.variantMappings = map[string]map[string]struct{}{}
+	p.itemGroups = map[string]map[string]struct{}{}
+	p.expirations = nil
+	heap.Init(&p.expirations)
+	p.lru.Init()
+	p.dirtyItems = map[string]struct{}{}
+	p.dirtyGroups = map[string]struct{}{}
+	p.cacheUsed.Store(0)
+	p.physicalUsed.Store(0)
+	p.bodyEntries.Store(0)
+	p.mappingEntries.Store(0)
+	p.expirationEntries.Store(0)
+	p.batchMu.Lock()
+	p.pending = nil
+	p.pendingBytes = 0
+	p.batchMu.Unlock()
+	return obsolete, nil
 }
 
 func removeFiles(paths map[string]struct{}) {
@@ -1162,49 +1431,65 @@ func (p *provider) ensureSpaceLockedWithTransient(incoming uint64, configured li
 	if pruneErr != nil {
 		return pruneErr
 	}
-	used, available, err := p.capacityAvailable(configured, transient)
+	budget, err := p.capacityAvailable(configured, transient)
 	if err != nil {
 		return err
 	}
-	if incoming > available {
+	if incoming > budget.accountedAvailable || incoming > budget.physicalAvailable {
 		p.rejections.Add(1)
 		return ErrCapacity
 	}
-	if used <= available-incoming {
+	accountedRequired := uint64(0)
+	physicalRequired := uint64(0)
+	if budget.accountedUsed > budget.accountedAvailable-incoming {
+		accountedRequired = budget.accountedUsed - (budget.accountedAvailable - incoming)
+	}
+	if budget.physicalUsed > budget.physicalAvailable-incoming {
+		physicalRequired = budget.physicalUsed - (budget.physicalAvailable - incoming)
+	}
+	if accountedRequired == 0 && physicalRequired == 0 {
 		return nil
 	}
-	required := used - (available - incoming)
-	freed, err := p.evictBytes(required)
+	freedAccounted, freedPhysical, err := p.evictForBudget(accountedRequired, physicalRequired)
 	if err != nil {
 		return err
 	}
-	if freed < required {
+	if freedAccounted < accountedRequired || freedPhysical < physicalRequired {
 		p.rejections.Add(1)
 		return ErrCapacity
 	}
 	return nil
 }
 
-func (p *provider) capacityAvailable(configured limits, transient uint64) (uint64, uint64, error) {
+type capacityBudget struct {
+	accountedUsed      uint64
+	physicalUsed       uint64
+	accountedAvailable uint64
+	physicalAvailable  uint64
+}
+
+func (p *provider) capacityAvailable(configured limits, transient uint64) (capacityBudget, error) {
 	usage, err := p.diskUsage(p.path)
 	if err != nil {
-		return 0, 0, err
+		return capacityBudget{}, err
 	}
-	cacheUsed := p.cacheUsed.Load()
+	budget := capacityBudget{
+		accountedUsed: p.cacheUsed.Load(), physicalUsed: p.physicalUsed.Load(),
+		accountedAvailable: ^uint64(0),
+	}
 	target := usage.Total * uint64(normalizePercent(configured.maxDiskUsagePercent)) / 100
 	nonCacheUsed := uint64(0)
-	trackedAndTransient := cacheUsed + transient
+	trackedAndTransient := budget.physicalUsed + transient
 	if usage.Used > trackedAndTransient {
 		nonCacheUsed = usage.Used - trackedAndTransient
 	}
-	if nonCacheUsed > target {
-		return cacheUsed, 0, nil
+	if nonCacheUsed < target {
+		budget.physicalAvailable = target - nonCacheUsed
 	}
-	available := target - nonCacheUsed
 	if !configured.auto && configured.maxBytes > 0 {
-		available = min(available, configured.maxBytes)
+		budget.accountedAvailable = configured.maxBytes
 	}
-	return cacheUsed, available, nil
+	return budget, nil
 }
 
 func withinAutoLimit(total, used, incoming uint64, percent int) bool {
@@ -1218,19 +1503,26 @@ func (p *provider) evictOldest() bool {
 }
 
 func (p *provider) evictBytes(required uint64) (uint64, error) {
-	if required == 0 {
-		return 0, nil
+	freed, _, err := p.evictForBudget(required, 0)
+	return freed, err
+}
+
+func (p *provider) evictForBudget(requiredAccounted, requiredPhysical uint64) (uint64, uint64, error) {
+	if requiredAccounted == 0 && requiredPhysical == 0 {
+		return 0, 0, nil
 	}
 	p.mu.Lock()
 	state := newBatchState(p)
-	var freed uint64
-	for element := p.lru.Front(); element != nil && freed < required; element = element.Next() {
+	var freedAccounted uint64
+	var freedPhysical uint64
+	for element := p.lru.Front(); element != nil && (freedAccounted < requiredAccounted || freedPhysical < requiredPhysical); element = element.Next() {
 		key := element.Value.(string)
 		item, ok := state.getItem(p, key)
 		if !ok || !item.file {
 			continue
 		}
-		freed += item.compressedSize
+		freedAccounted += item.accountedSize
+		freedPhysical += item.physicalSize
 		state.deleteItem(p, key)
 		state.evicted++
 	}
@@ -1243,15 +1535,15 @@ func (p *provider) evictBytes(required uint64) (uint64, error) {
 	}
 	p.mu.Unlock()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	for path := range state.obsoleteFiles {
 		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
-			return freed, removeErr
+			return freedAccounted, freedPhysical, removeErr
 		}
 	}
 	p.evictions.Add(state.evicted)
-	return freed, err
+	return freedAccounted, freedPhysical, err
 }
 
 func (p *provider) deleteItemLocked(key string, item cacheItem) {
@@ -1275,14 +1567,39 @@ func (p *provider) forgetItemLocked(key string, item cacheItem) {
 		}
 	}
 	delete(p.itemGroups, key)
-	if item.file && item.compressedSize > 0 {
-		p.cacheUsed.Add(^uint64(item.compressedSize - 1))
+	if item.accountedSize > 0 {
+		p.cacheUsed.Add(^(item.accountedSize - 1))
+	}
+	if item.physicalSize > 0 {
+		p.physicalUsed.Add(^(item.physicalSize - 1))
 	}
 }
 
 func (p *provider) removeItemAccountingLocked(item cacheItem) {
 	if item.lru != nil {
 		p.lru.Remove(item.lru)
+	}
+	if item.expiration != nil && item.expiration.index >= 0 {
+		heap.Remove(&p.expirations, item.expiration.index)
+	}
+	if item.file {
+		atomicDecrement(&p.bodyEntries)
+	} else {
+		atomicDecrement(&p.mappingEntries)
+	}
+	p.expirationEntries.Store(uint64(len(p.expirations)))
+}
+
+func (p *provider) addItemAccountingLocked(item cacheItem) {
+	if item.file {
+		p.bodyEntries.Add(1)
+	} else {
+		p.mappingEntries.Add(1)
+	}
+}
+
+func atomicDecrement(value *atomic.Uint64) {
+	for current := value.Load(); current > 0 && !value.CompareAndSwap(current, current-1); current = value.Load() {
 	}
 }
 
@@ -1304,7 +1621,7 @@ func (p *provider) removeVariantFromMappingsLocked(variedKey string) {
 			p.deleteItemLocked(key, item)
 			continue
 		}
-		value, marshalErr := proto.Marshal(mapping)
+		value, marshalErr := core.EncodeMapping(mapping)
 		if marshalErr != nil {
 			p.deleteItemLocked(key, item)
 			continue
@@ -1345,7 +1662,7 @@ func (p *provider) repairMappingsLocked() bool {
 			p.deleteItemLocked(key, item)
 			continue
 		}
-		value, marshalErr := proto.Marshal(mapping)
+		value, marshalErr := core.EncodeMapping(mapping)
 		if marshalErr != nil {
 			p.corruptions.Add(1)
 			p.deleteItemLocked(key, item)
@@ -1416,13 +1733,18 @@ func (p *provider) loadIndex() error {
 					}
 				}
 				p.nextVersion++
-				p.items[key] = cacheItem{
+				loaded := cacheItem{
 					value: item.Value, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
 					generation: p.nextVersion,
 				}
+				loaded.accountedSize = accountedItemSize(key, loaded)
 				if !item.ExpiresAt.IsZero() {
-					heap.Push(&p.expirations, expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion})
+					loaded.expiration = &expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion, index: -1}
+					heap.Push(&p.expirations, loaded.expiration)
 				}
+				p.items[key] = loaded
+				p.mappingEntries.Add(1)
+				p.cacheUsed.Add(loaded.accountedSize)
 				return nil
 			}
 			if filepath.Base(item.File) != item.File || item.File == indexName {
@@ -1448,18 +1770,25 @@ func (p *provider) loadIndex() error {
 			validFiles[item.File] = struct{}{}
 			p.nextVersion++
 			modifiedAt := item.ModifiedAt
+			physicalSize := roundUp4K(uint64(len(compressed)))
 			if info, statErr := os.Stat(path); statErr == nil {
 				modifiedAt = info.ModTime().UnixNano()
+				physicalSize = physicalSizeFromInfo(info, uint64(len(compressed)))
 			}
 			loaded := cacheItem{
 				value: []byte(path), file: true, expiresAt: item.ExpiresAt, lastAccess: item.LastAccess,
-				generation: p.nextVersion, compressedSize: uint64(len(compressed)), originalSize: originalSize, checksum: checksum, modifiedAt: modifiedAt,
+				generation: p.nextVersion, compressedSize: uint64(len(compressed)), physicalSize: physicalSize, originalSize: originalSize, checksum: checksum, modifiedAt: modifiedAt,
 			}
+			loaded.accountedSize = accountedItemSize(key, loaded)
 			p.items[key] = loaded
 			if !item.ExpiresAt.IsZero() {
-				heap.Push(&p.expirations, expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion})
+				loaded.expiration = &expirationEntry{at: item.ExpiresAt, key: key, generation: p.nextVersion, index: -1}
+				heap.Push(&p.expirations, loaded.expiration)
+				p.items[key] = loaded
 			}
-			p.cacheUsed.Add(loaded.compressedSize)
+			p.cacheUsed.Add(loaded.accountedSize)
+			p.physicalUsed.Add(loaded.physicalSize)
+			p.bodyEntries.Add(1)
 			return nil
 		}); err != nil {
 			return err
@@ -1493,6 +1822,7 @@ func (p *provider) loadIndex() error {
 	if err != nil {
 		return err
 	}
+	p.expirationEntries.Store(uint64(len(p.expirations)))
 	keysByAccess := make([]string, 0, len(p.items))
 	for key, item := range p.items {
 		if item.file {
@@ -1585,6 +1915,14 @@ func (p *provider) openIndex(path string) error {
 		return err
 	}
 	p.index = db
+	if err = initializeIndexDB(db); err != nil {
+		_ = db.Close()
+		p.index = nil
+	}
+	return err
+}
+
+func initializeIndexDB(db *bolt.DB) error {
 	return db.Update(func(tx *bolt.Tx) error {
 		meta, err := tx.CreateBucketIfNotExists(indexMetaBucket)
 		if err != nil {
@@ -1603,6 +1941,72 @@ func (p *provider) openIndex(path string) error {
 		_, err = tx.CreateBucketIfNotExists(indexGroupsBucket)
 		return err
 	})
+}
+
+func (p *provider) replaceWithEmptyIndexLocked() error {
+	indexPath := filepath.Join(p.path, indexName)
+	temporary, err := os.CreateTemp(p.path, ".goveto-cache-index-reset-*")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	if err = temporary.Close(); err != nil {
+		_ = os.Remove(temporaryPath)
+		return err
+	}
+	defer os.Remove(temporaryPath)
+	empty, err := bolt.Open(temporaryPath, 0o640, &bolt.Options{Timeout: time.Second, NoFreelistSync: true})
+	if err != nil {
+		return err
+	}
+	if err = initializeIndexDB(empty); err == nil {
+		err = empty.Sync()
+	}
+	if closeErr := empty.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+
+	backupPath := indexPath + ".reset-backup"
+	_ = os.Remove(backupPath)
+	if p.index != nil {
+		if err = p.index.Sync(); err != nil {
+			return err
+		}
+		if err = p.index.Close(); err != nil {
+			return err
+		}
+		p.index = nil
+	}
+	if err = os.Rename(indexPath, backupPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		_ = p.openIndex(indexPath)
+		return err
+	}
+	restore := func(cause error) error {
+		_ = os.Remove(indexPath)
+		if restoreErr := os.Rename(backupPath, indexPath); restoreErr != nil && !errors.Is(restoreErr, os.ErrNotExist) {
+			return errors.Join(cause, restoreErr)
+		}
+		return errors.Join(cause, p.openIndex(indexPath))
+	}
+	if err = os.Rename(temporaryPath, indexPath); err != nil {
+		return restore(err)
+	}
+	if err = p.openIndex(indexPath); err != nil {
+		return restore(err)
+	}
+	directory, openErr := os.Open(p.path)
+	if openErr == nil {
+		openErr = errors.Join(directory.Sync(), directory.Close())
+	}
+	if openErr != nil {
+		p.closeIndex()
+		return restore(openErr)
+	}
+	_ = os.Remove(backupPath)
+	return nil
 }
 
 func (p *provider) rebuildIndex(path string) error {
@@ -1638,7 +2042,7 @@ func (p *provider) removeOrphanFiles(valid map[string]struct{}) error {
 		if entry.IsDir() {
 			continue
 		}
-		if isTemporaryCacheFile(entry.Name()) {
+		if isTemporaryCacheFile(entry.Name()) || strings.HasPrefix(entry.Name(), ".goveto-origin-") {
 			if err = os.Remove(filepath.Join(p.path, entry.Name())); err != nil && !errors.Is(err, os.ErrNotExist) {
 				return err
 			}
@@ -1658,28 +2062,32 @@ func (p *provider) removeOrphanFiles(valid map[string]struct{}) error {
 }
 
 func readCachedResponseFile(path string) ([]byte, error) {
-	compressed, err := os.ReadFile(path)
+	encoded, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	if _, err = validateCompressedResponse(compressed); err != nil {
+	if _, err = validateObjectResponse(bytes.NewReader(encoded), uint64(len(encoded))); err != nil {
 		return nil, err
 	}
-	return compressed, nil
+	return encoded, nil
 }
 
 func inspectCachedResponseFile(path string) ([]byte, uint64, error) {
-	compressed, err := os.ReadFile(path)
+	encoded, err := os.ReadFile(path)
 	if err != nil {
 		return nil, 0, err
 	}
-	originalSize, err := validateCompressedResponse(compressed)
-	return compressed, originalSize, err
+	originalSize, err := validateObjectResponse(bytes.NewReader(encoded), uint64(len(encoded)))
+	return encoded, originalSize, err
 }
 
-func validateCompressedResponse(compressed []byte) (uint64, error) {
-	counted := &countingReader{Reader: lz4.NewReader(bytes.NewReader(compressed))}
-	if err := validateCachedResponseReader(counted); err != nil {
+func validateObjectResponse(source io.ReaderAt, encodedSize uint64) (uint64, error) {
+	reader, err := newObjectReader(source, encodedSize)
+	if err != nil {
+		return 0, err
+	}
+	counted := &countingReader{Reader: reader}
+	if err = validateCachedResponseReader(counted); err != nil {
 		return 0, err
 	}
 	return counted.Bytes, nil
@@ -1722,49 +2130,24 @@ func readCachedObjectFile(file *os.File, expectedSize uint64, expectedChecksum [
 }
 
 func writeCompressedTemporary(target string, value []byte) (path string, size uint64, checksum [sha256.Size]byte, err error) {
-	temporary, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".tmp-")
+	path, size, err = writeObject(target, value)
 	if err != nil {
 		return "", 0, checksum, err
 	}
-	path = temporary.Name()
-	cleanup := func() {
-		_ = temporary.Close()
+	file, err := os.Open(path)
+	if err != nil {
 		_ = os.Remove(path)
-	}
-	if err = temporary.Chmod(0o640); err != nil {
-		cleanup()
 		return "", 0, checksum, err
 	}
 	hash := sha256.New()
-	writer := lz4.NewWriter(io.MultiWriter(temporary, hash))
-	if err = writer.Apply(lz4.BlockSizeOption(lz4.Block64Kb), lz4.ConcurrencyOption(1)); err != nil {
-		cleanup()
-		return "", 0, checksum, err
-	}
-	if _, err = writer.Write(value); err != nil {
-		_ = writer.Close()
-		cleanup()
-		return "", 0, checksum, err
-	}
-	if err = writer.Close(); err != nil {
-		cleanup()
-		return "", 0, checksum, err
-	}
-	if err = temporary.Sync(); err != nil {
-		cleanup()
-		return "", 0, checksum, err
-	}
-	info, err := temporary.Stat()
-	if err != nil {
-		cleanup()
-		return "", 0, checksum, err
-	}
-	if err = temporary.Close(); err != nil {
-		cleanup()
+	_, hashErr := io.Copy(hash, file)
+	closeErr := file.Close()
+	if err = errors.Join(hashErr, closeErr); err != nil {
+		_ = os.Remove(path)
 		return "", 0, checksum, err
 	}
 	copy(checksum[:], hash.Sum(nil))
-	return path, uint64(info.Size()), checksum, nil
+	return path, size, checksum, nil
 }
 
 func validateCachedResponse(value []byte) error {
@@ -1792,7 +2175,7 @@ func validateCachedResponseReader(source io.Reader) error {
 	if response.StatusCode == http.StatusNotModified {
 		return ErrUncacheable
 	}
-	noBody := response.Header.Get("X-Goveto-Origin-Method") == http.MethodHead ||
+	noBody := response.Header.Get("X-Goveto-Cache-Method") == http.MethodHead ||
 		response.StatusCode == http.StatusNoContent
 	var bodyBytes int64
 	if response.Body != nil && !noBody {

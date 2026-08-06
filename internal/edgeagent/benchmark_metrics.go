@@ -54,6 +54,14 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 			"gc_count":            memory.NumGC, "goroutines": runtime.NumGoroutine(),
 			"cache_hits": cacheStats.Hits, "cache_misses": cacheStats.Misses,
 			"cache_evictions":                cacheStats.Evictions,
+			"cache_body_entries":             cacheStats.BodyEntries,
+			"cache_mapping_entries":          cacheStats.MappingEntries,
+			"cache_expiration_entries":       cacheStats.ExpirationEntries,
+			"cache_accounted_bytes":          cacheStats.AccountedBytes,
+			"cache_physical_bytes":           cacheStats.PhysicalBytes,
+			"cache_index_bytes":              cacheStats.IndexBytes,
+			"cache_index_free_pages":         cacheStats.IndexFreePages,
+			"cache_index_pending_pages":      cacheStats.IndexPendingPages,
 			"cache_write_queue_depth":        cacheStats.WriteQueueDepth,
 			"cache_write_queue_bytes":        cacheStats.WriteQueueBytes,
 			"cache_write_queue_depth_max":    cacheStats.WriteQueueDepthMax,
@@ -137,6 +145,7 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 	mux.HandleFunc("GET /debug/pprof/profile", httppprof.Profile)
 	mux.Handle("GET /debug/pprof/mutex", httppprof.Handler("mutex"))
 	mux.Handle("GET /debug/pprof/allocs", httppprof.Handler("allocs"))
+	mux.Handle("GET /debug/pprof/heap", httppprof.Handler("heap"))
 	mux.Handle("GET /debug/pprof/goroutine", httppprof.Handler("goroutine"))
 	return mux
 }

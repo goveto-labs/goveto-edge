@@ -63,6 +63,7 @@ type LogQueue struct {
 	accessLastError       string
 	accessLastSuccess     time.Time
 	accessPersistOverride func([]LogRecord) ([]uint64, error)
+	accessProcessed       []LogRecord
 	benchmarkAccessLogs   atomic.Bool
 }
 

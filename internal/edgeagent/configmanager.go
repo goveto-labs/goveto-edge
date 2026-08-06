@@ -595,19 +595,6 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
 		} else if ok && cachePolicy.Enabled && len(cachePolicy.Rules) > 0 {
-			cacheHandler := souinHandler(id, cachePolicy, nodeConfig)
-			routes = append(routes, map[string]any{
-				"@id": "site_" + id + "_cache_api",
-				"match": []any{
-					map[string]any{
-						"host":   site.Domains,
-						"method": []string{http.MethodPost, "PURGE"},
-						"path":   []string{"/__goveto/cache/" + id + "*"},
-					},
-				},
-				"handle":   []any{cacheHandler},
-				"terminal": true,
-			})
 			methods := cachePolicy.Methods
 			if cachePolicy.AllowPurgeMethod {
 				routes = append(routes, map[string]any{
@@ -630,31 +617,8 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			}
 			for ruleIndex, rule := range cachePolicy.Rules {
 				cachedHandlers := append([]any(nil), handlers...)
-				cachedHandlers = append(cachedHandlers, map[string]any{
-					"handler":                      "goveto_cache_headers",
-					"site_id":                      id,
-					"ignore_request_cache_control": true,
-					"x_cache":                      cachePolicy.ResponseHeaders.XCache,
-					"age":                          cachePolicy.ResponseHeaders.Age,
-					"stale_while_revalidate_ttl":   staleWhileRevalidateTTL(cachePolicy),
-					"background_revalidate":        cachePolicy.Stale.Enabled && cachePolicy.Stale.WhileRevalidateSeconds > 0,
-					"coalesce":                     cacheRequestCoalescing(cachePolicy),
-					"coalesce_headers":             cacheKeyHeaders(cachePolicy),
-					"coalesce_ignore_query":        !cacheKeyHasPart(cachePolicy.CacheKey, cachepolicy.CacheKeyPartQuery),
-				})
 				cachedHandlers = append(cachedHandlers,
-					cacheHandler,
-					map[string]any{
-						"handler":              "goveto_cache_headers",
-						"age":                  true,
-						"default_ttl":          rule.TTL.DefaultSeconds,
-						"status_ttl":           rule.TTL.Status,
-						"stale_if_error_ttl":   staleIfErrorTTL(cachePolicy),
-						"override_client_ttl":  rule.TTL.OverrideClientTTL,
-						"client_ttl":           rule.TTL.ClientSeconds,
-						"bypass_cache_control": cachePolicy.BypassCacheControl,
-						"validate_upstream":    true,
-					},
+					govetoCacheHandler(id, cachePolicy, rule, nodeConfig),
 					originMetrics, reverseProxy,
 				)
 				routes = append(routes, map[string]any{
@@ -867,60 +831,31 @@ func decodeAccessPolicy(raw map[string]any, geoIPPath string, validateGeoIP func
 	return policy, true, nil
 }
 
-func souinHandler(siteID string, policy cachepolicy.CachePolicy, nodeConfig NodeConfig) map[string]any {
-	stale := "0s"
-	if policy.Stale.Enabled {
-		staleSeconds := max(policy.Stale.IfErrorSeconds, policy.Stale.WhileRevalidateSeconds)
-		stale = strconv.Itoa(staleSeconds) + "s"
+func govetoCacheHandler(siteID string, cachePolicy cachepolicy.CachePolicy, rule cachepolicy.CacheRule, nodeConfig NodeConfig) map[string]any {
+	return map[string]any{
+		"handler":                    "goveto_cache",
+		"site_id":                    siteID,
+		"path":                       filepath.Join(nodeConfig.CacheDirectory, siteID),
+		"auto_max_size":              nodeConfig.AutoMaxSize,
+		"max_size_bytes":             nodeConfig.MaxSizeBytes,
+		"max_disk_usage_percent":     nodeConfig.MaxDiskUsagePercent,
+		"key_parts":                  cachePolicy.CacheKey.Parts,
+		"key_headers":                cacheKeyHeaders(cachePolicy),
+		"hash_key":                   cachePolicy.CacheKey.Hash,
+		"hide_key":                   cachePolicy.CacheKey.Hide,
+		"default_ttl":                rule.TTL.DefaultSeconds,
+		"status_ttl":                 rule.TTL.Status,
+		"stale_if_error_ttl":         staleIfErrorTTL(cachePolicy),
+		"stale_while_revalidate_ttl": staleWhileRevalidateTTL(cachePolicy),
+		"max_body_bytes":             cachePolicy.MaxBodyBytes,
+		"coalesce":                   cacheRequestCoalescing(cachePolicy),
+		"x_cache":                    cachePolicy.ResponseHeaders.XCache,
+		"age":                        cachePolicy.ResponseHeaders.Age,
+		"override_client_ttl":        rule.TTL.OverrideClientTTL,
+		"client_ttl":                 rule.TTL.ClientSeconds,
+		"bypass_cache_control":       cachePolicy.BypassCacheControl,
+		"surrogate_key_header":       cachePolicy.SurrogateKeyHeader,
 	}
-	keyHeaders := cacheKeyHeaders(policy)
-	defaultTTL := policy.Rules[0].TTL.DefaultSeconds
-
-	verbs := append([]string(nil), policy.Methods...)
-	if policy.AllowPurgeMethod {
-		verbs = append(verbs, "PURGE")
-	}
-
-	configuration := map[string]any{
-		"SurrogateKeyDisabled": true,
-		"DefaultCache": map[string]any{
-			"allowed_http_verbs": verbs,
-			"cache_name":         "Goveto-" + siteID,
-			"key": map[string]any{
-				"disable_body":   true,
-				"disable_query":  !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartQuery),
-				"disable_scheme": !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartScheme),
-				"disable_host":   !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartHost),
-				"disable_method": !cacheKeyHasPart(policy.CacheKey, cachepolicy.CacheKeyPartMethod),
-				"headers":        keyHeaders,
-				"hash":           policy.CacheKey.Hash,
-				"hide":           policy.CacheKey.Hide,
-			},
-			"mode":                     "strict",
-			"disable_coalescing":       true,
-			"max_cacheable_body_bytes": policy.MaxBodyBytes,
-			"ttl":                      strconv.Itoa(defaultTTL) + "s",
-			"stale":                    stale,
-			"default_cache_control":    "public, max-age=" + strconv.Itoa(defaultTTL),
-			"simplefs": map[string]any{
-				"found": true,
-				"path":  filepath.Join(nodeConfig.CacheDirectory, siteID),
-				"configuration": map[string]any{
-					"auto_max_size":          nodeConfig.AutoMaxSize,
-					"max_size_bytes":         nodeConfig.MaxSizeBytes,
-					"max_disk_usage_percent": nodeConfig.MaxDiskUsagePercent,
-				},
-			},
-			"storers": []string{"simplefs"},
-		},
-		"API": map[string]any{
-			"souin": map[string]any{
-				"enable":   true,
-				"basepath": "/__goveto/cache/" + siteID,
-			},
-		},
-	}
-	return map[string]any{"handler": "cache", "Configuration": configuration}
 }
 
 func staleIfErrorTTL(policy cachepolicy.CachePolicy) int {
@@ -947,15 +882,7 @@ func containsFold(values []string, target string) bool {
 }
 
 func cacheKeyHeaders(policy cachepolicy.CachePolicy) []string {
-	headers := append([]string(nil), policy.CacheKey.Headers...)
-	if policy.CacheRangeRequests {
-		for _, header := range []string{"Range", "If-Range"} {
-			if !containsFold(headers, header) {
-				headers = append(headers, header)
-			}
-		}
-	}
-	return headers
+	return append([]string(nil), policy.CacheKey.Headers...)
 }
 
 func cacheKeyHasPart(key cachepolicy.CacheKey, target string) bool {

@@ -85,8 +85,9 @@ func RunBenchmark(ctx context.Context, config Config) (Report, error) {
 			MaxCapturedValues: config.MaxCapturedValues, MaxLoadCPUPercent: config.MaxLoadCPUPercent,
 			MaxAgentRSSBytes: config.MaxAgentRSSBytes, MaxAgentRSSGrowthBytes: config.MaxAgentRSSGrowthBytes, MaxAgentGoroutineGrowth: config.MaxAgentGoroutineGrowth,
 			MinRPS: config.MinRPS, MaxP99MS: config.MaxP99MS, MaxAllocationBytesPerRequest: config.MaxAllocationBytesPerRequest,
-			PostCooldownGC: config.AgentGCURL != "" && config.Cooldown > 0,
-			Variant:        config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs, RequireCacheWritesDrained: config.RequireCacheWritesDrained,
+			PostCooldownGC:         config.AgentGCURL != "" && config.Cooldown > 0,
+			PostCooldownCacheReset: config.PostCooldownCacheReset,
+			Variant:                config.Variant, RequireCompleteAccessLogs: config.RequireCompleteAccessLogs, RequireCacheWritesDrained: config.RequireCacheWritesDrained,
 		},
 	}
 	var loadCPUMax float64
@@ -140,7 +141,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		runWorkersWithRequestContext(warmContext, warmContext, config, client, warmupState, &requestSequence, sharedQUIC)
 		cancel()
 	}
-	if config.RequireCompleteAccessLogs {
+	if config.RequireCompleteAccessLogs || config.MaxAllocationBytesPerRequest > 0 {
 		if drainErr := waitForAccessBufferDrain(ctx, config.AgentMetricsURL, 10*time.Second); drainErr != nil {
 			environmentErrors = append(environmentErrors, drainErr.Error())
 		}
@@ -183,6 +184,14 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 			environmentErrors = append(environmentErrors, drainErr.Error())
 		}
 	}
+	var settledEnd TimeSeriesPoint
+	if config.MaxAllocationBytesPerRequest > 0 || config.RequireCompleteAccessLogs {
+		if drainErr := waitForAccessBufferDrain(ctx, config.AgentMetricsURL, 10*time.Second); drainErr != nil {
+			environmentErrors = append(environmentErrors, drainErr.Error())
+		} else {
+			settledEnd = captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "settled_end")
+		}
+	}
 	if config.Cooldown > 0 {
 		timer := time.NewTimer(config.Cooldown)
 		select {
@@ -206,6 +215,9 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 	if !measurementEnd.At.IsZero() {
 		samples = append(samples, measurementEnd)
 	}
+	if !settledEnd.At.IsZero() {
+		samples = append(samples, settledEnd)
+	}
 	naturalEnd := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "cooldown_end")
 	if !naturalEnd.At.IsZero() {
 		samples = append(samples, naturalEnd)
@@ -217,7 +229,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 			resources.GoroutinesCooldownGrowth = naturalEnd.Goroutines - preWarmup.Goroutines
 		}
 	}
-	if config.MaxAllocationBytesPerRequest > 0 && !measurementEnd.telemetryCaptured {
+	if config.MaxAllocationBytesPerRequest > 0 && !settledEnd.telemetryCaptured {
 		environmentErrors = append(environmentErrors, "allocation telemetry was unavailable at the measurement boundary")
 	}
 	if config.MaxAgentGoroutineGrowth > 0 || config.RequireCacheWritesDrained || config.RequireCompleteAccessLogs {
@@ -232,17 +244,7 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 		if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
 			environmentErrors = append(environmentErrors, gcErr.Error())
 		} else {
-			timer := time.NewTimer(time.Second)
-			select {
-			case <-timer.C:
-			case <-ctx.Done():
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-			}
+			waitForResourceSettlement(ctx)
 			postGC := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "post_gc")
 			if !postGC.At.IsZero() {
 				samples = append(samples, postGC)
@@ -254,13 +256,32 @@ func runOnce(ctx context.Context, config Config, index int) (Run, float64, error
 			}
 		}
 	}
+	if config.PostCooldownCacheReset {
+		if resetErr := triggerCacheControl(ctx, config.AgentMetricsURL, "/cache/reset"); resetErr != nil {
+			environmentErrors = append(environmentErrors, resetErr.Error())
+		} else if gcErr := triggerPostCooldownGC(ctx, config.AgentGCURL); gcErr != nil {
+			environmentErrors = append(environmentErrors, gcErr.Error())
+		} else {
+			waitForResourceSettlement(ctx)
+			postResetGC := captureResourcePoint(config.AgentPID, config.AgentMetricsURL, state, "post_reset_gc")
+			if !postResetGC.At.IsZero() {
+				samples = append(samples, postResetGC)
+				if (config.AgentPID > 0 && postResetGC.RSSBytes == 0) || (config.AgentMetricsURL != "" && postResetGC.HeapBytes == 0) {
+					environmentErrors = append(environmentErrors, "post-reset GC completed but its resource snapshot was incomplete")
+				} else {
+					applyPostResetGC(&resources, postResetGC)
+				}
+			}
+		}
+	}
 	if resources.RSSBytesMax > resources.RSSBytesStart {
 		resources.RSSBytesGrowth = resources.RSSBytesMax - resources.RSSBytesStart
 	}
-	if measurementEnd.telemetryCaptured {
-		resources.AllocatedBytes = counterDelta(measurementEnd.TotalAllocBytes, resources.totalAllocStart)
-		if measurementEnd.Requests > 0 {
-			resources.AllocationBytesPerRequest = float64(resources.AllocatedBytes) / float64(measurementEnd.Requests)
+	if settledEnd.telemetryCaptured {
+		resources.SettledTotalAllocBytes = settledEnd.TotalAllocBytes
+		resources.AllocatedBytes = counterDelta(settledEnd.TotalAllocBytes, resources.totalAllocStart)
+		if settledEnd.Requests > 0 {
+			resources.AllocationBytesPerRequest = float64(resources.AllocatedBytes) / float64(settledEnd.Requests)
 		}
 	}
 	sort.Slice(samples, func(i, j int) bool { return samples[i].At.Before(samples[j].At) })
@@ -549,6 +570,12 @@ func validateConfig(config *Config) error {
 	}
 	if (config.Variant == VariantControl || config.RequireCompleteAccessLogs) && config.AgentMetricsURL == "" {
 		return errors.New("control and complete access log modes require agent metrics")
+	}
+	if config.MaxAllocationBytesPerRequest > 0 && config.AgentMetricsURL == "" {
+		return errors.New("allocation gates require agent metrics")
+	}
+	if config.PostCooldownCacheReset && (config.AgentMetricsURL == "" || config.AgentGCURL == "") {
+		return errors.New("post-cooldown cache reset requires agent metrics and GC URLs")
 	}
 	for _, status := range config.AllowedStatuses {
 		if status < 100 || status > 599 {
@@ -1004,6 +1031,14 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
 					point.CacheWriteCommitLatencyMS = telemetry.CacheWriteCommitLatencyMS
 					point.CacheInflightWrites = telemetry.CacheInflightWrites
+					point.CacheBodyEntries = telemetry.CacheBodyEntries
+					point.CacheMappingEntries = telemetry.CacheMappingEntries
+					point.CacheExpirationEntries = telemetry.CacheExpirationEntries
+					point.CacheAccountedBytes = telemetry.CacheAccountedBytes
+					point.CachePhysicalBytes = telemetry.CachePhysicalBytes
+					point.CacheIndexBytes = telemetry.CacheIndexBytes
+					point.CacheIndexFreePages = telemetry.CacheIndexFreePages
+					point.CacheIndexPendingPages = telemetry.CacheIndexPendingPages
 					allocationElapsed := time.Since(previousTelemetryAt).Seconds()
 					if hasTelemetryBaseline && allocationElapsed > 0 && telemetry.TotalAlloc >= previousTelemetry.TotalAlloc {
 						point.AllocationRate = float64(telemetry.TotalAlloc-previousTelemetry.TotalAlloc) / allocationElapsed
@@ -1085,6 +1120,14 @@ type telemetrySample struct {
 	CacheAverageWriteBatchSize float64   `json:"cache_average_write_batch_size"`
 	CacheWriteCommitLatencyMS  float64   `json:"cache_write_commit_latency_ms"`
 	CacheInflightWrites        uint64    `json:"cache_inflight_writes"`
+	CacheBodyEntries           uint64    `json:"cache_body_entries"`
+	CacheMappingEntries        uint64    `json:"cache_mapping_entries"`
+	CacheExpirationEntries     uint64    `json:"cache_expiration_entries"`
+	CacheAccountedBytes        uint64    `json:"cache_accounted_bytes"`
+	CachePhysicalBytes         uint64    `json:"cache_physical_bytes"`
+	CacheIndexBytes            uint64    `json:"cache_index_bytes"`
+	CacheIndexFreePages        uint64    `json:"cache_index_free_pages"`
+	CacheIndexPendingPages     uint64    `json:"cache_index_pending_pages"`
 }
 
 func captureResourcePoint(pid int32, metricsURL string, state *runState, phase string) TimeSeriesPoint {
@@ -1137,6 +1180,14 @@ func captureResourcePoint(pid int32, metricsURL string, state *runState, phase s
 			point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
 			point.CacheWriteCommitLatencyMS = telemetry.CacheWriteCommitLatencyMS
 			point.CacheInflightWrites = telemetry.CacheInflightWrites
+			point.CacheBodyEntries = telemetry.CacheBodyEntries
+			point.CacheMappingEntries = telemetry.CacheMappingEntries
+			point.CacheExpirationEntries = telemetry.CacheExpirationEntries
+			point.CacheAccountedBytes = telemetry.CacheAccountedBytes
+			point.CachePhysicalBytes = telemetry.CachePhysicalBytes
+			point.CacheIndexBytes = telemetry.CacheIndexBytes
+			point.CacheIndexFreePages = telemetry.CacheIndexFreePages
+			point.CacheIndexPendingPages = telemetry.CacheIndexPendingPages
 		}
 	}
 	return point
@@ -1176,6 +1227,14 @@ func applyNaturalEnd(summary *ResourceSummary, point TimeSeriesPoint) {
 	summary.CacheWriteQueueDepthEnd = point.CacheWriteQueueDepth
 	summary.CacheWriteQueueBytesEnd = point.CacheWriteQueueBytes
 	summary.CacheInflightWritesEnd = point.CacheInflightWrites
+	summary.CacheBodyEntriesEnd = point.CacheBodyEntries
+	summary.CacheMappingEntriesEnd = point.CacheMappingEntries
+	summary.CacheExpirationEntriesEnd = point.CacheExpirationEntries
+	summary.CacheAccountedBytesEnd = point.CacheAccountedBytes
+	summary.CachePhysicalBytesEnd = point.CachePhysicalBytes
+	summary.CacheIndexBytesEnd = point.CacheIndexBytes
+	summary.CacheIndexFreePagesEnd = point.CacheIndexFreePages
+	summary.CacheIndexPendingPagesEnd = point.CacheIndexPendingPages
 	summary.CacheWriteQueueDepthMax = max(summary.CacheWriteQueueDepthMax, point.CacheWriteQueueDepthMax)
 	summary.CacheWriteQueueBytesMax = max(summary.CacheWriteQueueBytesMax, point.CacheWriteQueueBytesMax)
 	summary.CacheWriteRejectionsDelta = counterDelta(point.CacheWriteRejections, summary.cacheWriteRejectionsStart)
@@ -1270,6 +1329,14 @@ func applyPostGC(summary *ResourceSummary, point TimeSeriesPoint) {
 	summary.HeapReleasedBytesPostGC = point.HeapReleasedBytes
 }
 
+func applyPostResetGC(summary *ResourceSummary, point TimeSeriesPoint) {
+	summary.RSSBytesPostResetGC = point.RSSBytes
+	summary.HeapBytesPostResetGC = point.HeapBytes
+	summary.HeapInuseBytesPostResetGC = point.HeapInuseBytes
+	summary.HeapIdleBytesPostResetGC = point.HeapIdleBytes
+	summary.HeapReleasedPostResetGC = point.HeapReleasedBytes
+}
+
 func triggerPostCooldownGC(ctx context.Context, url string) error {
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
@@ -1284,6 +1351,15 @@ func triggerPostCooldownGC(ctx context.Context, url string) error {
 		return fmt.Errorf("trigger post-cooldown GC: status %d", response.StatusCode)
 	}
 	return nil
+}
+
+func waitForResourceSettlement(ctx context.Context) {
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+	case <-ctx.Done():
+	}
 }
 
 func fetchTelemetry(ctx context.Context, client *http.Client, url string) (telemetrySample, error) {

@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -141,6 +142,8 @@ func run(args []string) error {
 	host := flags.String("host", "", "HTTP Host and TLS server name")
 	output := flags.String("output", "benchmark-results", "artifact output directory")
 	baseline := flags.String("baseline", "", "baseline report.json")
+	baselineRun := flags.String("baseline-run", "", "baseline report.json (required for cache/full acceptance)")
+	establishBaseline := flags.Bool("establish-baseline", false, "explicitly establish the first cache/full baseline")
 	minBaselineRPSRatio := flags.Float64("min-baseline-rps-ratio", 0, "optional minimum current/baseline RPS ratio")
 	maxBaselineAllocationRatio := flags.Float64("max-baseline-allocation-ratio", 0, "optional maximum current/baseline allocation ratio")
 	control := flags.String("control", "", "matching control-variant report.json")
@@ -164,6 +167,7 @@ func run(args []string) error {
 	agentPID := flags.Int("agent-pid", 0, "Edge Agent PID to sample")
 	agentMetricsURL := flags.String("agent-metrics-url", "", "optional benchmark telemetry URL")
 	agentGCURL := flags.String("agent-gc-url", "", "optional benchmark-only post-cooldown GC URL")
+	postCooldownCacheReset := flags.Bool("post-cooldown-cache-reset", false, "reset cache and run GC after the natural post-cooldown GC snapshot")
 	minCacheHits := flags.Uint64("min-cache-hits", 0, "minimum cache hit delta required in every run")
 	minCacheMisses := flags.Uint64("min-cache-misses", 0, "minimum cache miss delta required in every run")
 	minCacheEvictions := flags.Uint64("min-cache-evictions", 0, "minimum cache eviction delta required in every run")
@@ -222,9 +226,24 @@ func run(args []string) error {
 	if *repeats == 0 {
 		*repeats = defaultRepeats
 	}
+	if *baseline != "" && *baselineRun != "" {
+		return errors.New("use only one of --baseline or --baseline-run")
+	}
+	baselinePath := *baselineRun
+	if baselinePath == "" {
+		baselinePath = *baseline
+	}
+	if *establishBaseline && baselinePath != "" {
+		return errors.New("--establish-baseline cannot be combined with a baseline report")
+	}
+	relativeGate := *minBaselineRPSRatio > 0 || *maxBaselineAllocationRatio > 0
+	cacheAcceptance := agentbench.Variant(*variant) == agentbench.VariantFull && strings.Contains(strings.ToLower(*scenario), "cache")
+	if (relativeGate || cacheAcceptance) && baselinePath == "" && !*establishBaseline {
+		return errors.New("cache/full and relative acceptance gates require --baseline-run; use --establish-baseline only for the first baseline")
+	}
 	var baselineReport *agentbench.Report
-	if *baseline != "" {
-		loaded, readErr := agentbench.ReadBaselineReport(*baseline)
+	if baselinePath != "" {
+		loaded, readErr := agentbench.ReadBaselineReport(baselinePath)
 		if readErr != nil {
 			return fmt.Errorf("read baseline: %w", readErr)
 		}
@@ -250,7 +269,7 @@ func run(args []string) error {
 		RequestHeaders: requestHeaders, CaptureHeaders: captureHeaders, InsecureSkipVerify: *insecure, NewConnection: *newConnection, UniqueQuery: *uniqueQuery,
 		UniqueQueryCardinality: *uniqueQueryCardinality, UniqueQueryNamespace: strings.TrimSpace(*uniqueQueryNamespace),
 		Cooldown: *cooldown, CapacityProbe: *capacityProbe,
-		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, AgentGCURL: *agentGCURL, SampleInterval: time.Second,
+		AgentPID: int32(*agentPID), AgentMetricsURL: *agentMetricsURL, AgentGCURL: *agentGCURL, PostCooldownCacheReset: *postCooldownCacheReset, SampleInterval: time.Second,
 		MinCacheHits: *minCacheHits, MinCacheMisses: *minCacheMisses, MinCacheEvictions: *minCacheEvictions,
 		MaxCapturedValues:       *maxCapturedValues,
 		MaxLoadCPUPercent:       *maxLoadCPU,
@@ -269,6 +288,9 @@ func run(args []string) error {
 		report.BinarySHA256 = agentbench.FileSHA256(*agentBinary)
 	}
 	if baselineReport != nil {
+		report.BaselineRunID = baselineRunID(baselinePath)
+		report.BaselineCommit = baselineReport.Commit
+		report.BaselineArtifactSHA256 = agentbench.FileSHA256(baselinePath)
 		decision := agentbench.Compare(report, *baselineReport)
 		decision = agentbench.ApplyBaselineRatioGates(decision, report, *baselineReport, *minBaselineRPSRatio, *maxBaselineAllocationRatio)
 		report.Baseline = &decision
@@ -296,6 +318,14 @@ func run(args []string) error {
 		return errors.New("benchmark control gate failed: " + report.Control.Reason)
 	}
 	return nil
+}
+
+func baselineRunID(reportPath string) string {
+	directory := filepath.Dir(filepath.Clean(reportPath))
+	for range 2 {
+		directory = filepath.Dir(directory)
+	}
+	return filepath.Base(directory)
 }
 
 func suiteDefaults(suite agentbench.Suite) (time.Duration, time.Duration, int) {
