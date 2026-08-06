@@ -13,6 +13,7 @@ import CreateNode from '@/pages/CreateNode.tsx';
 import CreateSite from '@/pages/CreateSite.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
 import DNS from '@/pages/DNS.tsx';
+import DNSZones from '@/pages/DNSZones.tsx';
 import Init from '@/pages/Init.tsx';
 import Jobs from '@/pages/Jobs.tsx';
 import Login from '@/pages/Login.tsx';
@@ -59,6 +60,7 @@ export default function App() {
                                     <Route element={<PurgeJobs />} path='/sites/cache' />
                                     <Route element={<SiteDetail />} path='/sites/:siteId/*' />
                                     <Route element={<DNS />} path='/dns' />
+                                    <Route element={<DNSZones />} path='/dns/zones' />
                                     <Route element={<Certificates />} path='/certificates' />
                                     <Route element={<Jobs />} path='/jobs' />
                                     <Route element={<PurgeJobs />} path='/purge' />

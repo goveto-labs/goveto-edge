@@ -28,6 +28,14 @@ const (
 
 var ErrDNSNotConfigured = errors.New("DNS provider is not configured")
 
+// EndpointConfig returns the cluster primary-hostname DNS provider configuration.
+func EndpointConfig(ctx context.Context, db *client.Client, clusterID string) (*model.DNSProviderConfig, error) {
+	return db.DNSProviderConfig.FindFirst(ctx,
+		query.DNSProviderConfig.ClusterId.Equals(clusterID),
+		query.DNSProviderConfig.Kind.Equals(model.DNSProviderKindENDPOINT),
+	)
+}
+
 type Service struct {
 	db         *client.Client
 	cipher     *node.CredentialCipher
@@ -139,10 +147,7 @@ func (s *Service) EnqueueNodeIPIfChanged(
 	if cluster == nil || cluster.PrimaryHostname == nil || *cluster.PrimaryHostname == "" {
 		return nil, nil
 	}
-	config, err := s.db.DNSProviderConfig.FindUnique(
-		ctx,
-		query.DNSProviderConfig.ClusterId.Equals(clusterID),
-	)
+	config, err := EndpointConfig(ctx, s.db, clusterID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,10 +206,7 @@ func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) err
 	}
 	defer unlock()
 
-	config, err := s.db.DNSProviderConfig.FindUnique(
-		ctx,
-		query.DNSProviderConfig.ClusterId.Equals(clusterID),
-	)
+	config, err := EndpointConfig(ctx, s.db, clusterID)
 	if err != nil {
 		return err
 	}
@@ -279,9 +281,13 @@ func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) err
 			DoMany(ctx); err != nil {
 			return err
 		}
+		// Keep ACME zones; only remove the cluster primary endpoint provider.
 		if _, err := tx.DNSProviderConfig.Delete().
-			Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
-			Do(ctx); err != nil {
+			Where(
+				query.DNSProviderConfig.ClusterId.Equals(clusterID),
+				query.DNSProviderConfig.Kind.Equals(model.DNSProviderKindENDPOINT),
+			).
+			DoMany(ctx); err != nil {
 			return err
 		}
 		_, err = tx.Cluster.Update().
@@ -349,7 +355,10 @@ func (s *Service) enqueuePeriodic(ctx context.Context) {
 		int64(jobRetention/time.Second),
 	)
 	configs, err := s.db.DNSProviderConfig.Query().
-		Where(query.DNSProviderConfig.Enabled.Equals(true)).
+		Where(
+			query.DNSProviderConfig.Enabled.Equals(true),
+			query.DNSProviderConfig.Kind.Equals(model.DNSProviderKindENDPOINT),
+		).
 		Do(ctx)
 	if err != nil {
 		return
@@ -619,10 +628,7 @@ func (s *Service) reconcile(ctx context.Context, clusterID string) error {
 	if cluster.PrimaryHostname == nil || *cluster.PrimaryHostname == "" {
 		return errors.New("cluster primary hostname is not configured")
 	}
-	config, err := s.db.DNSProviderConfig.FindUnique(
-		ctx,
-		query.DNSProviderConfig.ClusterId.Equals(clusterID),
-	)
+	config, err := EndpointConfig(ctx, s.db, clusterID)
 	if err != nil {
 		return err
 	}
@@ -663,10 +669,7 @@ func (s *Service) reconcile(ctx context.Context, clusterID string) error {
 }
 
 func (s *Service) deleteAll(ctx context.Context, clusterID string) error {
-	config, err := s.db.DNSProviderConfig.FindUnique(
-		ctx,
-		query.DNSProviderConfig.ClusterId.Equals(clusterID),
-	)
+	config, err := EndpointConfig(ctx, s.db, clusterID)
 	if err != nil {
 		return err
 	}

@@ -121,15 +121,32 @@ export interface DNSLine {
 }
 
 export type DNSProviderType = 'ALIYUN' | 'CLOUDFLARE';
+export type DNSProviderKind = 'ENDPOINT' | 'ACME';
 
 export interface DNSProviderDomain {
     name: string;
     id?: string;
 }
 
+export interface DNSZone {
+    id: string;
+    kind: DNSProviderKind;
+    type: DNSProviderType;
+    zone: string;
+    zone_id: string | null;
+    default_ttl: number;
+    proxied: boolean;
+    enabled: boolean;
+    credentials_configured: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
 export interface DNSConfigResponse {
     primary_hostname: string | null;
     provider: {
+        id?: string;
+        kind?: DNSProviderKind;
         type: DNSProviderType;
         zone: string;
         zone_id: string | null;
@@ -138,6 +155,7 @@ export interface DNSConfigResponse {
         enabled: boolean;
         credentials_configured: boolean;
     } | null;
+    zones: DNSZone[];
 }
 
 export interface DNSManagedRecord {

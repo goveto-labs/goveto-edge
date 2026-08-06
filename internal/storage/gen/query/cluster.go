@@ -42,7 +42,7 @@ type ClusterQuery struct {
 	Groups          clusterGroupsRelation
 	Regions         clusterRegionsRelation
 	DnsLines        clusterDnsLinesRelation
-	DnsProvider     clusterDnsProviderRelation
+	DnsProviders    clusterDnsProvidersRelation
 	DnsRecords      clusterDnsRecordsRelation
 	DnsSyncJobs     clusterDnsSyncJobsRelation
 	Certificates    clusterCertificatesRelation
@@ -75,7 +75,7 @@ var Cluster = ClusterQuery{
 	Groups:          clusterGroupsRelation{},
 	Regions:         clusterRegionsRelation{},
 	DnsLines:        clusterDnsLinesRelation{},
-	DnsProvider:     clusterDnsProviderRelation{},
+	DnsProviders:    clusterDnsProvidersRelation{},
 	DnsRecords:      clusterDnsRecordsRelation{},
 	DnsSyncJobs:     clusterDnsSyncJobsRelation{},
 	Certificates:    clusterCertificatesRelation{},
@@ -609,12 +609,12 @@ func (clusterDnsLinesRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "dnsLines"}
 }
 
-// DnsProviderRelation provides relation query helpers for dnsProvider.
-type clusterDnsProviderRelation struct{}
+// DnsProvidersRelation provides relation query helpers for dnsProviders.
+type clusterDnsProvidersRelation struct{}
 
-// Fetch creates an include clause to fetch related dnsProvider.
-func (clusterDnsProviderRelation) Fetch() ClusterIncludeClause {
-	return ClusterIncludeClause{Relation: "dnsProvider"}
+// Fetch creates an include clause to fetch related dnsProviders.
+func (clusterDnsProvidersRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "dnsProviders"}
 }
 
 // DnsRecordsRelation provides relation query helpers for dnsRecords.
@@ -726,7 +726,7 @@ type ClusterCreateInput struct {
 	Groups          *ClusterGroupCreateNestedInput
 	Regions         *ClusterRegionCreateNestedInput
 	DnsLines        *DNSLineCreateNestedInput
-	DnsProvider     *DNSProviderConfigCreateNestedInput
+	DnsProviders    *DNSProviderConfigCreateNestedInput
 	DnsRecords      *DNSManagedRecordCreateNestedInput
 	DnsSyncJobs     *DNSSyncJobCreateNestedInput
 	Certificates    *CertificateCreateNestedInput

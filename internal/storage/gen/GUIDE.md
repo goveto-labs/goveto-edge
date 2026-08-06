@@ -373,7 +373,8 @@ query.PostAuthorIdColumn
 - Query namespace: `query.DNSProviderConfig`
 - Fields:
   - `Id` (String, id)
-  - `Clusterid` (String, unique)
+  - `Clusterid` (String)
+  - `Kind` ()
   - `Provider` ()
   - `Zone` (String)
   - `Zoneid` (String, optional)

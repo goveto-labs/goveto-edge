@@ -62,6 +62,11 @@ enum DNSProviderType {
   CLOUDFLARE
 }
 
+enum DNSProviderKind {
+  ENDPOINT
+  ACME
+}
+
 enum DNSRecordStatus {
   PENDING
   SYNCED
@@ -309,7 +314,7 @@ model Cluster {
   groups          ClusterGroup[]
   regions         ClusterRegion[]
   dnsLines        DNSLine[]
-  dnsProvider     DNSProviderConfig?
+  dnsProviders    DNSProviderConfig[]
   dnsRecords      DNSManagedRecord[]
   dnsSyncJobs     DNSSyncJob[]
   certificates    Certificate[]
@@ -430,7 +435,8 @@ model DNSManagedRecord {
 
 model DNSProviderConfig {
   id                   String          @id @default(uuid())
-  clusterId            String          @unique @map("cluster_id")
+  clusterId            String          @map("cluster_id")
+  kind                 DNSProviderKind @default(ENDPOINT)
   provider             DNSProviderType
   zone                 String
   zoneId               String?         @map("zone_id")
@@ -440,8 +446,10 @@ model DNSProviderConfig {
   enabled              Boolean         @default(true)
   createdAt            DateTime        @default(now()) @map("created_at")
   updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at")
-  cluster              Cluster         @relation(fields: [clusterId], references: [id])
+  cluster              Cluster         @relation(fields: [clusterId], references: [id], onDelete: Cascade)
 
+  @@unique([clusterId, zone])
+  @@index([clusterId, kind, enabled])
   @@index([provider, enabled])
   @@map("dns_provider_configs")
 }

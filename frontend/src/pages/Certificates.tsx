@@ -1,13 +1,15 @@
-import type { Certificate } from '@/api';
+import type { Certificate, DNSZone } from '@/api';
 
 import { Button, Input, TextArea, useOverlayState } from '@heroui/react';
 import { Plus, RefreshCw, RotateCw, Send, ShieldCheck, Trash2, Upload, Zap } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 
-import { ApiError, certificatesApi } from '@/api';
+import { ApiError, certificatesApi, dnsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
+import { DomainAddField } from '@/components/DomainAddField.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
@@ -17,6 +19,9 @@ import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
 
+const LETS_ENCRYPT_PROD = 'https://acme-v02.api.letsencrypt.org/directory';
+const LETS_ENCRYPT_STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory';
+
 function message(error: unknown, fallback: string) {
     return error instanceof ApiError || error instanceof Error ? error.message : fallback;
 }
@@ -25,13 +30,56 @@ function formatDate(value?: string) {
     return value ? new Date(value).toLocaleString() : '—';
 }
 
+function normalizeDomain(value: string) {
+    return value.trim().toLowerCase().replace(/\.$/, '');
+}
+
+function apexDomain(value: string) {
+    return value.startsWith('*.') ? value.slice(2) : value;
+}
+
+function asciiHostname(value: string) {
+    const normalized = apexDomain(normalizeDomain(value));
+    try {
+        return new URL(`http://${normalized}`).hostname.replace(/\.$/, '');
+    } catch {
+        return normalized;
+    }
+}
+
+function zoneCoversDomain(zone: string, domain: string) {
+    const host = asciiHostname(domain);
+    const normalizedZone = asciiHostname(zone);
+    return host === normalizedZone || host.endsWith(`.${normalizedZone}`);
+}
+
+function bestZoneForDomain(zones: DNSZone[], domain: string) {
+    let best: DNSZone | null = null;
+    for (const zone of zones) {
+        if (!zone.enabled) continue;
+        if (!zoneCoversDomain(zone.zone, domain)) continue;
+        if (!best || zone.zone.length > best.zone.length) best = zone;
+    }
+    return best;
+}
+
+function suggestName(domains: string[]) {
+    if (domains.length === 0) return '';
+    const primary = apexDomain(domains[0]);
+    if (domains.some((domain) => domain.startsWith('*.'))) return `${primary}-wildcard`;
+    if (domains.length === 1) return primary;
+    return `${primary}-san`;
+}
+
 export default function Certificates() {
     const { clusterId, clusters } = useCluster();
     const canManage = canManageCluster(
         clusters.find((clusterItem) => clusterItem.id === clusterId)?.role
     );
     const api = useMemo(() => certificatesApi(clusterId), [clusterId]);
+    const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
     const [certs, setCerts] = useState<Certificate[]>([]);
+    const [zones, setZones] = useState<DNSZone[]>([]);
     const [error, setError] = useState('');
     const [busyId, setBusyId] = useState('');
     const [replaceTarget, setReplaceTarget] = useState<Certificate | null>(null);
@@ -39,37 +87,72 @@ export default function Certificates() {
     const uploadModal = useOverlayState();
     const acmeModal = useOverlayState();
     const [name, setName] = useState('');
+    const [nameTouched, setNameTouched] = useState(false);
     const [certificate, setCertificate] = useState('');
     const [privateKey, setPrivateKey] = useState('');
-    const [domains, setDomains] = useState('');
+    const [domains, setDomains] = useState<string[]>([]);
     const [email, setEmail] = useState('');
+    const [directoryPreset, setDirectoryPreset] = useState<'production' | 'staging' | 'custom'>(
+        'production'
+    );
     const [directoryUrl, setDirectoryUrl] = useState('');
     const [challengeType, setChallengeType] = useState<'HTTP_01' | 'DNS_01'>('HTTP_01');
+    const [challengeTouched, setChallengeTouched] = useState(false);
     const [autoRenew, setAutoRenew] = useState(true);
     const [renewBeforeDays, setRenewBeforeDays] = useState(30);
     const [submitting, setSubmitting] = useState(false);
     const [submitError, setSubmitError] = useState('');
 
+    const hasWildcard = domains.some((domain) => domain.startsWith('*.'));
+    const effectiveChallenge = hasWildcard ? 'DNS_01' : challengeType;
+    const domainCoverage = useMemo(
+        () =>
+            domains.map((domain) => ({
+                domain,
+                zone: bestZoneForDomain(zones, domain),
+            })),
+        [domains, zones]
+    );
+    const uncoveredDomains = domainCoverage.filter((item) => !item.zone).map((item) => item.domain);
+    const enabledZones = zones.filter((zone) => zone.enabled);
+
     const load = useCallback(async () => {
         if (!clusterId) return;
         try {
-            setCerts(await api.list());
+            const [certificateData, dnsConfig] = await Promise.all([
+                api.list(),
+                dns.config().catch(() => null),
+            ]);
+            setCerts(certificateData);
+            setZones(dnsConfig?.zones ?? []);
             setError('');
         } catch (err) {
             setError(message(err, 'Failed to load certificates'));
         }
-    }, [api, clusterId]);
+    }, [api, clusterId, dns]);
 
     useAutoRefresh(load, Boolean(clusterId));
 
+    useEffect(() => {
+        if (!nameTouched) setName(suggestName(domains));
+    }, [domains, nameTouched]);
+
+    useEffect(() => {
+        if (hasWildcard && !challengeTouched) setChallengeType('DNS_01');
+    }, [challengeTouched, hasWildcard]);
+
     const reset = () => {
         setName('');
+        setNameTouched(false);
         setCertificate('');
         setPrivateKey('');
-        setDomains('');
-        setEmail('');
+        setDomains([]);
+        const lastEmail = certs.find((cert) => cert.acme_email)?.acme_email || '';
+        setEmail(lastEmail);
+        setDirectoryPreset('production');
         setDirectoryUrl('');
         setChallengeType('HTTP_01');
+        setChallengeTouched(false);
         setAutoRenew(true);
         setRenewBeforeDays(30);
         setSubmitError('');
@@ -110,20 +193,49 @@ export default function Certificates() {
         }
     };
 
+    const resolvedDirectoryUrl = () => {
+        if (directoryPreset === 'production') return undefined;
+        if (directoryPreset === 'staging') return LETS_ENCRYPT_STAGING;
+        return directoryUrl || undefined;
+    };
+
     const issue = async (event: React.FormEvent) => {
         event.preventDefault();
+        if (domains.length === 0) {
+            setSubmitError('Add at least one domain.');
+            return;
+        }
+        if (effectiveChallenge === 'DNS_01' && uncoveredDomains.length > 0) {
+            setSubmitError(
+                `No configured DNS zone covers: ${uncoveredDomains.join(', ')}. Add the zone under DNS settings first.`
+            );
+            return;
+        }
+        if (directoryPreset === 'custom') {
+            if (!directoryUrl.trim()) {
+                setSubmitError('Enter a custom ACME directory URL.');
+                return;
+            }
+            try {
+                const parsed = new URL(directoryUrl);
+                if (parsed.protocol !== 'https:') {
+                    setSubmitError('ACME directory URL must use HTTPS.');
+                    return;
+                }
+            } catch {
+                setSubmitError('ACME directory URL is invalid.');
+                return;
+            }
+        }
         setSubmitting(true);
         setSubmitError('');
         try {
             await api.createACME({
-                name,
-                domains: domains
-                    .split(/[\n,]/)
-                    .map((value) => value.trim())
-                    .filter(Boolean),
+                name: name.trim() || suggestName(domains),
+                domains,
                 email,
-                directory_url: directoryUrl || undefined,
-                challenge_type: challengeType,
+                directory_url: resolvedDirectoryUrl(),
+                challenge_type: effectiveChallenge,
                 auto_renew: autoRenew,
                 renew_before_days: renewBeforeDays,
             });
@@ -386,12 +498,12 @@ export default function Certificates() {
                 icon={<Zap className='h-5 w-5' />}
                 isOpen={acmeModal.isOpen}
                 size='lg'
-                subtitle='HTTP-01 uses an attached site; wildcard names require DNS-01.'
+                subtitle='Add domains with chips, then choose HTTP-01 or DNS-01. Wildcards always use DNS-01.'
                 title='Issue with ACME'
                 onOpenChange={acmeModal.setOpen}
             >
                 <form className='flex flex-col' onSubmit={issue}>
-                    <div className='grid gap-4 p-6 md:grid-cols-2'>
+                    <div className='grid max-h-[75vh] gap-4 overflow-y-auto p-6 md:grid-cols-2'>
                         {submitError && (
                             <div className='md:col-span-2'>
                                 <FormError message={submitError} />
@@ -404,7 +516,10 @@ export default function Certificates() {
                                 required
                                 variant='secondary'
                                 value={name}
-                                onChange={(event) => setName(event.target.value)}
+                                onChange={(event) => {
+                                    setNameTouched(true);
+                                    setName(event.target.value);
+                                }}
                             />
                         </FormField>
                         <FormField htmlFor='acme-email' label='ACME account email' required>
@@ -419,32 +534,97 @@ export default function Certificates() {
                         </FormField>
                         <div className='md:col-span-2'>
                             <FormField
-                                htmlFor='acme-domains'
                                 label='Domains'
-                                hint='One per line or comma-separated. Example: example.com, *.example.com'
+                                hint='Add one domain, paste many, or include matching wildcards.'
                                 required
                             >
-                                <TextArea
-                                    id='acme-domains'
-                                    required
-                                    rows={4}
-                                    variant='secondary'
+                                <DomainAddField
+                                    allowWildcard
+                                    addLabel='Add domains'
+                                    emptyLabel='No domains added yet'
                                     value={domains}
-                                    onChange={(event) => setDomains(event.target.value)}
+                                    onChange={setDomains}
                                 />
                             </FormField>
                         </div>
+                        {domains.length > 0 && effectiveChallenge === 'DNS_01' && (
+                            <div className='space-y-2 rounded-lg border border-border bg-surface-secondary p-4 md:col-span-2'>
+                                <div className='text-sm font-medium'>DNS-01 zone coverage</div>
+                                {enabledZones.length === 0 ? (
+                                    <p className='text-sm text-danger'>
+                                        No DNS zones are configured.{' '}
+                                        <Link className='underline' to='/dns'>
+                                            Open DNS settings
+                                        </Link>{' '}
+                                        to add a provider zone before issuing.
+                                    </p>
+                                ) : (
+                                    <div className='space-y-1.5'>
+                                        {domainCoverage.map((item) => (
+                                            <div
+                                                className='flex flex-wrap items-center justify-between gap-2 text-sm'
+                                                key={item.domain}
+                                            >
+                                                <span className='font-mono text-xs'>
+                                                    {item.domain}
+                                                </span>
+                                                {item.zone ? (
+                                                    <span className='text-xs text-muted'>
+                                                        {item.zone.type === 'ALIYUN'
+                                                            ? 'Aliyun'
+                                                            : 'Cloudflare'}{' '}
+                                                        · {item.zone.zone}
+                                                        {item.zone.kind === 'ENDPOINT'
+                                                            ? ' (endpoint)'
+                                                            : ''}
+                                                    </span>
+                                                ) : (
+                                                    <span className='text-xs text-danger'>
+                                                        No matching DNS zone
+                                                    </span>
+                                                )}
+                                            </div>
+                                        ))}
+                                        {uncoveredDomains.length > 0 && (
+                                            <p className='pt-1 text-xs text-danger'>
+                                                Add missing zones in{' '}
+                                                <Link className='underline' to='/dns'>
+                                                    DNS settings
+                                                </Link>{' '}
+                                                before continuing.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                        {domains.length > 0 && effectiveChallenge === 'HTTP_01' && (
+                            <div className='rounded-lg border border-border bg-surface-secondary px-4 py-3 text-sm text-muted md:col-span-2'>
+                                HTTP-01 requires each domain to already be attached to a published
+                                site on this cluster.
+                            </div>
+                        )}
                         <SelectField
                             label='Challenge'
                             options={[
-                                { id: 'HTTP_01', label: 'HTTP-01' },
-                                { id: 'DNS_01', label: 'DNS-01' },
+                                {
+                                    id: 'HTTP_01',
+                                    label: 'HTTP-01 · domain attached to a site',
+                                },
+                                {
+                                    id: 'DNS_01',
+                                    label: 'DNS-01 · provider zone / wildcards',
+                                },
                             ]}
-                            value={challengeType}
+                            value={effectiveChallenge}
                             variant='secondary'
-                            onChange={(value) => setChallengeType(value as 'HTTP_01' | 'DNS_01')}
+                            isDisabled={hasWildcard}
+                            onChange={(value) => {
+                                setChallengeTouched(true);
+                                setChallengeType(value as 'HTTP_01' | 'DNS_01');
+                            }}
                         />
-                        <FormField htmlFor='renew-days' label='Renew before expiry'>
+                        <FormField htmlFor='renew-days' label='Renew before expiry (days)'>
                             <Input
                                 id='renew-days'
                                 max={90}
@@ -455,11 +635,25 @@ export default function Certificates() {
                                 onChange={(event) => setRenewBeforeDays(Number(event.target.value))}
                             />
                         </FormField>
-                        <div className='md:col-span-2'>
+                        <SelectField
+                            label='ACME directory'
+                            options={[
+                                { id: 'production', label: "Let's Encrypt production" },
+                                { id: 'staging', label: "Let's Encrypt staging" },
+                                { id: 'custom', label: 'Custom HTTPS directory URL' },
+                            ]}
+                            value={directoryPreset}
+                            variant='secondary'
+                            onChange={(value) =>
+                                setDirectoryPreset(value as 'production' | 'staging' | 'custom')
+                            }
+                        />
+                        {directoryPreset === 'custom' ? (
                             <FormField
                                 htmlFor='directory-url'
-                                label='ACME directory URL'
-                                hint="Leave blank for Let's Encrypt production."
+                                label='Custom directory URL'
+                                hint={`Example: ${LETS_ENCRYPT_PROD}`}
+                                required
                             >
                                 <Input
                                     id='directory-url'
@@ -469,7 +663,18 @@ export default function Certificates() {
                                     onChange={(event) => setDirectoryUrl(event.target.value)}
                                 />
                             </FormField>
-                        </div>
+                        ) : (
+                            <div className='rounded-lg border border-border px-4 py-3 text-sm text-muted'>
+                                {directoryPreset === 'production'
+                                    ? "Uses Let's Encrypt production. Certificates are trusted by browsers."
+                                    : "Uses Let's Encrypt staging. Ideal for testing rate limits and DNS-01 wiring."}
+                            </div>
+                        )}
+                        {hasWildcard && (
+                            <div className='rounded-lg border border-border bg-surface-secondary px-4 py-3 text-sm text-muted md:col-span-2'>
+                                Wildcard names were detected, so the challenge is locked to DNS-01.
+                            </div>
+                        )}
                         <div className='flex items-center justify-between rounded-lg border border-border px-4 py-3 text-sm md:col-span-2'>
                             <span>
                                 <span className='font-medium'>Automatic renewal</span>
@@ -489,7 +694,15 @@ export default function Certificates() {
                         <Button type='button' variant='ghost' onPress={acmeModal.close}>
                             Cancel
                         </Button>
-                        <Button isDisabled={submitting} type='submit' variant='primary'>
+                        <Button
+                            isDisabled={
+                                submitting ||
+                                domains.length === 0 ||
+                                (effectiveChallenge === 'DNS_01' && uncoveredDomains.length > 0)
+                            }
+                            type='submit'
+                            variant='primary'
+                        >
                             {submitting ? 'Queueing…' : 'Issue certificate'}
                         </Button>
                     </DialogFooter>

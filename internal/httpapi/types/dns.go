@@ -34,9 +34,13 @@ type DNSLine struct {
 type DNSConfig struct {
 	PrimaryHostname *string            `json:"primary_hostname"`
 	Provider        *DNSProviderConfig `json:"provider"`
+	Zones           []DNSZone          `json:"zones"`
 }
 
+// DNSProviderConfig is the backward-compatible endpoint provider payload.
 type DNSProviderConfig struct {
+	ID                    string                `json:"id,omitempty"`
+	Kind                  model.DNSProviderKind `json:"kind,omitempty"`
 	Type                  model.DNSProviderType `json:"type"`
 	Zone                  string                `json:"zone"`
 	ZoneID                *string               `json:"zone_id"`
@@ -46,10 +50,62 @@ type DNSProviderConfig struct {
 	CredentialsConfigured bool                  `json:"credentials_configured"`
 }
 
-func NewDNSConfig(hostname *string, provider *model.DNSProviderConfig) DNSConfig {
-	result := DNSConfig{PrimaryHostname: hostname}
-	if provider != nil {
-		result.Provider = &DNSProviderConfig{Type: provider.Provider, Zone: provider.Zone, ZoneID: provider.ZoneId, DefaultTTL: provider.DefaultTtl, Proxied: provider.Proxied, Enabled: provider.Enabled, CredentialsConfigured: provider.CredentialsEncrypted != ""}
+// DNSZone is any configured provider zone (endpoint or ACME).
+type DNSZone struct {
+	ID                    string                `json:"id"`
+	Kind                  model.DNSProviderKind `json:"kind"`
+	Type                  model.DNSProviderType `json:"type"`
+	Zone                  string                `json:"zone"`
+	ZoneID                *string               `json:"zone_id"`
+	DefaultTTL            int                   `json:"default_ttl"`
+	Proxied               bool                  `json:"proxied"`
+	Enabled               bool                  `json:"enabled"`
+	CredentialsConfigured bool                  `json:"credentials_configured"`
+	CreatedAt             time.Time             `json:"created_at"`
+	UpdatedAt             time.Time             `json:"updated_at"`
+}
+
+func NewDNSZone(provider *model.DNSProviderConfig) DNSZone {
+	return DNSZone{
+		ID:                    provider.Id,
+		Kind:                  provider.Kind,
+		Type:                  provider.Provider,
+		Zone:                  provider.Zone,
+		ZoneID:                provider.ZoneId,
+		DefaultTTL:            provider.DefaultTtl,
+		Proxied:               provider.Proxied,
+		Enabled:               provider.Enabled,
+		CredentialsConfigured: provider.CredentialsEncrypted != "",
+		CreatedAt:             provider.CreatedAt,
+		UpdatedAt:             provider.UpdatedAt,
+	}
+}
+
+func NewDNSProviderConfig(provider *model.DNSProviderConfig) *DNSProviderConfig {
+	if provider == nil {
+		return nil
+	}
+	return &DNSProviderConfig{
+		ID:                    provider.Id,
+		Kind:                  provider.Kind,
+		Type:                  provider.Provider,
+		Zone:                  provider.Zone,
+		ZoneID:                provider.ZoneId,
+		DefaultTTL:            provider.DefaultTtl,
+		Proxied:               provider.Proxied,
+		Enabled:               provider.Enabled,
+		CredentialsConfigured: provider.CredentialsEncrypted != "",
+	}
+}
+
+func NewDNSConfig(hostname *string, endpoint *model.DNSProviderConfig, zones []model.DNSProviderConfig) DNSConfig {
+	result := DNSConfig{
+		PrimaryHostname: hostname,
+		Provider:        NewDNSProviderConfig(endpoint),
+		Zones:           make([]DNSZone, 0, len(zones)),
+	}
+	for index := range zones {
+		result.Zones = append(result.Zones, NewDNSZone(&zones[index]))
 	}
 	return result
 }

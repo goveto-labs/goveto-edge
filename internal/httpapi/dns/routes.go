@@ -51,6 +51,16 @@ type discoveryRequest struct {
 	Zone        string                `json:"zone"`
 	ZoneID      string                `json:"zone_id"`
 	Credentials map[string]string     `json:"credentials"`
+	// Optional saved zone id whose credentials should be reused.
+	ConfigID string `json:"config_id"`
+}
+
+type zoneRequest struct {
+	Provider    model.DNSProviderType `json:"provider"`
+	Zone        string                `json:"zone"`
+	ZoneID      string                `json:"zone_id"`
+	Credentials map[string]string     `json:"credentials"`
+	Enabled     *bool                 `json:"enabled"`
 }
 
 type countRow struct {
@@ -74,6 +84,10 @@ func Register(
 	group.PUT("", updateConfig(db, cipher), credentials)
 	group.DELETE("", deleteConfig(db, service), credentials)
 	group.POST("/refresh", refreshConfig(db, cipher), credentials)
+	group.GET("/zones", listZones(db), read)
+	group.POST("/zones", createZone(db, cipher), credentials)
+	group.PUT("/zones/:zone_config_id", updateZone(db, cipher), credentials)
+	group.DELETE("/zones/:zone_config_id", deleteZone(db), credentials)
 	group.GET("/records", listRecords(db), read)
 	group.GET("/jobs", listJobs(db), read)
 	group.POST("/sync", syncNow(db, service), credentials)
@@ -120,10 +134,15 @@ func discoveryCredentials(
 		}
 		return raw, nil
 	}
-	config, err := db.DNSProviderConfig.FindUnique(
-		c.Request().Context(),
-		query.DNSProviderConfig.ClusterId.Equals(c.Param("cluster_id")),
-	)
+	ctx := c.Request().Context()
+	clusterID := c.Param("cluster_id")
+	var config *model.DNSProviderConfig
+	var err error
+	if strings.TrimSpace(input.ConfigID) != "" {
+		config, err = ownedZoneConfig(ctx, db, clusterID, strings.TrimSpace(input.ConfigID))
+	} else {
+		config, err = dnssync.EndpointConfig(ctx, db, clusterID)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -137,27 +156,54 @@ func discoveryCredentials(
 	return []byte(plain), nil
 }
 
+func loadDNSConfig(ctx context.Context, db *client.Client, clusterID string) (types.DNSConfig, error) {
+	var empty types.DNSConfig
+	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+	if err != nil {
+		return empty, err
+	}
+	if cluster == nil {
+		return empty, echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+	}
+	zones, err := db.DNSProviderConfig.Query().
+		Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
+		OrderBy(query.DNSProviderConfig.Kind.Asc()).
+		OrderBy(query.DNSProviderConfig.Zone.Asc()).
+		Do(ctx)
+	if err != nil {
+		return empty, err
+	}
+	var endpoint *model.DNSProviderConfig
+	for index := range zones {
+		if zones[index].Kind == model.DNSProviderKindENDPOINT {
+			endpoint = &zones[index]
+			break
+		}
+	}
+	return types.NewDNSConfig(cluster.PrimaryHostname, endpoint, zones), nil
+}
+
+func ownedZoneConfig(ctx context.Context, db *client.Client, clusterID, configID string) (*model.DNSProviderConfig, error) {
+	config, err := db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.Id.Equals(configID))
+	if err != nil {
+		return nil, err
+	}
+	if config == nil || config.ClusterId != clusterID {
+		return nil, echo.NewHTTPError(http.StatusNotFound, "DNS zone not found")
+	}
+	return config, nil
+}
+
 // @summary Get DNS config
-// @description Return cluster primary hostname and managed DNS provider configuration.
+// @description Return cluster primary hostname, endpoint provider, and all DNS zones.
 // @Tags dns
 func getConfig(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		ctx := c.Request().Context()
-		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(c.Param("cluster_id")))
+		response, err := loadDNSConfig(c.Request().Context(), db, c.Param("cluster_id"))
 		if err != nil {
 			return err
 		}
-		if cluster == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
-		}
-		provider, err := db.DNSProviderConfig.FindUnique(
-			ctx,
-			query.DNSProviderConfig.ClusterId.Equals(cluster.Id),
-		)
-		if err != nil {
-			return err
-		}
-		return types.JSON(c, http.StatusOK, types.NewDNSConfig(cluster.PrimaryHostname, provider))
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -204,45 +250,17 @@ func updateConfig(
 
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
-		beforeCluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		before, err := loadDNSConfig(ctx, db, clusterID)
 		if err != nil {
 			return err
 		}
-		beforeProvider, err := db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
-		if err != nil {
-			return err
-		}
-		before := types.NewDNSConfig(beforeCluster.PrimaryHostname, beforeProvider)
 		credentialsProvided := len(input.Credentials) > 0
 		encryptedInput := ""
 		var credentialsRaw []byte
 		if credentialsProvided {
-			sanitized := map[string]string{}
-			switch input.Provider {
-			case model.DNSProviderTypeALIYUN:
-				accessKeyID := strings.TrimSpace(input.Credentials["access_key_id"])
-				accessKeySecret := strings.TrimSpace(input.Credentials["access_key_secret"])
-				if accessKeyID == "" || accessKeySecret == "" {
-					return echo.NewHTTPError(
-						http.StatusBadRequest,
-						"Aliyun access_key_id and access_key_secret are required",
-					)
-				}
-				sanitized["access_key_id"] = accessKeyID
-				sanitized["access_key_secret"] = accessKeySecret
-			case model.DNSProviderTypeCLOUDFLARE:
-				apiToken := strings.TrimSpace(input.Credentials["api_token"])
-				if apiToken == "" {
-					return echo.NewHTTPError(
-						http.StatusBadRequest,
-						"Cloudflare api_token is required",
-					)
-				}
-				sanitized["api_token"] = apiToken
-			}
-			raw, marshalErr := json.Marshal(sanitized)
-			if marshalErr != nil {
-				return marshalErr
+			raw, encryptErr := encodeProviderCredentials(input.Provider, input.Credentials)
+			if encryptErr != nil {
+				return encryptErr
 			}
 			credentialsRaw = raw
 			encryptedInput, err = cipher.Encrypt(string(raw))
@@ -250,10 +268,7 @@ func updateConfig(
 				return err
 			}
 		} else {
-			existing, findErr := db.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
+			existing, findErr := dnssync.EndpointConfig(ctx, db, clusterID)
 			if findErr != nil {
 				return findErr
 			}
@@ -321,10 +336,7 @@ func updateConfig(
 				)
 			}
 
-			existing, findErr := tx.DNSProviderConfig.FindUnique(
-				ctx,
-				query.DNSProviderConfig.ClusterId.Equals(clusterID),
-			)
+			existing, findErr := dnssync.EndpointConfig(ctx, tx, clusterID)
 			if findErr != nil {
 				return findErr
 			}
@@ -344,6 +356,20 @@ func updateConfig(
 						http.StatusConflict,
 						"disable DNS and wait for record cleanup before changing provider or zone",
 					)
+				}
+			}
+			// Endpoint zone name cannot collide with an existing ACME zone.
+			if existing == nil || existing.Zone != zone {
+				conflict, conflictErr := tx.DNSProviderConfig.FindFirst(ctx,
+					query.DNSProviderConfig.ClusterId.Equals(clusterID),
+					query.DNSProviderConfig.Zone.Equals(zone),
+					query.DNSProviderConfig.Kind.Equals(model.DNSProviderKindACME),
+				)
+				if conflictErr != nil {
+					return conflictErr
+				}
+				if conflict != nil {
+					return echo.NewHTTPError(http.StatusConflict, "zone is already configured as an ACME DNS zone")
 				}
 			}
 
@@ -370,6 +396,7 @@ func updateConfig(
 			}
 
 			sets := []query.DNSProviderConfigSetClause{
+				query.DNSProviderConfig.Kind.Set(model.DNSProviderKindENDPOINT),
 				query.DNSProviderConfig.Provider.Set(input.Provider),
 				query.DNSProviderConfig.Zone.Set(zone),
 				query.DNSProviderConfig.CredentialsEncrypted.Set(encrypted),
@@ -387,13 +414,16 @@ func updateConfig(
 			}
 			if existing != nil {
 				if _, updateErr := tx.DNSProviderConfig.Update().
-					Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
+					Where(query.DNSProviderConfig.Id.Equals(existing.Id)).
 					Set(sets...).
 					Do(ctx); updateErr != nil {
 					return updateErr
 				}
 			} else {
-				sets = append(sets, query.DNSProviderConfig.ClusterId.Set(clusterID))
+				sets = append(sets,
+					query.DNSProviderConfig.Id.Set(uuid.NewString()),
+					query.DNSProviderConfig.ClusterId.Set(clusterID),
+				)
 				if _, createErr := tx.DNSProviderConfig.Create().Set(sets...).Do(ctx); createErr != nil {
 					return createErr
 				}
@@ -407,18 +437,10 @@ func updateConfig(
 		if err != nil {
 			return err
 		}
-		cluster, findErr := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		response, findErr := loadDNSConfig(ctx, db, clusterID)
 		if findErr != nil {
 			return findErr
 		}
-		config, findErr := db.DNSProviderConfig.FindUnique(
-			ctx,
-			query.DNSProviderConfig.ClusterId.Equals(clusterID),
-		)
-		if findErr != nil {
-			return findErr
-		}
-		response := types.NewDNSConfig(cluster.PrimaryHostname, config)
 		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
 	}
@@ -431,11 +453,7 @@ func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc 
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
-		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
-		if err != nil {
-			return err
-		}
-		provider, err := db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
+		before, err := loadDNSConfig(ctx, db, clusterID)
 		if err != nil {
 			return err
 		}
@@ -445,7 +463,7 @@ func deleteConfig(db *client.Client, service *dnssync.Service) echo.HandlerFunc 
 			}
 			return err
 		}
-		audit.SetChange(c, types.NewDNSConfig(cluster.PrimaryHostname, provider), nil)
+		audit.SetChange(c, before, nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
 }
@@ -457,17 +475,17 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		clusterID := c.Param("cluster_id")
-		config, err := db.DNSProviderConfig.FindUnique(
-			ctx,
-			query.DNSProviderConfig.ClusterId.Equals(clusterID),
-		)
+		before, err := loadDNSConfig(ctx, db, clusterID)
+		if err != nil {
+			return err
+		}
+		config, err := dnssync.EndpointConfig(ctx, db, clusterID)
 		if err != nil {
 			return err
 		}
 		if config == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
 		}
-		before := types.NewDNSConfig(nil, config)
 		plain, err := cipher.Decrypt(config.CredentialsEncrypted)
 		if err != nil {
 			return err
@@ -512,7 +530,7 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 			}
 			if config.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID != value(config.ZoneId) {
 				_, err = tx.DNSProviderConfig.Update().
-					Where(query.DNSProviderConfig.ClusterId.Equals(clusterID)).
+					Where(query.DNSProviderConfig.Id.Equals(config.Id)).
 					Set(
 						query.DNSProviderConfig.ZoneId.Set(zoneID),
 						query.DNSProviderConfig.UpdatedAt.Set(now),
@@ -525,18 +543,10 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 		if err != nil {
 			return err
 		}
-		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		response, err := loadDNSConfig(ctx, db, clusterID)
 		if err != nil {
 			return err
 		}
-		config, err = db.DNSProviderConfig.FindUnique(
-			ctx,
-			query.DNSProviderConfig.ClusterId.Equals(clusterID),
-		)
-		if err != nil {
-			return err
-		}
-		response := types.NewDNSConfig(cluster.PrimaryHostname, config)
 		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
 	}
@@ -746,6 +756,332 @@ func deleteLine(db *client.Client) echo.HandlerFunc {
 		audit.SetChange(c, types.NewDNSLine(deleted), nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
+}
+
+// @summary List DNS zones
+// @description List all configured DNS provider zones for the cluster.
+// @Tags dns
+func listZones(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		response, err := loadDNSConfig(c.Request().Context(), db, c.Param("cluster_id"))
+		if err != nil {
+			return err
+		}
+		return types.JSON(c, http.StatusOK, response.Zones)
+	}
+}
+
+// @summary Create ACME DNS zone
+// @description Add an additional DNS provider zone used for ACME DNS-01 challenges.
+// @Tags dns
+func createZone(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input zoneRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		zone, err := hostname(input.Zone)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid DNS zone")
+		}
+		if input.Provider != model.DNSProviderTypeALIYUN && input.Provider != model.DNSProviderTypeCLOUDFLARE {
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
+		}
+		zoneID := strings.TrimSpace(input.ZoneID)
+		if input.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id is required")
+		}
+		raw, err := encodeProviderCredentials(input.Provider, input.Credentials)
+		if err != nil {
+			return err
+		}
+		if err = validateZoneCredentials(c.Request().Context(), input.Provider, zone, zoneID, raw); err != nil {
+			return err
+		}
+		encrypted, err := cipher.Encrypt(string(raw))
+		if err != nil {
+			return err
+		}
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
+		var item *model.DNSProviderConfig
+		err = db.Tx(ctx, func(tx *client.Client) error {
+			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
+				return lockErr
+			}
+			cluster, findErr := tx.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+			if findErr != nil {
+				return findErr
+			}
+			if cluster == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+			}
+			existing, findErr := tx.DNSProviderConfig.FindFirst(ctx,
+				query.DNSProviderConfig.ClusterId.Equals(clusterID),
+				query.DNSProviderConfig.Zone.Equals(zone),
+			)
+			if findErr != nil {
+				return findErr
+			}
+			if existing != nil {
+				return echo.NewHTTPError(http.StatusConflict, "DNS zone is already configured")
+			}
+			now := time.Now()
+			sets := []query.DNSProviderConfigSetClause{
+				query.DNSProviderConfig.Id.Set(uuid.NewString()),
+				query.DNSProviderConfig.ClusterId.Set(clusterID),
+				query.DNSProviderConfig.Kind.Set(model.DNSProviderKindACME),
+				query.DNSProviderConfig.Provider.Set(input.Provider),
+				query.DNSProviderConfig.Zone.Set(zone),
+				query.DNSProviderConfig.CredentialsEncrypted.Set(encrypted),
+				query.DNSProviderConfig.DefaultTtl.Set(60),
+				query.DNSProviderConfig.Proxied.Set(false),
+				query.DNSProviderConfig.Enabled.Set(enabled),
+				query.DNSProviderConfig.UpdatedAt.Set(now),
+			}
+			if zoneID != "" {
+				sets = append(sets, query.DNSProviderConfig.ZoneId.Set(zoneID))
+			}
+			var createErr error
+			item, createErr = tx.DNSProviderConfig.Create().Set(sets...).Do(ctx)
+			return createErr
+		})
+		if err != nil {
+			return err
+		}
+		response := types.NewDNSZone(item)
+		audit.SetResourceID(c, item.Id)
+		audit.SetChange(c, nil, response)
+		return types.JSON(c, http.StatusCreated, response)
+	}
+}
+
+// @summary Update DNS zone
+// @description Update credentials or enabled state for an ACME DNS zone.
+// @Tags dns
+func updateZone(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		var input zoneRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
+		config, err := ownedZoneConfig(ctx, db, clusterID, c.Param("zone_config_id"))
+		if err != nil {
+			return err
+		}
+		if config.Kind != model.DNSProviderKindACME {
+			return echo.NewHTTPError(http.StatusBadRequest, "use the endpoint endpoints to manage the primary DNS zone")
+		}
+		before := types.NewDNSZone(config)
+		provider := config.Provider
+		if input.Provider != "" {
+			provider = input.Provider
+		}
+		if provider != model.DNSProviderTypeALIYUN && provider != model.DNSProviderTypeCLOUDFLARE {
+			return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
+		}
+		zone := config.Zone
+		if strings.TrimSpace(input.Zone) != "" {
+			zone, err = hostname(input.Zone)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "invalid DNS zone")
+			}
+		}
+		zoneID := value(config.ZoneId)
+		if strings.TrimSpace(input.ZoneID) != "" {
+			zoneID = strings.TrimSpace(input.ZoneID)
+		}
+		if provider == model.DNSProviderTypeCLOUDFLARE && zoneID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id is required")
+		}
+		enabled := config.Enabled
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		requiresValidation := zoneUpdateRequiresValidation(
+			config,
+			provider,
+			zone,
+			zoneID,
+			enabled,
+			len(input.Credentials) > 0,
+		)
+
+		encrypted := config.CredentialsEncrypted
+		var credentialsRaw []byte
+		if len(input.Credentials) > 0 {
+			raw, encodeErr := encodeProviderCredentials(provider, input.Credentials)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			credentialsRaw = raw
+			encrypted, err = cipher.Encrypt(string(raw))
+			if err != nil {
+				return err
+			}
+		} else {
+			if provider != config.Provider {
+				return echo.NewHTTPError(http.StatusBadRequest, "DNS provider credentials are required when changing provider")
+			}
+			if requiresValidation {
+				plain, decryptErr := cipher.Decrypt(config.CredentialsEncrypted)
+				if decryptErr != nil {
+					return decryptErr
+				}
+				credentialsRaw = []byte(plain)
+			}
+		}
+		if requiresValidation {
+			if err = validateZoneCredentials(ctx, provider, zone, zoneID, credentialsRaw); err != nil {
+				return err
+			}
+		}
+
+		err = db.Tx(ctx, func(tx *client.Client) error {
+			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
+				return lockErr
+			}
+			if zone != config.Zone {
+				conflict, conflictErr := tx.DNSProviderConfig.FindFirst(ctx,
+					query.DNSProviderConfig.ClusterId.Equals(clusterID),
+					query.DNSProviderConfig.Zone.Equals(zone),
+				)
+				if conflictErr != nil {
+					return conflictErr
+				}
+				if conflict != nil && conflict.Id != config.Id {
+					return echo.NewHTTPError(http.StatusConflict, "DNS zone is already configured")
+				}
+			}
+			now := time.Now()
+			sets := []query.DNSProviderConfigSetClause{
+				query.DNSProviderConfig.Provider.Set(provider),
+				query.DNSProviderConfig.Zone.Set(zone),
+				query.DNSProviderConfig.CredentialsEncrypted.Set(encrypted),
+				query.DNSProviderConfig.Enabled.Set(enabled),
+				query.DNSProviderConfig.UpdatedAt.Set(now),
+			}
+			if zoneID != "" {
+				sets = append(sets, query.DNSProviderConfig.ZoneId.Set(zoneID))
+			} else {
+				sets = append(sets, query.DNSProviderConfig.ZoneId.SetNull())
+			}
+			_, updateErr := tx.DNSProviderConfig.Update().
+				Where(query.DNSProviderConfig.Id.Equals(config.Id)).
+				Set(sets...).Do(ctx)
+			return updateErr
+		})
+		if err != nil {
+			return err
+		}
+		updated, err := ownedZoneConfig(ctx, db, clusterID, config.Id)
+		if err != nil {
+			return err
+		}
+		response := types.NewDNSZone(updated)
+		audit.SetChange(c, before, response)
+		return types.JSON(c, http.StatusOK, response)
+	}
+}
+
+// @summary Delete DNS zone
+// @description Remove an ACME DNS zone. Endpoint zones must be deleted via DELETE /dns.
+// @Tags dns
+func deleteZone(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
+		config, err := ownedZoneConfig(ctx, db, clusterID, c.Param("zone_config_id"))
+		if err != nil {
+			return err
+		}
+		if config.Kind != model.DNSProviderKindACME {
+			return echo.NewHTTPError(http.StatusBadRequest, "use DELETE /dns to remove the primary endpoint zone")
+		}
+		before := types.NewDNSZone(config)
+		err = db.Tx(ctx, func(tx *client.Client) error {
+			if lockErr := dnssync.LockClusterTx(ctx, tx, clusterID); lockErr != nil {
+				return lockErr
+			}
+			_, deleteErr := tx.DNSProviderConfig.Delete().
+				Where(query.DNSProviderConfig.Id.Equals(config.Id)).
+				Do(ctx)
+			return deleteErr
+		})
+		if err != nil {
+			return err
+		}
+		audit.SetChange(c, before, nil)
+		return types.JSON(c, http.StatusOK, nil)
+	}
+}
+
+func zoneUpdateRequiresValidation(
+	config *model.DNSProviderConfig,
+	provider model.DNSProviderType,
+	zone string,
+	zoneID string,
+	enabled bool,
+	credentialsProvided bool,
+) bool {
+	return enabled || credentialsProvided || provider != config.Provider || zone != config.Zone || zoneID != value(config.ZoneId)
+}
+
+func encodeProviderCredentials(provider model.DNSProviderType, credentials map[string]string) ([]byte, error) {
+	if len(credentials) == 0 {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "DNS provider credentials are required")
+	}
+	sanitized := map[string]string{}
+	switch provider {
+	case model.DNSProviderTypeALIYUN:
+		accessKeyID := strings.TrimSpace(credentials["access_key_id"])
+		accessKeySecret := strings.TrimSpace(credentials["access_key_secret"])
+		if accessKeyID == "" || accessKeySecret == "" {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "Aliyun access_key_id and access_key_secret are required")
+		}
+		sanitized["access_key_id"] = accessKeyID
+		sanitized["access_key_secret"] = accessKeySecret
+	case model.DNSProviderTypeCLOUDFLARE:
+		apiToken := strings.TrimSpace(credentials["api_token"])
+		if apiToken == "" {
+			return nil, echo.NewHTTPError(http.StatusBadRequest, "Cloudflare api_token is required")
+		}
+		sanitized["api_token"] = apiToken
+	default:
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
+	}
+	return json.Marshal(sanitized)
+}
+
+func validateZoneCredentials(ctx context.Context, provider model.DNSProviderType, zone, zoneID string, raw []byte) error {
+	domains, err := dnsprovider.ListDomains(ctx, provider, raw, nil)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadGateway, "failed to validate DNS credentials: "+err.Error())
+	}
+	found := false
+	for _, domain := range domains {
+		if strings.EqualFold(domain.Name, zone) {
+			found = true
+			if provider == model.DNSProviderTypeCLOUDFLARE && zoneID != "" && domain.ID != "" && domain.ID != zoneID {
+				return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id does not match the selected zone")
+			}
+			break
+		}
+	}
+	if !found {
+		return echo.NewHTTPError(http.StatusBadRequest, "selected zone is not available for these credentials")
+	}
+	// Ensure the provider client can be constructed for this zone.
+	if _, err = dnsprovider.New(provider, zone, zoneID, raw, nil); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return nil
 }
 
 func hostname(input string) (string, error) {

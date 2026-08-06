@@ -33,6 +33,7 @@ func ApplyDNSProviderConfigOptions(opts []DNSProviderConfigQueryOption) DNSProvi
 type DNSProviderConfigQuery struct {
 	Id                   dNSProviderConfigIdField
 	ClusterId            dNSProviderConfigClusterIdField
+	Kind                 dNSProviderConfigKindField
 	Provider             dNSProviderConfigProviderField
 	Zone                 dNSProviderConfigZoneField
 	ZoneId               dNSProviderConfigZoneIdField
@@ -48,6 +49,7 @@ type DNSProviderConfigQuery struct {
 const DNSProviderConfigTable = "dns_provider_configs"
 const DNSProviderConfigIdColumn = "id"
 const DNSProviderConfigClusterIdColumn = "cluster_id"
+const DNSProviderConfigKindColumn = "kind"
 const DNSProviderConfigProviderColumn = "provider"
 const DNSProviderConfigZoneColumn = "zone"
 const DNSProviderConfigZoneIdColumn = "zone_id"
@@ -62,6 +64,7 @@ const DNSProviderConfigUpdatedAtColumn = "updated_at"
 var DNSProviderConfig = DNSProviderConfigQuery{
 	Id:                   dNSProviderConfigIdField{},
 	ClusterId:            dNSProviderConfigClusterIdField{},
+	Kind:                 dNSProviderConfigKindField{},
 	Provider:             dNSProviderConfigProviderField{},
 	Zone:                 dNSProviderConfigZoneField{},
 	ZoneId:               dNSProviderConfigZoneIdField{},
@@ -283,6 +286,52 @@ func (dNSProviderConfigClusterIdField) Asc() DNSProviderConfigOrderByClause {
 // Desc returns a descending order clause for this field.
 func (dNSProviderConfigClusterIdField) Desc() DNSProviderConfigOrderByClause {
 	return DNSProviderConfigOrderByClause{Field: "cluster_id", Direction: "DESC"}
+}
+
+// KindField provides query operations for the kind field.
+type dNSProviderConfigKindField struct{}
+
+// Equals creates an equality condition.
+func (dNSProviderConfigKindField) Equals(v model.DNSProviderKind) DNSProviderConfigWhereClause {
+	return DNSProviderConfigWhereClause{Field: "kind", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSProviderConfigKindField) Not(v model.DNSProviderKind) DNSProviderConfigWhereClause {
+	return DNSProviderConfigWhereClause{Field: "kind", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSProviderConfigKindField) In(vals ...model.DNSProviderKind) DNSProviderConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSProviderConfigWhereClause{Field: "kind", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSProviderConfigKindField) NotIn(vals ...model.DNSProviderKind) DNSProviderConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSProviderConfigWhereClause{Field: "kind", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (dNSProviderConfigKindField) Set(v model.DNSProviderKind) DNSProviderConfigSetClause {
+	return DNSProviderConfigSetClause{Field: "kind", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSProviderConfigKindField) Asc() DNSProviderConfigOrderByClause {
+	return DNSProviderConfigOrderByClause{Field: "kind", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSProviderConfigKindField) Desc() DNSProviderConfigOrderByClause {
+	return DNSProviderConfigOrderByClause{Field: "kind", Direction: "DESC"}
 }
 
 // ProviderField provides query operations for the provider field.
@@ -857,6 +906,7 @@ type DNSProviderConfigGroupByResult struct {
 type DNSProviderConfigCreateInput struct {
 	Id                   string
 	ClusterId            string
+	Kind                 model.DNSProviderKind
 	Provider             model.DNSProviderType
 	Zone                 string
 	ZoneId               **string
@@ -871,7 +921,7 @@ type DNSProviderConfigCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d DNSProviderConfigCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Provider, d.Zone, d.ZoneId, d.CredentialsEncrypted, d.DefaultTtl, d.Proxied, d.Enabled, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Kind, d.Provider, d.Zone, d.ZoneId, d.CredentialsEncrypted, d.DefaultTtl, d.Proxied, d.Enabled, d.CreatedAt, d.UpdatedAt}
 }
 
 // DNSProviderConfigCreateNestedInput supports nested creates and connects.
@@ -882,6 +932,5 @@ type DNSProviderConfigCreateNestedInput struct {
 
 // DNSProviderConfigWhereUniqueInput identifies a unique DNSProviderConfig record.
 type DNSProviderConfigWhereUniqueInput struct {
-	Id        *string
-	ClusterId *string
+	Id *string
 }

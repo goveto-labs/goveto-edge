@@ -157,6 +157,11 @@ func issueACME(db *client.Client, service *certmanager.Service) echo.HandlerFunc
 				return echo.NewHTTPError(http.StatusBadRequest, "wildcard certificates require DNS_01")
 			}
 		}
+		if input.ChallengeType == model.ACMEChallengeTypeDNS_01 {
+			if err = certmanager.EnsureDNSZonesCoverDomains(c.Request().Context(), db, c.Param("cluster_id"), domains); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
+		}
 		directory := strings.TrimSpace(input.DirectoryURL)
 		if directory != "" {
 			parsed, parseErr := url.Parse(directory)

@@ -357,6 +357,9 @@ export default function DNS() {
         await mutate(() => api.delete(), 'Failed to delete CDN endpoint');
     };
 
+    const providerLabel = (type: DNSProviderType) =>
+        type === 'ALIYUN' ? 'Aliyun DNS' : 'Cloudflare';
+
     if (!clusterId) {
         return (
             <div className='space-y-6'>
@@ -371,7 +374,7 @@ export default function DNS() {
     return (
         <div className='space-y-6'>
             <PageHeader
-                subtitle='Publish the cluster primary hostname to edge node IP addresses.'
+                subtitle='Publish the cluster scheduling hostname to edge node IP addresses.'
                 title='DNS'
             >
                 <Button isDisabled={loading || busy} variant='ghost' onPress={() => void load()}>
@@ -424,6 +427,9 @@ export default function DNS() {
                 </div>
             )}
             <Card className='p-5'>
+                <div className='mb-3 text-xs font-semibold tracking-wide text-muted uppercase'>
+                    CDN endpoint
+                </div>
                 {configured ? (
                     <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-center'>
                         <div>
@@ -432,8 +438,7 @@ export default function DNS() {
                                 {zone}
                             </div>
                             <p className='mt-1 text-sm text-muted'>
-                                {provider === 'ALIYUN' ? 'Aliyun DNS' : 'Cloudflare'} · {hostname} ·
-                                TTL {ttl}
+                                {providerLabel(provider)} · {hostname} · TTL {ttl}
                             </p>
                         </div>
                         <span className='text-sm text-muted'>

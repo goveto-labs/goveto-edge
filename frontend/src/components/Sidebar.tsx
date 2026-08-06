@@ -16,6 +16,7 @@ import {
     Settings,
     ShieldCheck,
     ShieldCog,
+    Waypoints,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
 
@@ -50,7 +51,12 @@ const nav: NavItemConfig[] = [
             { path: '/sites/cache', label: 'Cache operations', icon: Flame },
         ],
     },
-    { path: '/dns', label: 'DNS', icon: Cloud },
+    {
+        path: '/dns',
+        label: 'DNS',
+        icon: Cloud,
+        children: [{ path: '/dns/zones', label: 'DNS zones', icon: Waypoints }],
+    },
     { path: '/jobs', label: 'Jobs', icon: ListTodo },
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];

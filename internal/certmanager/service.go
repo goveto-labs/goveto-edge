@@ -532,21 +532,80 @@ func accountScope(clusterID, directory, email string) string {
 	return "goveto-edge/acme-account/v1\x00" + clusterID + "\x00" + directory + "\x00" + email
 }
 
-func (s *Service) dnsProvider(ctx context.Context, clusterID string) (dnsprovider.Provider, error) {
-	config, err := s.db.DNSProviderConfig.FindUnique(ctx, query.DNSProviderConfig.ClusterId.Equals(clusterID))
+func (s *Service) dnsProviderForDomain(ctx context.Context, clusterID, domain string) (dnsprovider.Provider, *model.DNSProviderConfig, error) {
+	config, err := MatchDNSZone(ctx, s.db, clusterID, domain)
 	if err != nil {
-		return nil, err
-	}
-	if config == nil || !config.Enabled {
-		return nil, errors.New("DNS provider is not configured or disabled")
+		return nil, nil, err
 	}
 	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
 	if err != nil {
-		return nil, fmt.Errorf("decrypt DNS provider credentials: %w", err)
+		return nil, nil, fmt.Errorf("decrypt DNS provider credentials: %w", err)
 	}
 	zoneID := ""
 	if config.ZoneId != nil {
 		zoneID = *config.ZoneId
 	}
-	return dnsprovider.New(config.Provider, config.Zone, zoneID, []byte(plain), nil)
+	provider, err := dnsprovider.New(config.Provider, config.Zone, zoneID, []byte(plain), nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return provider, config, nil
+}
+
+// MatchDNSZone selects the enabled DNS provider zone that best covers domain
+// using longest-suffix matching across ENDPOINT and ACME zones.
+func MatchDNSZone(ctx context.Context, db *client.Client, clusterID, domain string) (*model.DNSProviderConfig, error) {
+	configs, err := db.DNSProviderConfig.Query().Where(
+		query.DNSProviderConfig.ClusterId.Equals(clusterID),
+		query.DNSProviderConfig.Enabled.Equals(true),
+	).Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return selectBestDNSZone(configs, domain)
+}
+
+func selectBestDNSZone(configs []model.DNSProviderConfig, domain string) (*model.DNSProviderConfig, error) {
+	domain = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(domain)), "*.")
+	domain = strings.TrimSuffix(domain, ".")
+	if domain == "" {
+		return nil, errors.New("domain is required for DNS-01")
+	}
+	enabled := make([]model.DNSProviderConfig, 0, len(configs))
+	for _, config := range configs {
+		if config.Enabled {
+			enabled = append(enabled, config)
+		}
+	}
+	if len(enabled) == 0 {
+		return nil, errors.New("no enabled DNS provider zones are configured")
+	}
+	var best *model.DNSProviderConfig
+	bestLen := -1
+	for index := range enabled {
+		zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(enabled[index].Zone)), ".")
+		if zone == "" {
+			continue
+		}
+		if domain == zone || strings.HasSuffix(domain, "."+zone) {
+			if len(zone) > bestLen {
+				best = &enabled[index]
+				bestLen = len(zone)
+			}
+		}
+	}
+	if best == nil {
+		return nil, fmt.Errorf("no DNS zone covers %q", domain)
+	}
+	return best, nil
+}
+
+// EnsureDNSZonesCoverDomains verifies every domain is covered by an enabled DNS zone.
+func EnsureDNSZonesCoverDomains(ctx context.Context, db *client.Client, clusterID string, domains []string) error {
+	for _, domain := range domains {
+		if _, err := MatchDNSZone(ctx, db, clusterID, domain); err != nil {
+			return err
+		}
+	}
+	return nil
 }

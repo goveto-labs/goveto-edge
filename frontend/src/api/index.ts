@@ -1,4 +1,9 @@
-export type { DNSDiscoveryRequest, UpdateDNSConfig } from './dns.ts';
+export type {
+    CreateDNSZoneRequest,
+    DNSDiscoveryRequest,
+    UpdateDNSConfig,
+    UpdateDNSZoneRequest,
+} from './dns.ts';
 export type * from './types.ts';
 
 export { adminSettingsApi } from './adminSettings.ts';

@@ -13120,7 +13120,7 @@ func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, o
 
 func quotedDNSProviderConfigTable(c *Client) string { return c.quoteIdentifier("dns_provider_configs") }
 func quotedDNSProviderConfigColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -13132,6 +13132,8 @@ func quoteDNSProviderConfigField(c *Client, field string) (string, error) {
 	case "id":
 		return c.quoteIdentifier(field), nil
 	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "kind":
 		return c.quoteIdentifier(field), nil
 	case "provider":
 		return c.quoteIdentifier(field), nil
@@ -13360,14 +13362,14 @@ func (b DNSProviderConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"})
+		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.DNSProviderConfig
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -13394,7 +13396,7 @@ func (b DNSProviderConfigCreateManyBuilder) DoReturningValues(ctx context.Contex
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -13646,7 +13648,7 @@ func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DN
 	var results []model.DNSProviderConfig
 	for rows.Next() {
 		var item model.DNSProviderConfig
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -13678,7 +13680,7 @@ func (a DNSProviderConfigActions) FindUnique(ctx context.Context, where query.DN
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.DNSProviderConfig
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -13709,7 +13711,7 @@ func (a DNSProviderConfigActions) CreateOne(ctx context.Context, sets ...query.D
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -13728,7 +13730,7 @@ func (a DNSProviderConfigActions) CreateMany(ctx context.Context, data []query.D
 }
 
 func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []query.DNSProviderConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -13801,7 +13803,7 @@ func (a DNSProviderConfigActions) UpdateOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -13906,7 +13908,7 @@ func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -13930,7 +13932,7 @@ func (a DNSProviderConfigActions) DeleteOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

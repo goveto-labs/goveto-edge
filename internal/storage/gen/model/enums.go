@@ -155,6 +155,22 @@ func ValidDNSProviderTypeValues() []DNSProviderType {
 	}
 }
 
+// DNSProviderKind represents the DNSProviderKind enum type.
+type DNSProviderKind string
+
+const (
+	DNSProviderKindENDPOINT DNSProviderKind = "ENDPOINT"
+	DNSProviderKindACME     DNSProviderKind = "ACME"
+)
+
+// ValidDNSProviderKindValues returns all valid values for the DNSProviderKind enum.
+func ValidDNSProviderKindValues() []DNSProviderKind {
+	return []DNSProviderKind{
+		DNSProviderKindENDPOINT,
+		DNSProviderKindACME,
+	}
+}
+
 // DNSRecordStatus represents the DNSRecordStatus enum type.
 type DNSRecordStatus string
 

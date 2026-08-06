@@ -18,6 +18,7 @@ import (
 type challengeState struct {
 	PublishJobs []string
 	DNSRecord   *dnsprovider.Record
+	DNSProvider dnsprovider.Provider
 }
 
 type challengeSolver struct {
@@ -30,17 +31,18 @@ func (s *challengeSolver) Present(ctx context.Context, challenge acme.Challenge)
 	expiresAt := time.Now().UTC().Add(30 * time.Minute)
 	state := challengeState{}
 	if challenge.Type == acme.ChallengeTypeDNS01 {
-		provider, err := s.service.dnsProvider(ctx, s.certificate.ClusterId)
+		provider, config, err := s.service.dnsProviderForDomain(ctx, s.certificate.ClusterId, domain)
 		if err != nil {
 			return err
 		}
 		record := dnsprovider.Record{Hostname: strings.TrimSuffix(challenge.DNS01TXTRecordName(), "."), Type: model.DNSRecordTypeTXT, Value: challenge.DNS01KeyAuthorization(), Line: "default", TTL: 60}
 		id, err := provider.Upsert(ctx, record)
 		if err != nil {
-			return fmt.Errorf("present DNS-01 challenge: %w", err)
+			return fmt.Errorf("present DNS-01 challenge for zone %s: %w", config.Zone, err)
 		}
 		record.ID = id
 		state.DNSRecord = &record
+		state.DNSProvider = provider
 		_, err = s.service.db.ACMEChallenge.Create().Set(
 			query.ACMEChallenge.CertificateId.Set(s.certificate.Id), query.ACMEChallenge.ClusterId.Set(s.certificate.ClusterId),
 			query.ACMEChallenge.Type.Set(model.ACMEChallengeTypeDNS_01), query.ACMEChallenge.Status.Set(model.ACMEChallengeStatusPRESENTED),
@@ -109,12 +111,8 @@ func (s *challengeSolver) CleanUp(ctx context.Context, challenge acme.Challenge)
 	value, _ := s.service.httpState.LoadAndDelete(challenge.Token)
 	if challenge.Type == acme.ChallengeTypeDNS01 && value != nil {
 		state := value.(challengeState)
-		if state.DNSRecord != nil {
-			provider, err := s.service.dnsProvider(ctx, s.certificate.ClusterId)
-			if err == nil {
-				err = provider.Delete(ctx, *state.DNSRecord)
-			}
-			if err != nil {
+		if state.DNSRecord != nil && state.DNSProvider != nil {
+			if err := state.DNSProvider.Delete(ctx, *state.DNSRecord); err != nil {
 				return err
 			}
 		}
