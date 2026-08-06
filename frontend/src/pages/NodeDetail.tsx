@@ -19,6 +19,7 @@ import type { DonutSlice } from '@/components/DonutChart.tsx';
 import { Button, Input } from '@heroui/react';
 import {
     ArrowLeft,
+    Bug,
     Check,
     Download,
     FileText,
@@ -36,6 +37,7 @@ import {
     Trash2,
     X,
 } from 'lucide-react';
+import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
@@ -346,7 +348,11 @@ export default function NodeDetail() {
     const applyNode = useCallback((value: Node) => {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
-        setCache(value.cacheConfig ?? null);
+        setCache(
+            value.cacheConfig
+                ? { ...value.cacheConfig, debug_mode: Boolean(value.cacheConfig.debug_mode) }
+                : null
+        );
         setSshIp((current) => current || value.sshHost || value.addresses[0]?.address || '');
         setSshPort((current) => current || String(value.sshPort || 22));
         setSSHCredentialId((current) => current || value.sshCredentialId || '');
@@ -649,7 +655,10 @@ export default function NodeDetail() {
                 ...cache,
                 auto_max_size: false,
             });
-            setCache(result.cache_config);
+            setCache({
+                ...result.cache_config,
+                debug_mode: Boolean(result.cache_config.debug_mode),
+            });
             setCacheMessage(
                 result.synced
                     ? 'Configuration saved and synchronized to the node.'
@@ -1675,6 +1684,26 @@ export default function NodeDetail() {
                                                     }
                                                 />
                                             </FormField>
+                                        </div>
+                                        <div className='flex items-start justify-between gap-5 rounded-xl border border-border bg-surface-secondary/30 px-4 py-3'>
+                                            <div className='min-w-0'>
+                                                <div className='flex items-center gap-2 text-sm font-medium'>
+                                                    <Bug className='h-4 w-4 text-muted' />
+                                                    Debug mode
+                                                </div>
+                                                <p className='mt-1 max-w-2xl text-xs leading-5 text-muted'>
+                                                    When enabled, the edge returns detailed cache
+                                                    diagnostics such as Cache-Status (including key
+                                                    and TTL). Keep this off on production nodes.
+                                                </p>
+                                            </div>
+                                            <ToggleSwitch
+                                                isSelected={cache.debug_mode}
+                                                label='Debug mode'
+                                                onChange={(debug_mode) =>
+                                                    setCache({ ...cache, debug_mode })
+                                                }
+                                            />
                                         </div>
                                         {cacheMessage && (
                                             <div className='rounded-xl border border-border bg-surface-secondary/40 px-4 py-3 text-sm'>

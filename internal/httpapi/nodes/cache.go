@@ -72,6 +72,7 @@ func updateCacheConfig(db *client.Client, gateway *edgecontrol.Gateway) echo.Han
 			query.NodeCacheConfig.CacheDir.Set(input.CacheDirectory),
 			query.NodeCacheConfig.AutoMaxSize.Set(input.AutoMaxSize),
 			query.NodeCacheConfig.MaxDiskUsagePercent.Set(input.MaxDiskUsagePercent),
+			query.NodeCacheConfig.DebugMode.Set(input.DebugMode),
 		}
 		if input.AutoMaxSize {
 			sets = append(sets, query.NodeCacheConfig.MaxSizeBytes.SetNull())

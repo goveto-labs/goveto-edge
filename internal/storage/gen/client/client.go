@@ -19998,7 +19998,7 @@ func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts .
 
 func quotedNodeCacheConfigTable(c *Client) string { return c.quoteIdentifier("node_cache_configs") }
 func quotedNodeCacheConfigColumns(c *Client) string {
-	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "debug_mode", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -20018,6 +20018,8 @@ func quoteNodeCacheConfigField(c *Client, field string) (string, error) {
 	case "max_size_bytes":
 		return c.quoteIdentifier(field), nil
 	case "max_disk_usage_percent":
+		return c.quoteIdentifier(field), nil
+	case "debug_mode":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -20232,14 +20234,14 @@ func (b NodeCacheConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]mo
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCacheConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCacheConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "debug_mode", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.NodeCacheConfig
-			if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("NodeCacheConfig.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -20266,7 +20268,7 @@ func (b NodeCacheConfigCreateManyBuilder) DoReturningValues(ctx context.Context)
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+		returningColumns = []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "debug_mode", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -20518,7 +20520,7 @@ func (a NodeCacheConfigActions) FindMany(ctx context.Context, opts ...query.Node
 	var results []model.NodeCacheConfig
 	for rows.Next() {
 		var item model.NodeCacheConfig
-		if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("NodeCacheConfig.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -20550,7 +20552,7 @@ func (a NodeCacheConfigActions) FindUnique(ctx context.Context, where query.Node
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.NodeCacheConfig
-	if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -20581,7 +20583,7 @@ func (a NodeCacheConfigActions) CreateOne(ctx context.Context, sets ...query.Nod
 		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.NodeCacheConfig
-		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("NodeCacheConfig.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -20600,7 +20602,7 @@ func (a NodeCacheConfigActions) CreateMany(ctx context.Context, data []query.Nod
 }
 
 func (a NodeCacheConfigActions) buildNodeCacheConfigCreateManySQL(data []query.NodeCacheConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "created_at", "updated_at"}
+	cols := []string{"id", "node_id", "cache_dir", "auto_max_size", "max_size_bytes", "max_disk_usage_percent", "debug_mode", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -20673,7 +20675,7 @@ func (a NodeCacheConfigActions) UpdateOne(ctx context.Context, where query.NodeC
 		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
-		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -20778,7 +20780,7 @@ func (a NodeCacheConfigActions) UpsertOne(ctx context.Context, where query.NodeC
 		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
-		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("NodeCacheConfig.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -20802,7 +20804,7 @@ func (a NodeCacheConfigActions) DeleteOne(ctx context.Context, where query.NodeC
 		q += " RETURNING " + quotedNodeCacheConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.NodeCacheConfig
-		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.NodeId, &item.CacheDir, &item.AutoMaxSize, &item.MaxSizeBytes, &item.MaxDiskUsagePercent, &item.DebugMode, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

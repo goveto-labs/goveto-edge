@@ -37,7 +37,7 @@ func TestVaryMergesConfiguredHeadersAndIgnoresCompression(t *testing.T) {
 }
 
 func TestHiddenHashedKeyIsNotExposed(t *testing.T) {
-	handler := Handler{HashKey: true, HideKey: true, XCache: true}
+	handler := Handler{HashKey: true, HideKey: true, XCache: true, Debug: true}
 	raw := strings.Repeat("secret", 32)
 	if key := handler.storageKey(raw); len(key) != 64 || strings.Contains(key, raw) {
 		t.Fatalf("unexpected hashed key %q", key)
@@ -46,6 +46,23 @@ func TestHiddenHashedKeyIsNotExposed(t *testing.T) {
 	handler.setResultHeaders(header, "HIT", raw, 30)
 	if strings.Contains(header.Get("Cache-Status"), "key=") || header.Get("X-Cache") != "HIT" {
 		t.Fatalf("hidden result headers: %#v", header)
+	}
+}
+
+func TestDebugModeControlsCacheStatus(t *testing.T) {
+	raw := "method:GET host:example.test path:/asset"
+	off := Handler{XCache: true, Age: true}
+	header := http.Header{}
+	off.setResultHeaders(header, "HIT", raw, 30)
+	if header.Get("Cache-Status") != "" || header.Get("X-Cache") != "HIT" || header.Get("Age") != "0" {
+		t.Fatalf("production headers leaked debug status: %#v", header)
+	}
+	on := Handler{XCache: true, Age: true, Debug: true}
+	header = http.Header{}
+	on.setResultHeaders(header, "HIT", raw, 30)
+	status := header.Get("Cache-Status")
+	if !strings.Contains(status, "hit") || !strings.Contains(status, "ttl=30") || !strings.Contains(status, "key=") {
+		t.Fatalf("debug Cache-Status missing detail: %q", status)
 	}
 }
 

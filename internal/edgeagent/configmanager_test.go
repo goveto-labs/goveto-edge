@@ -586,6 +586,7 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 			CacheDirectory:      "/var/cache/goveto",
 			AutoMaxSize:         true,
 			MaxDiskUsagePercent: 77,
+			DebugMode:           true,
 		},
 	)
 	if err != nil {
@@ -597,6 +598,7 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 		`"path":"/var/cache/goveto/site-1"`,
 		`"auto_max_size":true`,
 		`"max_disk_usage_percent":77`,
+		`"debug":true`,
 		`"coalesce":true`,
 		`"key_parts":["METHOD","HOST","PATH","QUERY"]`,
 		`"cache_range_requests":true`,

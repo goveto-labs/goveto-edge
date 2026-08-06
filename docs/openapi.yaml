@@ -3736,6 +3736,8 @@ paths:
                                     type: boolean
                                 cache_directory:
                                     type: string
+                                debug_mode:
+                                    type: boolean
                                 max_disk_usage_percent:
                                     type: number
                                 max_size_bytes:
@@ -9190,6 +9192,8 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+                debugMode:
+                    type: boolean
                 id:
                     type: string
                 maxDiskUsagePercent:
@@ -10994,6 +10998,8 @@ components:
                     type: boolean
                 cache_directory:
                     type: string
+                debug_mode:
+                    type: boolean
                 max_disk_usage_percent:
                     type: number
                 max_size_bytes:

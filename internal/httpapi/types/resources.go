@@ -145,6 +145,7 @@ type NodeCacheConfig struct {
 	AutoMaxSize         bool   `json:"auto_max_size"`
 	MaxSizeBytes        uint64 `json:"max_size_bytes"`
 	MaxDiskUsagePercent int    `json:"max_disk_usage_percent"`
+	DebugMode           bool   `json:"debug_mode"`
 }
 
 type NodeHardwareProfile struct {
@@ -168,7 +169,10 @@ func NewNodeHardwareProfile(value *model.NodeHardwareProfile) NodeHardwareProfil
 }
 
 func NewNodeCacheConfig(value *model.NodeCacheConfig) NodeCacheConfig {
-	result := NodeCacheConfig{CacheDirectory: value.CacheDir, AutoMaxSize: value.AutoMaxSize, MaxDiskUsagePercent: value.MaxDiskUsagePercent}
+	result := NodeCacheConfig{
+		CacheDirectory: value.CacheDir, AutoMaxSize: value.AutoMaxSize,
+		MaxDiskUsagePercent: value.MaxDiskUsagePercent, DebugMode: value.DebugMode,
+	}
 	if value.MaxSizeBytes != nil {
 		result.MaxSizeBytes = uint64(*value.MaxSizeBytes)
 	}

@@ -499,6 +499,7 @@ query.PostAuthorIdColumn
   - `Automaxsize` (Boolean)
   - `Maxsizebytes` (BigInt, optional)
   - `Maxdiskusagepercent` (Int)
+  - `Debugmode` (Boolean)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

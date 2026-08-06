@@ -851,6 +851,7 @@ func govetoCacheHandler(siteID string, cachePolicy cachepolicy.CachePolicy, rule
 		"coalesce":                   cacheRequestCoalescing(cachePolicy),
 		"x_cache":                    cachePolicy.ResponseHeaders.XCache,
 		"age":                        cachePolicy.ResponseHeaders.Age,
+		"debug":                      nodeConfig.DebugMode,
 		"override_client_ttl":        rule.TTL.OverrideClientTTL,
 		"client_ttl":                 rule.TTL.ClientSeconds,
 		"bypass_cache_control":       cachePolicy.BypassCacheControl,

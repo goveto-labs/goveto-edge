@@ -564,15 +564,16 @@ func (g *Gateway) reconcileCacheConfig(ctx context.Context, nodeID string, curre
 		AutoMaxSize         bool   `db:"auto_max_size"`
 		MaxSizeBytes        *int64 `db:"max_size_bytes"`
 		MaxDiskUsagePercent int    `db:"max_disk_usage_percent"`
+		DebugMode           bool   `db:"debug_mode"`
 	}
 	rows, err := client.Raw[storedConfig](ctx, g.db, `SELECT cache_dir, auto_max_size, max_size_bytes,
-		max_disk_usage_percent FROM node_cache_configs WHERE node_id = $1`, nodeID)
+		max_disk_usage_percent, debug_mode FROM node_cache_configs WHERE node_id = $1`, nodeID)
 	if err != nil || len(rows) != 1 {
 		return err
 	}
 	desired := edgeprotocol.NodeCacheConfig{
 		CacheDirectory: rows[0].CacheDirectory, AutoMaxSize: rows[0].AutoMaxSize,
-		MaxDiskUsagePercent: rows[0].MaxDiskUsagePercent,
+		MaxDiskUsagePercent: rows[0].MaxDiskUsagePercent, DebugMode: rows[0].DebugMode,
 	}
 	if rows[0].MaxSizeBytes != nil {
 		desired.MaxSizeBytes = uint64(*rows[0].MaxSizeBytes)

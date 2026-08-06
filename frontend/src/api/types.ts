@@ -243,6 +243,7 @@ export interface NodeCacheConfig {
     auto_max_size: boolean;
     max_size_bytes: number;
     max_disk_usage_percent: number;
+    debug_mode: boolean;
 }
 
 export interface NodeHardwareProfile {

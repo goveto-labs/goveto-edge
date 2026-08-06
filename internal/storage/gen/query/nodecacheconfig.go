@@ -36,6 +36,7 @@ type NodeCacheConfigQuery struct {
 	AutoMaxSize         nodeCacheConfigAutoMaxSizeField
 	MaxSizeBytes        nodeCacheConfigMaxSizeBytesField
 	MaxDiskUsagePercent nodeCacheConfigMaxDiskUsagePercentField
+	DebugMode           nodeCacheConfigDebugModeField
 	CreatedAt           nodeCacheConfigCreatedAtField
 	UpdatedAt           nodeCacheConfigUpdatedAtField
 	Node                nodeCacheConfigNodeRelation
@@ -48,6 +49,7 @@ const NodeCacheConfigCacheDirColumn = "cache_dir"
 const NodeCacheConfigAutoMaxSizeColumn = "auto_max_size"
 const NodeCacheConfigMaxSizeBytesColumn = "max_size_bytes"
 const NodeCacheConfigMaxDiskUsagePercentColumn = "max_disk_usage_percent"
+const NodeCacheConfigDebugModeColumn = "debug_mode"
 const NodeCacheConfigCreatedAtColumn = "created_at"
 const NodeCacheConfigUpdatedAtColumn = "updated_at"
 
@@ -59,6 +61,7 @@ var NodeCacheConfig = NodeCacheConfigQuery{
 	AutoMaxSize:         nodeCacheConfigAutoMaxSizeField{},
 	MaxSizeBytes:        nodeCacheConfigMaxSizeBytesField{},
 	MaxDiskUsagePercent: nodeCacheConfigMaxDiskUsagePercentField{},
+	DebugMode:           nodeCacheConfigDebugModeField{},
 	CreatedAt:           nodeCacheConfigCreatedAtField{},
 	UpdatedAt:           nodeCacheConfigUpdatedAtField{},
 	Node:                nodeCacheConfigNodeRelation{},
@@ -509,6 +512,52 @@ func (nodeCacheConfigMaxDiskUsagePercentField) Desc() NodeCacheConfigOrderByClau
 	return NodeCacheConfigOrderByClause{Field: "max_disk_usage_percent", Direction: "DESC"}
 }
 
+// DebugModeField provides query operations for the debugMode field.
+type nodeCacheConfigDebugModeField struct{}
+
+// Equals creates an equality condition.
+func (nodeCacheConfigDebugModeField) Equals(v bool) NodeCacheConfigWhereClause {
+	return NodeCacheConfigWhereClause{Field: "debug_mode", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeCacheConfigDebugModeField) Not(v bool) NodeCacheConfigWhereClause {
+	return NodeCacheConfigWhereClause{Field: "debug_mode", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeCacheConfigDebugModeField) In(vals ...bool) NodeCacheConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeCacheConfigWhereClause{Field: "debug_mode", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeCacheConfigDebugModeField) NotIn(vals ...bool) NodeCacheConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeCacheConfigWhereClause{Field: "debug_mode", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (nodeCacheConfigDebugModeField) Set(v bool) NodeCacheConfigSetClause {
+	return NodeCacheConfigSetClause{Field: "debug_mode", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeCacheConfigDebugModeField) Asc() NodeCacheConfigOrderByClause {
+	return NodeCacheConfigOrderByClause{Field: "debug_mode", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeCacheConfigDebugModeField) Desc() NodeCacheConfigOrderByClause {
+	return NodeCacheConfigOrderByClause{Field: "debug_mode", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type nodeCacheConfigCreatedAtField struct{}
 
@@ -688,6 +737,7 @@ type NodeCacheConfigCreateInput struct {
 	AutoMaxSize         bool
 	MaxSizeBytes        **int64
 	MaxDiskUsagePercent int
+	DebugMode           bool
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	Node                *NodeCreateNestedInput
@@ -695,7 +745,7 @@ type NodeCacheConfigCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCacheConfigCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.NodeId, d.CacheDir, d.AutoMaxSize, d.MaxSizeBytes, d.MaxDiskUsagePercent, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.NodeId, d.CacheDir, d.AutoMaxSize, d.MaxSizeBytes, d.MaxDiskUsagePercent, d.DebugMode, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCacheConfigCreateNestedInput supports nested creates and connects.

@@ -166,6 +166,7 @@ type NodeCacheConfig struct {
 	AutoMaxSize         bool   `json:"auto_max_size"`
 	MaxSizeBytes        uint64 `json:"max_size_bytes"`
 	MaxDiskUsagePercent int    `json:"max_disk_usage_percent"`
+	DebugMode           bool   `json:"debug_mode"`
 }
 
 func (c SiteConfig) Validate() error {

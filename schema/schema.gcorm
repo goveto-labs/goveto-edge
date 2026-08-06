@@ -583,6 +583,7 @@ model NodeCacheConfig {
   autoMaxSize         Boolean  @default(true) @map("auto_max_size")
   maxSizeBytes        BigInt?  @map("max_size_bytes")
   maxDiskUsagePercent Int      @default(80) @map("max_disk_usage_percent")
+  debugMode           Boolean  @default(false) @map("debug_mode")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @default(now()) @updatedAt @map("updated_at")
   node                Node     @relation(fields: [nodeId], references: [id])

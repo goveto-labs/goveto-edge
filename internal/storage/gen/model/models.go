@@ -379,6 +379,7 @@ type NodeCacheConfig struct {
 	AutoMaxSize         bool      `db:"auto_max_size" json:"autoMaxSize"`
 	MaxSizeBytes        *int64    `db:"max_size_bytes" json:"maxSizeBytes"`
 	MaxDiskUsagePercent int       `db:"max_disk_usage_percent" json:"maxDiskUsagePercent"`
+	DebugMode           bool      `db:"debug_mode" json:"debugMode"`
 	CreatedAt           time.Time `db:"created_at" json:"createdAt"`
 	UpdatedAt           time.Time `db:"updated_at" json:"updatedAt"`
 	Node                *Node     `db:"-" json:"node,omitempty"`

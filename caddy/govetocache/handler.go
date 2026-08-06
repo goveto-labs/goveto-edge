@@ -43,6 +43,7 @@ type Handler struct {
 	Coalesce                bool           `json:"coalesce,omitempty"`
 	XCache                  bool           `json:"x_cache"`
 	Age                     bool           `json:"age"`
+	Debug                   bool           `json:"debug,omitempty"`
 	OverrideClientTTL       bool           `json:"override_client_ttl,omitempty"`
 	ClientTTL               int            `json:"client_ttl,omitempty"`
 	BypassCacheControl      []string       `json:"bypass_cache_control,omitempty"`
@@ -498,17 +499,22 @@ func (h *Handler) storageKey(raw string) string {
 }
 
 func (h *Handler) setResultHeaders(header http.Header, result, key string, ttl int) {
-	status := "Goveto; " + strings.ToLower(result)
-	if ttl >= 0 {
-		status += "; ttl=" + strconv.Itoa(ttl)
-	}
-	if !h.HideKey {
-		if h.HashKey {
-			key = h.storageKey(key)
+	if h.Debug {
+		status := "Goveto; " + strings.ToLower(result)
+		if ttl >= 0 {
+			status += "; ttl=" + strconv.Itoa(ttl)
 		}
-		status += "; key=\"" + strings.ReplaceAll(key, "\"", "\\\"") + "\""
+		if !h.HideKey {
+			exposed := key
+			if h.HashKey {
+				exposed = h.storageKey(key)
+			}
+			status += "; key=\"" + strings.ReplaceAll(exposed, "\"", "\\\"") + "\""
+		}
+		header.Set("Cache-Status", status)
+	} else {
+		header.Del("Cache-Status")
 	}
-	header.Set("Cache-Status", status)
 	if h.XCache {
 		header.Set("X-Cache", result)
 	} else {
