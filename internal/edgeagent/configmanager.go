@@ -206,12 +206,12 @@ func (m *ConfigManager) PurgeDetailed(purge edgeprotocol.PurgeRequest) (edgeprot
 	if !ok || site.Disabled {
 		return result, errors.New("site config is not active")
 	}
-	cachePolicy, configured, err := decodeCachePolicy(site.Cache)
+	_, configured, err := decodeCachePolicy(site.Cache)
 	if err != nil {
 		return result, fmt.Errorf("invalid site cache policy: %w", err)
 	}
-	if !configured || !cachePolicy.Enabled {
-		return result, errors.New("site cache is not enabled")
+	if !configured {
+		return result, errors.New("site cache is not configured")
 	}
 	if len(site.Domains) == 0 {
 		return result, errors.New("site has no domain")
@@ -594,7 +594,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
-		} else if ok && cachePolicy.Enabled && len(cachePolicy.Rules) > 0 {
+		} else if ok && len(cachePolicy.Rules) > 0 {
 			methods := cachePolicy.Methods
 			if cachePolicy.AllowPurgeMethod {
 				routes = append(routes, map[string]any{

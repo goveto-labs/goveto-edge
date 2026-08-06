@@ -10,7 +10,6 @@ import (
 )
 
 type CachePolicy struct {
-	Enabled            bool         `json:"enabled"`
 	ResponseHeaders    CacheHeaders `json:"response_headers"`
 	AllowPurgeMethod   bool         `json:"allow_purge_method"`
 	RequestCoalescing  bool         `json:"request_coalescing"`
@@ -75,7 +74,6 @@ type CacheConditionRule struct {
 
 func DefaultCachePolicy() CachePolicy {
 	return CachePolicy{
-		Enabled:            true,
 		ResponseHeaders:    CacheHeaders{XCache: true, Age: true},
 		RequestCoalescing:  true,
 		CacheRangeRequests: true,

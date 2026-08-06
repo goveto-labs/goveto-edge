@@ -307,7 +307,7 @@ export default function SiteDetail() {
 
     const [site, setSite] = useState<SiteDetails | null>(null);
     const [listener, setListener] = useState<SiteListenerConfig>({});
-    const [cache, setCache] = useState<CachePolicy>({ enabled: true });
+    const [cache, setCache] = useState<CachePolicy>({});
     const [compression, setCompression] = useState<CompressionPolicy>({});
     const [delivery, setDelivery] = useState<DeliveryPolicy>(defaultDeliveryPolicy);
     const [security, setSecurity] = useState<SecurityPolicy>({

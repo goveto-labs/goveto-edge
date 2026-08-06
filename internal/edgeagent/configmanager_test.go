@@ -614,7 +614,6 @@ func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
 	config := validHTTPConfig(t)
 	policy := cachePolicyWithCatchAllRule()
-	policy.Enabled = true
 	policy.Methods = []string{http.MethodGet, http.MethodPost}
 	policy.CacheKey.Parts = []string{
 		cachepolicy.CacheKeyPartMethod,
@@ -652,7 +651,6 @@ func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
 func TestCacheConfigRendersPerRuleTTLInOrder(t *testing.T) {
 	config := validHTTPConfig(t)
 	policy := cachePolicyWithCatchAllRule()
-	policy.Enabled = true
 	fallback := policy.Rules[0]
 	policy.Rules = []cachepolicy.CacheRule{
 		{
@@ -1051,7 +1049,6 @@ func validHTTPConfig(t *testing.T) SiteConfig {
 func enabledCachePolicy(t *testing.T) map[string]any {
 	t.Helper()
 	policy := cachePolicyWithCatchAllRule()
-	policy.Enabled = true
 	data, err := json.Marshal(policy)
 	if err != nil {
 		t.Fatal(err)

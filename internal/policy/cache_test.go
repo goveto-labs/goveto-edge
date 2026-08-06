@@ -30,9 +30,6 @@ func TestDefaultCachePolicyValid(t *testing.T) {
 	if err := policy.NormalizeAndValidate(); err != nil {
 		t.Fatal(err)
 	}
-	if !policy.Enabled {
-		t.Fatal("cache must be enabled by default")
-	}
 	if len(policy.Rules) != 0 {
 		t.Fatalf("default cache policy must not match requests: %#v", policy.Rules)
 	}

@@ -666,7 +666,6 @@ export interface SiteListenerConfig {
 }
 
 export interface CachePolicy {
-    enabled?: boolean;
     response_headers?: {
         x_cache?: boolean;
         age?: boolean;

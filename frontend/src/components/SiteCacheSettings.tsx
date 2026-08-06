@@ -1131,29 +1131,15 @@ export function SiteCacheSettings({
                 <ContentCard className='overflow-hidden' noPadding>
                     <div className='flex flex-col gap-5 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                         <div className='flex items-center gap-3'>
-                            <span
-                                className={`flex h-10 w-10 items-center justify-center rounded-lg ${cache.enabled ? 'bg-primary text-primary-foreground' : 'bg-surface-secondary text-muted'}`}
-                            >
+                            <span className='flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground'>
                                 <HardDrive className='h-5 w-5' />
                             </span>
                             <div>
                                 <h2 className='text-base font-semibold'>Cache policy</h2>
                                 <p className='mt-0.5 text-xs text-muted'>
-                                    {cache.enabled
-                                        ? `${rules.length} ordered cache rule${rules.length === 1 ? '' : 's'}`
-                                        : 'Caching is disabled'}
+                                    {`${rules.length} ordered cache rule${rules.length === 1 ? '' : 's'}`}
                                 </p>
                             </div>
-                        </div>
-                        <div className='flex items-center gap-3'>
-                            <span className='text-xs font-medium text-muted'>
-                                {cache.enabled ? 'Enabled' : 'Disabled'}
-                            </span>
-                            <ToggleSwitch
-                                label='Enable cache'
-                                isSelected={cache.enabled ?? false}
-                                onChange={(enabled) => onChange({ ...cache, enabled })}
-                            />
                         </div>
                     </div>
 

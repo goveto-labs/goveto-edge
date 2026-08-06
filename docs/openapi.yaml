@@ -10082,8 +10082,6 @@ components:
                     $ref: '#/components/schemas/policy_CacheKey'
                 cache_range_requests:
                     type: boolean
-                enabled:
-                    type: boolean
                 max_body_bytes:
                     type: number
                 methods:

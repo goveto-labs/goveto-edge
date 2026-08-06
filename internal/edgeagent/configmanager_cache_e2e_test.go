@@ -167,7 +167,6 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		Origins:  []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
 	}
 	cache := cachePolicyWithCatchAllRule()
-	cache.Enabled = true
 	cache.Rules[0].TTL.DefaultSeconds = 120
 	cache.CacheKey.Headers = []string{"X-Variant"}
 	config.Cache = toMap(t, cache)

@@ -50,7 +50,7 @@ func TestCreateSiteBundleRejectsNegativeOriginPriorityBeforeDatabaseWrite(t *tes
 
 func TestCreateSiteBundleRejectsInvalidImportedPolicyBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
-	bundle.Cache = json.RawMessage(`{"enabled":true,"ttl":{"default_seconds":-1}}`)
+	bundle.Cache = json.RawMessage(`{"ttl":{"default_seconds":-1}}`)
 	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "invalid cache policy") {
 		t.Fatalf("invalid cache policy error = %v", err)
