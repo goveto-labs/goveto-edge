@@ -13,7 +13,6 @@ readonly COMPOSE_PROJECT="goveto-edge-benchmark"
 readonly STATE_DIR="$REPO_ROOT/deploy/benchmark/state"
 readonly RESULTS_ROOT="$REPO_ROOT/deploy/benchmark/results"
 readonly MIN_UDP_BUFFER=7500000
-readonly OFFICIAL_CACHE_BASELINE="20260803T025637Z"
 
 mode="quick"
 runner="default"
@@ -69,8 +68,8 @@ Options:
   --cache-warmup <duration>   Full/cache matrix warmup per case (default: 5s)
   --cache-duration <duration> Full/cache measurement per repeat (default: 15s)
   --cache-repeats <count>     Full/cache measurement repeats (default: 3)
-  --baseline-run <run-id>     Compare each case with the same case from this run
-  --establish-baseline        Explicitly create the first cache/full baseline
+  --baseline-run <run-id>     Optional: compare each case with the same case from this run
+  --establish-baseline        Optional: mark this run as a fresh baseline (no comparison)
   --case-filter <regex>       Run only case names matching this Bash regex
   --reuse-environment         Keep benchmark volumes and credentials
   --cleanup                   Stop containers after the run
@@ -118,9 +117,6 @@ case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;;
 [[ -z "$baseline_run" || "$baseline_run" =~ ^[A-Za-z0-9._-]+$ ]] || die "invalid baseline run-id"
 if $establish_baseline && [[ -n "$baseline_run" ]]; then
   die "--establish-baseline cannot be combined with --baseline-run"
-fi
-if [[ ( "$mode" == "cache" || "$mode" == "full" ) && -z "$baseline_run" ]] && ! $establish_baseline; then
-  baseline_run="$OFFICIAL_CACHE_BASELINE"
 fi
 [[ "$max_load_cpu" =~ ^[0-9]+([.][0-9]+)?$ ]] || die "max-load-cpu must be numeric"
 [[ "$cache_repeats" =~ ^[1-9][0-9]*$ ]] || die "cache-repeats must be a positive integer"

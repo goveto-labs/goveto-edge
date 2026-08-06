@@ -85,12 +85,15 @@ Use `bandwidth` on it for the 1 MiB and 16 MiB protocol follow-up when standard
 agent4 results are load-saturated; those standard results are lower bounds, not
 load10 baselines.
 Use `--protocols "h1 h2 h3"` to select protocols, `--run-id NAME` to name the
-result directory, `--baseline-run RUN_ID` to compare against the matching case
-from a prior run, and `--cleanup` to stop containers after the run. Baseline
-new reports use schema 1.4. Baseline comparison accepts compatible schema 1.2,
-1.3, and 1.4 reports and requires an exact runner, architecture, suite,
-scenario, protocol, concurrency, and connection-mode match. Run
-`script/run_agent_benchmark.sh --help` for all options.
+result directory, and `--cleanup` to stop containers after the run. Baseline
+comparison is optional: pass `--baseline-run RUN_ID` only when that prior run
+exists under `deploy/benchmark/results/`, or `--establish-baseline` to mark a
+fresh baseline without comparison. By default, `cache` and `full` run standalone
+and do not require any older result directory. New reports use schema 1.4.
+Baseline comparison accepts compatible schema 1.2, 1.3, and 1.4 reports and
+requires an exact runner, architecture, suite, scenario, protocol, concurrency,
+and connection-mode match. Run `script/run_agent_benchmark.sh --help` for all
+options.
 
 The cache matrix timings in `full` and `cache` default to a 5 second warmup,
 15 second measurement, and three repetitions. Override them with
