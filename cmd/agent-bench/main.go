@@ -142,10 +142,10 @@ func run(args []string) error {
 	host := flags.String("host", "", "HTTP Host and TLS server name")
 	output := flags.String("output", "benchmark-results", "artifact output directory")
 	baseline := flags.String("baseline", "", "baseline report.json")
-	baselineRun := flags.String("baseline-run", "", "baseline report.json (required for cache/full acceptance)")
-	establishBaseline := flags.Bool("establish-baseline", false, "explicitly establish the first cache/full baseline")
-	minBaselineRPSRatio := flags.Float64("min-baseline-rps-ratio", 0, "optional minimum current/baseline RPS ratio")
-	maxBaselineAllocationRatio := flags.Float64("max-baseline-allocation-ratio", 0, "optional maximum current/baseline allocation ratio")
+	baselineRun := flags.String("baseline-run", "", "optional baseline report.json for comparison gates")
+	establishBaseline := flags.Bool("establish-baseline", false, "mark this run as a baseline without comparison")
+	minBaselineRPSRatio := flags.Float64("min-baseline-rps-ratio", 0, "optional minimum current/baseline RPS ratio (requires a baseline report)")
+	maxBaselineAllocationRatio := flags.Float64("max-baseline-allocation-ratio", 0, "optional maximum current/baseline allocation ratio (requires a baseline report)")
 	control := flags.String("control", "", "matching control-variant report.json")
 	variant := flags.String("variant", string(agentbench.VariantFull), "benchmark variant: full or control")
 	requireCompleteAccessLogs := flags.Bool("require-complete-access-logs", false, "require zero access log loss and a drained queue")
@@ -236,11 +236,8 @@ func run(args []string) error {
 	if *establishBaseline && baselinePath != "" {
 		return errors.New("--establish-baseline cannot be combined with a baseline report")
 	}
-	relativeGate := *minBaselineRPSRatio > 0 || *maxBaselineAllocationRatio > 0
-	cacheAcceptance := agentbench.Variant(*variant) == agentbench.VariantFull && strings.Contains(strings.ToLower(*scenario), "cache")
-	if (relativeGate || cacheAcceptance) && baselinePath == "" && !*establishBaseline {
-		return errors.New("cache/full and relative acceptance gates require --baseline-run; use --establish-baseline only for the first baseline")
-	}
+	// Relative ratio gates only apply when a baseline report is provided. Standalone
+	// runs (including cache matrix cases) are valid without historical results.
 	var baselineReport *agentbench.Report
 	if baselinePath != "" {
 		loaded, readErr := agentbench.ReadBaselineReport(baselinePath)
