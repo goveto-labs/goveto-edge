@@ -212,7 +212,11 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 	installCtx, cancel := context.WithTimeout(ctx, installExecutionTimeout)
 	defer cancel()
 	logger.Info("connecting to node over SSH")
-	connection, err := connectSSH(installCtx, *payload.SSH)
+	verifier, err := PinnedHostKeyVerifier(installCtx, w.db, payload.NodeID)
+	if err != nil {
+		return err
+	}
+	connection, err := connectSSH(installCtx, *payload.SSH, verifier)
 	if err != nil {
 		return err
 	}
@@ -393,7 +397,10 @@ func (w *InstallWorker) collectAndStoreHardwareProfile(
 	return nil
 }
 
-func connectSSH(ctx context.Context, input SSHInstallInput) (*ssh.Client, error) {
+func connectSSH(ctx context.Context, input SSHInstallInput, hostKey HostKeySettings) (*ssh.Client, error) {
+	if hostKey.Callback == nil {
+		return nil, permanentInstallError(errors.New("SSH host key callback is required"))
+	}
 	auth := []ssh.AuthMethod{}
 	if input.UsesPassword() {
 		auth = append(
@@ -430,10 +437,11 @@ func connectSSH(ctx context.Context, input SSHInstallInput) (*ssh.Client, error)
 	}
 
 	config := &ssh.ClientConfig{
-		User:            input.User,
-		Auth:            auth,
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         20 * time.Second,
+		User:              input.User,
+		Auth:              auth,
+		HostKeyCallback:   hostKey.Callback,
+		HostKeyAlgorithms: hostKey.Algorithms,
+		Timeout:           20 * time.Second,
 	}
 	endpoint := net.JoinHostPort(input.EntryIP, fmt.Sprint(input.Port))
 	dialer := net.Dialer{Timeout: 20 * time.Second}
@@ -467,14 +475,18 @@ func connectSSH(ctx context.Context, input SSHInstallInput) (*ssh.Client, error)
 	}
 }
 
-func TestSSHConnection(ctx context.Context, input SSHInstallInput) (string, error) {
+// TestSSHConnection verifies SSH reachability and detects the remote
+// architecture. hostKey decides how the server host key is handled: a
+// PinnedHostKeyVerifier for known nodes, or CaptureHostKey during trust
+// establishment.
+func TestSSHConnection(ctx context.Context, input SSHInstallInput, hostKey HostKeySettings) (string, error) {
 	if err := input.Validate(); err != nil {
 		return "", err
 	}
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	connection, err := connectSSH(ctx, input)
+	connection, err := connectSSH(ctx, input, hostKey)
 	if err != nil {
 		return "", err
 	}

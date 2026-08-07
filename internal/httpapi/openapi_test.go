@@ -44,6 +44,12 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	e := echo.New()
 	routes := map[routeKey]bool{}
 	e.OnAddRoute = func(route echo.Route) error {
+		// Echo v5.3 registers an internal 404 route per middleware group so
+		// group middleware also runs for unmatched paths. Those are not API
+		// operations and do not belong in the specification.
+		if route.Method == echo.RouteNotFound {
+			return nil
+		}
 		routes[routeKey(route.Method+" "+route.Path)] = true
 		return nil
 	}

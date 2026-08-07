@@ -57,14 +57,14 @@ enum ConfigStatus {
   ROLLED_BACK
 }
 
-enum DNSProviderType {
-  ALIYUN
-  CLOUDFLARE
-}
-
 enum DNSProviderKind {
   ENDPOINT
   ACME
+}
+
+enum DNSProviderType {
+  ALIYUN
+  CLOUDFLARE
 }
 
 enum DNSRecordStatus {
@@ -302,13 +302,13 @@ model CertificateJob {
 }
 
 model Cluster {
-  id              String             @id @default(uuid())
-  creatorId       String             @map("creator_id")
+  id              String              @id @default(uuid())
+  creatorId       String              @map("creator_id")
   name            String
-  primaryHostname String?            @unique @map("primary_hostname")
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @default(now()) @updatedAt @map("updated_at")
-  creator         User               @relation(fields: [creatorId], references: [id])
+  primaryHostname String?             @unique @map("primary_hostname")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at")
+  creator         User                @relation(fields: [creatorId], references: [id])
   members         ClusterMember[]
   nodes           Node[]
   groups          ClusterGroup[]
@@ -561,6 +561,7 @@ model Node {
   cacheConfig        NodeCacheConfig?
   hardwareProfile    NodeHardwareProfile?
   credential         NodeCredential?
+  sshHostKey         NodeSSHHostKey?
   agentTasks         AgentTask[]
   installJobs        InstallJob[]
   sshCredential      SSHCredential?          @relation(fields: [sshCredentialId], references: [id])
@@ -658,6 +659,18 @@ model NodeRegionMembership {
   @@id([nodeId, regionId])
   @@index([regionId])
   @@map("node_region_memberships")
+}
+
+model NodeSSHHostKey {
+  nodeId            UUID     @id @map("node_id")
+  keyType           String   @map("key_type")
+  publicKey         String   @db.Text @map("public_key")
+  fingerprintSha256 String   @map("fingerprint_sha256")
+  firstSeenAt       DateTime @default(now()) @map("first_seen_at")
+  lastVerifiedAt    DateTime @default(now()) @map("last_verified_at")
+  node              Node     @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@map("node_ssh_host_keys")
 }
 
 model NodeSiteConfigVersion {

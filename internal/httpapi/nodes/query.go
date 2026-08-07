@@ -34,7 +34,7 @@ func list(db *client.Client) echo.HandlerFunc {
 }
 
 // @summary Get node
-// @description Get a single node with addresses, site config versions and cache config.
+// @description Get a single node with addresses, site config versions, cache config and pinned SSH host key.
 // @Tags nodes
 func get(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {

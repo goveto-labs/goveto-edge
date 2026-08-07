@@ -254,7 +254,28 @@ export interface NodeSSH {
 export interface SSHConnectionTestResponse {
     ok: boolean;
     architecture: string;
+    host_key_type?: string;
+    host_key_fingerprint?: string;
 }
+
+export interface NodeSSHHostKey {
+    keyType: string;
+    publicKey: string;
+    fingerprintSha256: string;
+    firstSeenAt: string;
+    lastVerifiedAt: string;
+}
+
+export interface NodeSSHHostKeyPreview {
+    keyType: string;
+    publicKey: string;
+    fingerprintSha256: string;
+    pinnedFingerprintSha256?: string;
+    matchesPin: boolean;
+}
+
+export const SSH_HOST_KEY_CHANGED_CODE = 'ssh_host_key_changed';
+export const SSH_HOST_KEY_REQUIRED_CODE = 'ssh_host_key_required';
 
 export interface NodeCacheConfig {
     cache_directory: string;
@@ -291,6 +312,7 @@ export interface Node {
     sshCredentialId?: string;
     sshHost?: string;
     sshPort?: number;
+    sshHostKey?: NodeSSHHostKey;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     groupMemberships?: Array<{ nodeId: string; groupId: string }>;

@@ -50,6 +50,7 @@ type Client struct {
 	NodeGroupMembership   NodeGroupMembershipActions
 	NodeHardwareProfile   NodeHardwareProfileActions
 	NodeRegionMembership  NodeRegionMembershipActions
+	NodeSSHHostKey        NodeSSHHostKeyActions
 	NodeSiteConfigVersion NodeSiteConfigVersionActions
 	OriginBackend         OriginBackendActions
 	OriginPool            OriginPoolActions
@@ -99,6 +100,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.NodeGroupMembership = NodeGroupMembershipActions{client: c}
 	c.NodeHardwareProfile = NodeHardwareProfileActions{client: c}
 	c.NodeRegionMembership = NodeRegionMembershipActions{client: c}
+	c.NodeSSHHostKey = NodeSSHHostKeyActions{client: c}
 	c.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
@@ -308,6 +310,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.NodeGroupMembership = NodeGroupMembershipActions{client: txClient}
 	txClient.NodeHardwareProfile = NodeHardwareProfileActions{client: txClient}
 	txClient.NodeRegionMembership = NodeRegionMembershipActions{client: txClient}
+	txClient.NodeSSHHostKey = NodeSSHHostKeyActions{client: txClient}
 	txClient.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
@@ -25802,6 +25805,978 @@ func (a NodeRegionMembershipActions) GroupBy(ctx context.Context, fields []strin
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("NodeRegionMembership.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedNodeSSHHostKeyTable(c *Client) string { return c.quoteIdentifier("node_ssh_host_keys") }
+func quotedNodeSSHHostKeyColumns(c *Client) string {
+	cols := []string{"node_id", "key_type", "public_key", "fingerprint_sha256", "first_seen_at", "last_verified_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNodeSSHHostKeyField(c *Client, field string) (string, error) {
+	switch field {
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "key_type":
+		return c.quoteIdentifier(field), nil
+	case "public_key":
+		return c.quoteIdentifier(field), nil
+	case "fingerprint_sha256":
+		return c.quoteIdentifier(field), nil
+	case "first_seen_at":
+		return c.quoteIdentifier(field), nil
+	case "last_verified_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NodeSSHHostKey field %q", field)
+	}
+}
+
+// buildNodeSSHHostKeyWhere recursively builds a WHERE clause string and arguments.
+func buildNodeSSHHostKeyWhere(c *Client, wheres []query.NodeSSHHostKeyWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NodeSSHHostKeyWhereClause); ok {
+				sub, subArgs := buildNodeSSHHostKeyWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NodeSSHHostKeyWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNodeSSHHostKeyWhere(c, []query.NodeSSHHostKeyWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NodeSSHHostKeyWhereClause); ok {
+				sub, subArgs := buildNodeSSHHostKeyWhere(c, []query.NodeSSHHostKeyWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteNodeSSHHostKeyField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NodeSSHHostKeyActions provides database operations for the NodeSSHHostKey model.
+type NodeSSHHostKeyActions struct {
+	client *Client
+}
+
+// NodeSSHHostKeyCreateBuilder builds a NodeSSHHostKey create operation incrementally.
+type NodeSSHHostKeyCreateBuilder struct {
+	action NodeSSHHostKeyActions
+	sets   []query.NodeSSHHostKeySetClause
+}
+
+// Create starts a staged NodeSSHHostKey create operation.
+func (a NodeSSHHostKeyActions) Create() NodeSSHHostKeyCreateBuilder {
+	return NodeSSHHostKeyCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NodeSSHHostKeyCreateBuilder) Set(sets ...query.NodeSSHHostKeySetClause) NodeSSHHostKeyCreateBuilder {
+	next := NodeSSHHostKeyCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NodeSSHHostKeySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NodeSSHHostKeyCreateBuilder) Do(ctx context.Context) (*model.NodeSSHHostKey, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NodeSSHHostKeyCreateManyBuilder builds a bulk NodeSSHHostKey insert operation.
+type NodeSSHHostKeyCreateManyBuilder struct {
+	action            NodeSSHHostKeyActions
+	data              []query.NodeSSHHostKeyCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NodeSSHHostKey insert operation.
+func (a NodeSSHHostKeyActions) BulkCreate(data []query.NodeSSHHostKeyCreateInput) NodeSSHHostKeyCreateManyBuilder {
+	return NodeSSHHostKeyCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NodeSSHHostKeyCreateManyBuilder) OnConflictDoNothing(columns ...string) NodeSSHHostKeyCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NodeSSHHostKeyCreateManyBuilder) Returning(columns ...string) NodeSSHHostKeyCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NodeSSHHostKeyCreateManyBuilder) BatchSize(n int) NodeSSHHostKeyCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NodeSSHHostKeyCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSSHHostKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NodeSSHHostKey.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NodeSSHHostKey.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NodeSSHHostKeyCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NodeSSHHostKey, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NodeSSHHostKey
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSSHHostKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"node_id", "key_type", "public_key", "fingerprint_sha256", "first_seen_at", "last_verified_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NodeSSHHostKey
+			if err := rows.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NodeSSHHostKeyCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"node_id", "key_type", "public_key", "fingerprint_sha256", "first_seen_at", "last_verified_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNodeSSHHostKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NodeSSHHostKeyQueryBuilder builds a NodeSSHHostKey query incrementally.
+type NodeSSHHostKeyQueryBuilder struct {
+	action NodeSSHHostKeyActions
+	opts   []query.NodeSSHHostKeyQueryOption
+}
+
+// Query starts a staged NodeSSHHostKey query.
+func (a NodeSSHHostKeyActions) Query() NodeSSHHostKeyQueryBuilder {
+	return NodeSSHHostKeyQueryBuilder{action: a}
+}
+
+func (b NodeSSHHostKeyQueryBuilder) withOptions(opts ...query.NodeSSHHostKeyQueryOption) NodeSSHHostKeyQueryBuilder {
+	next := NodeSSHHostKeyQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NodeSSHHostKeyQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NodeSSHHostKeyQueryBuilder) Where(clauses ...query.NodeSSHHostKeyWhereClause) NodeSSHHostKeyQueryBuilder {
+	opts := make([]query.NodeSSHHostKeyQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NodeSSHHostKeyQueryBuilder) OrderBy(clause query.NodeSSHHostKeyOrderByClause) NodeSSHHostKeyQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NodeSSHHostKeyQueryBuilder) Include(clauses ...query.NodeSSHHostKeyIncludeClause) NodeSSHHostKeyQueryBuilder {
+	opts := make([]query.NodeSSHHostKeyQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NodeSSHHostKeyQueryBuilder) Take(n int) NodeSSHHostKeyQueryBuilder {
+	return b.withOptions(query.NodeSSHHostKeyTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NodeSSHHostKeyQueryBuilder) Skip(n int) NodeSSHHostKeyQueryBuilder {
+	return b.withOptions(query.NodeSSHHostKeySkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NodeSSHHostKeyQueryBuilder) Do(ctx context.Context) ([]model.NodeSSHHostKey, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NodeSSHHostKeyQueryBuilder) First(ctx context.Context) (*model.NodeSSHHostKey, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NodeSSHHostKeyQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNodeSSHHostKeyOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NodeSSHHostKeyUpdateBuilder builds a NodeSSHHostKey update operation incrementally.
+type NodeSSHHostKeyUpdateBuilder struct {
+	action NodeSSHHostKeyActions
+	wheres []query.NodeSSHHostKeyWhereClause
+	sets   []query.NodeSSHHostKeySetClause
+}
+
+// Update starts a staged NodeSSHHostKey update operation.
+func (a NodeSSHHostKeyActions) Update() NodeSSHHostKeyUpdateBuilder {
+	return NodeSSHHostKeyUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NodeSSHHostKeyUpdateBuilder) Where(clauses ...query.NodeSSHHostKeyWhereClause) NodeSSHHostKeyUpdateBuilder {
+	next := NodeSSHHostKeyUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NodeSSHHostKeyWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NodeSSHHostKeySetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NodeSSHHostKeyUpdateBuilder) Set(sets ...query.NodeSSHHostKeySetClause) NodeSSHHostKeyUpdateBuilder {
+	next := NodeSSHHostKeyUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NodeSSHHostKeyWhereClause(nil), b.wheres...),
+		sets:   make([]query.NodeSSHHostKeySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NodeSSHHostKeyUpdateBuilder) combinedWhere() (query.NodeSSHHostKeyWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeSSHHostKeyWhereClause{}, fmt.Errorf("NodeSSHHostKey.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeSSHHostKey.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NodeSSHHostKeyUpdateBuilder) Do(ctx context.Context) (*model.NodeSSHHostKey, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NodeSSHHostKeyUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NodeSSHHostKeyDeleteBuilder builds a NodeSSHHostKey delete operation incrementally.
+type NodeSSHHostKeyDeleteBuilder struct {
+	action NodeSSHHostKeyActions
+	wheres []query.NodeSSHHostKeyWhereClause
+}
+
+// Delete starts a staged NodeSSHHostKey delete operation.
+func (a NodeSSHHostKeyActions) Delete() NodeSSHHostKeyDeleteBuilder {
+	return NodeSSHHostKeyDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NodeSSHHostKeyDeleteBuilder) Where(clauses ...query.NodeSSHHostKeyWhereClause) NodeSSHHostKeyDeleteBuilder {
+	next := NodeSSHHostKeyDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NodeSSHHostKeyWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NodeSSHHostKeyDeleteBuilder) combinedWhere() (query.NodeSSHHostKeyWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NodeSSHHostKeyWhereClause{}, fmt.Errorf("NodeSSHHostKey.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NodeSSHHostKey.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NodeSSHHostKeyDeleteBuilder) Do(ctx context.Context) (*model.NodeSSHHostKey, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NodeSSHHostKeyDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NodeSSHHostKey records.
+func (a NodeSSHHostKeyActions) FindMany(ctx context.Context, opts ...query.NodeSSHHostKeyQueryOption) ([]model.NodeSSHHostKey, error) {
+	cfg := query.ApplyNodeSSHHostKeyOptions(opts)
+	q := "SELECT " + quotedNodeSSHHostKeyColumns(a.client) + " FROM " + quotedNodeSSHHostKeyTable(a.client)
+	argIdx := 0
+	where, args := buildNodeSSHHostKeyWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteNodeSSHHostKeyField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NodeSSHHostKey
+	for rows.Next() {
+		var item model.NodeSSHHostKey
+		if err := rows.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NodeSSHHostKey record.
+func (a NodeSSHHostKeyActions) FindFirst(ctx context.Context, opts ...query.NodeSSHHostKeyQueryOption) (*model.NodeSSHHostKey, error) {
+	opts = append(opts, query.NodeSSHHostKeyTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NodeSSHHostKey record by unique constraint.
+func (a NodeSSHHostKeyActions) FindUnique(ctx context.Context, where query.NodeSSHHostKeyWhereClause) (*model.NodeSSHHostKey, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSSHHostKeyWhere(a.client, []query.NodeSSHHostKeyWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedNodeSSHHostKeyColumns(a.client) + " FROM " + quotedNodeSSHHostKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NodeSSHHostKey
+	if err := row.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NodeSSHHostKey.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NodeSSHHostKey record.
+func (a NodeSSHHostKeyActions) CreateOne(ctx context.Context, sets ...query.NodeSSHHostKeySetClause) (*model.NodeSSHHostKey, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeSSHHostKey.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeSSHHostKeyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeSSHHostKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NodeSSHHostKey
+		if err := row.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NodeSSHHostKey records.
+func (a NodeSSHHostKeyActions) CreateMany(ctx context.Context, data []query.NodeSSHHostKeyCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NodeSSHHostKeyActions) buildNodeSSHHostKeyCreateManySQL(data []query.NodeSSHHostKeyCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"node_id", "key_type", "public_key", "fingerprint_sha256", "first_seen_at", "last_verified_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNodeSSHHostKeyTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NodeSSHHostKey record matching the where clause.
+func (a NodeSSHHostKeyActions) UpdateOne(ctx context.Context, where query.NodeSSHHostKeyWhereClause, sets ...query.NodeSSHHostKeySetClause) (*model.NodeSSHHostKey, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NodeSSHHostKey.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeSSHHostKeyWhere(a.client, []query.NodeSSHHostKeyWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeSSHHostKeyTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeSSHHostKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSSHHostKey
+		if err := row.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeSSHHostKey.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NodeSSHHostKey records matching the where clauses.
+func (a NodeSSHHostKeyActions) UpdateMany(ctx context.Context, wheres []query.NodeSSHHostKeyWhereClause, sets ...query.NodeSSHHostKeySetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NodeSSHHostKey.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNodeSSHHostKeyWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNodeSSHHostKeyTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeSSHHostKey.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NodeSSHHostKey record.
+func (a NodeSSHHostKeyActions) UpsertOne(ctx context.Context, where query.NodeSSHHostKeyWhereClause, create []query.NodeSSHHostKeySetClause, update []query.NodeSSHHostKeySetClause) (*model.NodeSSHHostKey, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NodeSSHHostKey.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNodeSSHHostKeyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteNodeSSHHostKeyField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNodeSSHHostKeyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeSSHHostKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSSHHostKey
+		if err := row.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NodeSSHHostKey record matching the where clause.
+func (a NodeSSHHostKeyActions) DeleteOne(ctx context.Context, where query.NodeSSHHostKeyWhereClause) (*model.NodeSSHHostKey, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSSHHostKeyWhere(a.client, []query.NodeSSHHostKeyWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedNodeSSHHostKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNodeSSHHostKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NodeSSHHostKey
+		if err := row.Scan(&item.NodeId, &item.KeyType, &item.PublicKey, &item.FingerprintSha256, &item.FirstSeenAt, &item.LastVerifiedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NodeSSHHostKey.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NodeSSHHostKey records matching the where clauses.
+func (a NodeSSHHostKeyActions) DeleteMany(ctx context.Context, wheres ...query.NodeSSHHostKeyWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSSHHostKeyWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedNodeSSHHostKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NodeSSHHostKey.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NodeSSHHostKey records matching the where clauses.
+func (a NodeSSHHostKeyActions) Count(ctx context.Context, wheres ...query.NodeSSHHostKeyWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNodeSSHHostKeyWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedNodeSSHHostKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NodeSSHHostKey.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NodeSSHHostKey.
+func (a NodeSSHHostKeyActions) Aggregate(ctx context.Context, opts ...query.NodeSSHHostKeyAggregateOption) (*query.NodeSSHHostKeyAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeSSHHostKeyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNodeSSHHostKeyTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NodeSSHHostKeyAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NodeSSHHostKey.
+func (a NodeSSHHostKeyActions) GroupBy(ctx context.Context, fields []string, opts ...query.NodeSSHHostKeyAggregateOption) ([]query.NodeSSHHostKeyGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNodeSSHHostKeyField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNodeSSHHostKeyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNodeSSHHostKeyTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NodeSSHHostKey.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NodeSSHHostKeyGroupByResult
+	for rows.Next() {
+		r := query.NodeSSHHostKeyGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NodeSSHHostKey.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

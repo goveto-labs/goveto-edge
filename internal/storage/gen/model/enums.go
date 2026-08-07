@@ -139,22 +139,6 @@ func ValidConfigStatusValues() []ConfigStatus {
 	}
 }
 
-// DNSProviderType represents the DNSProviderType enum type.
-type DNSProviderType string
-
-const (
-	DNSProviderTypeALIYUN     DNSProviderType = "ALIYUN"
-	DNSProviderTypeCLOUDFLARE DNSProviderType = "CLOUDFLARE"
-)
-
-// ValidDNSProviderTypeValues returns all valid values for the DNSProviderType enum.
-func ValidDNSProviderTypeValues() []DNSProviderType {
-	return []DNSProviderType{
-		DNSProviderTypeALIYUN,
-		DNSProviderTypeCLOUDFLARE,
-	}
-}
-
 // DNSProviderKind represents the DNSProviderKind enum type.
 type DNSProviderKind string
 
@@ -168,6 +152,22 @@ func ValidDNSProviderKindValues() []DNSProviderKind {
 	return []DNSProviderKind{
 		DNSProviderKindENDPOINT,
 		DNSProviderKindACME,
+	}
+}
+
+// DNSProviderType represents the DNSProviderType enum type.
+type DNSProviderType string
+
+const (
+	DNSProviderTypeALIYUN     DNSProviderType = "ALIYUN"
+	DNSProviderTypeCLOUDFLARE DNSProviderType = "CLOUDFLARE"
+)
+
+// ValidDNSProviderTypeValues returns all valid values for the DNSProviderType enum.
+func ValidDNSProviderTypeValues() []DNSProviderType {
+	return []DNSProviderType{
+		DNSProviderTypeALIYUN,
+		DNSProviderTypeCLOUDFLARE,
 	}
 }
 

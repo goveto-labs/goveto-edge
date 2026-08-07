@@ -8,7 +8,9 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
-func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node, includeCache bool) error {
+// loadNodeRelations hydrates memberships and addresses. When includeDetails is
+// true it also loads cache config, hardware profile and the pinned SSH host key.
+func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node, includeDetails bool) error {
 	addresses, err := db.NodeAddress.Query().
 		Where(query.NodeAddress.NodeId.Equals(node.Id)).
 		OrderBy(query.NodeAddress.CreatedAt.Asc()).
@@ -46,7 +48,7 @@ func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node,
 	node.GroupMemberships = nodeGroupMembershipPointers(groups)
 	node.RegionMemberships = nodeRegionMembershipPointers(regions)
 	node.SiteConfigVersions = nodeSiteConfigVersionPointers(versions)
-	if includeCache {
+	if includeDetails {
 		cache, err := db.NodeCacheConfig.FindUnique(
 			ctx,
 			query.NodeCacheConfig.NodeId.Equals(node.Id),
@@ -63,6 +65,14 @@ func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node,
 			return err
 		}
 		node.HardwareProfile = hardware
+		hostKey, err := db.NodeSSHHostKey.FindUnique(
+			ctx,
+			query.NodeSSHHostKey.NodeId.Equals(node.Id),
+		)
+		if err != nil {
+			return err
+		}
+		node.SshHostKey = hostKey
 	}
 	return nil
 }

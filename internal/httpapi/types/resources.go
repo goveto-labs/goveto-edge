@@ -198,6 +198,40 @@ type Node struct {
 	SiteConfigVersions []SiteConfigVersion    `json:"siteConfigVersions,omitempty"`
 	CacheConfig        *NodeCacheConfig       `json:"cacheConfig,omitempty"`
 	HardwareProfile    *NodeHardwareProfile   `json:"hardwareProfile,omitempty"`
+	SSHHostKey         *NodeSSHHostKey        `json:"sshHostKey,omitempty"`
+}
+
+// NodeSSHHostKey is the operator-facing view of a node's pinned SSH host key.
+type NodeSSHHostKey struct {
+	KeyType           string    `json:"keyType"`
+	PublicKey         string    `json:"publicKey"`
+	FingerprintSHA256 string    `json:"fingerprintSha256"`
+	FirstSeenAt       time.Time `json:"firstSeenAt"`
+	LastVerifiedAt    time.Time `json:"lastVerifiedAt"`
+}
+
+// NodeSSHHostKeyPreview is the host key currently presented by the server
+// before an operator chooses to pin it.
+type NodeSSHHostKeyPreview struct {
+	KeyType                 string `json:"keyType"`
+	PublicKey               string `json:"publicKey"`
+	FingerprintSHA256       string `json:"fingerprintSha256"`
+	PinnedFingerprintSHA256 string `json:"pinnedFingerprintSha256,omitempty"`
+	MatchesPin              bool   `json:"matchesPin"`
+}
+
+// NewNodeSSHHostKey converts the pinned host key model to its API view.
+func NewNodeSSHHostKey(value *model.NodeSSHHostKey) NodeSSHHostKey {
+	if value == nil {
+		return NodeSSHHostKey{}
+	}
+	return NodeSSHHostKey{
+		KeyType:           value.KeyType,
+		PublicKey:         value.PublicKey,
+		FingerprintSHA256: value.FingerprintSha256,
+		FirstSeenAt:       value.FirstSeenAt,
+		LastVerifiedAt:    value.LastVerifiedAt,
+	}
 }
 
 func NewNode(value *model.Node) Node {
@@ -224,6 +258,10 @@ func NewNode(value *model.Node) Node {
 	if value.HardwareProfile != nil {
 		hardware := NewNodeHardwareProfile(value.HardwareProfile)
 		result.HardwareProfile = &hardware
+	}
+	if value.SshHostKey != nil {
+		hostKey := NewNodeSSHHostKey(value.SshHostKey)
+		result.SSHHostKey = &hostKey
 	}
 	return result
 }

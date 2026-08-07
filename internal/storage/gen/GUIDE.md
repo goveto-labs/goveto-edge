@@ -556,6 +556,18 @@ query.PostAuthorIdColumn
   - `Nodeid` (UUID)
   - `Regionid` (String)
 
+### NodeSSHHostKey
+
+- Client handle: `c.NodeSSHHostKey`
+- Query namespace: `query.NodeSSHHostKey`
+- Fields:
+  - `Nodeid` (UUID, id)
+  - `Keytype` (String)
+  - `Publickey` (String)
+  - `Fingerprintsha256` (String)
+  - `Firstseenat` (DateTime)
+  - `Lastverifiedat` (DateTime)
+
 ### NodeSiteConfigVersion
 
 - Client handle: `c.NodeSiteConfigVersion`

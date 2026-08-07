@@ -10,6 +10,7 @@ import type {
     NodeRuntimePoint,
     NodeSnapshot,
     NodeSSH,
+    NodeSSHHostKeyPreview,
     SSHCredential,
     SSHCredentialWriteRequest,
     TrafficPoint,
@@ -23,6 +24,7 @@ import {
     Check,
     Download,
     FileText,
+    Fingerprint,
     Globe2,
     HardDrive,
     Network,
@@ -40,7 +42,15 @@ import {
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
-import { ApiError, analyticsApi, clusterApi, nodesApi, sshCredentialsApi } from '@/api';
+import {
+    ApiError,
+    analyticsApi,
+    clusterApi,
+    installErrorNeedsHostKeyTrust,
+    isSSHHostKeyApiError,
+    nodesApi,
+    sshCredentialsApi,
+} from '@/api';
 import { ByteSizeInput } from '@/components/ByteSizeInput.tsx';
 import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -337,6 +347,13 @@ export default function NodeDetail() {
     const [testing, setTesting] = useState(false);
     const [reinstalling, setReinstalling] = useState(false);
     const [reinstallConfirmOpen, setReinstallConfirmOpen] = useState(false);
+    const [trustConfirmOpen, setTrustConfirmOpen] = useState(false);
+    const [trustingHostKey, setTrustingHostKey] = useState(false);
+    const [trustPreviewLoading, setTrustPreviewLoading] = useState(false);
+    const [trustPreview, setTrustPreview] = useState<NodeSSHHostKeyPreview | null>(null);
+    const [trustHostKeyError, setTrustHostKeyError] = useState('');
+    const [trustHostKeyMessage, setTrustHostKeyMessage] = useState('');
+    const [hostKeyIssueActive, setHostKeyIssueActive] = useState(false);
     const [testedFingerprint, setTestedFingerprint] = useState('');
     const [testAttemptFingerprint, setTestAttemptFingerprint] = useState('');
     const [testMessage, setTestMessage] = useState('');
@@ -412,6 +429,10 @@ export default function NodeDetail() {
         setTestAttemptFingerprint('');
         setTestMessage('');
         setTestError('');
+        setTrustHostKeyError('');
+        setTrustHostKeyMessage('');
+        setHostKeyIssueActive(false);
+        setTrustPreview(null);
     }, [nodeId]);
 
     const loadInstallation = useCallback(
@@ -729,6 +750,7 @@ export default function NodeDetail() {
                 node.status === 'PENDING' || node.status === 'INSTALLING'
             );
             applyNode(reinstalled);
+            setHostKeyIssueActive(false);
             setInstallation((current) =>
                 current
                     ? {
@@ -741,6 +763,9 @@ export default function NodeDetail() {
             setTestedFingerprint('');
             navigate(`/nodes/${node.id}/installation?track=1`);
         } catch (reinstallError) {
+            if (isSSHHostKeyApiError(reinstallError)) {
+                setHostKeyIssueActive(true);
+            }
             setError(
                 reinstallError instanceof ApiError
                     ? reinstallError.message
@@ -748,6 +773,51 @@ export default function NodeDetail() {
             );
         } finally {
             setReinstalling(false);
+        }
+    };
+
+    const openTrustHostKeyDialog = async () => {
+        if (!node) return;
+        setTrustConfirmOpen(true);
+        setTrustPreview(null);
+        setTrustHostKeyError('');
+        setTrustPreviewLoading(true);
+        try {
+            setTrustPreview(await api.previewSSHHostKey(node.id));
+        } catch (previewError) {
+            setTrustHostKeyError(
+                previewError instanceof ApiError
+                    ? previewError.message
+                    : 'Failed to preview the SSH host key'
+            );
+            setTrustConfirmOpen(false);
+        } finally {
+            setTrustPreviewLoading(false);
+        }
+    };
+
+    const trustHostKey = async () => {
+        if (!node || !trustPreview) return;
+        setTrustingHostKey(true);
+        setTrustHostKeyError('');
+        setTrustHostKeyMessage('');
+        try {
+            const hostKey = await api.trustSSHHostKey(node.id);
+            await refreshNode();
+            setHostKeyIssueActive(false);
+            setTrustHostKeyMessage(
+                `Trusted ${hostKey.keyType} host key ${hostKey.fingerprintSha256}.`
+            );
+            setTrustConfirmOpen(false);
+            setTrustPreview(null);
+        } catch (trustError) {
+            setTrustHostKeyError(
+                trustError instanceof ApiError
+                    ? trustError.message
+                    : 'Failed to trust the SSH host key'
+            );
+        } finally {
+            setTrustingHostKey(false);
         }
     };
 
@@ -828,6 +898,10 @@ export default function NodeDetail() {
     const addressSummary = node?.addresses.length
         ? node.addresses.map((item) => item.address).join(', ')
         : '-';
+    const hostKeyIssue =
+        hostKeyIssueActive ||
+        installErrorNeedsHostKeyTrust(node?.installError) ||
+        installErrorNeedsHostKeyTrust(installation?.install_error);
     const cacheIsValid = Boolean(
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
@@ -935,6 +1009,47 @@ export default function NodeDetail() {
                                 <pre className='mt-1 whitespace-pre-wrap break-words font-sans text-xs leading-5'>
                                     {node.installError}
                                 </pre>
+                            </div>
+                        </ContentCard>
+                    )}
+                    {hostKeyIssue && (
+                        <ContentCard className='overflow-hidden p-0' noPadding>
+                            <div className='border-t border-warning/30 bg-warning/10 px-5 py-3 text-warning'>
+                                <div className='flex items-center gap-2 text-sm font-medium'>
+                                    <Fingerprint className='h-4 w-4' />
+                                    SSH host key trust required
+                                </div>
+                                <p className='mt-1 text-xs leading-5'>
+                                    Installation and reinstall cannot continue until this
+                                    node&apos;s SSH host key is trusted. This is expected after an
+                                    operating system reinstall or for nodes created before host-key
+                                    pinning, but a changed key can also indicate a man-in-the-middle
+                                    attack. Preview the fingerprint, verify it on the server out of
+                                    band, then trust it before retrying.
+                                </p>
+                                <Button
+                                    className='mt-3'
+                                    isDisabled={trustingHostKey || trustPreviewLoading}
+                                    size='sm'
+                                    variant='secondary'
+                                    onPress={() => void openTrustHostKeyDialog()}
+                                >
+                                    {trustPreviewLoading
+                                        ? 'Loading key…'
+                                        : trustingHostKey
+                                          ? 'Trusting…'
+                                          : 'Review and trust SSH host key'}
+                                </Button>
+                                {trustHostKeyMessage && (
+                                    <p className='mt-2 text-xs leading-5 text-success'>
+                                        {trustHostKeyMessage}
+                                    </p>
+                                )}
+                                {trustHostKeyError && (
+                                    <div className='mt-2'>
+                                        <FormError message={trustHostKeyError} />
+                                    </div>
+                                )}
                             </div>
                         </ContentCard>
                     )}
@@ -1877,6 +1992,78 @@ export default function NodeDetail() {
                                             )}
                                         </div>
 
+                                        <div className='border-t border-border py-4'>
+                                            <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                                                <div className='min-w-0'>
+                                                    <div className='flex items-center gap-2 text-sm font-medium'>
+                                                        <Fingerprint className='h-4 w-4 text-muted' />
+                                                        {node.sshHostKey
+                                                            ? 'Pinned SSH host key'
+                                                            : 'SSH host key not trusted yet'}
+                                                        {node.sshHostKey && (
+                                                            <span className='text-xs font-normal text-muted'>
+                                                                {node.sshHostKey.keyType}
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                    {node.sshHostKey ? (
+                                                        <>
+                                                            <div className='mt-1.5 break-all font-mono text-xs text-muted'>
+                                                                {node.sshHostKey.fingerprintSha256}
+                                                            </div>
+                                                            <p className='mt-1.5 text-xs leading-5 text-muted'>
+                                                                First trusted{' '}
+                                                                {new Date(
+                                                                    node.sshHostKey.firstSeenAt
+                                                                ).toLocaleString()}{' '}
+                                                                · Last verified{' '}
+                                                                {new Date(
+                                                                    node.sshHostKey.lastVerifiedAt
+                                                                ).toLocaleString()}
+                                                            </p>
+                                                        </>
+                                                    ) : (
+                                                        <p className='mt-1.5 text-xs leading-5 text-muted'>
+                                                            Preview and trust the server host key
+                                                            before SSH install or reinstall. New
+                                                            nodes pin automatically at creation;
+                                                            existing nodes need an explicit trust
+                                                            step.
+                                                        </p>
+                                                    )}
+                                                    {!hostKeyIssue && trustHostKeyMessage && (
+                                                        <p className='mt-1.5 text-xs leading-5 text-success'>
+                                                            {trustHostKeyMessage}
+                                                        </p>
+                                                    )}
+                                                    {!hostKeyIssue && trustHostKeyError && (
+                                                        <div className='mt-2'>
+                                                            <FormError
+                                                                message={trustHostKeyError}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <Button
+                                                    className='shrink-0'
+                                                    isDisabled={
+                                                        trustingHostKey || trustPreviewLoading
+                                                    }
+                                                    size='sm'
+                                                    variant='secondary'
+                                                    onPress={() => void openTrustHostKeyDialog()}
+                                                >
+                                                    {trustPreviewLoading
+                                                        ? 'Loading key…'
+                                                        : trustingHostKey
+                                                          ? 'Trusting…'
+                                                          : node.sshHostKey
+                                                            ? 'Review and trust'
+                                                            : 'Preview and trust'}
+                                                </Button>
+                                            </div>
+                                        </div>
+
                                         <div className='flex flex-col-reverse gap-3 border-t border-border py-5 sm:flex-row sm:items-center sm:justify-between'>
                                             <p className='text-xs leading-5 text-muted'>
                                                 Reinstallation replaces the agent binary and
@@ -2120,6 +2307,65 @@ systemctl status goveto-edge-agent`}
                     void reinstall();
                 }}
                 onOpenChange={setReinstallConfirmOpen}
+            />
+
+            <ConfirmDialog
+                confirmLabel='Trust this host key'
+                description={
+                    trustPreviewLoading ? (
+                        <p className='text-sm text-muted'>
+                            Fetching the host key currently presented by the server…
+                        </p>
+                    ) : trustPreview ? (
+                        <div className='space-y-3 text-sm'>
+                            <p>
+                                Verify this fingerprint on the server out of band before trusting
+                                it. After you confirm, the control plane pins this key for future
+                                SSH connections.
+                            </p>
+                            <div className='rounded-xl border border-border bg-surface-secondary/40 px-3 py-2'>
+                                <div className='text-xs font-medium text-muted'>
+                                    Presented host key
+                                    {trustPreview.keyType ? ` · ${trustPreview.keyType}` : ''}
+                                </div>
+                                <div className='mt-1 break-all font-mono text-xs'>
+                                    {trustPreview.fingerprintSha256}
+                                </div>
+                                {trustPreview.pinnedFingerprintSha256 && (
+                                    <div className='mt-2 text-xs text-muted'>
+                                        Currently pinned:{' '}
+                                        <span className='break-all font-mono'>
+                                            {trustPreview.pinnedFingerprintSha256}
+                                        </span>
+                                        {trustPreview.matchesPin ? ' (unchanged)' : ' (different)'}
+                                    </div>
+                                )}
+                            </div>
+                            <p className='text-xs text-muted'>
+                                Example check:{' '}
+                                <span className='font-mono'>
+                                    ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+                                </span>
+                            </p>
+                        </div>
+                    ) : (
+                        <p className='text-sm text-muted'>Host key preview is unavailable.</p>
+                    )
+                }
+                isOpen={trustConfirmOpen}
+                loading={trustingHostKey || trustPreviewLoading}
+                title='Trust SSH host key?'
+                onConfirm={() => {
+                    if (!trustPreview || trustPreviewLoading || trustingHostKey) return;
+                    void trustHostKey();
+                }}
+                onOpenChange={(open) => {
+                    setTrustConfirmOpen(open);
+                    if (!open) {
+                        setTrustPreview(null);
+                        setTrustPreviewLoading(false);
+                    }
+                }}
             />
         </div>
     );

@@ -4583,6 +4583,88 @@ paths:
                                             - ok
                                     data:
                                         $ref: '#/components/schemas/types_Node'
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/ssh-host-key/preview:
+        post:
+            operationId: previewSSHHostKey
+            summary: Preview node SSH host key
+            description: Connect to the node and return the currently presented SSH host key without pinning it.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - credentialManage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_NodeSSHHostKeyPreview'
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/ssh-host-key/trust:
+        post:
+            operationId: trustSSHHostKey
+            summary: Re-trust node SSH host key
+            description: Connect to the node, pin the currently presented SSH host key and return it for verification.
+            tags:
+                - nodes
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - credentialManage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_NodeSSHHostKey'
     /api/v1/clusters/{cluster_id}/nodes/test-connection:
         post:
             operationId: testConnection
@@ -4630,6 +4712,10 @@ paths:
                                         type: object
                                         properties:
                                             architecture:
+                                                type: string
+                                            host_key_fingerprint:
+                                                type: string
+                                            host_key_type:
                                                 type: string
                                             ok:
                                                 type: boolean
@@ -11341,6 +11427,8 @@ components:
                     type: string
                 sshHost:
                     type: string
+                sshHostKey:
+                    $ref: '#/components/schemas/types_NodeSSHHostKey'
                 sshPort:
                     type: number
                 status:
@@ -11408,6 +11496,23 @@ components:
                 nodeId:
                     type: string
                 regionId:
+                    type: string
+        types_NodeSSHHostKey:
+            type: object
+            properties:
+                fingerprintSha256:
+                    type: string
+                firstSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                keyType:
+                    type: string
+                lastVerifiedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                publicKey:
                     type: string
         types_PublishJob:
             type: object

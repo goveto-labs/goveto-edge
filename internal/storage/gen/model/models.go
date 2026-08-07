@@ -357,6 +357,7 @@ type Node struct {
 	CacheConfig        *NodeCacheConfig         `db:"-" json:"cacheConfig,omitempty"`
 	HardwareProfile    *NodeHardwareProfile     `db:"-" json:"hardwareProfile,omitempty"`
 	Credential         *NodeCredential          `db:"-" json:"credential,omitempty"`
+	SshHostKey         *NodeSSHHostKey          `db:"-" json:"sshHostKey,omitempty"`
 	AgentTasks         []*AgentTask             `db:"-" json:"agentTasks,omitempty"`
 	InstallJobs        []*InstallJob            `db:"-" json:"installJobs,omitempty"`
 	SshCredential      *SSHCredential           `db:"-" json:"sshCredential,omitempty"`
@@ -434,6 +435,17 @@ type NodeRegionMembership struct {
 	RegionId string         `db:"region_id" json:"regionId"`
 	Node     *Node          `db:"-" json:"node,omitempty"`
 	Region   *ClusterRegion `db:"-" json:"region,omitempty"`
+}
+
+// NodeSSHHostKey represents the NodeSSHHostKey model.
+type NodeSSHHostKey struct {
+	NodeId            string    `db:"node_id" json:"nodeId"`
+	KeyType           string    `db:"key_type" json:"keyType"`
+	PublicKey         string    `db:"public_key" json:"publicKey"`
+	FingerprintSha256 string    `db:"fingerprint_sha256" json:"fingerprintSha256"`
+	FirstSeenAt       time.Time `db:"first_seen_at" json:"firstSeenAt"`
+	LastVerifiedAt    time.Time `db:"last_verified_at" json:"lastVerifiedAt"`
+	Node              *Node     `db:"-" json:"node,omitempty"`
 }
 
 // NodeSiteConfigVersion represents the NodeSiteConfigVersion model.

@@ -117,6 +117,10 @@ export default function CreateNode() {
     const [sshTestAttemptFingerprint, setSSHTestAttemptFingerprint] = useState('');
     const [sshTestMessage, setSSHTestMessage] = useState('');
     const [sshTestError, setSSHTestError] = useState('');
+    const [sshTestHostKey, setSSHTestHostKey] = useState<{
+        type: string;
+        fingerprint: string;
+    } | null>(null);
     const sshPayload = useMemo<NodeSSH>(
         () => ({
             entry_ip: sshIp.trim(),
@@ -246,11 +250,20 @@ export default function CreateNode() {
         setSSHTestAttemptFingerprint(fingerprint);
         setSSHTestMessage('');
         setSSHTestError('');
+        setSSHTestHostKey(null);
         try {
             const result = await nodeApi.testConnection(sshPayload);
             if (fingerprint !== sshFingerprintRef.current) return;
             setTestedSSHFingerprint(fingerprint);
             setSSHTestMessage(`Connected successfully · ${result.architecture}`);
+            setSSHTestHostKey(
+                result.host_key_fingerprint
+                    ? {
+                          type: result.host_key_type || '',
+                          fingerprint: result.host_key_fingerprint,
+                      }
+                    : null
+            );
         } catch (testError) {
             setTestedSSHFingerprint('');
             setSSHTestError(
@@ -525,6 +538,29 @@ export default function CreateNode() {
                                                     </span>
                                                 )}
                                             </div>
+                                            {sshConnectionVerified && sshTestHostKey && (
+                                                <div className='mt-3 rounded-xl border border-border bg-surface-secondary/30 px-4 py-3'>
+                                                    <div className='text-xs font-medium text-muted'>
+                                                        Server host key
+                                                        {sshTestHostKey.type
+                                                            ? ` · ${sshTestHostKey.type}`
+                                                            : ''}
+                                                    </div>
+                                                    <div className='mt-1 break-all font-mono text-xs'>
+                                                        {sshTestHostKey.fingerprint}
+                                                    </div>
+                                                    <p className='mt-1.5 text-xs leading-5 text-muted'>
+                                                        Verify this fingerprint on the server before
+                                                        creating the node, for example with{' '}
+                                                        <span className='font-mono'>
+                                                            ssh-keygen -lf
+                                                            /etc/ssh/ssh_host_ed25519_key.pub
+                                                        </span>
+                                                        . It is pinned on first install and checked
+                                                        on every connection.
+                                                    </p>
+                                                </div>
+                                            )}
                                             {sshTestAttemptFingerprint === sshFingerprint &&
                                                 sshTestError && (
                                                     <div className='mt-3'>

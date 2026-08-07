@@ -52,6 +52,7 @@ type NodeQuery struct {
 	CacheConfig        nodeCacheConfigRelation
 	HardwareProfile    nodeHardwareProfileRelation
 	Credential         nodeCredentialRelation
+	SshHostKey         nodeSshHostKeyRelation
 	AgentTasks         nodeAgentTasksRelation
 	InstallJobs        nodeInstallJobsRelation
 	SshCredential      nodeSshCredentialRelation
@@ -95,6 +96,7 @@ var Node = NodeQuery{
 	CacheConfig:        nodeCacheConfigRelation{},
 	HardwareProfile:    nodeHardwareProfileRelation{},
 	Credential:         nodeCredentialRelation{},
+	SshHostKey:         nodeSshHostKeyRelation{},
 	AgentTasks:         nodeAgentTasksRelation{},
 	InstallJobs:        nodeInstallJobsRelation{},
 	SshCredential:      nodeSshCredentialRelation{},
@@ -1029,6 +1031,14 @@ func (nodeCredentialRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "credential"}
 }
 
+// SshHostKeyRelation provides relation query helpers for sshHostKey.
+type nodeSshHostKeyRelation struct{}
+
+// Fetch creates an include clause to fetch related sshHostKey.
+func (nodeSshHostKeyRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "sshHostKey"}
+}
+
 // AgentTasksRelation provides relation query helpers for agentTasks.
 type nodeAgentTasksRelation struct{}
 
@@ -1115,6 +1125,7 @@ type NodeCreateInput struct {
 	CacheConfig        *NodeCacheConfigCreateNestedInput
 	HardwareProfile    *NodeHardwareProfileCreateNestedInput
 	Credential         *NodeCredentialCreateNestedInput
+	SshHostKey         *NodeSSHHostKeyCreateNestedInput
 	AgentTasks         *AgentTaskCreateNestedInput
 	InstallJobs        *InstallJobCreateNestedInput
 	SshCredential      *SSHCredentialCreateNestedInput

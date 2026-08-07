@@ -45,6 +45,8 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/enable", enableNode(db, dnsService), authn.RequireAuth, nodeManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/disable", disableNode(db, gateway, dnsService), authn.RequireAuth, nodeManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", revokeNodeCredential(db, gateway, dnsService), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/preview", previewSSHHostKey(db, cipher), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/trust", trustSSHHostKey(db, cipher), authn.RequireAuth, credentialManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher, authority, gateway), authn.RequireAuth, credentialManage)
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, credentialManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, nodeManage)
@@ -59,8 +61,10 @@ type testConnectionRequest struct {
 }
 
 type testConnectionResponse struct {
-	OK           bool   `json:"ok"`
-	Architecture string `json:"architecture"`
+	OK                 bool   `json:"ok"`
+	Architecture       string `json:"architecture"`
+	HostKeyType        string `json:"host_key_type"`
+	HostKeyFingerprint string `json:"host_key_fingerprint"`
 }
 
 type reinstallRequest struct {
@@ -83,14 +87,16 @@ func testConnection(db *client.Client, cipher *nodedomain.CredentialCipher) echo
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		architecture, err := nodedomain.TestSSHConnection(c.Request().Context(), sshInput)
+		capture, captured := nodedomain.CaptureHostKey()
+		architecture, err := nodedomain.TestSSHConnection(c.Request().Context(), sshInput, capture)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
 		}
-		return types.JSON(c, http.StatusOK, testConnectionResponse{
-			OK:           true,
-			Architecture: architecture,
-		})
+		response := testConnectionResponse{OK: true, Architecture: architecture}
+		if hostKey := captured(); hostKey != nil {
+			response.HostKeyType, response.HostKeyFingerprint = nodedomain.SSHHostKeySummary(hostKey)
+		}
+		return types.JSON(c, http.StatusOK, response)
 	}
 }
 
@@ -127,7 +133,17 @@ func reinstall(
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		if _, err := nodedomain.TestSSHConnection(ctx, sshInput); err != nil {
+		verifier, err := nodedomain.PinnedHostKeyVerifier(ctx, db, node.Id)
+		if err != nil {
+			if mapped := mapHostKeyAPIError(err); mapped != nil {
+				return mapped
+			}
+			return err
+		}
+		if _, err := nodedomain.TestSSHConnection(ctx, sshInput, verifier); err != nil {
+			if mapped := mapHostKeyAPIError(err); mapped != nil {
+				return mapped
+			}
 			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
 		}
 		credential, err := db.NodeCredential.FindUnique(
@@ -244,8 +260,13 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		if _, err := nodedomain.TestSSHConnection(ctx, sshInput); err != nil {
+		capture, captured := nodedomain.CaptureHostKey()
+		if _, err := nodedomain.TestSSHConnection(ctx, sshInput, capture); err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: "+err.Error())
+		}
+		hostKey := captured()
+		if hostKey == nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "SSH connection test failed: server presented no host key")
 		}
 
 		nodeID := uuid.NewString()
@@ -274,6 +295,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 			}
 
 			if _, err := tx.Node.Create().Set(sets...).Do(ctx); err != nil {
+				return err
+			}
+			if _, err := nodedomain.PinHostKey(ctx, tx, nodeID, hostKey); err != nil {
 				return err
 			}
 			if _, err := tx.NodeCacheConfig.Create().
