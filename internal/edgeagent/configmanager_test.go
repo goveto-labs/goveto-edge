@@ -387,11 +387,6 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 	config.OriginPolicy = edgeprotocol.OriginPolicyConfig{
 		TimeoutMS: 17000,
 		Headers:   map[string][]string{"X-Origin-Token": {"secret"}},
-		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
-			Enabled: true, Method: "HEAD", Host: "health.internal",
-			Headers: map[string][]string{"X-Health": {"probe"}}, ExpectedStatus: 204,
-			ExpectedBody: "ready", IntervalMS: 4000, TimeoutMS: 1200, Passes: 3, Fails: 4,
-		},
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 45000, MaxFails: 5,
 			UnhealthyStatus: []int{500, 503}, UnhealthyLatencyMS: 2500, UnhealthyRequestCount: 64,
@@ -427,9 +422,9 @@ func TestRenderCaddyConfigMapsOriginGovernance(t *testing.T) {
 			t.Fatalf("missing origin governance setting %s in %s", expected, raw)
 		}
 	}
-	for _, forbidden := range []string{`"active":`, `"unhealthy_request_count"`} {
+	for _, forbidden := range []string{`"active":`, `"unhealthy_request_count":`} {
 		if strings.Contains(raw, forbidden) {
-			t.Fatalf("response- or probe-based health setting %s must not be rendered in %s", forbidden, raw)
+			t.Fatalf("probe-based health setting %s must not be rendered in %s", forbidden, raw)
 		}
 	}
 	if !strings.Contains(raw, `"method":["GET","HEAD","PUT","DELETE","OPTIONS","TRACE"]`) || strings.Contains(raw, `"method":["GET","HEAD","POST"`) {
@@ -522,7 +517,6 @@ func TestApplySiteUsesPerOriginHostHeaders(t *testing.T) {
 		},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
 			TimeoutMS:     2000,
-			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 		},
 	}

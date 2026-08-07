@@ -8557,33 +8557,6 @@ components:
                     type: boolean
                 tls_min_version:
                     type: string
-        edgeprotocol_OriginActiveHealthConfig:
-            type: object
-            properties:
-                enabled:
-                    type: boolean
-                expected_body:
-                    type: string
-                expected_status:
-                    type: number
-                fails:
-                    type: number
-                headers:
-                    type: object
-                    additionalProperties:
-                        type: array
-                        items:
-                            type: string
-                host:
-                    type: string
-                interval_ms:
-                    type: number
-                method:
-                    type: string
-                passes:
-                    type: number
-                timeout_ms:
-                    type: number
         edgeprotocol_OriginPassiveHealthConfig:
             type: object
             properties:
@@ -8604,8 +8577,6 @@ components:
         edgeprotocol_OriginPolicyConfig:
             type: object
             properties:
-                active_health:
-                    $ref: '#/components/schemas/edgeprotocol_OriginActiveHealthConfig'
                 headers:
                     type: object
                     additionalProperties:

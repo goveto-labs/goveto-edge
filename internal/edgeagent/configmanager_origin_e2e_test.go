@@ -51,7 +51,6 @@ func TestAgentHTTPSOriginUsesSNIPrivateCAAndMTLS(t *testing.T) {
 		Origins:  []OriginConfig{{Protocol: "https", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
 			TimeoutMS:     2000,
-			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Transport: edgeprotocol.OriginTransportConfig{
 				DialTimeoutMS: 500, TLSHandshakeTimeoutMS: 500, ResponseHeaderTimeoutMS: 1000,
@@ -101,11 +100,7 @@ func TestAgentDoesNotProbeOrigins(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS: 2000,
-		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{
-			Enabled: true, Method: http.MethodHead, ExpectedStatus: http.StatusNoContent,
-			IntervalMS: 20, TimeoutMS: 100, Passes: 1, Fails: 1,
-		},
+		TimeoutMS:     2000,
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 	})
 	defer manager.Stop()
@@ -137,8 +132,7 @@ func TestAgentHTTPResponsesDoNotTripPassiveHealth(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS:    2000,
-		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
+		TimeoutMS: 2000,
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 200, MaxFails: 1, UnhealthyStatus: []int{503},
 		},
@@ -183,8 +177,7 @@ func TestAgentConfiguredStatusFailsOverAndRecovers(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS:    2000,
-		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
+		TimeoutMS: 2000,
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 150, MaxFails: 1, UnhealthyStatus: []int{502, 503, 504},
 		},
@@ -330,8 +323,7 @@ func TestAgentRemovesConfiguredSlowOrigin(t *testing.T) {
 	defer backup.Close()
 
 	manager, port := applyOriginGovernanceSite(t, primary, backup, edgeprotocol.OriginPolicyConfig{
-		TimeoutMS:    2000,
-		ActiveHealth: edgeprotocol.OriginActiveHealthConfig{Enabled: false},
+		TimeoutMS: 2000,
 		PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 500, MaxFails: 1, UnhealthyLatencyMS: 20,
 		},
@@ -391,7 +383,6 @@ func TestAgentEnforcesTotalOriginTimeout(t *testing.T) {
 		Origins:  []OriginConfig{{Protocol: "http", Address: origin.Listener.Addr().String(), Weight: 1}},
 		OriginPolicy: edgeprotocol.OriginPolicyConfig{
 			TimeoutMS:     50,
-			ActiveHealth:  edgeprotocol.OriginActiveHealthConfig{Enabled: false},
 			PassiveHealth: edgeprotocol.OriginPassiveHealthConfig{Enabled: false},
 			Retry:         edgeprotocol.OriginRetryConfig{Retries: 1, TryDurationMS: 100, TryIntervalMS: 10},
 		},

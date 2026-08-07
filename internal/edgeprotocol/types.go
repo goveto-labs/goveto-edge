@@ -75,23 +75,9 @@ type OriginConfig struct {
 type OriginPolicyConfig struct {
 	TimeoutMS     int                       `json:"timeout_ms,omitempty"`
 	Headers       map[string][]string       `json:"headers,omitempty"`
-	ActiveHealth  OriginActiveHealthConfig  `json:"active_health"`
 	PassiveHealth OriginPassiveHealthConfig `json:"passive_health"`
 	Transport     OriginTransportConfig     `json:"transport"`
 	Retry         OriginRetryConfig         `json:"retry"`
-}
-
-type OriginActiveHealthConfig struct {
-	Enabled        bool                `json:"enabled"`
-	Method         string              `json:"method,omitempty"`
-	Host           string              `json:"host,omitempty"`
-	Headers        map[string][]string `json:"headers,omitempty"`
-	ExpectedStatus int                 `json:"expected_status,omitempty"`
-	ExpectedBody   string              `json:"expected_body,omitempty"`
-	IntervalMS     int                 `json:"interval_ms,omitempty"`
-	TimeoutMS      int                 `json:"timeout_ms,omitempty"`
-	Passes         int                 `json:"passes,omitempty"`
-	Fails          int                 `json:"fails,omitempty"`
 }
 
 type OriginPassiveHealthConfig struct {
@@ -130,10 +116,6 @@ type OriginRetryConfig struct {
 func DefaultOriginPolicy() OriginPolicyConfig {
 	return OriginPolicyConfig{
 		TimeoutMS: 10000,
-		ActiveHealth: OriginActiveHealthConfig{
-			Enabled: false, Method: "GET", ExpectedStatus: 200,
-			IntervalMS: 30000, TimeoutMS: 5000, Passes: 1, Fails: 2,
-		},
 		PassiveHealth: OriginPassiveHealthConfig{
 			Enabled: true, FailDurationMS: 30000, MaxFails: 3,
 			UnhealthyStatus: []int{http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout},
@@ -220,26 +202,6 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 	if policy.TimeoutMS == 0 {
 		policy.TimeoutMS = defaults.TimeoutMS
 	}
-	if policy.ActiveHealth.Method == "" {
-		policy.ActiveHealth.Method = defaults.ActiveHealth.Method
-	}
-	if policy.ActiveHealth.ExpectedStatus == 0 {
-		policy.ActiveHealth.ExpectedStatus = defaults.ActiveHealth.ExpectedStatus
-	}
-	if policy.ActiveHealth.IntervalMS == 0 {
-		policy.ActiveHealth.IntervalMS = defaults.ActiveHealth.IntervalMS
-	}
-	if policy.ActiveHealth.TimeoutMS == 0 {
-		policy.ActiveHealth.TimeoutMS = defaults.ActiveHealth.TimeoutMS
-	}
-	if policy.ActiveHealth.Passes == 0 {
-		policy.ActiveHealth.Passes = defaults.ActiveHealth.Passes
-	}
-	if policy.ActiveHealth.Fails == 0 {
-		policy.ActiveHealth.Fails = defaults.ActiveHealth.Fails
-	}
-	// Origin availability is learned from real proxied requests only.
-	policy.ActiveHealth.Enabled = false
 	if policy.PassiveHealth.FailDurationMS == 0 {
 		policy.PassiveHealth.FailDurationMS = defaults.PassiveHealth.FailDurationMS
 	}
@@ -277,7 +239,7 @@ func NormalizeOriginPolicy(policy OriginPolicyConfig) OriginPolicyConfig {
 }
 
 func ValidateOriginPolicy(policy OriginPolicyConfig) error {
-	if policy.TimeoutMS < 1 || policy.ActiveHealth.IntervalMS < 0 || policy.ActiveHealth.TimeoutMS < 0 ||
+	if policy.TimeoutMS < 1 ||
 		policy.PassiveHealth.FailDurationMS < 0 || policy.PassiveHealth.UnhealthyLatencyMS < 0 ||
 		policy.Transport.DialTimeoutMS < 0 || policy.Transport.TLSHandshakeTimeoutMS < 0 ||
 		policy.Transport.ResponseHeaderTimeoutMS < 0 || policy.Transport.ReadTimeoutMS < 0 ||
@@ -289,18 +251,6 @@ func ValidateOriginPolicy(policy OriginPolicyConfig) error {
 	}
 	if policy.Transport.MaxConnsPerHost > 0 && policy.Transport.KeepAliveMaxIdleConnsPerHost > policy.Transport.MaxConnsPerHost {
 		return errors.New("origin keep-alive idle connections per host must not exceed max connections per host")
-	}
-	if policy.ActiveHealth.Enabled {
-		method := strings.ToUpper(policy.ActiveHealth.Method)
-		if method == "" || !httpguts.ValidHeaderFieldName(method) {
-			return errors.New("invalid active health check method")
-		}
-		if policy.ActiveHealth.ExpectedStatus < http.StatusContinue || policy.ActiveHealth.ExpectedStatus > 599 {
-			return errors.New("invalid active health expected status")
-		}
-		if policy.ActiveHealth.Passes < 1 || policy.ActiveHealth.Fails < 1 {
-			return errors.New("active health passes and fails must be positive")
-		}
 	}
 	if policy.PassiveHealth.Enabled && policy.PassiveHealth.MaxFails < 1 {
 		return errors.New("passive health max_fails must be positive")
@@ -319,7 +269,7 @@ func ValidateOriginPolicy(policy OriginPolicyConfig) error {
 	if policy.Transport.MTLSConfigured && policy.Transport.TLSClientCertificatePEM == "" {
 		return errors.New("origin mTLS is marked configured but no certificate was supplied")
 	}
-	for name, values := range mergeHeaders(policy.Headers, policy.ActiveHealth.Headers) {
+	for name, values := range policy.Headers {
 		if !httpguts.ValidHeaderFieldName(name) {
 			return fmt.Errorf("invalid origin header name %q", name)
 		}
@@ -330,16 +280,6 @@ func ValidateOriginPolicy(policy OriginPolicyConfig) error {
 		}
 	}
 	return nil
-}
-
-func mergeHeaders(groups ...map[string][]string) map[string][]string {
-	merged := map[string][]string{}
-	for _, group := range groups {
-		for name, values := range group {
-			merged[name] = values
-		}
-	}
-	return merged
 }
 
 type LogRecord struct {

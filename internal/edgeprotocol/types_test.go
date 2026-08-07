@@ -91,7 +91,6 @@ func TestSiteConfigValidateMixedOrigins(t *testing.T) {
 func TestParseOriginPolicyUsesGovernanceAsSingleSource(t *testing.T) {
 	governance := json.RawMessage(`{
 		"timeout_ms":1,
-		"active_health":{"enabled":true,"method":"HEAD","expected_status":204,"fails":4},
 		"passive_health":{"enabled":true,"max_fails":5},
 		"transport":{"ip_version":"ipv4","tls_server_name":"origin.internal"},
 		"retry":{"retries":4,"try_duration_ms":8000,"try_interval_ms":400}
@@ -103,13 +102,7 @@ func TestParseOriginPolicyUsesGovernanceAsSingleSource(t *testing.T) {
 	if policy.TimeoutMS != 1 || len(policy.Headers) != 0 {
 		t.Fatalf("governance was not decoded directly: %#v", policy)
 	}
-	if policy.ActiveHealth.Method != "HEAD" || policy.ActiveHealth.ExpectedStatus != 204 || policy.ActiveHealth.Fails != 4 {
-		t.Fatalf("active health policy lost: %#v", policy.ActiveHealth)
-	}
-	if policy.ActiveHealth.Enabled {
-		t.Fatal("decoded active health probing must be disabled")
-	}
-	if policy.ActiveHealth.IntervalMS != 30000 || policy.PassiveHealth.FailDurationMS != 30000 {
+	if policy.PassiveHealth.FailDurationMS != 30000 {
 		t.Fatalf("missing governance defaults: %#v", policy)
 	}
 	if policy.Transport.IPVersion != "ipv4" || policy.Transport.TLSServerName != "origin.internal" || policy.Retry.Retries != 4 {
@@ -137,9 +130,6 @@ func TestValidateOriginPolicyRejectsUnsafeValues(t *testing.T) {
 
 func TestDefaultOriginPolicyUsesResponseStatusFailover(t *testing.T) {
 	policy := DefaultOriginPolicy()
-	if policy.ActiveHealth.Enabled {
-		t.Fatal("active origin probing must be disabled by default")
-	}
 	if !policy.PassiveHealth.Enabled {
 		t.Fatal("passive health must remain enabled")
 	}
@@ -171,14 +161,13 @@ func TestNormalizeAndValidateOriginConnectionPool(t *testing.T) {
 
 func TestNormalizeOriginPolicyPreservesResponseBasedHealthFailures(t *testing.T) {
 	policy := DefaultOriginPolicy()
-	policy.ActiveHealth.Enabled = true
 	policy.PassiveHealth.UnhealthyStatus = []int{404, 500, 503}
 	policy.PassiveHealth.UnhealthyLatencyMS = 2500
 	policy.PassiveHealth.UnhealthyRequestCount = 64
 	policy = NormalizeOriginPolicy(policy)
-	if policy.ActiveHealth.Enabled || !reflect.DeepEqual(policy.PassiveHealth.UnhealthyStatus, []int{404, 500, 503}) ||
+	if !reflect.DeepEqual(policy.PassiveHealth.UnhealthyStatus, []int{404, 500, 503}) ||
 		policy.PassiveHealth.UnhealthyLatencyMS != 2500 || policy.PassiveHealth.UnhealthyRequestCount != 64 {
-		t.Fatalf("response health did not survive normalization: %#v", policy)
+		t.Fatalf("response health did not survive normalization: %#v", policy.PassiveHealth)
 	}
 }
 
