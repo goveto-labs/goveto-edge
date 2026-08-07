@@ -105,7 +105,6 @@ func asMap(value any) map[string]any {
 
 func benchmarkCachePolicies() (cachepolicy.CachePolicy, cachepolicy.CachePolicy, error) {
 	standard := cachepolicy.DefaultCachePolicy()
-	standard.Enabled = true
 	standard.AllowPurgeMethod = true
 	standard.Stale.IfErrorSeconds = 3600
 	standard.Stale.WhileRevalidateSeconds = 30

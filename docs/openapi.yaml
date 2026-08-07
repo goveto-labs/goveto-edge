@@ -269,6 +269,52 @@ paths:
                                                 type: boolean
                                             totp_required:
                                                 type: boolean
+    /api/v1/auth/methods:
+        get:
+            operationId: authMethods
+            summary: get /api/v1/auth/methods
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - Limit
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: object
+                                        properties:
+                                            local_login_enabled:
+                                                type: boolean
+                                            providers:
+                                                type: array
+                                                items:
+                                                    type: object
+                                                    properties:
+                                                        enabled:
+                                                            type: boolean
+                                                        id:
+                                                            type: string
+                                                        provider_name:
+                                                            type: string
+                                                        start_url:
+                                                            type: string
+                                                        type:
+                                                            type: string
     /api/v1/auth/password:
         put:
             operationId: changePassword
@@ -378,6 +424,63 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             token:
                                                 type: string
+    /api/v1/auth/providers/callback:
+        get:
+            operationId: externalAuthCallback
+            summary: get /api/v1/auth/providers/callback
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - Limit
+            parameters:
+                - name: error
+                  in: query
+                  schema:
+                    type: string
+                - name: state
+                  in: query
+                  schema:
+                    type: string
+                - name: code
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "302":
+                    description: Redirect to the control-plane UI after completing single sign-on.
+    /api/v1/auth/providers/{provider_id}/start:
+        get:
+            operationId: externalAuthStart
+            summary: get /api/v1/auth/providers/{provider_id}/start
+            tags:
+                - auth
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - Limit
+            parameters:
+                - name: provider_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: return_to
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "302":
+                    description: Redirect to the identity provider authorization URL.
     /api/v1/auth/register:
         post:
             operationId: register
@@ -2966,6 +3069,196 @@ paths:
                                             - ok
                                     data:
                                         $ref: '#/components/schemas/types_DNSJob'
+    /api/v1/clusters/{cluster_id}/dns/zones:
+        get:
+            operationId: listZones
+            summary: List DNS zones
+            description: List all configured DNS provider zones for the cluster.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_DNSZone'
+        post:
+            operationId: createZone
+            summary: Create ACME DNS zone
+            description: Add an additional DNS provider zone used for ACME DNS-01 challenges.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - credentials
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                credentials:
+                                    type: object
+                                    additionalProperties:
+                                        type: string
+                                enabled:
+                                    type: boolean
+                                provider:
+                                    $ref: '#/components/schemas/model_DNSProviderType'
+                                zone:
+                                    type: string
+                                zone_id:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSZone'
+    /api/v1/clusters/{cluster_id}/dns/zones/{zone_config_id}:
+        put:
+            operationId: updateZone
+            summary: Update DNS zone
+            description: Update credentials or enabled state for an ACME DNS zone.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - credentials
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: zone_config_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                credentials:
+                                    type: object
+                                    additionalProperties:
+                                        type: string
+                                enabled:
+                                    type: boolean
+                                provider:
+                                    $ref: '#/components/schemas/model_DNSProviderType'
+                                zone:
+                                    type: string
+                                zone_id:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/types_DNSZone'
+        delete:
+            operationId: deleteZone
+            summary: Delete DNS zone
+            description: Remove an ACME DNS zone. Endpoint zones must be deleted via DELETE /dns.
+            tags:
+                - dns
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - credentials
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: zone_config_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
     /api/v1/clusters/{cluster_id}/groups:
         get:
             operationId: listGroups
@@ -3099,6 +3392,51 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/jobs_Job'
+    /api/v1/clusters/{cluster_id}/jobs/{kind}/{job_id}:
+        get:
+            operationId: detail
+            summary: get /api/v1/clusters/{cluster_id}/jobs/{kind}/{job_id}
+            tags:
+                - clusters-jobs
+            security:
+                - cookie_session: []
+            x-middlewares:
+                - Middleware
+                - Session
+                - RequireActiveUser
+                - RequireTOTPEnrollment
+                - RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: job_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: kind
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                        enum:
+                                            - ok
+                                    data:
+                                        $ref: '#/components/schemas/jobs_Job'
     /api/v1/clusters/{cluster_id}/jobs/{kind}/{job_id}/cancel:
         post:
             operationId: mutate
@@ -8959,6 +9297,8 @@ components:
                     type: string
                 zoneId:
                     type: string
+        model_DNSProviderKind:
+            type: string
         model_DNSProviderType:
             type: string
         model_DNSRecordStatus:
@@ -10926,6 +11266,35 @@ components:
                 type:
                     $ref: '#/components/schemas/model_DNSRecordType'
                 value:
+                    type: string
+        types_DNSZone:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credentials_configured:
+                    type: boolean
+                default_ttl:
+                    type: number
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                kind:
+                    $ref: '#/components/schemas/model_DNSProviderKind'
+                proxied:
+                    type: boolean
+                type:
+                    $ref: '#/components/schemas/model_DNSProviderType'
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                zone:
+                    type: string
+                zone_id:
                     type: string
         types_Node:
             type: object
