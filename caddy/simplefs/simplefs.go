@@ -980,7 +980,20 @@ func applyCachedRange(response *http.Response, requested cacherange.Spec) error 
 	if !ok {
 		return nil
 	}
-	if requested.Start >= total {
+	start := requested.Start
+	end := requested.End
+	if requested.SuffixLength > 0 {
+		// Suffix range (bytes=-N) resolves against the total length: the
+		// final SuffixLength bytes, or the entire representation when it is
+		// smaller than the requested suffix.
+		if requested.SuffixLength >= total {
+			start = 0
+		} else {
+			start = total - requested.SuffixLength
+		}
+		end = total - 1
+	}
+	if start >= total {
 		_ = response.Body.Close()
 		response.Body = http.NoBody
 		response.StatusCode = http.StatusRequestedRangeNotSatisfiable
@@ -991,12 +1004,12 @@ func applyCachedRange(response *http.Response, requested cacherange.Spec) error 
 		response.Header.Set("Content-Length", "0")
 		return nil
 	}
-	end := min(requested.End, total-1)
-	if requested.Start < bodyStart || requested.Start > bodyEnd || end > bodyEnd {
+	end = min(end, total-1)
+	if start < bodyStart || start > bodyEnd || end > bodyEnd {
 		return nil
 	}
-	length := end - requested.Start + 1
-	skip := requested.Start - bodyStart
+	length := end - start + 1
+	skip := start - bodyStart
 	if pooled, ok := response.Body.(*pooledResponseBody); ok && pooled.object != nil {
 		if err := pooled.seekBody(skip); err != nil {
 			return err
@@ -1008,7 +1021,7 @@ func applyCachedRange(response *http.Response, requested cacherange.Spec) error 
 	response.Status = "206 Partial Content"
 	response.ContentLength = int64(length)
 	response.Header.Set("Accept-Ranges", "bytes")
-	response.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", requested.Start, end, total))
+	response.Header.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, total))
 	response.Header.Set("Content-Length", strconv.FormatUint(length, 10))
 	return nil
 }

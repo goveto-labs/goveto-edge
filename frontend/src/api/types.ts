@@ -709,6 +709,14 @@ export interface CachePolicy {
     cache_key?: {
         parts?: Array<'METHOD' | 'SCHEME' | 'HOST' | 'PATH' | 'QUERY'>;
         headers?: string[];
+        /** Omitted defaults to true server-side; only explicit false disables sorting. */
+        query?: {
+            normalize?: boolean;
+            include?: string[];
+            exclude?: string[];
+        };
+        /** Cookie names in the key. Avoid session cookies — one object per value. */
+        cookies?: string[];
         hash?: boolean;
         hide?: boolean;
     };

@@ -369,12 +369,12 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		beforeSuffix := counters.count("GET /video ")
 		for range 2 {
 			suffix := requestEdge(t, port, config.Domains[0], http.MethodGet, "/video", http.Header{"Range": {"bytes=-100"}})
-			if suffix.body != string(video[len(video)-100:]) || suffix.header.Get("X-Cache") != "" {
-				t.Fatalf("suffix range bypass mismatch: body=%d x-cache=%q", len(suffix.body), suffix.header.Get("X-Cache"))
+			if suffix.body != string(video[len(video)-100:]) || suffix.header.Get("X-Cache") != "HIT" {
+				t.Fatalf("suffix range was not served from cache: body=%d x-cache=%q", len(suffix.body), suffix.header.Get("X-Cache"))
 			}
 		}
-		if got := counters.count("GET /video "); got != beforeSuffix+2 {
-			t.Fatalf("suffix ranges should bypass cache: origins=%d want=%d", got, beforeSuffix+2)
+		if got := counters.count("GET /video "); got != beforeSuffix {
+			t.Fatalf("suffix ranges should be served from cache: origins=%d want=%d", got, beforeSuffix)
 		}
 
 		beforeInvalid := counters.count("GET /video ")

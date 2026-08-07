@@ -23,7 +23,57 @@ func TestCacheKeyIsUnambiguousAndPreservesRawQuery(t *testing.T) {
 	first := &http.Request{Method: "GET", Host: "example.test", URL: &url.URL{Path: "/a", RawQuery: "a=1&b=2"}, Header: http.Header{"X-Key": {"bc"}}}
 	second := &http.Request{Method: "GET", Host: "example.test", URL: &url.URL{Path: "/a", RawQuery: "b=2&a=1"}, Header: http.Header{"X-Key": {"b", "c"}}}
 	if handler.cacheKey(first, nil) == handler.cacheKey(second, nil) {
-		t.Fatal("distinct query order or header value boundaries produced the same key")
+		t.Fatal("distinct header value boundaries produced the same key")
+	}
+}
+
+func TestCacheKeySortsQueryParameters(t *testing.T) {
+	handler := Handler{
+		SiteID: "site", KeyParts: []string{policy.CacheKeyPartQuery}, KeyQueryNormalize: true,
+	}
+	first := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "b=2&a=1"}}
+	second := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "a=1&b=2"}}
+	if handler.cacheKey(first, nil) != handler.cacheKey(second, nil) {
+		t.Fatalf("disordered query strings did not collapse: %q vs %q", handler.cacheKey(first, nil), handler.cacheKey(second, nil))
+	}
+}
+
+func TestCacheKeyQueryExcludeDropsTrackingParameters(t *testing.T) {
+	handler := Handler{
+		SiteID: "site", KeyParts: []string{policy.CacheKeyPartQuery},
+		KeyQueryNormalize: true, KeyQueryExclude: []string{"utm_*"},
+	}
+	clean := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "a=1"}}
+	tracked := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "a=1&utm_source=newsletter"}}
+	if handler.cacheKey(clean, nil) != handler.cacheKey(tracked, nil) {
+		t.Fatalf("utm wildcard exclude did not collapse keys: %q vs %q", handler.cacheKey(clean, nil), handler.cacheKey(tracked, nil))
+	}
+}
+
+func TestCacheKeyQueryIncludeWhitelistsParameters(t *testing.T) {
+	handler := Handler{
+		SiteID: "site", KeyParts: []string{policy.CacheKeyPartQuery},
+		KeyQueryNormalize: true, KeyQueryInclude: []string{"id"},
+	}
+	first := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "id=1&utm_source=x"}}
+	second := &http.Request{Method: "GET", URL: &url.URL{Path: "/a", RawQuery: "id=1"}}
+	if handler.cacheKey(first, nil) != handler.cacheKey(second, nil) {
+		t.Fatalf("include whitelist did not drop unlisted params: %q vs %q", handler.cacheKey(first, nil), handler.cacheKey(second, nil))
+	}
+}
+
+func TestCacheKeyCookiesParticipateWhenConfigured(t *testing.T) {
+	handler := Handler{
+		SiteID: "site", KeyParts: []string{policy.CacheKeyPartPath}, KeyCookies: []string{"session"},
+	}
+	base := &http.Request{Method: "GET", URL: &url.URL{Path: "/a"}, Header: http.Header{"Cookie": {"session=abc; tracking=1"}}}
+	other := &http.Request{Method: "GET", URL: &url.URL{Path: "/a"}, Header: http.Header{"Cookie": {"session=def; tracking=1"}}}
+	none := &http.Request{Method: "GET", URL: &url.URL{Path: "/a"}}
+	if handler.cacheKey(base, nil) == handler.cacheKey(other, nil) {
+		t.Fatal("distinct configured cookie values produced the same key")
+	}
+	if handler.cacheKey(base, nil) == handler.cacheKey(none, nil) {
+		t.Fatal("configured cookie presence did not vary the key")
 	}
 }
 

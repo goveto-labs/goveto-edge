@@ -151,3 +151,81 @@ func TestCachePolicyValidatesOrderedPerRuleTTL(t *testing.T) {
 		t.Fatal("expected duplicate cache rule name")
 	}
 }
+
+func TestCacheKeyQueryNormalizationDefaultsOn(t *testing.T) {
+	policy := DefaultCachePolicy()
+	if !policy.CacheKey.Query.NormalizeEnabled() {
+		t.Fatal("default cache key query normalization must be enabled")
+	}
+	// Missing JSON field (nil pointer) becomes explicit true on validate so
+	// existing site policies opt into sorting unless they set false.
+	legacy := cachePolicyWithCatchAllRule()
+	legacy.CacheKey.Query = QueryKey{}
+	if err := legacy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if legacy.CacheKey.Query.Normalize == nil || !*legacy.CacheKey.Query.Normalize {
+		t.Fatal("NormalizeAndValidate must materialize normalize=true for omitted values")
+	}
+	disabled := cachePolicyWithCatchAllRule()
+	disabled.CacheKey.Query.Normalize = boolPtr(false)
+	if err := disabled.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if disabled.CacheKey.Query.NormalizeEnabled() {
+		t.Fatal("explicit normalize=false must be preserved")
+	}
+}
+
+func TestCacheKeyQueryIncludeAndExcludeAreMutuallyExclusive(t *testing.T) {
+	policy := cachePolicyWithCatchAllRule()
+	policy.CacheKey.Query.Include = []string{"id"}
+	policy.CacheKey.Query.Exclude = []string{"utm_source"}
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected include/exclude mutual exclusion error")
+	}
+}
+
+func TestCacheKeyQueryListsAreLowercasedAndSorted(t *testing.T) {
+	policy := cachePolicyWithCatchAllRule()
+	policy.CacheKey.Query.Exclude = []string{"UTM_Source", "b", "a"}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := policy.CacheKey.Query.Exclude; len(got) != 3 || got[0] != "a" || got[1] != "b" || got[2] != "utm_source" {
+		t.Fatalf("exclude list not normalized: %#v", got)
+	}
+}
+
+func TestCacheKeyQueryRejectsBadNamesAndDuplicates(t *testing.T) {
+	for _, mutate := range []func(*CachePolicy){
+		func(p *CachePolicy) { p.CacheKey.Query.Exclude = []string{"bad name"} },
+		func(p *CachePolicy) { p.CacheKey.Query.Include = []string{"x", "x"} },
+		func(p *CachePolicy) { p.CacheKey.Query.Include = []string{"\""} },
+	} {
+		policy := cachePolicyWithCatchAllRule()
+		mutate(&policy)
+		if err := policy.NormalizeAndValidate(); err == nil {
+			t.Fatalf("expected query list validation error: %#v", policy.CacheKey.Query)
+		}
+	}
+}
+
+func TestCacheKeyCookiesAreSortedAndValidated(t *testing.T) {
+	policy := cachePolicyWithCatchAllRule()
+	policy.CacheKey.Cookies = []string{"session", "ab_test", "session"}
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected duplicate cookie error")
+	}
+	policy.CacheKey.Cookies = []string{"session", "ab_test"}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if got := policy.CacheKey.Cookies; got[0] != "ab_test" || got[1] != "session" {
+		t.Fatalf("cookies not sorted: %#v", got)
+	}
+	policy.CacheKey.Cookies = []string{"bad cookie"}
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected invalid cookie name error")
+	}
+}

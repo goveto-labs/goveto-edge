@@ -44,13 +44,13 @@ func TestMatcherRejectsRangeWhenRangeCachingIsDisabled(t *testing.T) {
 	}
 }
 
-func TestCacheableRangeAcceptsSingleStartRangesOnly(t *testing.T) {
-	for _, value := range []string{"bytes=0-99", "BYTES = 5 - 5"} {
+func TestCacheableRangeAcceptsSingleAndSuffixRanges(t *testing.T) {
+	for _, value := range []string{"bytes=0-99", "BYTES = 5 - 5", "bytes=-100"} {
 		if !cacheableRange(value) {
 			t.Fatalf("range %q should be cacheable", value)
 		}
 	}
-	for _, value := range []string{"bytes=-100", "bytes=100-", "bytes=0-1,3-4", "items=0-1", "bytes=9-1", "bytes=x-1"} {
+	for _, value := range []string{"bytes=100-", "bytes=0-1,3-4", "items=0-1", "bytes=9-1", "bytes=x-1", "bytes=-"} {
 		if cacheableRange(value) {
 			t.Fatalf("range %q should bypass cache", value)
 		}
@@ -71,8 +71,18 @@ func TestMatcherStoresValidatedRangeInRequestContext(t *testing.T) {
 		t.Fatal("validated range did not match")
 	}
 	spec, ok := cacherange.FromContext(request.Context())
-	if !ok || spec.Start != 12 || spec.End != 34 {
+	if !ok || spec.Start != 12 || spec.End != 34 || spec.SuffixLength != 0 {
 		t.Fatalf("cached range = %#v, %v", spec, ok)
+	}
+
+	suffix := httptest.NewRequest(http.MethodGet, "http://example.test/video", nil)
+	suffix.Header.Set("Range", "bytes=-500")
+	if !m.Match(suffix) {
+		t.Fatal("suffix range did not match")
+	}
+	spec, ok = cacherange.FromContext(suffix.Context())
+	if !ok || spec.SuffixLength != 500 || spec.Start != 0 || spec.End != 0 {
+		t.Fatalf("suffix range = %#v, %v", spec, ok)
 	}
 }
 

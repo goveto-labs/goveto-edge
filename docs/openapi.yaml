@@ -10448,6 +10448,11 @@ components:
         policy_CacheKey:
             type: object
             properties:
+                cookies:
+                    type: array
+                    items:
+                        type: string
+                    description: Cookie names whose values participate in the cache key. High-cardinality cookies (for example session identifiers) create one cache object per distinct value and can exhaust cache storage.
                 hash:
                     type: boolean
                 headers:
@@ -10466,6 +10471,24 @@ components:
                             - HOST
                             - PATH
                             - QUERY
+                query:
+                    $ref: '#/components/schemas/policy_QueryKey'
+        policy_QueryKey:
+            type: object
+            properties:
+                normalize:
+                    type: boolean
+                    description: Sort query parameters by name so disordered query strings collapse to one cache entry. Omitted defaults to true; only an explicit false disables sorting.
+                include:
+                    type: array
+                    items:
+                        type: string
+                    description: Whitelist of query parameters that participate in the key; a trailing "*" matches by prefix.
+                exclude:
+                    type: array
+                    items:
+                        type: string
+                    description: Blacklist of query parameters dropped from the key; a trailing "*" matches by prefix (e.g. "utm_*").
         policy_CachePolicy:
             type: object
             properties:

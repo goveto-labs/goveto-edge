@@ -635,6 +635,10 @@ func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
 	}
 	policy.CacheKey.Headers = []string{"Accept-Language"}
 	policy.CacheKey.Hash = true
+	normalizeQuery := true
+	policy.CacheKey.Query.Normalize = &normalizeQuery
+	policy.CacheKey.Query.Exclude = []string{"utm_source"}
+	policy.CacheKey.Cookies = []string{"session", "ab_test"}
 	policy.Rules[0].TTL.OverrideClientTTL = true
 	policy.Rules[0].TTL.ClientSeconds = 60
 	policy.BypassCacheControl = []string{"max-age=0", "no-store"}
@@ -650,6 +654,9 @@ func TestCacheConfigRendersAdvancedPolicy(t *testing.T) {
 		`"key_parts":["METHOD","HOST","PATH"]`,
 		`"key_headers":["Accept-Language"]`,
 		`"hash_key":true`,
+		`"key_query_normalize":true`,
+		`"key_query_exclude":["utm_source"]`,
+		`"key_cookies":["ab_test","session"]`,
 		`"override_client_ttl":true`,
 		`"client_ttl":60`,
 		`"bypass_cache_control":["max-age=0","no-store"]`,

@@ -10,7 +10,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +35,10 @@ type Handler struct {
 	MaxDiskUsagePercent     int            `json:"max_disk_usage_percent"`
 	KeyParts                []string       `json:"key_parts"`
 	KeyHeaders              []string       `json:"key_headers,omitempty"`
+	KeyQueryNormalize       bool           `json:"key_query_normalize,omitempty"`
+	KeyQueryInclude         []string       `json:"key_query_include,omitempty"`
+	KeyQueryExclude         []string       `json:"key_query_exclude,omitempty"`
+	KeyCookies              []string       `json:"key_cookies,omitempty"`
 	HashKey                 bool           `json:"hash_key,omitempty"`
 	HideKey                 bool           `json:"hide_key,omitempty"`
 	DefaultTTL              int            `json:"default_ttl"`
@@ -444,7 +450,7 @@ func (h *Handler) cacheKey(request *http.Request, varied http.Header) string {
 		case policy.CacheKeyPartPath:
 			appendField(&key, "path", request.URL.EscapedPath())
 		case policy.CacheKeyPartQuery:
-			appendField(&key, "query", request.URL.RawQuery)
+			appendField(&key, "query", normalizeQuery(request.URL.RawQuery, h.KeyQueryNormalize, h.KeyQueryInclude, h.KeyQueryExclude))
 		}
 	}
 	if varied == nil {
@@ -461,6 +467,22 @@ func (h *Handler) cacheKey(request *http.Request, varied http.Header) string {
 		sortStrings(names)
 		for _, name := range names {
 			appendHeaderField(&key, name, varied.Values(name))
+		}
+	}
+	if len(h.KeyCookies) > 0 {
+		cookies := request.Cookies()
+		for _, name := range h.KeyCookies {
+			var values []string
+			for _, cookie := range cookies {
+				if cookie.Name == name {
+					values = append(values, cookie.Value)
+				}
+			}
+			appendField(&key, "cookie", name)
+			for _, value := range values {
+				appendField(&key, "value", value)
+			}
+			appendField(&key, "count", strconv.Itoa(len(values)))
 		}
 	}
 	return key.String()
@@ -481,6 +503,112 @@ func appendHeaderField(target *strings.Builder, name string, values []string) {
 		appendField(target, "value", value)
 	}
 	appendField(target, "count", strconv.Itoa(len(values)))
+}
+
+// normalizeQuery canonicalizes the query component of a cache key. Sorting
+// collapses reordered parameters (?b=2&a=1 ?a=1&b=2) into one entry, and
+// include/exclude lists drop tracking parameters (utm_*) and similar noise.
+// The include/exclude match is case-insensitive and honors a trailing "*"
+// prefix wildcard.
+func normalizeQuery(raw string, sorted bool, include, exclude []string) string {
+	if !sorted && len(include) == 0 && len(exclude) == 0 {
+		return raw
+	}
+	pairs := parseQueryPairs(raw)
+	filter := len(include) > 0 || len(exclude) > 0
+	if filter {
+		var includePatterns, excludePatterns []string
+		for _, name := range include {
+			includePatterns = append(includePatterns, strings.ToLower(name))
+		}
+		for _, name := range exclude {
+			excludePatterns = append(excludePatterns, strings.ToLower(name))
+		}
+		kept := pairs[:0]
+		for _, pair := range pairs {
+			lower := strings.ToLower(pair.key)
+			if len(includePatterns) > 0 {
+				if !matchAnyParam(lower, includePatterns) {
+					continue
+				}
+			} else if matchAnyParam(lower, excludePatterns) {
+				continue
+			}
+			kept = append(kept, pair)
+		}
+		pairs = kept
+	}
+	if !sorted {
+		var builder strings.Builder
+		for i, pair := range pairs {
+			if i > 0 {
+				builder.WriteByte('&')
+			}
+			builder.WriteString(url.QueryEscape(pair.key))
+			builder.WriteByte('=')
+			builder.WriteString(pair.value)
+		}
+		return builder.String()
+	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return pairs[i].key < pairs[j].key
+	})
+	values := make(url.Values, len(pairs))
+	for _, pair := range pairs {
+		values[pair.key] = append(values[pair.key], pair.value)
+	}
+	return values.Encode()
+}
+
+type queryPair struct {
+	key   string
+	value string
+}
+
+func parseQueryPairs(raw string) []queryPair {
+	if raw == "" {
+		return nil
+	}
+	pairs := make([]queryPair, 0, strings.Count(raw, "&")+1)
+	for raw != "" {
+		element := raw
+		if i := strings.IndexByte(raw, '&'); i >= 0 {
+			element = raw[:i]
+			raw = raw[i+1:]
+		} else {
+			raw = ""
+		}
+		if element == "" {
+			continue
+		}
+		key := element
+		value := ""
+		if i := strings.IndexByte(element, '='); i >= 0 {
+			key = element[:i]
+			value = element[i+1:]
+		}
+		if decoded, err := url.QueryUnescape(key); err == nil {
+			key = decoded
+		}
+		if decoded, err := url.QueryUnescape(value); err == nil {
+			value = decoded
+		}
+		pairs = append(pairs, queryPair{key: key, value: value})
+	}
+	return pairs
+}
+
+func matchAnyParam(name string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if strings.HasSuffix(pattern, "*") {
+			if strings.HasPrefix(name, strings.TrimSuffix(pattern, "*")) {
+				return true
+			}
+		} else if name == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 func purgeKey(request *http.Request) string {

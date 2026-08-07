@@ -56,9 +56,38 @@ const (
 type CacheKey struct {
 	Parts   []string `json:"parts"`
 	Headers []string `json:"headers"`
+	Query   QueryKey `json:"query"`
+	Cookies []string `json:"cookies"`
 	Hash    bool     `json:"hash"`
 	Hide    bool     `json:"hide"`
 }
+
+// QueryKey controls how the query component of a cache key is canonicalized.
+// Disordered query strings (e.g. ?b=2&a=1) and tracking parameters
+// (utm_*) otherwise fragment the cache and destroy hit rates.
+type QueryKey struct {
+	// Normalize sorts query parameters by name so that ?b=2&a=1 and
+	// ?a=1&b=2 collapse to a single cache entry.
+	//
+	// nil/omitted means enabled (site-wide default). Only an explicit
+	// false disables sorting. NormalizeAndValidate materializes the
+	// default so saved policies persist the effective value.
+	Normalize *bool `json:"normalize,omitempty"`
+	// Include whitelists the query parameters that participate in the key;
+	// every other parameter is dropped. Mutually exclusive with Exclude.
+	Include []string `json:"include,omitempty"`
+	// Exclude blacklists query parameters that are dropped from the key.
+	// A trailing "*" matches by prefix (e.g. "utm_*" drops utm_source).
+	// Mutually exclusive with Include.
+	Exclude []string `json:"exclude,omitempty"`
+}
+
+// NormalizeEnabled reports whether query-parameter sorting is on. Missing
+// configuration defaults to enabled.
+func (q QueryKey) NormalizeEnabled() bool {
+	return q.Normalize == nil || *q.Normalize
+}
+
 type CacheConditions struct {
 	GroupOperator string                `json:"group_operator"`
 	Groups        []CacheConditionGroup `json:"groups"`
@@ -92,6 +121,7 @@ func DefaultCachePolicy() CachePolicy {
 				CacheKeyPartQuery,
 			},
 			Headers: []string{},
+			Query:   QueryKey{Normalize: boolPtr(true)},
 		},
 		BypassCacheControl: []string{"no-store", "private"},
 		SurrogateKeyHeader: "Surrogate-Key",
@@ -189,6 +219,13 @@ func (p *CachePolicy) NormalizeAndValidate() error {
 	}
 	sort.Strings(normalizedHeaders)
 	p.CacheKey.Headers = normalizedHeaders
+
+	if err := normalizeAndValidateQueryKey(&p.CacheKey.Query); err != nil {
+		return err
+	}
+	if err := normalizeAndValidateCookieNames(&p.CacheKey.Cookies); err != nil {
+		return err
+	}
 
 	seenDirectives := map[string]struct{}{}
 	directivePattern := regexp.MustCompile(`^[a-z][a-z0-9_-]*(?:=[a-z0-9._-]+)?$`)
@@ -330,3 +367,64 @@ func normalizeCacheConditions(conditions *CacheConditions, prefix string) (bool,
 }
 
 func booleanOperator(value string) bool { return value == "AND" || value == "OR" }
+
+var queryParamPattern = regexp.MustCompile(`^[A-Za-z0-9_.\-]+(?:\*)?$`)
+
+func boolPtr(value bool) *bool { return &value }
+
+func normalizeAndValidateQueryKey(query *QueryKey) error {
+	// Site-wide default: sort query params unless the operator explicitly disables it.
+	if query.Normalize == nil {
+		query.Normalize = boolPtr(true)
+	}
+	if len(query.Include) > 0 && len(query.Exclude) > 0 {
+		return errors.New("cache_key.query.include and exclude are mutually exclusive")
+	}
+	normalize := func(values []string) ([]string, error) {
+		seen := map[string]struct{}{}
+		result := make([]string, 0, len(values))
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" || !queryParamPattern.MatchString(value) {
+				return nil, fmt.Errorf("invalid query parameter name %q", value)
+			}
+			lower := strings.ToLower(value)
+			if _, ok := seen[lower]; ok {
+				return nil, fmt.Errorf("duplicate query parameter %q", value)
+			}
+			seen[lower] = struct{}{}
+			result = append(result, lower)
+		}
+		sort.Strings(result)
+		return result, nil
+	}
+	var err error
+	if query.Include, err = normalize(query.Include); err != nil {
+		return fmt.Errorf("cache_key.query.include: %w", err)
+	}
+	if query.Exclude, err = normalize(query.Exclude); err != nil {
+		return fmt.Errorf("cache_key.query.exclude: %w", err)
+	}
+	return nil
+}
+
+var cookieNamePattern = regexp.MustCompile(`^[A-Za-z0-9_!#$%&'*+.^` + "`" + `|~-]+$`)
+
+func normalizeAndValidateCookieNames(cookies *[]string) error {
+	seen := map[string]struct{}{}
+	normalized := make([]string, 0, len(*cookies))
+	for _, name := range *cookies {
+		name = strings.TrimSpace(name)
+		if name == "" || !cookieNamePattern.MatchString(name) {
+			return fmt.Errorf("invalid cache key cookie name %q", name)
+		}
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("duplicate cache key cookie %q", name)
+		}
+		seen[name] = struct{}{}
+		normalized = append(normalized, name)
+	}
+	sort.Strings(normalized)
+	*cookies = normalized
+	return nil
+}

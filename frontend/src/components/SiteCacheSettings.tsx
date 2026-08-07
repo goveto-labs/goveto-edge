@@ -161,34 +161,62 @@ function SettingsCard({
     );
 }
 
+const cookieNamePattern = /^[A-Za-z0-9_!#$%&'*+.^`|~-]+$/;
+
 function EditCacheKeyDialog({
     parts,
     headers,
+    cookies,
+    queryNormalize,
     onClose,
     onConfirm,
 }: {
     parts: CacheKeyPart[];
     headers: string[];
+    cookies: string[];
+    queryNormalize: boolean;
     onClose: () => void;
-    onConfirm: (parts: CacheKeyPart[], headers: string[]) => void;
+    onConfirm: (next: {
+        parts: CacheKeyPart[];
+        headers: string[];
+        cookies: string[];
+        queryNormalize: boolean;
+    }) => void;
 }) {
     const [selectedParts, setSelectedParts] = useState<CacheKeyPart[]>(parts);
     const [selectedHeaders, setSelectedHeaders] = useState<string[]>(headers);
+    const [selectedCookies, setSelectedCookies] = useState<string[]>(cookies);
+    const [normalizeQuery, setNormalizeQuery] = useState(queryNormalize);
     const [headerDraft, setHeaderDraft] = useState('');
+    const [cookieDraft, setCookieDraft] = useState('');
     const normalizedHeader = canonicalHeaderName(headerDraft);
     const headerManaged = normalizedHeader.toLowerCase() === 'accept-encoding';
     const headerValid =
         /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(headerDraft.trim()) &&
         !headerManaged &&
         !selectedHeaders.some((header) => header.toLowerCase() === normalizedHeader.toLowerCase());
+    const cookieName = cookieDraft.trim();
+    const cookieValid =
+        cookieNamePattern.test(cookieName) &&
+        !selectedCookies.some((cookie) => cookie === cookieName);
     const addHeader = () => {
         if (!headerValid) return;
         setSelectedHeaders([...selectedHeaders, normalizedHeader]);
         setHeaderDraft('');
     };
+    const addCookie = () => {
+        if (!cookieValid) return;
+        setSelectedCookies([...selectedCookies, cookieName]);
+        setCookieDraft('');
+    };
     const confirm = () => {
         const orderedParts = cacheKeyPartOrder.filter((part) => selectedParts.includes(part));
-        onConfirm(orderedParts, selectedHeaders);
+        onConfirm({
+            parts: orderedParts,
+            headers: selectedHeaders,
+            cookies: [...selectedCookies].sort((a, b) => a.localeCompare(b)),
+            queryNormalize: normalizeQuery,
+        });
     };
 
     return (
@@ -305,6 +333,77 @@ function EditCacheKeyDialog({
                             </div>
                         ))}
                     </div>
+                )}
+
+                {selectedParts.includes('QUERY') && (
+                    <SettingToggle
+                        description='Sort query parameters by name so ?b=2&a=1 and ?a=1&b=2 share one cache object. On by default for every site unless you turn it off.'
+                        label='Normalize query string'
+                        selected={normalizeQuery}
+                        onChange={setNormalizeQuery}
+                    />
+                )}
+
+                <FormField
+                    error={
+                        cookieDraft && !cookieValid
+                            ? 'Enter a unique cookie name (no spaces).'
+                            : undefined
+                    }
+                    hint='Cookie values are appended to the key. Prefer low-cardinality flags, not session IDs.'
+                    htmlFor='cache-key-cookie-name'
+                    label='Request cookie'
+                >
+                    <div className='flex gap-2'>
+                        <Input
+                            id='cache-key-cookie-name'
+                            placeholder='ab_test'
+                            value={cookieDraft}
+                            variant='secondary'
+                            onChange={(event) => setCookieDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    addCookie();
+                                }
+                            }}
+                        />
+                        <Button isDisabled={!cookieValid} variant='secondary' onPress={addCookie}>
+                            Add cookie
+                        </Button>
+                    </div>
+                </FormField>
+                {selectedCookies.length > 0 && (
+                    <>
+                        <div className='rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-warning'>
+                            Each distinct cookie value creates a separate cache object. Session or
+                            user-id cookies can exhaust storage and collapse hit rates — use only
+                            low-cardinality cookies (feature flags, locale, currency).
+                        </div>
+                        <div className='grid gap-2 sm:grid-cols-2'>
+                            {selectedCookies.map((cookie) => (
+                                <div
+                                    className='flex min-h-11 items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2'
+                                    key={cookie}
+                                >
+                                    <code className='truncate text-xs font-semibold'>{cookie}</code>
+                                    <Button
+                                        isIconOnly
+                                        aria-label={`Remove ${cookie} from cache key`}
+                                        size='sm'
+                                        variant='ghost'
+                                        onPress={() =>
+                                            setSelectedCookies(
+                                                selectedCookies.filter((value) => value !== cookie)
+                                            )
+                                        }
+                                    >
+                                        <X className='h-3.5 w-3.5' />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </>
                 )}
             </div>
             <DialogFooter>
@@ -432,6 +531,9 @@ export function SiteCacheSettings({
     const methods = cache.methods ?? ['GET', 'HEAD'];
     const cacheKeyParts = cache.cache_key?.parts ?? [];
     const cacheKeyHeaders = cache.cache_key?.headers ?? [];
+    const cacheKeyCookies = cache.cache_key?.cookies ?? [];
+    // Omitted normalize defaults to enabled (matches control-plane policy).
+    const queryNormalize = cache.cache_key?.query?.normalize !== false;
     const bypassValues = cache.bypass_cache_control ?? [];
     const maxBodyBytes = cache.max_body_bytes ?? 64 << 20;
     const staleValid =
@@ -444,6 +546,9 @@ export function SiteCacheSettings({
         new Set(cacheKeyHeaders.map((header) => header.toLowerCase())).size ===
             cacheKeyHeaders.length &&
         cacheKeyHeaders.every((header) => /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(header));
+    const cacheKeyCookiesValid =
+        new Set(cacheKeyCookies).size === cacheKeyCookies.length &&
+        cacheKeyCookies.every((cookie) => cookieNamePattern.test(cookie));
     const cacheKeyPartsValid =
         cacheKeyParts.includes('PATH') &&
         new Set(cacheKeyParts).size === cacheKeyParts.length &&
@@ -458,6 +563,7 @@ export function SiteCacheSettings({
         staleValid &&
         cacheKeyPartsValid &&
         cacheKeyHeadersValid &&
+        cacheKeyCookiesValid &&
         bypassValid;
 
     const setCacheKey = (patch: Partial<NonNullable<CachePolicy['cache_key']>>) =>
@@ -467,11 +573,29 @@ export function SiteCacheSettings({
                 ...cache.cache_key,
                 parts: cacheKeyParts,
                 headers: cacheKeyHeaders,
+                cookies: cacheKeyCookies,
+                query: {
+                    ...cache.cache_key?.query,
+                    normalize: queryNormalize,
+                },
                 ...patch,
             },
         });
-    const confirmCacheKey = (parts: CacheKeyPart[], headers: string[]) => {
-        setCacheKey({ parts, headers });
+    const confirmCacheKey = (next: {
+        parts: CacheKeyPart[];
+        headers: string[];
+        cookies: string[];
+        queryNormalize: boolean;
+    }) => {
+        setCacheKey({
+            parts: next.parts,
+            headers: next.headers,
+            cookies: next.cookies,
+            query: {
+                ...cache.cache_key?.query,
+                normalize: next.queryNormalize,
+            },
+        });
         setAddingKeyPart(false);
     };
     const addBypassValue = (value: string) => {
@@ -495,6 +619,12 @@ export function SiteCacheSettings({
             id: `header:${header.toLowerCase()}`,
             label: `Header: ${header}`,
             token: `{header.${header.toLowerCase()}}`,
+            required: false,
+        })),
+        ...cacheKeyCookies.map((cookie) => ({
+            id: `cookie:${cookie}`,
+            label: `Cookie: ${cookie}`,
+            token: `{cookie.${cookie}}`,
             required: false,
         })),
     ];
@@ -602,11 +732,28 @@ export function SiteCacheSettings({
                                 <code className='block overflow-x-auto whitespace-nowrap text-xs font-semibold text-foreground'>
                                     {cacheKeyPreview || 'No key parts selected'}
                                 </code>
+                                {cacheKeyParts.includes('QUERY') && (
+                                    <p className='mt-2 text-xs text-muted'>
+                                        Query string:{' '}
+                                        {queryNormalize
+                                            ? 'parameters are sorted by name (default).'
+                                            : 'raw order is preserved.'}
+                                    </p>
+                                )}
                             </div>
-                            {(!cacheKeyPartsValid || !cacheKeyHeadersValid) && (
+                            {cacheKeyCookies.length > 0 && (
+                                <div className='mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs leading-5 text-warning'>
+                                    Cookie values are part of the cache key. High-cardinality
+                                    cookies (session, user id) create one object per visitor and can
+                                    exhaust cache storage.
+                                </div>
+                            )}
+                            {(!cacheKeyPartsValid ||
+                                !cacheKeyHeadersValid ||
+                                !cacheKeyCookiesValid) && (
                                 <p className='mt-2 text-xs text-danger'>
-                                    The key must contain URI path and use unique, valid header
-                                    names.
+                                    The key must contain URI path and use unique, valid header and
+                                    cookie names.
                                 </p>
                             )}
                         </div>
@@ -894,8 +1041,10 @@ export function SiteCacheSettings({
 
             {addingKeyPart && (
                 <EditCacheKeyDialog
+                    cookies={cacheKeyCookies}
                     headers={cacheKeyHeaders}
                     parts={cacheKeyParts}
+                    queryNormalize={queryNormalize}
                     onClose={() => setAddingKeyPart(false)}
                     onConfirm={confirmCacheKey}
                 />

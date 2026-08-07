@@ -48,11 +48,11 @@ func (m Matcher) Match(r *http.Request) bool {
 		return false
 	}
 	if value := strings.Join(r.Header.Values("Range"), ","); value != "" {
-		start, end, ok := parseCacheableRange(value)
+		spec, ok := parseCacheableRange(value)
 		if !m.CacheRangeRequests || r.Header.Get("If-Range") != "" || !ok {
 			return false
 		}
-		*r = *r.WithContext(cacherange.WithContext(r.Context(), cacherange.Spec{Start: start, End: end}))
+		*r = *r.WithContext(cacherange.WithContext(r.Context(), spec))
 	}
 	groupMatches := make([]bool, len(m.Conditions.Groups))
 	for gi, group := range m.Conditions.Groups {
@@ -80,28 +80,43 @@ func matchesCacheControl(values, configured []string) bool {
 }
 
 func cacheableRange(value string) bool {
-	_, _, ok := parseCacheableRange(value)
+	_, ok := parseCacheableRange(value)
 	return ok
 }
 
-func parseCacheableRange(value string) (uint64, uint64, bool) {
+func parseCacheableRange(value string) (cacherange.Spec, bool) {
 	unit, interval, ok := strings.Cut(strings.TrimSpace(value), "=")
 	if !ok || !strings.EqualFold(strings.TrimSpace(unit), "bytes") || strings.Contains(interval, ",") {
-		return 0, 0, false
+		return cacherange.Spec{}, false
 	}
 	startText, endText, ok := strings.Cut(strings.TrimSpace(interval), "-")
-	if !ok || startText == "" {
-		return 0, 0, false
+	if !ok {
+		return cacherange.Spec{}, false
 	}
-	start, err := strconv.ParseUint(strings.TrimSpace(startText), 10, 64)
+	startText = strings.TrimSpace(startText)
+	endText = strings.TrimSpace(endText)
+	// Suffix range: bytes=-500 selects the final 500 bytes of the
+	// representation. The bound is resolved against the content length when
+	// the cached body is served, because the matcher does not know the
+	// representation length up front.
+	if startText == "" {
+		if endText == "" {
+			return cacherange.Spec{}, false
+		}
+		suffix, err := strconv.ParseUint(endText, 10, 64)
+		return cacherange.Spec{SuffixLength: suffix}, err == nil && suffix > 0
+	}
+	start, err := strconv.ParseUint(startText, 10, 64)
 	if err != nil {
-		return 0, 0, false
+		return cacherange.Spec{}, false
 	}
-	if strings.TrimSpace(endText) == "" {
-		return 0, 0, false
+	if endText == "" {
+		// Open-ended range (bytes=500-) is not cacheable: the response has no
+		// fixed end bound and cannot be served from a stored full representation.
+		return cacherange.Spec{}, false
 	}
-	end, err := strconv.ParseUint(strings.TrimSpace(endText), 10, 64)
-	return start, end, err == nil && end >= start
+	end, err := strconv.ParseUint(endText, 10, 64)
+	return cacherange.Spec{Start: start, End: end}, err == nil && end >= start
 }
 
 func (Matcher) matchRule(requestPath string, rule policy.CacheConditionRule, compiled *regexp.Regexp) bool {

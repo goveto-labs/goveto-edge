@@ -443,6 +443,8 @@ func TestCachedRangeClampsEndAndRejectsUnsatisfiableStart(t *testing.T) {
 	}{
 		{name: "end beyond object", spec: cacherange.Spec{Start: 7, End: 100}, wantStatus: http.StatusPartialContent, wantBody: "789", wantRange: "bytes 7-9/10", wantLength: 3},
 		{name: "start beyond object", spec: cacherange.Spec{Start: 10, End: 20}, wantStatus: http.StatusRequestedRangeNotSatisfiable, wantRange: "bytes */10"},
+		{name: "suffix within object", spec: cacherange.Spec{SuffixLength: 4}, wantStatus: http.StatusPartialContent, wantBody: "6789", wantRange: "bytes 6-9/10", wantLength: 4},
+		{name: "suffix exceeds object", spec: cacherange.Spec{SuffixLength: 100}, wantStatus: http.StatusPartialContent, wantBody: "0123456789", wantRange: "bytes 0-9/10", wantLength: 10},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := (&http.Request{Header: http.Header{}}).WithContext(cacherange.WithContext(t.Context(), test.spec))
