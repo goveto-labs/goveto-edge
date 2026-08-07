@@ -11,6 +11,7 @@ import (
 
 type CachePolicy struct {
 	ResponseHeaders    CacheHeaders `json:"response_headers"`
+	DevMode            bool         `json:"dev_mode,omitempty"`
 	AllowPurgeMethod   bool         `json:"allow_purge_method"`
 	RequestCoalescing  bool         `json:"request_coalescing"`
 	CacheRangeRequests bool         `json:"cache_range_requests"`

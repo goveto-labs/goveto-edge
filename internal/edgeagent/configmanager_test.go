@@ -575,6 +575,25 @@ func TestCacheConfigSkipsCacheRoutesWhenRulesAreEmpty(t *testing.T) {
 	}
 }
 
+func TestCacheConfigSkipsCacheRoutesInDevMode(t *testing.T) {
+	config := validHTTPConfig(t)
+	policy := cachePolicyWithCatchAllRule()
+	policy.DevMode = true
+	config.Cache = toMap(t, policy)
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(encoded)
+	if strings.Contains(text, `"handler":"goveto_cache"`) || strings.Contains(text, `"@id":"site_site-1_cache_`) {
+		t.Fatalf("dev mode generated cache routes: %s", text)
+	}
+	if !strings.Contains(text, `"@id":"site_site-1"`) {
+		t.Fatalf("dev mode removed the plain proxy route: %s", text)
+	}
+}
+
 func TestCacheConfigPassesPrivateDynamicLimitToSimpleFS(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Cache = enabledCachePolicy(t)

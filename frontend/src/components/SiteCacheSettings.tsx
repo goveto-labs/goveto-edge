@@ -502,7 +502,7 @@ export function SiteCacheSettings({
 
     return (
         <>
-            <div className='space-y-8'>
+            <div className='space-y-4'>
                 <SettingsCard
                     icon={KeyRound}
                     title='Cache key'

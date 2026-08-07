@@ -594,7 +594,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 
 		if cachePolicy, ok, err := decodeCachePolicy(site.Cache); err != nil {
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
-		} else if ok && len(cachePolicy.Rules) > 0 {
+		} else if ok && len(cachePolicy.Rules) > 0 && !cachePolicy.DevMode {
 			methods := cachePolicy.Methods
 			if cachePolicy.AllowPurgeMethod {
 				routes = append(routes, map[string]any{

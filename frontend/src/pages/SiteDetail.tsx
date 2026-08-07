@@ -61,6 +61,7 @@ import { SiteCacheRules } from '@/components/SiteCacheRules.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
+import { SiteDevelopmentMode } from '@/components/SiteDevelopmentMode.tsx';
 import { SiteSecuritySettings } from '@/components/SiteSecuritySettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
@@ -621,6 +622,22 @@ export default function SiteDetail() {
             savedCacheRef.current = result.cache;
             setCache(result.cache);
         }, 'Cache settings saved and publishing queued.');
+    const toggleDevMode = () => {
+        const enabling = !(cache.dev_mode ?? false);
+        return runSave(
+            async () => {
+                const result = await api.updateCache(siteId, {
+                    ...savedCacheRef.current,
+                    dev_mode: enabling,
+                });
+                savedCacheRef.current = result.cache;
+                setCache((current) => ({ ...current, dev_mode: result.cache.dev_mode }));
+            },
+            enabling
+                ? 'Development mode enabled. All requests bypass the cache.'
+                : 'Development mode disabled. Cache behavior restored.'
+        );
+    };
     const saveCompression = () =>
         runSave(async () => {
             const result = await api.updateCompression(siteId, compression);
@@ -1037,7 +1054,7 @@ export default function SiteDetail() {
                                     </nav>
                                     <div className='min-w-0'>
                                         {settingsPage === 'basic' && (
-                                            <div className='space-y-8'>
+                                            <div className='space-y-4'>
                                                 <ContentCard noPadding>
                                                     <SectionHeader
                                                         title='Basic settings'
@@ -1136,7 +1153,7 @@ export default function SiteDetail() {
                                             </div>
                                         )}
                                         {settingsPage === 'domains' && (
-                                            <div className='space-y-8'>
+                                            <div className='space-y-4'>
                                                 <ContentCard noPadding>
                                                     <SectionHeader
                                                         title='Domain configuration'
@@ -1299,7 +1316,7 @@ export default function SiteDetail() {
                                             </div>
                                         )}
                                         {settingsPage === 'https' && (
-                                            <div className='space-y-8'>
+                                            <div className='space-y-4'>
                                                 <ContentCard className='overflow-visible' noPadding>
                                                     <SectionHeader
                                                         title='HTTPS configuration'
@@ -1491,7 +1508,7 @@ export default function SiteDetail() {
                                             </div>
                                         )}
                                         {settingsPage === 'origins' && (
-                                            <div className='space-y-8'>
+                                            <div className='space-y-4'>
                                                 <ContentCard noPadding>
                                                     <SectionHeader
                                                         title='Origin configuration'
@@ -1690,13 +1707,18 @@ export default function SiteDetail() {
                                             </div>
                                         )}
                                         {settingsPage === 'cache' && (
-                                            <div className='space-y-8'>
+                                            <div className='space-y-4'>
                                                 <SiteCachePurge
                                                     site={{
                                                         id: site.id,
                                                         name: site.name,
                                                         domains: site.domains,
                                                     }}
+                                                />
+                                                <SiteDevelopmentMode
+                                                    disabled={saving || !canOperate}
+                                                    enabled={cache.dev_mode ?? false}
+                                                    onToggle={() => void toggleDevMode()}
                                                 />
                                                 <SiteCacheSettings
                                                     cache={cache}

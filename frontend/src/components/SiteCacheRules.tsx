@@ -693,7 +693,7 @@ export function SiteCacheRules({
 
     return (
         <>
-            <div className='space-y-8'>
+            <div className='space-y-4'>
                 <ContentCard className='overflow-hidden' noPadding>
                     <div className='flex flex-col gap-5 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                         <div className='flex items-center gap-3'>
