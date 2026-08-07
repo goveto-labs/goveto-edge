@@ -5,6 +5,7 @@ import { Plus, RefreshCw, Save, Shield, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
 import { ApiError, dnsApi } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -31,6 +32,7 @@ export default function DNSZones() {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [dialogOpen, setDialogOpen] = useState(false);
+    const [pendingDelete, setPendingDelete] = useState<DNSZone | null>(null);
     const [provider, setProvider] = useState<DNSProviderType>('ALIYUN');
     const [accessKeyId, setAccessKeyId] = useState('');
     const [accessKeySecret, setAccessKeySecret] = useState('');
@@ -148,13 +150,6 @@ export default function DNSZones() {
     };
 
     const remove = async (zone: DNSZone) => {
-        if (
-            !confirm(
-                `Remove DNS zone "${zone.zone}"? Existing certificates keep working until the next DNS-01 renewal.`
-            )
-        ) {
-            return;
-        }
         setBusy(true);
         setError('');
         try {
@@ -261,7 +256,7 @@ export default function DNSZones() {
                                             isDisabled={!canEdit}
                                             size='sm'
                                             variant='danger'
-                                            onPress={() => void remove(zone)}
+                                            onPress={() => setPendingDelete(zone)}
                                         >
                                             <Trash2 className='h-3.5 w-3.5' />
                                         </Button>
@@ -374,7 +369,7 @@ export default function DNSZones() {
                                 onChange={selectDomain}
                             />
                         </div>
-                        
+
                         <div className='rounded-lg border border-border bg-surface-secondary px-4 py-3 text-sm text-muted md:col-span-2'>
                             This zone creates temporary ACME TXT records and does not change the
                             cluster scheduling hostname.
@@ -400,6 +395,26 @@ export default function DNSZones() {
                     </DialogFooter>
                 </form>
             </DialogShell>
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={
+                    pendingDelete
+                        ? `Remove DNS zone "${pendingDelete.zone}"? Existing certificates keep working until the next DNS-01 renewal.`
+                        : undefined
+                }
+                isOpen={pendingDelete !== null}
+                title='Delete DNS zone?'
+                onConfirm={() => {
+                    const zone = pendingDelete;
+                    setPendingDelete(null);
+                    if (zone) void remove(zone);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDelete(null);
+                }}
+            />
         </div>
     );
 }

@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
@@ -53,6 +54,7 @@ export default function Nodes() {
     const [runtimeByNode, setRuntimeByNode] = useState<Record<string, NodeSnapshot>>({});
     const [error, setError] = useState('');
     const [editingNode, setEditingNode] = useState<Node | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<Node | null>(null);
     const [dnsLineDraft, setDnsLineDraft] = useState<Set<string>>(new Set());
     const [dnsLineQuery, setDnsLineQuery] = useState('');
     const [dnsLineSaving, setDnsLineSaving] = useState(false);
@@ -88,7 +90,6 @@ export default function Nodes() {
     useAutoRefresh(load, Boolean(clusterId));
 
     const handleDelete = async (node: Node) => {
-        if (!confirm(`Delete node "${node.name}"?`)) return;
         try {
             await nodeApi.delete(node.id);
             await load();
@@ -301,7 +302,7 @@ export default function Nodes() {
                                             <Button
                                                 size='sm'
                                                 variant='danger'
-                                                onPress={() => void handleDelete(node)}
+                                                onPress={() => setPendingDelete(node)}
                                             >
                                                 <Trash2 className='mr-1.5 h-3.5 w-3.5' />
                                                 Delete
@@ -423,6 +424,22 @@ export default function Nodes() {
                     </Button>
                 </DialogFooter>
             </DialogShell>
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={pendingDelete ? `Delete node "${pendingDelete.name}"?` : undefined}
+                isOpen={pendingDelete !== null}
+                title='Delete node?'
+                onConfirm={() => {
+                    const node = pendingDelete;
+                    setPendingDelete(null);
+                    if (node) void handleDelete(node);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDelete(null);
+                }}
+            />
         </div>
     );
 }

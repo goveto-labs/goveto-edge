@@ -25,6 +25,7 @@ import {
     AdminAuthProviderDialog,
     authenticationProviderPresets,
 } from '@/components/AdminAuthProviderDialog.tsx';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -163,6 +164,8 @@ export default function AdminSettings() {
     const [editingProvider, setEditingProvider] = useState<AuthenticationProviderSettings | null>(
         null
     );
+    const [pendingDeleteProvider, setPendingDeleteProvider] =
+        useState<AuthenticationProviderSettings | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [restarting, setRestarting] = useState(false);
@@ -285,7 +288,7 @@ export default function AdminSettings() {
     };
 
     const deleteProvider = (provider: AuthenticationProviderSettings) => {
-        if (!form || !window.confirm(`Delete the ${provider.provider_name} provider?`)) return;
+        if (!form) return;
         updateForm({
             ...form,
             authentication: {
@@ -664,7 +667,9 @@ export default function AdminSettings() {
                                                             size='sm'
                                                             type='button'
                                                             variant='ghost'
-                                                            onPress={() => deleteProvider(provider)}
+                                                            onPress={() =>
+                                                                setPendingDeleteProvider(provider)
+                                                            }
                                                         >
                                                             <Trash2 className='h-4 w-4' />
                                                         </Button>
@@ -723,6 +728,26 @@ export default function AdminSettings() {
                     onSave={applyProvider}
                 />
             )}
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={
+                    pendingDeleteProvider
+                        ? `Delete the ${pendingDeleteProvider.provider_name} provider?`
+                        : undefined
+                }
+                isOpen={pendingDeleteProvider !== null}
+                title='Delete provider?'
+                onConfirm={() => {
+                    const provider = pendingDeleteProvider;
+                    setPendingDeleteProvider(null);
+                    if (provider) deleteProvider(provider);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDeleteProvider(null);
+                }}
+            />
         </div>
     );
 }

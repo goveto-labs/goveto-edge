@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
 import { ApiError, certificatesApi, dnsApi } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
@@ -83,6 +84,7 @@ export default function Certificates() {
     const [error, setError] = useState('');
     const [busyId, setBusyId] = useState('');
     const [replaceTarget, setReplaceTarget] = useState<Certificate | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<Certificate | null>(null);
 
     const uploadModal = useOverlayState();
     const acmeModal = useOverlayState();
@@ -249,11 +251,6 @@ export default function Certificates() {
     };
 
     const action = async (cert: Certificate, kind: 'renew' | 'reissue' | 'publish' | 'remove') => {
-        if (
-            kind === 'remove' &&
-            !window.confirm(`Delete certificate "${cert.name}" and remove it from attached sites?`)
-        )
-            return;
         setBusyId(cert.id);
         setError('');
         try {
@@ -427,7 +424,7 @@ export default function Certificates() {
                                                 isDisabled={busy}
                                                 size='sm'
                                                 variant='danger'
-                                                onPress={() => void action(cert, 'remove')}
+                                                onPress={() => setPendingDelete(cert)}
                                             >
                                                 <Trash2 className='h-3.5 w-3.5' />
                                             </Button>
@@ -708,6 +705,26 @@ export default function Certificates() {
                     </DialogFooter>
                 </form>
             </DialogShell>
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={
+                    pendingDelete
+                        ? `Delete certificate "${pendingDelete.name}" and remove it from attached sites?`
+                        : undefined
+                }
+                isOpen={pendingDelete !== null}
+                title='Delete certificate?'
+                onConfirm={() => {
+                    const cert = pendingDelete;
+                    setPendingDelete(null);
+                    if (cert) void action(cert, 'remove');
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDelete(null);
+                }}
+            />
         </div>
     );
 }

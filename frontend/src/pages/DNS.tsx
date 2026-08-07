@@ -11,6 +11,7 @@ import { Globe2, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, dnsApi } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -46,6 +47,7 @@ export default function DNS() {
     const [records, setRecords] = useState<DNSManagedRecord[]>([]);
     const [jobs, setJobs] = useState<DNSSyncJob[]>([]);
     const [domainDialogOpen, setDomainDialogOpen] = useState(false);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
     const [providerDomains, setProviderDomains] = useState<DNSProviderDomain[]>([]);
     const [discoveringDomains, setDiscoveringDomains] = useState(false);
     const [loadedClusterId, setLoadedClusterId] = useState('');
@@ -350,10 +352,6 @@ export default function DNS() {
     };
 
     const deleteDomain = async () => {
-        if (
-            !confirm(`Delete the CDN endpoint configuration for "${zone}" and all managed records?`)
-        )
-            return;
         await mutate(() => api.delete(), 'Failed to delete CDN endpoint');
     };
 
@@ -408,7 +406,11 @@ export default function DNS() {
                     Sync now
                 </Button>
                 {configured && isOwner && (
-                    <Button isDisabled={!canEdit} variant='danger' onPress={deleteDomain}>
+                    <Button
+                        isDisabled={!canEdit}
+                        variant='danger'
+                        onPress={() => setDeleteConfirmOpen(true)}
+                    >
                         <Trash2 className='mr-2 h-4 w-4' />
                         Delete endpoint
                     </Button>
@@ -686,6 +688,19 @@ export default function DNS() {
                     ))}
                 </tbody>
             </DataTable>
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={`Delete the CDN endpoint configuration for "${zone}" and all managed records?`}
+                isOpen={deleteConfirmOpen}
+                title='Delete CDN endpoint?'
+                onConfirm={() => {
+                    setDeleteConfirmOpen(false);
+                    void deleteDomain();
+                }}
+                onOpenChange={setDeleteConfirmOpen}
+            />
         </div>
     );
 }

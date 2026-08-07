@@ -21,7 +21,6 @@ import {
     Cloud,
     FileArchive,
     FileText,
-    Flame,
     Globe2,
     HardDrive,
     LockKeyhole,
@@ -47,6 +46,7 @@ import {
     publishApi,
     sitesApi,
 } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
@@ -56,6 +56,8 @@ import { RankingBars } from '@/components/RankingBars.tsx';
 import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
+import { SiteCachePurge } from '@/components/SiteCachePurge.tsx';
+import { SiteCacheRules } from '@/components/SiteCacheRules.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
@@ -64,7 +66,6 @@ import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
-import { CacheOperations } from '@/pages/PurgeJobs.tsx';
 import { SiteAccessLogsView } from '@/pages/SitesAccessLogs.tsx';
 import { defaultDeliveryPolicy, normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
@@ -80,8 +81,8 @@ type SettingsPage =
     | 'delivery'
     | 'security'
     | 'cache'
-    | 'compression'
-    | 'cache-operations';
+    | 'cache-rules'
+    | 'compression';
 type Period = '24h' | '30d';
 type OriginDraft = SiteOrigin & { draft_id: string };
 
@@ -172,8 +173,31 @@ const settingsPages = [
     { id: 'delivery' as const, label: 'Delivery', icon: Route },
     { id: 'security' as const, label: 'Security', icon: ShieldCheck },
     { id: 'cache' as const, label: 'Cache', icon: HardDrive },
+    { id: 'cache-rules' as const, label: 'Rules', icon: HardDrive },
     { id: 'compression' as const, label: 'Compression', icon: FileArchive },
-    { id: 'cache-operations' as const, label: 'Cache operations', icon: Flame },
+];
+type SettingsNavEntry =
+    | { kind: 'page'; id: SettingsPage }
+    | { kind: 'divider' }
+    | { kind: 'group'; id: SettingsPage; children: { id: SettingsPage; label: string }[] };
+const settingsNav: SettingsNavEntry[] = [
+    { kind: 'page', id: 'basic' },
+    { kind: 'page', id: 'domains' },
+    { kind: 'page', id: 'http' },
+    { kind: 'page', id: 'https' },
+    { kind: 'page', id: 'origins' },
+    { kind: 'divider' },
+    { kind: 'page', id: 'delivery' },
+    { kind: 'page', id: 'security' },
+    {
+        kind: 'group',
+        id: 'cache',
+        children: [
+            { id: 'cache', label: 'Settings' },
+            { id: 'cache-rules', label: 'Rules' },
+        ],
+    },
+    { kind: 'page', id: 'compression' },
 ];
 const palette = ['#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#64748b'];
 
@@ -306,6 +330,7 @@ export default function SiteDetail() {
     const previousDetailPathRef = useRef(detailPath);
 
     const [site, setSite] = useState<SiteDetails | null>(null);
+    const [deleteSiteOpen, setDeleteSiteOpen] = useState(false);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
     const [compression, setCompression] = useState<CompressionPolicy>({});
@@ -633,8 +658,7 @@ export default function SiteDetail() {
         }
     };
     const deleteSite = async () => {
-        if (!site || !window.confirm(`Delete site "${site.name}" and all of its configuration?`))
-            return;
+        if (!site) return;
         await runSave(async () => {
             await api.delete(siteId);
             navigate('/sites');
@@ -933,15 +957,74 @@ export default function SiteDetail() {
                             {tab === 'settings' && (
                                 <div className='grid gap-6 lg:grid-cols-[200px_1fr]'>
                                     <nav className='flex flex-col gap-1 lg:sticky lg:top-0 lg:self-start'>
-                                        {settingsPages.map((item) => {
+                                        {settingsNav.map((entry) => {
+                                            if (entry.kind === 'divider') {
+                                                return (
+                                                    <div
+                                                        className='my-1 border-t border-border'
+                                                        key='divider'
+                                                    />
+                                                );
+                                            }
+                                            const item = settingsPages.find(
+                                                (page) => page.id === entry.id
+                                            );
+                                            if (!item) return null;
                                             const Icon = item.icon;
+                                            const itemClassName = (active: boolean) =>
+                                                `flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                                                    active
+                                                        ? 'bg-surface-secondary text-foreground'
+                                                        : 'text-muted hover:bg-surface-secondary hover:text-foreground'
+                                                }`;
+                                            if (entry.kind === 'group') {
+                                                const expanded = entry.children.some(
+                                                    (child) => child.id === settingsPage
+                                                );
+                                                return (
+                                                    <div key={entry.id}>
+                                                        <button
+                                                            className={itemClassName(
+                                                                settingsPage === entry.id
+                                                            )}
+                                                            type='button'
+                                                            onClick={() =>
+                                                                navigateTo('settings', entry.id)
+                                                            }
+                                                        >
+                                                            <Icon className='h-4 w-4' />
+                                                            {item.label}
+                                                        </button>
+                                                        {expanded && (
+                                                            <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
+                                                                {entry.children.map((child) => (
+                                                                    <button
+                                                                        className={itemClassName(
+                                                                            settingsPage ===
+                                                                                child.id
+                                                                        )}
+                                                                        key={child.id}
+                                                                        type='button'
+                                                                        onClick={() =>
+                                                                            navigateTo(
+                                                                                'settings',
+                                                                                child.id
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        {child.label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            }
                                             return (
                                                 <button
-                                                    className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${
+                                                    className={itemClassName(
                                                         settingsPage === item.id
-                                                            ? 'bg-surface-secondary text-foreground'
-                                                            : 'text-muted hover:bg-surface-secondary hover:text-foreground'
-                                                    }`}
+                                                    )}
                                                     key={item.id}
                                                     type='button'
                                                     onClick={() => navigateTo('settings', item.id)}
@@ -1015,7 +1098,9 @@ export default function SiteDetail() {
                                                         <div className='flex justify-end p-5'>
                                                             <Button
                                                                 variant='danger'
-                                                                onPress={() => void deleteSite()}
+                                                                onPress={() =>
+                                                                    setDeleteSiteOpen(true)
+                                                                }
                                                             >
                                                                 <Trash2 className='mr-1.5 h-4 w-4' />
                                                                 Delete site
@@ -1605,7 +1690,28 @@ export default function SiteDetail() {
                                             </div>
                                         )}
                                         {settingsPage === 'cache' && (
-                                            <SiteCacheSettings
+                                            <div className='space-y-8'>
+                                                <SiteCachePurge
+                                                    site={{
+                                                        id: site.id,
+                                                        name: site.name,
+                                                        domains: site.domains,
+                                                    }}
+                                                />
+                                                <SiteCacheSettings
+                                                    cache={cache}
+                                                    isDirty={cacheDirty}
+                                                    saving={saving}
+                                                    onChange={setCache}
+                                                    onDiscard={() =>
+                                                        setCache(savedCacheRef.current)
+                                                    }
+                                                    onSave={() => void saveCache()}
+                                                />
+                                            </div>
+                                        )}
+                                        {settingsPage === 'cache-rules' && (
+                                            <SiteCacheRules
                                                 cache={cache}
                                                 isDirty={cacheDirty}
                                                 saving={saving}
@@ -1650,16 +1756,6 @@ export default function SiteDetail() {
                                                 onSave={() => void saveSecurity()}
                                             />
                                         )}
-                                        {settingsPage === 'cache-operations' && (
-                                            <CacheOperations
-                                                embedded
-                                                fixedSite={{
-                                                    id: site.id,
-                                                    name: site.name,
-                                                    domains: site.domains,
-                                                }}
-                                            />
-                                        )}
                                     </div>
                                 </div>
                             )}
@@ -1667,6 +1763,18 @@ export default function SiteDetail() {
                     </>
                 )
             )}
+            <ConfirmDialog
+                danger
+                confirmLabel='Delete site'
+                description={`Delete site "${site?.name ?? ''}" and all of its configuration?`}
+                isOpen={deleteSiteOpen}
+                title='Delete site?'
+                onConfirm={() => {
+                    setDeleteSiteOpen(false);
+                    void deleteSite();
+                }}
+                onOpenChange={setDeleteSiteOpen}
+            />
         </div>
     );
 }

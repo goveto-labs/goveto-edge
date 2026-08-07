@@ -37,12 +37,12 @@ import {
     Trash2,
     X,
 } from 'lucide-react';
-import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi, sshCredentialsApi } from '@/api';
 import { ByteSizeInput } from '@/components/ByteSizeInput.tsx';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
@@ -55,6 +55,7 @@ import { SSHCredentialDialog } from '@/components/SSHCredentialDialog.tsx';
 import { SSHCredentialSelect } from '@/components/SSHCredentialSelect.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
@@ -322,6 +323,10 @@ export default function NodeDetail() {
     const [editingAddressId, setEditingAddressId] = useState('');
     const [editingAddress, setEditingAddress] = useState('');
     const [addressBusyId, setAddressBusyId] = useState('');
+    const [pendingAddressDelete, setPendingAddressDelete] = useState<{
+        id: string;
+        address: string;
+    } | null>(null);
     const [cache, setCache] = useState<NodeCacheConfig | null>(null);
     const [cacheSaving, setCacheSaving] = useState(false);
     const [cacheMessage, setCacheMessage] = useState('');
@@ -331,6 +336,7 @@ export default function NodeDetail() {
     const [sshCredentialId, setSSHCredentialId] = useState('');
     const [testing, setTesting] = useState(false);
     const [reinstalling, setReinstalling] = useState(false);
+    const [reinstallConfirmOpen, setReinstallConfirmOpen] = useState(false);
     const [testedFingerprint, setTestedFingerprint] = useState('');
     const [testAttemptFingerprint, setTestAttemptFingerprint] = useState('');
     const [testMessage, setTestMessage] = useState('');
@@ -629,8 +635,8 @@ export default function NodeDetail() {
         }
     };
 
-    const removeAddress = async (addressId: string, address: string) => {
-        if (!node || !window.confirm(`Delete IP address ${address}?`)) return;
+    const removeAddress = async (addressId: string) => {
+        if (!node) return;
         setAddressBusyId(addressId);
         setError('');
         try {
@@ -714,7 +720,6 @@ export default function NodeDetail() {
 
     const reinstall = async () => {
         if (!node || !connectionVerified) return;
-        if (!confirm(`Reinstall the agent on "${node.name}"?`)) return;
         setReinstalling(true);
         setError('');
         try {
@@ -1553,10 +1558,11 @@ export default function NodeDetail() {
                                                                     size='sm'
                                                                     variant='ghost'
                                                                     onPress={() =>
-                                                                        void removeAddress(
-                                                                            address.id,
-                                                                            address.address
-                                                                        )
+                                                                        setPendingAddressDelete({
+                                                                            id: address.id,
+                                                                            address:
+                                                                                address.address,
+                                                                        })
                                                                     }
                                                                 >
                                                                     <Trash2 className='h-4 w-4 text-danger' />
@@ -1880,7 +1886,7 @@ export default function NodeDetail() {
                                                 className='shrink-0'
                                                 isDisabled={!connectionVerified || reinstalling}
                                                 type='button'
-                                                onPress={() => void reinstall()}
+                                                onPress={() => setReinstallConfirmOpen(true)}
                                             >
                                                 {reinstalling
                                                     ? 'Starting installation…'
@@ -2082,6 +2088,38 @@ systemctl status goveto-edge-agent`}
                     ]);
                     setSSHCredentialId(credential.id);
                 }}
+            />
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={
+                    pendingAddressDelete
+                        ? `Delete IP address ${pendingAddressDelete.address}?`
+                        : undefined
+                }
+                isOpen={pendingAddressDelete !== null}
+                title='Delete IP address?'
+                onConfirm={() => {
+                    const target = pendingAddressDelete;
+                    setPendingAddressDelete(null);
+                    if (target) void removeAddress(target.id);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingAddressDelete(null);
+                }}
+            />
+
+            <ConfirmDialog
+                confirmLabel='Reinstall'
+                description={node ? `Reinstall the agent on "${node.name}"?` : undefined}
+                isOpen={reinstallConfirmOpen}
+                title='Reinstall agent?'
+                onConfirm={() => {
+                    setReinstallConfirmOpen(false);
+                    void reinstall();
+                }}
+                onOpenChange={setReinstallConfirmOpen}
             />
         </div>
     );

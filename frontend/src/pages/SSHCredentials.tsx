@@ -6,6 +6,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, sshCredentialsApi } from '@/api';
+import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -29,6 +30,7 @@ export default function SSHCredentials() {
     const [nodesLoading, setNodesLoading] = useState(false);
     const [linkedNodes, setLinkedNodes] = useState<SSHCredentialNode[]>([]);
     const [viewing, setViewing] = useState<SSHCredential | null>(null);
+    const [pendingDelete, setPendingDelete] = useState<SSHCredential | null>(null);
 
     const load = useCallback(async () => {
         if (!clusterId || !isOwner) {
@@ -67,9 +69,6 @@ export default function SSHCredentials() {
     };
 
     const remove = async (credential: SSHCredential) => {
-        if (!window.confirm(`Delete SSH credential "${credential.name}"? This cannot be undone.`)) {
-            return;
-        }
         try {
             await api.delete(credential.id);
             await load();
@@ -208,7 +207,7 @@ export default function SSHCredentials() {
                                                 isDisabled={credential.node_count > 0}
                                                 size='sm'
                                                 variant='danger'
-                                                onPress={() => void remove(credential)}
+                                                onPress={() => setPendingDelete(credential)}
                                             >
                                                 <Trash2 className='mr-1.5 h-3.5 w-3.5' />
                                                 Delete
@@ -262,6 +261,26 @@ export default function SSHCredentials() {
                     )}
                 </div>
             </DialogShell>
+
+            <ConfirmDialog
+                confirmLabel='Delete'
+                danger
+                description={
+                    pendingDelete
+                        ? `Delete SSH credential "${pendingDelete.name}"? This cannot be undone.`
+                        : undefined
+                }
+                isOpen={pendingDelete !== null}
+                title='Delete SSH credential?'
+                onConfirm={() => {
+                    const credential = pendingDelete;
+                    setPendingDelete(null);
+                    if (credential) void remove(credential);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDelete(null);
+                }}
+            />
         </div>
     );
 }
