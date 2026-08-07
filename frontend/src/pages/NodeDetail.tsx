@@ -22,6 +22,7 @@ import {
     ArrowLeft,
     Bug,
     Check,
+    Database,
     Download,
     FileText,
     Fingerprint,
@@ -2062,6 +2063,49 @@ export default function NodeDetail() {
                                                             : 'Preview and trust'}
                                                 </Button>
                                             </div>
+                                        </div>
+
+                                        <div className='border-t border-border py-4'>
+                                            <div className='flex items-center gap-2 text-sm font-medium'>
+                                                <Database className='h-4 w-4 text-muted' />
+                                                Distributed state (Redis)
+                                                <span
+                                                    className={`text-xs font-normal ${
+                                                        node.redisAvailable === undefined
+                                                            ? 'text-muted'
+                                                            : node.redisAvailable
+                                                              ? 'text-success'
+                                                              : 'text-danger'
+                                                    }`}
+                                                >
+                                                    {node.redisAvailable === undefined
+                                                        ? 'Unknown'
+                                                        : node.redisAvailable
+                                                          ? 'Available'
+                                                          : 'Unavailable'}
+                                                </span>
+                                            </div>
+                                            {node.redisAvailable === false && (
+                                                <>
+                                                    {node.redisStatusError && (
+                                                        <div className='mt-1.5 break-all font-mono text-xs text-danger'>
+                                                            {node.redisStatusError}
+                                                        </div>
+                                                    )}
+                                                    <p className='mt-1.5 text-xs leading-5 text-muted'>
+                                                        Configure EDGE_AGENT_REDIS_URL on this node
+                                                        to enable Redis-backed features such as
+                                                        distributed rate limiting.
+                                                    </p>
+                                                </>
+                                            )}
+                                            {node.redisAvailable === undefined && (
+                                                <p className='mt-1.5 text-xs leading-5 text-muted'>
+                                                    The agent has not reported its Redis status yet.
+                                                    The node may be offline or running an older
+                                                    agent version.
+                                                </p>
+                                            )}
                                         </div>
 
                                         <div className='flex flex-col-reverse gap-3 border-t border-border py-5 sm:flex-row sm:items-center sm:justify-between'>

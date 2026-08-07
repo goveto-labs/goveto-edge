@@ -122,3 +122,63 @@ func configuredRedisStore() (distributedStore, error) {
 	redisClients.values[rawURL] = client
 	return &redisStore{client: client}, nil
 }
+
+// redisProbeCacheTTL bounds how often agents ping Redis. Heartbeats are more
+// frequent than this, so caching keeps hello/heartbeat from hammering the backend.
+const redisProbeCacheTTL = 30 * time.Second
+
+var redisProbeCache struct {
+	sync.Mutex
+	url       string
+	at        time.Time
+	available bool
+	err       string
+}
+
+// CheckRedisBackend probes the distributed state backend. It reports
+// available=true only when EDGE_AGENT_REDIS_URL is configured and Redis
+// answers a ping, so the control plane can distinguish "agent never
+// reported" from a genuine backend outage. Results are cached briefly so
+// frequent heartbeats reuse the last probe.
+func CheckRedisBackend(ctx context.Context) (available bool, statusError string) {
+	rawURL := os.Getenv("EDGE_AGENT_REDIS_URL")
+	now := time.Now()
+
+	redisProbeCache.Lock()
+	if redisProbeCache.url == rawURL && !redisProbeCache.at.IsZero() && now.Sub(redisProbeCache.at) < redisProbeCacheTTL {
+		available, statusError = redisProbeCache.available, redisProbeCache.err
+		redisProbeCache.Unlock()
+		return available, statusError
+	}
+	redisProbeCache.Unlock()
+
+	available, statusError = probeRedisBackend(ctx, rawURL)
+
+	redisProbeCache.Lock()
+	redisProbeCache.url = rawURL
+	redisProbeCache.at = time.Now()
+	redisProbeCache.available = available
+	redisProbeCache.err = statusError
+	redisProbeCache.Unlock()
+	return available, statusError
+}
+
+func probeRedisBackend(ctx context.Context, rawURL string) (bool, string) {
+	if rawURL == "" {
+		return false, "EDGE_AGENT_REDIS_URL is not configured"
+	}
+	store, err := configuredRedisStore()
+	if err != nil {
+		return false, err.Error()
+	}
+	backend, ok := store.(*redisStore)
+	if !ok {
+		return false, "unexpected distributed store implementation"
+	}
+	pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := backend.client.Ping(pingCtx).Err(); err != nil {
+		return false, "redis ping failed: " + err.Error()
+	}
+	return true, ""
+}

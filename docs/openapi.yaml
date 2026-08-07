@@ -11419,6 +11419,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/types_NodeRegionMembership'
+                redisAvailable:
+                    type: boolean
+                redisStatusError:
+                    type: string
                 siteConfigVersions:
                     type: array
                     items:

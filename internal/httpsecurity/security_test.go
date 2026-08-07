@@ -3,6 +3,7 @@ package httpsecurity
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -186,5 +187,113 @@ func TestLimitKeyedBucketsPerKey(t *testing.T) {
 	user = "user-b"
 	if err := handler(newContext()); err != nil {
 		t.Fatalf("other user shares the bucket: %v", err)
+	}
+}
+
+type failingRateStore struct{}
+
+func (failingRateStore) Incr(context.Context, string) *redis.IntCmd {
+	return redis.NewIntResult(0, errors.New("redis is down"))
+}
+
+func (failingRateStore) Expire(context.Context, string, time.Duration) *redis.BoolCmd {
+	return redis.NewBoolResult(false, errors.New("redis is down"))
+}
+
+func rateLimitContext() *echo.Context {
+	request := httptest.NewRequest(http.MethodPost, "/login", nil)
+	request.RemoteAddr = "192.0.2.1:1234"
+	return echo.New().NewContext(request, httptest.NewRecorder())
+}
+
+func TestRateLimiterFallsBackToMemoryWhenRedisFails(t *testing.T) {
+	limiter := NewRateLimiter(nil)
+	limiter.redis = failingRateStore{}
+	handler := limiter.Limit("login", 2, time.Minute)(func(*echo.Context) error { return nil })
+	for attempt := 1; attempt <= 3; attempt++ {
+		c := rateLimitContext()
+		err := handler(c)
+		if attempt <= 2 && err != nil {
+			t.Fatalf("attempt %d rejected during Redis outage: %v", attempt, err)
+		}
+		if attempt == 3 && statusFromError(err) != http.StatusTooManyRequests {
+			t.Fatalf("attempt 3 error = %v, want quota enforced by the in-memory fallback", err)
+		}
+	}
+	if !limiter.degraded.Load() {
+		t.Fatal("limiter did not record the degraded state")
+	}
+}
+
+func TestRateLimiterWithoutRedisUsesMemoryBackend(t *testing.T) {
+	limiter := NewRateLimiter(nil)
+	handler := limiter.Limit("login", 1, time.Minute)(func(*echo.Context) error { return nil })
+	if err := handler(rateLimitContext()); err != nil {
+		t.Fatalf("first request rejected without Redis: %v", err)
+	}
+	if err := handler(rateLimitContext()); statusFromError(err) != http.StatusTooManyRequests {
+		t.Fatalf("second request error = %v", err)
+	}
+}
+
+func TestRateLimiterRecoversToRedis(t *testing.T) {
+	limiter := NewRateLimiter(nil)
+	if err := limiter.Limit("login", 5, time.Minute)(func(*echo.Context) error { return nil })(rateLimitContext()); err != nil {
+		t.Fatal(err)
+	}
+	if !limiter.degraded.Load() {
+		t.Fatal("limiter should be degraded without Redis")
+	}
+	limiter.redis = &fakeRateStore{}
+	if err := limiter.Limit("login", 5, time.Minute)(func(*echo.Context) error { return nil })(rateLimitContext()); err != nil {
+		t.Fatal(err)
+	}
+	if limiter.degraded.Load() {
+		t.Fatal("limiter did not recover to the Redis backend")
+	}
+}
+
+func TestLocalRateStoreExpiresWindows(t *testing.T) {
+	store := newLocalRateStore()
+	now := time.Now().UTC()
+	if count := store.incr("key", time.Minute, now); count != 1 {
+		t.Fatalf("first count = %d", count)
+	}
+	if count := store.incr("key", time.Minute, now.Add(30*time.Second)); count != 2 {
+		t.Fatalf("same-window count = %d", count)
+	}
+	if count := store.incr("key", time.Minute, now.Add(61*time.Second)); count != 1 {
+		t.Fatalf("expired-window count = %d, want reset to 1", count)
+	}
+}
+
+func TestLocalRateStoreCapsDistinctKeys(t *testing.T) {
+	store := newLocalRateStore()
+	now := time.Now().UTC()
+	for index := 0; index < localRateStoreMaxKeys; index++ {
+		key := fmt.Sprintf("key-%d", index)
+		if count := store.incr(key, time.Minute, now); count != 1 {
+			t.Fatalf("seed %s count=%d", key, count)
+		}
+	}
+	if got := len(store.buckets); got != localRateStoreMaxKeys {
+		t.Fatalf("bucket count=%d want %d", got, localRateStoreMaxKeys)
+	}
+	// Additional distinct keys must collapse into the overflow bucket instead of growing RAM.
+	if count := store.incr("attacker-new", time.Minute, now); count != 1 {
+		t.Fatalf("overflow first count=%d", count)
+	}
+	if count := store.incr("attacker-other", time.Minute, now); count != 2 {
+		t.Fatalf("overflow shared count=%d", count)
+	}
+	if _, ok := store.buckets[localRateOverflowKey]; !ok {
+		t.Fatal("overflow bucket missing")
+	}
+	if got := len(store.buckets); got != localRateStoreMaxKeys+1 {
+		t.Fatalf("bucket count after overflow=%d", got)
+	}
+	// Existing keys remain independently tracked.
+	if count := store.incr("key-0", time.Minute, now); count != 2 {
+		t.Fatalf("existing key count=%d", count)
 	}
 }

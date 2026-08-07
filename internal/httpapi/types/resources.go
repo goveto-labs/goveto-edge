@@ -191,6 +191,8 @@ type Node struct {
 	SSHCredentialID    *string                `json:"sshCredentialId,omitempty"`
 	SSHHost            *string                `json:"sshHost,omitempty"`
 	SSHPort            *int                   `json:"sshPort,omitempty"`
+	RedisAvailable     *bool                  `json:"redisAvailable,omitempty"`
+	RedisStatusError   *string                `json:"redisStatusError,omitempty"`
 	Addresses          []NodeAddress          `json:"addresses"`
 	DNSLines           []NodeDNSLine          `json:"dnsLines,omitempty"`
 	GroupMemberships   []NodeGroupMembership  `json:"groupMemberships,omitempty"`
@@ -235,7 +237,7 @@ func NewNodeSSHHostKey(value *model.NodeSSHHostKey) NodeSSHHostKey {
 }
 
 func NewNode(value *model.Node) Node {
-	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, Version: value.Version, HeartbeatAt: value.HeartbeatAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, InstallError: value.InstallError, SSHCredentialID: value.SshCredentialId, SSHHost: value.SshHost, SSHPort: value.SshPort, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), GroupMemberships: make([]NodeGroupMembership, len(value.GroupMemberships)), RegionMemberships: make([]NodeRegionMembership, len(value.RegionMemberships)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
+	result := Node{ID: value.Id, Name: value.Name, Status: value.Status, Version: value.Version, HeartbeatAt: value.HeartbeatAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, InstallError: value.InstallError, SSHCredentialID: value.SshCredentialId, SSHHost: value.SshHost, SSHPort: value.SshPort, RedisAvailable: value.RedisAvailable, RedisStatusError: value.RedisStatusError, Addresses: make([]NodeAddress, len(value.Addresses)), DNSLines: make([]NodeDNSLine, len(value.DnsLines)), GroupMemberships: make([]NodeGroupMembership, len(value.GroupMemberships)), RegionMemberships: make([]NodeRegionMembership, len(value.RegionMemberships)), SiteConfigVersions: make([]SiteConfigVersion, len(value.SiteConfigVersions))}
 	for index, item := range value.Addresses {
 		result.Addresses[index] = NewNodeAddress(item)
 	}

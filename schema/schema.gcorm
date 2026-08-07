@@ -547,6 +547,8 @@ model Node {
   heartbeatAt        DateTime?               @map("heartbeat_at")
   status             NodeStatus              @default(PENDING)
   installError       String?                 @map("install_error") @db.Text
+  redisAvailable     Boolean?                @map("redis_available")
+  redisStatusError   String?                 @map("redis_status_error")
   sshCredentialId    UUID?                   @map("ssh_credential_id")
   sshHost            String?                 @map("ssh_host")
   sshPort            Int?                    @map("ssh_port")

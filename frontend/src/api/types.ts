@@ -313,6 +313,8 @@ export interface Node {
     sshHost?: string;
     sshPort?: number;
     sshHostKey?: NodeSSHHostKey;
+    redisAvailable?: boolean;
+    redisStatusError?: string;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     groupMemberships?: Array<{ nodeId: string; groupId: string }>;

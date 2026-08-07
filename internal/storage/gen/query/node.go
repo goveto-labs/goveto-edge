@@ -38,6 +38,8 @@ type NodeQuery struct {
 	HeartbeatAt        nodeHeartbeatAtField
 	Status             nodeStatusField
 	InstallError       nodeInstallErrorField
+	RedisAvailable     nodeRedisAvailableField
+	RedisStatusError   nodeRedisStatusErrorField
 	SshCredentialId    nodeSshCredentialIdField
 	SshHost            nodeSshHostField
 	SshPort            nodeSshPortField
@@ -67,6 +69,8 @@ const NodeVersionColumn = "version"
 const NodeHeartbeatAtColumn = "heartbeat_at"
 const NodeStatusColumn = "status"
 const NodeInstallErrorColumn = "install_error"
+const NodeRedisAvailableColumn = "redis_available"
+const NodeRedisStatusErrorColumn = "redis_status_error"
 const NodeSshCredentialIdColumn = "ssh_credential_id"
 const NodeSshHostColumn = "ssh_host"
 const NodeSshPortColumn = "ssh_port"
@@ -82,6 +86,8 @@ var Node = NodeQuery{
 	HeartbeatAt:        nodeHeartbeatAtField{},
 	Status:             nodeStatusField{},
 	InstallError:       nodeInstallErrorField{},
+	RedisAvailable:     nodeRedisAvailableField{},
+	RedisStatusError:   nodeRedisStatusErrorField{},
 	SshCredentialId:    nodeSshCredentialIdField{},
 	SshHost:            nodeSshHostField{},
 	SshPort:            nodeSshPortField{},
@@ -624,6 +630,133 @@ func (nodeInstallErrorField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "install_error", Direction: "DESC"}
 }
 
+// RedisAvailableField provides query operations for the redisAvailable field.
+type nodeRedisAvailableField struct{}
+
+// Equals creates an equality condition.
+func (nodeRedisAvailableField) Equals(v *bool) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_available", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeRedisAvailableField) Not(v *bool) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_available", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeRedisAvailableField) In(vals ...*bool) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "redis_available", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeRedisAvailableField) NotIn(vals ...*bool) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "redis_available", Operator: "NOT IN", Value: iVals}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeRedisAvailableField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "redis_available", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeRedisAvailableField) Set(v bool) NodeSetClause {
+	return NodeSetClause{Field: "redis_available", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeRedisAvailableField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "redis_available", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeRedisAvailableField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "redis_available", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeRedisAvailableField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "redis_available", Direction: "DESC"}
+}
+
+// RedisStatusErrorField provides query operations for the redisStatusError field.
+type nodeRedisStatusErrorField struct{}
+
+// Equals creates an equality condition.
+func (nodeRedisStatusErrorField) Equals(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeRedisStatusErrorField) Not(v *string) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeRedisStatusErrorField) In(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "redis_status_error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeRedisStatusErrorField) NotIn(vals ...*string) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "redis_status_error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (nodeRedisStatusErrorField) Contains(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (nodeRedisStatusErrorField) StartsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (nodeRedisStatusErrorField) EndsWith(v string) NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeRedisStatusErrorField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "redis_status_error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeRedisStatusErrorField) Set(v string) NodeSetClause {
+	return NodeSetClause{Field: "redis_status_error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeRedisStatusErrorField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "redis_status_error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeRedisStatusErrorField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "redis_status_error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeRedisStatusErrorField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "redis_status_error", Direction: "DESC"}
+}
+
 // SshCredentialIdField provides query operations for the sshCredentialId field.
 type nodeSshCredentialIdField struct{}
 
@@ -1111,6 +1244,8 @@ type NodeCreateInput struct {
 	HeartbeatAt        **time.Time
 	Status             model.NodeStatus
 	InstallError       **string
+	RedisAvailable     **bool
+	RedisStatusError   **string
 	SshCredentialId    **string
 	SshHost            **string
 	SshPort            **int
@@ -1134,7 +1269,7 @@ type NodeCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.RedisAvailable, d.RedisStatusError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

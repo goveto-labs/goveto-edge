@@ -14,6 +14,8 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -234,18 +236,116 @@ func statusFromError(err error) int {
 }
 
 type RateLimiter struct {
-	redis rateStore
+	redis    rateStore
+	local    atomic.Pointer[localRateStore]
+	degraded atomic.Bool
 }
 
-func NewRateLimiter(client *redis.Client) *RateLimiter { return &RateLimiter{redis: client} }
+func NewRateLimiter(client *redis.Client) *RateLimiter {
+	limiter := &RateLimiter{}
+	if client != nil {
+		limiter.redis = client
+	}
+	limiter.local.Store(newLocalRateStore())
+	return limiter
+}
 
 type rateStore interface {
 	Incr(context.Context, string) *redis.IntCmd
 	Expire(context.Context, string, time.Duration) *redis.BoolCmd
 }
 
+// localRateStoreMaxKeys caps in-memory buckets during Redis outages so a
+// flood of distinct keys cannot grow process memory without bound.
+const localRateStoreMaxKeys = 4096
+
+// localRateOverflowKey collapses excess distinct keys into one shared counter
+// once the store is at capacity. Attackers pay a shared quota instead of RAM.
+const localRateOverflowKey = "__overflow__"
+
+// localRateStore is the in-memory fixed-window fallback used when the Redis
+// backend is unavailable. It protects a single control-plane instance only;
+// with multiple control-plane replicas each process enforces its own counters,
+// so effective limits during a Redis outage scale roughly with replica count.
+type localRateStore struct {
+	mu      sync.Mutex
+	buckets map[string]*localRateBucket
+}
+
+type localRateBucket struct {
+	count   int64
+	expires time.Time
+}
+
+func newLocalRateStore() *localRateStore {
+	return &localRateStore{buckets: map[string]*localRateBucket{}}
+}
+
+func (s *localRateStore) evictExpired(now time.Time) {
+	for candidate, bucket := range s.buckets {
+		if !now.Before(bucket.expires) {
+			delete(s.buckets, candidate)
+		}
+	}
+}
+
+func (s *localRateStore) incr(key string, window time.Duration, now time.Time) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.evictExpired(now)
+	bucket := s.buckets[key]
+	if bucket == nil {
+		if len(s.buckets) >= localRateStoreMaxKeys {
+			// Prefer collapsing unknown keys over unbounded growth.
+			key = localRateOverflowKey
+			bucket = s.buckets[key]
+		}
+		if bucket == nil || !now.Before(bucket.expires) {
+			bucket = &localRateBucket{expires: now.Add(window)}
+			s.buckets[key] = bucket
+		}
+	} else if !now.Before(bucket.expires) {
+		bucket = &localRateBucket{expires: now.Add(window)}
+		s.buckets[key] = bucket
+	}
+	bucket.count++
+	return bucket.count
+}
+
 func (l *RateLimiter) Limit(name string, maximum int64, window time.Duration) echo.MiddlewareFunc {
 	return l.LimitKeyed(name, maximum, window, func(c *echo.Context) string { return c.RealIP() })
+}
+
+// incr counts one hit against the fixed window, preferring the shared Redis
+// backend and degrading to the in-memory store when Redis is unavailable so
+// endpoints stay reachable during a Redis outage. Multi-replica deployments
+// should treat the local fallback as best-effort: each replica has independent
+// counters, so auth-sensitive routes are weaker until Redis recovers.
+func (l *RateLimiter) incr(ctx context.Context, key string, window time.Duration) int64 {
+	if l.redis != nil {
+		count, err := l.redis.Incr(ctx, key).Result()
+		if err == nil {
+			err = l.redis.Expire(ctx, key, window+time.Second).Err()
+		}
+		if err == nil {
+			if l.degraded.CompareAndSwap(true, false) {
+				slog.Info("rate limiter recovered to the Redis backend")
+			}
+			return count
+		}
+		if l.degraded.CompareAndSwap(false, true) {
+			slog.Error("rate limiter degraded to the in-memory backend", "error", err)
+		}
+	} else if l.degraded.CompareAndSwap(false, true) {
+		slog.Error("rate limiter has no Redis backend; using the in-memory backend")
+	}
+	local := l.local.Load()
+	if local == nil {
+		// RateLimiter instances built as struct literals lazily get a store.
+		l.local.CompareAndSwap(nil, newLocalRateStore())
+		local = l.local.Load()
+	}
+	return local.incr(key, window, time.Now().UTC())
 }
 
 // LimitKeyed rate-limits with a caller-provided bucket key, e.g. the
@@ -253,18 +353,12 @@ func (l *RateLimiter) Limit(name string, maximum int64, window time.Duration) ec
 func (l *RateLimiter) LimitKeyed(name string, maximum int64, window time.Duration, keyFunc func(*echo.Context) string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
-			if l == nil || l.redis == nil {
+			if l == nil {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limiting unavailable")
 			}
 			bucket := time.Now().UTC().Unix() / max(int64(window.Seconds()), 1)
 			key := fmt.Sprintf("control-api:rate:%s:%s:%d", name, keyFunc(c), bucket)
-			count, err := l.redis.Incr(c.Request().Context(), key).Result()
-			if err != nil {
-				return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limiting unavailable")
-			}
-			if err := l.redis.Expire(c.Request().Context(), key, window+time.Second).Err(); err != nil {
-				return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limiting unavailable")
-			}
+			count := l.incr(c.Request().Context(), key, window)
 			remaining := max(maximum-count, 0)
 			c.Response().Header().Set("X-RateLimit-Limit", strconv.FormatInt(maximum, 10))
 			c.Response().Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))

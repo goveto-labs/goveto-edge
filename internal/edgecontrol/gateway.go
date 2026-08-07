@@ -24,6 +24,7 @@ import (
 
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/query"
 )
 
 const (
@@ -186,7 +187,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 	}()
 
 	clusterID, wasOnline, err := g.recordHeartbeat(
-		ctx, nodeID, first.Hello.CacheConfig, first.Hello.SiteVersions, first.Hello.AgentVersion,
+		ctx, nodeID, first.Hello.CacheConfig, first.Hello.SiteVersions, first.Hello.AgentVersion, first.Hello.Redis,
 	)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
@@ -283,7 +284,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 					return status.Error(codes.PermissionDenied, err.Error())
 				}
 				if _, _, err := g.recordHeartbeat(
-					ctx, nodeID, message.Heartbeat.CacheConfig, message.Heartbeat.SiteVersions, "",
+					ctx, nodeID, message.Heartbeat.CacheConfig, message.Heartbeat.SiteVersions, "", message.Heartbeat.Redis,
 				); err != nil {
 					return status.Error(codes.Internal, err.Error())
 				}
@@ -479,6 +480,7 @@ func (g *Gateway) recordHeartbeat(
 	current edgeprotocol.NodeCacheConfig,
 	siteVersions map[string]uint64,
 	agentVersion string,
+	redis *edgeprotocol.RedisStatus,
 ) (string, bool, error) {
 	type nodeState struct {
 		ClusterID string `db:"cluster_id"`
@@ -511,6 +513,19 @@ func (g *Gateway) recordHeartbeat(
 			return errors.New("node is disabled or unavailable")
 		}
 		state = rows[0]
+		if redis != nil {
+			// Only overwrite the capability when the agent reports it, so
+			// nodes on older agents keep their previous (unknown) state.
+			sets := []query.NodeSetClause{query.Node.RedisAvailable.Set(redis.Available)}
+			if redis.Error != "" {
+				sets = append(sets, query.Node.RedisStatusError.Set(redis.Error))
+			} else {
+				sets = append(sets, query.Node.RedisStatusError.SetNull())
+			}
+			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(nodeID)).Set(sets...).DoMany(ctx); err != nil {
+				return err
+			}
+		}
 		_, err = tx.RawExec(ctx, `UPDATE node_credentials SET bootstrap_identity_encrypted = NULL
 			WHERE node_id = $1 AND bootstrap_identity_encrypted IS NOT NULL`, nodeID)
 		return err

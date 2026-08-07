@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding/gzip"
 
+	"goveto-edge/caddy/waf"
 	"goveto-edge/internal/edgeprotocol"
 )
 
@@ -81,7 +82,7 @@ func (c *channelClient) runSession(ctx context.Context) error {
 	}
 	if err := stream.Send(&edgeprotocol.ClientMessage{Hello: &edgeprotocol.AgentHello{
 		NodeID: c.identity.NodeID, AgentVersion: currentAgentVersion(), CacheConfig: c.nodeConfigs.Get(),
-		SiteVersions: c.configs.SiteVersions(), GeoIP: c.geoIPStatus(),
+		SiteVersions: c.configs.SiteVersions(), GeoIP: c.geoIPStatus(), Redis: c.redisStatus(ctx),
 	}}); err != nil {
 		return err
 	}
@@ -170,7 +171,7 @@ func (c *channelClient) runSession(ctx context.Context) error {
 				CacheConfig: c.nodeConfigs.Get(), SiteVersions: c.configs.SiteVersions(),
 				QueueBytes: queueStats.Bytes, QueueRecords: queueStats.Records,
 				DroppedLogs: queueStats.DroppedRecords,
-				GeoIP:       c.geoIPStatus(),
+				GeoIP:       c.geoIPStatus(), Redis: c.redisStatus(sessionCtx),
 			}}); err != nil {
 				return err
 			}
@@ -355,6 +356,13 @@ func (c *channelClient) geoIPStatus() edgeprotocol.GeoIPStatus {
 		return edgeprotocol.GeoIPStatus{}
 	}
 	return c.geoIP.Status()
+}
+
+func (c *channelClient) redisStatus(ctx context.Context) *edgeprotocol.RedisStatus {
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	available, statusError := waf.CheckRedisBackend(probeCtx)
+	return &edgeprotocol.RedisStatus{Available: available, Error: statusError}
 }
 
 func (c *channelClient) tlsConfig() (*tls.Config, error) {

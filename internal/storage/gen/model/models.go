@@ -343,6 +343,8 @@ type Node struct {
 	HeartbeatAt        *time.Time               `db:"heartbeat_at" json:"heartbeatAt"`
 	Status             NodeStatus               `db:"status" json:"status"`
 	InstallError       *string                  `db:"install_error" json:"installError"`
+	RedisAvailable     *bool                    `db:"redis_available" json:"redisAvailable"`
+	RedisStatusError   *string                  `db:"redis_status_error" json:"redisStatusError"`
 	SshCredentialId    *string                  `db:"ssh_credential_id" json:"sshCredentialId"`
 	SshHost            *string                  `db:"ssh_host" json:"sshHost"`
 	SshPort            *int                     `db:"ssh_port" json:"sshPort"`

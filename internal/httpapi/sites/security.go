@@ -1,8 +1,12 @@
 package sites
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
@@ -12,6 +16,7 @@ import (
 	securitypolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
@@ -89,6 +94,9 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		}
 		if err := input.Access.NormalizeAndValidatePublic(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid access policy: "+err.Error())
+		}
+		if err := ensureRateLimitBackendCapacity(c.Request().Context(), db, c.Param("cluster_id"), input.RateLimit); err != nil {
+			return err
 		}
 
 		wafJSON, err := json.Marshal(input.WAF)
@@ -177,4 +185,68 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
 	}
+}
+
+// redisCapabilityFreshness is how recently an ONLINE node must have
+// heartbeated for its redis_available=false report to block enabling the
+// REDIS rate-limit backend. Stale offline/failed nodes must not lock the
+// cluster configuration forever.
+const redisCapabilityFreshness = 2 * time.Minute
+
+// ensureRateLimitBackendCapacity rejects the REDIS rate-limit backend when
+// currently online cluster nodes report their distributed state backend as
+// unavailable, instead of letting the site silently run with the configured
+// failure mode (e.g. LOCAL counters). Nodes that never reported a capability
+// (NULL), are not ONLINE, or have a stale heartbeat do not block the change.
+func ensureRateLimitBackendCapacity(
+	ctx context.Context,
+	db *client.Client,
+	clusterID string,
+	policy securitypolicy.RateLimitPolicy,
+) error {
+	if !policy.Enabled || policy.Backend != "REDIS" {
+		return nil
+	}
+	unavailable := false
+	nodes, err := db.Node.Query().
+		Where(
+			query.Node.ClusterId.Equals(clusterID),
+			query.Node.Status.Equals(model.NodeStatusONLINE),
+			query.Node.RedisAvailable.Equals(&unavailable),
+		).
+		OrderBy(query.Node.Name.Asc()).
+		Do(ctx)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	var names []string
+	for index := range nodes {
+		if nodeBlocksRedisRateLimit(nodes[index], now) {
+			names = append(names, nodes[index].Name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	return echo.NewHTTPError(http.StatusConflict, fmt.Sprintf(
+		"rate-limit backend REDIS is unavailable on node(s) %s: agent reports EDGE_AGENT_REDIS_URL unconfigured or unreachable",
+		strings.Join(names, ", "),
+	))
+}
+
+// nodeBlocksRedisRateLimit reports whether a node should prevent enabling the
+// REDIS rate-limit backend right now. Only fresh ONLINE reports of
+// redis_available=false block the change.
+func nodeBlocksRedisRateLimit(node model.Node, now time.Time) bool {
+	if node.Status != model.NodeStatusONLINE {
+		return false
+	}
+	if node.RedisAvailable == nil || *node.RedisAvailable {
+		return false
+	}
+	if node.HeartbeatAt == nil || !node.HeartbeatAt.After(now.Add(-redisCapabilityFreshness)) {
+		return false
+	}
+	return true
 }

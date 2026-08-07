@@ -35,12 +35,22 @@ type GeoIPChunk struct {
 	Data   []byte `json:"data"`
 }
 
+// RedisStatus reports the reachability of the node's distributed state
+// backend (EDGE_AGENT_REDIS_URL). It is a pointer in hello/heartbeat so the
+// control plane can tell "agent does not report yet" (nil) apart from
+// "backend unavailable" (Available=false).
+type RedisStatus struct {
+	Available bool   `json:"available"`
+	Error     string `json:"error,omitempty"`
+}
+
 type AgentHello struct {
 	NodeID       string            `json:"node_id"`
 	AgentVersion string            `json:"agent_version,omitempty"`
 	CacheConfig  NodeCacheConfig   `json:"cache_config"`
 	SiteVersions map[string]uint64 `json:"site_versions,omitempty"`
 	GeoIP        GeoIPStatus       `json:"geoip"`
+	Redis        *RedisStatus      `json:"redis,omitempty"`
 }
 
 type AgentHeartbeat struct {
@@ -50,6 +60,7 @@ type AgentHeartbeat struct {
 	QueueRecords uint64            `json:"queue_records,omitempty"`
 	DroppedLogs  uint64            `json:"dropped_logs,omitempty"`
 	GeoIP        GeoIPStatus       `json:"geoip"`
+	Redis        *RedisStatus      `json:"redis,omitempty"`
 }
 
 type AgentTask struct {

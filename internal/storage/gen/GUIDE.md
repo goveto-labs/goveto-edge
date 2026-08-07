@@ -473,6 +473,8 @@ query.PostAuthorIdColumn
   - `Heartbeatat` (DateTime, optional)
   - `Status` ()
   - `Installerror` (String, optional)
+  - `Redisavailable` (Boolean, optional)
+  - `Redisstatuserror` (String, optional)
   - `Sshcredentialid` (UUID, optional)
   - `Sshhost` (String, optional)
   - `Sshport` (Int, optional)
