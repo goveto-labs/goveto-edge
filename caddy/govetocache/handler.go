@@ -40,18 +40,21 @@ type Handler struct {
 	StaleIfErrorTTL         int            `json:"stale_if_error_ttl,omitempty"`
 	StaleWhileRevalidateTTL int            `json:"stale_while_revalidate_ttl,omitempty"`
 	MaxBodyBytes            uint64         `json:"max_body_bytes"`
-	Coalesce                bool           `json:"coalesce,omitempty"`
-	XCache                  bool           `json:"x_cache"`
-	Age                     bool           `json:"age"`
-	Debug                   bool           `json:"debug,omitempty"`
-	OverrideClientTTL       bool           `json:"override_client_ttl,omitempty"`
-	ClientTTL               int            `json:"client_ttl,omitempty"`
-	BypassCacheControl      []string       `json:"bypass_cache_control,omitempty"`
-	SurrogateKeyHeader      string         `json:"surrogate_key_header,omitempty"`
-	storage                 *simplefs.Storage
-	flightsMu               sync.Mutex
-	flights                 map[string]*flight
-	logger                  *zap.Logger
+	// Coalesce collapses concurrent misses on the same key into one origin fetch.
+	// Only the leader observes origin 1xx responses (e.g. 103 Early Hints);
+	// waiters block until the final response is cached and then see a HIT.
+	Coalesce           bool     `json:"coalesce,omitempty"`
+	XCache             bool     `json:"x_cache"`
+	Age                bool     `json:"age"`
+	Debug              bool     `json:"debug,omitempty"`
+	OverrideClientTTL  bool     `json:"override_client_ttl,omitempty"`
+	ClientTTL          int      `json:"client_ttl,omitempty"`
+	BypassCacheControl []string `json:"bypass_cache_control,omitempty"`
+	SurrogateKeyHeader string   `json:"surrogate_key_header,omitempty"`
+	storage            *simplefs.Storage
+	flightsMu          sync.Mutex
+	flights            map[string]*flight
+	logger             *zap.Logger
 }
 
 type flight struct {
@@ -62,9 +65,9 @@ var cacheableStatus = map[int]struct{}{
 	200: {}, 203: {}, 204: {}, 206: {}, 300: {}, 301: {}, 404: {}, 405: {}, 410: {}, 414: {}, 501: {},
 }
 
-func init() { caddy.RegisterModule(Handler{}) }
+func init() { caddy.RegisterModule(new(Handler)) }
 
-func (Handler) CaddyModule() caddy.ModuleInfo {
+func (*Handler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "http.handlers.goveto_cache", New: func() caddy.Module { return new(Handler) }}
 }
 
@@ -190,7 +193,7 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 			originRequest.Header.Set("If-Modified-Since", modified)
 		}
 	}
-	captured, captureErr := newCapturedResponse(h.Path)
+	captured, captureErr := newCapturedResponse(h.Path, w)
 	if captureErr != nil {
 		if stale != nil {
 			_ = stale.Body.Close()
@@ -208,10 +211,12 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		if stale != nil {
 			_ = stale.Body.Close()
 		}
-		if captured.writeErr != nil {
+		// After any 1xx was already flushed to the client, do not retry the
+		// full upstream chain — that can emit another 1xx/final response pair.
+		if captured.writeErr != nil && !captured.wrote1xx {
 			return next.ServeHTTP(w, request)
 		}
-		if err != nil || incomplete {
+		if err != nil || incomplete || captured.writeErr != nil {
 			writeBadGateway(w)
 			return nil
 		}
@@ -265,7 +270,7 @@ func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw
 	} else if modified := stale.Header.Get("Last-Modified"); modified != "" {
 		originRequest.Header.Set("If-Modified-Since", modified)
 	}
-	captured, err := newCapturedResponse(h.Path)
+	captured, err := newCapturedResponse(h.Path, nil)
 	if err != nil {
 		return
 	}
@@ -731,11 +736,13 @@ type capturedResponse struct {
 	size        int64
 	file        *os.File
 	path        string
+	downstream  http.ResponseWriter
 	wroteHeader bool
+	wrote1xx    bool
 	writeErr    error
 }
 
-func newCapturedResponse(directory string) (*capturedResponse, error) {
+func newCapturedResponse(directory string, downstream http.ResponseWriter) (*capturedResponse, error) {
 	file, err := os.CreateTemp(directory, ".goveto-origin-*")
 	if err != nil {
 		return nil, err
@@ -745,7 +752,7 @@ func newCapturedResponse(directory string) (*capturedResponse, error) {
 		_ = os.Remove(file.Name())
 		return nil, err
 	}
-	return &capturedResponse{header: http.Header{}, file: file, path: file.Name()}, nil
+	return &capturedResponse{header: http.Header{}, file: file, path: file.Name(), downstream: downstream}, nil
 }
 
 func (w *capturedResponse) Header() http.Header { return w.header }
@@ -754,8 +761,31 @@ func (w *capturedResponse) WriteHeader(status int) {
 	if w.wroteHeader {
 		return
 	}
+	if status >= 100 && status < 200 && status != http.StatusSwitchingProtocols {
+		w.forwardInformational(status)
+		return
+	}
 	w.wroteHeader = true
 	w.status = status
+}
+
+// forwardInformational passes an interim 1xx response through to the real
+// client without latching it as the final status. The caller (Caddy's
+// reverseproxy Got1xxResponse hook) has already copied the 1xx headers into
+// w.header and clears them after WriteHeader returns; the downstream header
+// map is cleared here because Go's server does not do that automatically
+// after a 1xx WriteHeader.
+func (w *capturedResponse) forwardInformational(status int) {
+	if w.downstream == nil {
+		return
+	}
+	header := w.downstream.Header()
+	for name, values := range w.header {
+		header[name] = append([]string(nil), values...)
+	}
+	w.downstream.WriteHeader(status)
+	clear(header)
+	w.wrote1xx = true
 }
 
 func (w *capturedResponse) Write(value []byte) (int, error) {
