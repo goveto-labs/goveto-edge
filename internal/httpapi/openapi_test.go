@@ -18,6 +18,7 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/httpapi/adminsettings"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
+	"goveto-edge/internal/httpapi/audit"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
 	"goveto-edge/internal/httpapi/clusters"
@@ -67,6 +68,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	purgeapi.Register(e, nil, nil)
 	jobsapi.Register(e, nil, nil)
 	sites.Register(e, nil, nil, nil, nil)
+	auditapi.Register(e, nil)
 	analyticsapi.Register(e, nil, analytics.NewStore(nil, 0))
 	return routes
 }
@@ -78,7 +80,7 @@ func documentedOperations(t *testing.T) map[routeKey]bool {
 		t.Fatalf("read OpenAPI specification: %v", err)
 	}
 	var spec struct {
-		OpenAPI string                            `yaml:"openapi"`
+		OpenAPI string                          `yaml:"openapi"`
 		Paths   map[string]map[string]yaml.Node `yaml:"paths"`
 	}
 	if err := yaml.Unmarshal(data, &spec); err != nil {

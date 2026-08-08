@@ -9,6 +9,7 @@ tags:
     - name: .well-known-acme-challenge
     - name: admin-settings
     - name: analytics
+    - name: audit
     - name: auth
     - name: auth-methods
     - name: auth-password
@@ -4473,6 +4474,53 @@ paths:
                                     msg:
                                         type: string
     /api/v1/clusters/{cluster_id}/members:
+        get:
+            operationId: listMembers
+            summary: List cluster members
+            description: List the cluster creator as OWNER together with all membership rows and their roles.
+            tags:
+                - clusters
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/types_ClusterMember'
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
         post:
             operationId: addMember
             summary: Add cluster member
@@ -4531,6 +4579,142 @@ paths:
                                             user_id:
                                                 type: string
                 "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/members/{user_id}:
+        put:
+            operationId: updateMember
+            summary: Update cluster member role
+            description: Change a member's role to VIEWER or OPERATOR, or transfer ownership with OWNER; transfer makes the previous creator an OPERATOR and requires cluster.transfer.
+            tags:
+                - clusters
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - clusteraccess.RequirePermission
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: user_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                permission:
+                                    $ref: '#/components/schemas/model_ClusterPermission'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            cluster_id:
+                                                type: string
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            permission:
+                                                $ref: '#/components/schemas/model_ClusterPermission'
+                                            user_id:
+                                                type: string
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+        delete:
+            operationId: removeMember
+            summary: Remove cluster member
+            description: Remove a member from the cluster; requires member management permission.
+            tags:
+                - clusters
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - clusteraccess.RequirePermission
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: user_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: OK
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
                     description: Client Error
                     content:
                         application/json:
@@ -8985,6 +9169,84 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/nodes_sshCredentialNodeResponse'
+    /api/v1/audit/events:
+        get:
+            operationId: listAuditEvents
+            summary: List audit events
+            description: Paginated, filterable audit log query; requires the platform audit-read permission.
+            tags:
+                - audit
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.RequirePlatform
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    minimum: 1
+                    default: 1
+                - name: page_size
+                  in: query
+                  schema:
+                    type: integer
+                    minimum: 1
+                    maximum: 500
+                    default: 100
+                - name: actor
+                  in: query
+                  schema:
+                    type: string
+                - name: action
+                  in: query
+                  schema:
+                    type: string
+                - name: resource_type
+                  in: query
+                  schema:
+                    type: string
+                - name: resource_id
+                  in: query
+                  schema:
+                    type: string
+                - name: request_id
+                  in: query
+                  schema:
+                    type: string
+                - name: result
+                  in: query
+                  schema:
+                    type: string
+                    enum:
+                        - SUCCESS
+                        - FAILURE
+                - name: from
+                  in: query
+                  schema:
+                    type: string
+                    format: date-time
+                - name: to
+                  in: query
+                  description: Exclusive upper bound; a date-only value means midnight after that date.
+                  schema:
+                    type: string
+                    format: date-time
+            responses:
+                "200":
+                    description: Paginated audit events.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/auditapi_auditListResponse'
+                "403":
+                    description: Caller lacks the platform audit-read permission.
     /api/v1/init:
         post:
             operationId: initialize
@@ -9213,6 +9475,55 @@ paths:
                                         type: string
 components:
     schemas:
+        auditapi_auditEvent:
+            type: object
+            properties:
+                id:
+                    type: string
+                actor_id:
+                    type: string
+                actor:
+                    type: string
+                user:
+                    $ref: '#/components/schemas/auditapi_userSummary'
+                source_ip:
+                    type: string
+                user_agent:
+                    type: string
+                action:
+                    type: string
+                resource_type:
+                    type: string
+                resource_id:
+                    type: string
+                before: {}
+                after: {}
+                request_id:
+                    type: string
+                result:
+                    type: string
+                    enum: [SUCCESS, FAILURE]
+                failure_reason:
+                    type: string
+                created_at:
+                    type: string
+                    format: date-time
+        auditapi_userSummary:
+            type: object
+            properties:
+                id: {type: string}
+                email: {type: string}
+                name: {type: string}
+        auditapi_auditListResponse:
+            type: object
+            properties:
+                items:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/auditapi_auditEvent'
+                total: {type: integer}
+                page: {type: integer}
+                page_size: {type: integer}
         adminsettings_authenticationProviderRequest:
             type: object
             properties:
@@ -10974,6 +11285,19 @@ components:
                 id:
                     type: string
                 name:
+                    type: string
+        types_ClusterMember:
+            type: object
+            properties:
+                cluster_id:
+                    type: string
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                permission:
+                    $ref: '#/components/schemas/model_ClusterPermission'
+                user_id:
                     type: string
         types_ClusterRegion:
             type: object

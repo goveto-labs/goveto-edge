@@ -29,6 +29,7 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
 	group.GET("/regions", listRegions(db))
 	group.POST("/regions", createRegion(db), clusteraccess.RequirePermission(db, rbac.PermissionNodeManage))
 	group.POST("/members", addMember(db), clusteraccess.RequirePermission(db, rbac.PermissionMemberManage))
+	registerMemberManagement(group, db)
 }
 
 // @summary List DNS lines

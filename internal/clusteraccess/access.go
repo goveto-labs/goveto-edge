@@ -92,3 +92,43 @@ func Authorize(ctx context.Context, db *client.Client, clusterID, uid string, pe
 	role = rbac.Highest(role, rbac.Role(user.Role))
 	return rbac.SubjectForRole(role).Allows(permission), role, nil
 }
+
+// RequirePlatform authorizes a platform-wide capability. Unlike
+// RequirePermission it does not scope to a cluster; ADMIN users hold the
+// platform.* permissions directly via the RBAC matrix, and everyone else is
+// denied. This is the single source of truth for platform-management
+// endpoints, replacing ad-hoc role == ADMIN checks.
+func RequirePlatform(db *client.Client, permission rbac.Permission) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			allowed, err := AuthorizePlatform(c.Request().Context(), db, auth.CurrentUID(c), permission)
+			if err != nil {
+				return err
+			}
+			if !allowed {
+				return echo.NewHTTPError(http.StatusForbidden, "permission denied: "+string(permission))
+			}
+			return next(c)
+		}
+	}
+}
+
+// AuthorizePlatform resolves a platform-wide permission without cluster scope.
+// Only ADMIN users hold platform.* capabilities per the RBAC matrix.
+func AuthorizePlatform(ctx context.Context, db *client.Client, uid string, permission rbac.Permission) (bool, error) {
+	if uid == "" {
+		return false, nil
+	}
+	user, cached := auth.CurrentUser(ctx, uid)
+	if !cached {
+		var err error
+		user, err = db.User.FindUnique(ctx, query.User.Id.Equals(uid))
+		if err != nil {
+			return false, err
+		}
+	}
+	if user == nil || user.Status != model.UserStatusACTIVE {
+		return false, nil
+	}
+	return rbac.Allows(rbac.Role(user.Role), permission), nil
+}
