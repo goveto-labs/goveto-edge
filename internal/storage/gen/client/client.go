@@ -52,6 +52,7 @@ type Client struct {
 	NodeRegionMembership  NodeRegionMembershipActions
 	NodeSSHHostKey        NodeSSHHostKeyActions
 	NodeSiteConfigVersion NodeSiteConfigVersionActions
+	NotificationChannel   NotificationChannelActions
 	OriginBackend         OriginBackendActions
 	OriginPool            OriginPoolActions
 	PasswordResetToken    PasswordResetTokenActions
@@ -102,6 +103,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.NodeRegionMembership = NodeRegionMembershipActions{client: c}
 	c.NodeSSHHostKey = NodeSSHHostKeyActions{client: c}
 	c.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: c}
+	c.NotificationChannel = NotificationChannelActions{client: c}
 	c.OriginBackend = OriginBackendActions{client: c}
 	c.OriginPool = OriginPoolActions{client: c}
 	c.PasswordResetToken = PasswordResetTokenActions{client: c}
@@ -312,6 +314,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.NodeRegionMembership = NodeRegionMembershipActions{client: txClient}
 	txClient.NodeSSHHostKey = NodeSSHHostKeyActions{client: txClient}
 	txClient.NodeSiteConfigVersion = NodeSiteConfigVersionActions{client: txClient}
+	txClient.NotificationChannel = NotificationChannelActions{client: txClient}
 	txClient.OriginBackend = OriginBackendActions{client: txClient}
 	txClient.OriginPool = OriginPoolActions{client: txClient}
 	txClient.PasswordResetToken = PasswordResetTokenActions{client: txClient}
@@ -27753,6 +27756,984 @@ func (a NodeSiteConfigVersionActions) GroupBy(ctx context.Context, fields []stri
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("NodeSiteConfigVersion.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedNotificationChannelTable(c *Client) string {
+	return c.quoteIdentifier("notification_channels")
+}
+func quotedNotificationChannelColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "service", "url_encrypted", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteNotificationChannelField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "service":
+		return c.quoteIdentifier(field), nil
+	case "url_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "enabled":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown NotificationChannel field %q", field)
+	}
+}
+
+// buildNotificationChannelWhere recursively builds a WHERE clause string and arguments.
+func buildNotificationChannelWhere(c *Client, wheres []query.NotificationChannelWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.NotificationChannelWhereClause); ok {
+				sub, subArgs := buildNotificationChannelWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.NotificationChannelWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildNotificationChannelWhere(c, []query.NotificationChannelWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.NotificationChannelWhereClause); ok {
+				sub, subArgs := buildNotificationChannelWhere(c, []query.NotificationChannelWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteNotificationChannelField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// NotificationChannelActions provides database operations for the NotificationChannel model.
+type NotificationChannelActions struct {
+	client *Client
+}
+
+// NotificationChannelCreateBuilder builds a NotificationChannel create operation incrementally.
+type NotificationChannelCreateBuilder struct {
+	action NotificationChannelActions
+	sets   []query.NotificationChannelSetClause
+}
+
+// Create starts a staged NotificationChannel create operation.
+func (a NotificationChannelActions) Create() NotificationChannelCreateBuilder {
+	return NotificationChannelCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b NotificationChannelCreateBuilder) Set(sets ...query.NotificationChannelSetClause) NotificationChannelCreateBuilder {
+	next := NotificationChannelCreateBuilder{
+		action: b.action,
+		sets:   make([]query.NotificationChannelSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b NotificationChannelCreateBuilder) Do(ctx context.Context) (*model.NotificationChannel, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// NotificationChannelCreateManyBuilder builds a bulk NotificationChannel insert operation.
+type NotificationChannelCreateManyBuilder struct {
+	action            NotificationChannelActions
+	data              []query.NotificationChannelCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk NotificationChannel insert operation.
+func (a NotificationChannelActions) BulkCreate(data []query.NotificationChannelCreateInput) NotificationChannelCreateManyBuilder {
+	return NotificationChannelCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b NotificationChannelCreateManyBuilder) OnConflictDoNothing(columns ...string) NotificationChannelCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b NotificationChannelCreateManyBuilder) Returning(columns ...string) NotificationChannelCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b NotificationChannelCreateManyBuilder) BatchSize(n int) NotificationChannelCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b NotificationChannelCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNotificationChannelCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("NotificationChannel.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("NotificationChannel.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b NotificationChannelCreateManyBuilder) DoReturning(ctx context.Context) ([]model.NotificationChannel, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.NotificationChannel
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNotificationChannelCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "service", "url_encrypted", "enabled", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.NotificationChannel
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b NotificationChannelCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "service", "url_encrypted", "enabled", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildNotificationChannelCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("NotificationChannel.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// NotificationChannelQueryBuilder builds a NotificationChannel query incrementally.
+type NotificationChannelQueryBuilder struct {
+	action NotificationChannelActions
+	opts   []query.NotificationChannelQueryOption
+}
+
+// Query starts a staged NotificationChannel query.
+func (a NotificationChannelActions) Query() NotificationChannelQueryBuilder {
+	return NotificationChannelQueryBuilder{action: a}
+}
+
+func (b NotificationChannelQueryBuilder) withOptions(opts ...query.NotificationChannelQueryOption) NotificationChannelQueryBuilder {
+	next := NotificationChannelQueryBuilder{
+		action: b.action,
+		opts:   make([]query.NotificationChannelQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b NotificationChannelQueryBuilder) Where(clauses ...query.NotificationChannelWhereClause) NotificationChannelQueryBuilder {
+	opts := make([]query.NotificationChannelQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b NotificationChannelQueryBuilder) OrderBy(clause query.NotificationChannelOrderByClause) NotificationChannelQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b NotificationChannelQueryBuilder) Include(clauses ...query.NotificationChannelIncludeClause) NotificationChannelQueryBuilder {
+	opts := make([]query.NotificationChannelQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b NotificationChannelQueryBuilder) Take(n int) NotificationChannelQueryBuilder {
+	return b.withOptions(query.NotificationChannelTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b NotificationChannelQueryBuilder) Skip(n int) NotificationChannelQueryBuilder {
+	return b.withOptions(query.NotificationChannelSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b NotificationChannelQueryBuilder) Do(ctx context.Context) ([]model.NotificationChannel, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b NotificationChannelQueryBuilder) First(ctx context.Context) (*model.NotificationChannel, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b NotificationChannelQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyNotificationChannelOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// NotificationChannelUpdateBuilder builds a NotificationChannel update operation incrementally.
+type NotificationChannelUpdateBuilder struct {
+	action NotificationChannelActions
+	wheres []query.NotificationChannelWhereClause
+	sets   []query.NotificationChannelSetClause
+}
+
+// Update starts a staged NotificationChannel update operation.
+func (a NotificationChannelActions) Update() NotificationChannelUpdateBuilder {
+	return NotificationChannelUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b NotificationChannelUpdateBuilder) Where(clauses ...query.NotificationChannelWhereClause) NotificationChannelUpdateBuilder {
+	next := NotificationChannelUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.NotificationChannelWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.NotificationChannelSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b NotificationChannelUpdateBuilder) Set(sets ...query.NotificationChannelSetClause) NotificationChannelUpdateBuilder {
+	next := NotificationChannelUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.NotificationChannelWhereClause(nil), b.wheres...),
+		sets:   make([]query.NotificationChannelSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b NotificationChannelUpdateBuilder) combinedWhere() (query.NotificationChannelWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NotificationChannelWhereClause{}, fmt.Errorf("NotificationChannel.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NotificationChannel.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b NotificationChannelUpdateBuilder) Do(ctx context.Context) (*model.NotificationChannel, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b NotificationChannelUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// NotificationChannelDeleteBuilder builds a NotificationChannel delete operation incrementally.
+type NotificationChannelDeleteBuilder struct {
+	action NotificationChannelActions
+	wheres []query.NotificationChannelWhereClause
+}
+
+// Delete starts a staged NotificationChannel delete operation.
+func (a NotificationChannelActions) Delete() NotificationChannelDeleteBuilder {
+	return NotificationChannelDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b NotificationChannelDeleteBuilder) Where(clauses ...query.NotificationChannelWhereClause) NotificationChannelDeleteBuilder {
+	next := NotificationChannelDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.NotificationChannelWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b NotificationChannelDeleteBuilder) combinedWhere() (query.NotificationChannelWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.NotificationChannelWhereClause{}, fmt.Errorf("NotificationChannel.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.NotificationChannel.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b NotificationChannelDeleteBuilder) Do(ctx context.Context) (*model.NotificationChannel, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b NotificationChannelDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple NotificationChannel records.
+func (a NotificationChannelActions) FindMany(ctx context.Context, opts ...query.NotificationChannelQueryOption) ([]model.NotificationChannel, error) {
+	cfg := query.ApplyNotificationChannelOptions(opts)
+	q := "SELECT " + quotedNotificationChannelColumns(a.client) + " FROM " + quotedNotificationChannelTable(a.client)
+	argIdx := 0
+	where, args := buildNotificationChannelWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteNotificationChannelField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.NotificationChannel
+	for rows.Next() {
+		var item model.NotificationChannel
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NotificationChannel.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching NotificationChannel record.
+func (a NotificationChannelActions) FindFirst(ctx context.Context, opts ...query.NotificationChannelQueryOption) (*model.NotificationChannel, error) {
+	opts = append(opts, query.NotificationChannelTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single NotificationChannel record by unique constraint.
+func (a NotificationChannelActions) FindUnique(ctx context.Context, where query.NotificationChannelWhereClause) (*model.NotificationChannel, error) {
+	argIdx := 0
+	whereSQL, args := buildNotificationChannelWhere(a.client, []query.NotificationChannelWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedNotificationChannelColumns(a.client) + " FROM " + quotedNotificationChannelTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.NotificationChannel
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("NotificationChannel.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single NotificationChannel record.
+func (a NotificationChannelActions) CreateOne(ctx context.Context, sets ...query.NotificationChannelSetClause) (*model.NotificationChannel, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NotificationChannel.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteNotificationChannelField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNotificationChannelTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNotificationChannelColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.NotificationChannel
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NotificationChannel.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple NotificationChannel records.
+func (a NotificationChannelActions) CreateMany(ctx context.Context, data []query.NotificationChannelCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a NotificationChannelActions) buildNotificationChannelCreateManySQL(data []query.NotificationChannelCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "service", "url_encrypted", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedNotificationChannelTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single NotificationChannel record matching the where clause.
+func (a NotificationChannelActions) UpdateOne(ctx context.Context, where query.NotificationChannelWhereClause, sets ...query.NotificationChannelSetClause) (*model.NotificationChannel, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("NotificationChannel.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNotificationChannelField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNotificationChannelWhere(a.client, []query.NotificationChannelWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNotificationChannelTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNotificationChannelColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NotificationChannel
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NotificationChannel.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple NotificationChannel records matching the where clauses.
+func (a NotificationChannelActions) UpdateMany(ctx context.Context, wheres []query.NotificationChannelWhereClause, sets ...query.NotificationChannelSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("NotificationChannel.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteNotificationChannelField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildNotificationChannelWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedNotificationChannelTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NotificationChannel.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single NotificationChannel record.
+func (a NotificationChannelActions) UpsertOne(ctx context.Context, where query.NotificationChannelWhereClause, create []query.NotificationChannelSetClause, update []query.NotificationChannelSetClause) (*model.NotificationChannel, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("NotificationChannel.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteNotificationChannelField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedNotificationChannelTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNotificationChannelField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteNotificationChannelField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteNotificationChannelField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNotificationChannelColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NotificationChannel
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("NotificationChannel.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single NotificationChannel record matching the where clause.
+func (a NotificationChannelActions) DeleteOne(ctx context.Context, where query.NotificationChannelWhereClause) (*model.NotificationChannel, error) {
+	argIdx := 0
+	whereSQL, args := buildNotificationChannelWhere(a.client, []query.NotificationChannelWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedNotificationChannelTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedNotificationChannelColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.NotificationChannel
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Service, &item.UrlEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("NotificationChannel.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple NotificationChannel records matching the where clauses.
+func (a NotificationChannelActions) DeleteMany(ctx context.Context, wheres ...query.NotificationChannelWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNotificationChannelWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedNotificationChannelTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("NotificationChannel.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of NotificationChannel records matching the where clauses.
+func (a NotificationChannelActions) Count(ctx context.Context, wheres ...query.NotificationChannelWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildNotificationChannelWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedNotificationChannelTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("NotificationChannel.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for NotificationChannel.
+func (a NotificationChannelActions) Aggregate(ctx context.Context, opts ...query.NotificationChannelAggregateOption) (*query.NotificationChannelAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNotificationChannelField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedNotificationChannelTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.NotificationChannelAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("NotificationChannel.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on NotificationChannel.
+func (a NotificationChannelActions) GroupBy(ctx context.Context, fields []string, opts ...query.NotificationChannelAggregateOption) ([]query.NotificationChannelGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteNotificationChannelField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteNotificationChannelField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedNotificationChannelTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("NotificationChannel.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.NotificationChannelGroupByResult
+	for rows.Next() {
+		r := query.NotificationChannelGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("NotificationChannel.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

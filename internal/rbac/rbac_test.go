@@ -16,6 +16,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 		PermissionCertificateDelete,
 		PermissionMemberManage,
 		PermissionClusterTransfer,
+		PermissionNotificationManage,
 	}
 	tests := []struct {
 		role    Role

@@ -141,27 +141,28 @@ type CertificateJob struct {
 
 // Cluster represents the Cluster model.
 type Cluster struct {
-	Id              string               `db:"id" json:"id"`
-	CreatorId       string               `db:"creator_id" json:"creatorId"`
-	Name            string               `db:"name" json:"name"`
-	PrimaryHostname *string              `db:"primary_hostname" json:"primaryHostname"`
-	CreatedAt       time.Time            `db:"created_at" json:"createdAt"`
-	UpdatedAt       time.Time            `db:"updated_at" json:"updatedAt"`
-	Creator         *User                `db:"-" json:"creator,omitempty"`
-	Members         []*ClusterMember     `db:"-" json:"members,omitempty"`
-	Nodes           []*Node              `db:"-" json:"nodes,omitempty"`
-	Groups          []*ClusterGroup      `db:"-" json:"groups,omitempty"`
-	Regions         []*ClusterRegion     `db:"-" json:"regions,omitempty"`
-	DnsLines        []*DNSLine           `db:"-" json:"dnsLines,omitempty"`
-	DnsProviders    []*DNSProviderConfig `db:"-" json:"dnsProviders,omitempty"`
-	DnsRecords      []*DNSManagedRecord  `db:"-" json:"dnsRecords,omitempty"`
-	DnsSyncJobs     []*DNSSyncJob        `db:"-" json:"dnsSyncJobs,omitempty"`
-	Certificates    []*Certificate       `db:"-" json:"certificates,omitempty"`
-	AcmeAccounts    []*ACMEAccount       `db:"-" json:"acmeAccounts,omitempty"`
-	OriginPools     []*OriginPool        `db:"-" json:"originPools,omitempty"`
-	Sites           []*Site              `db:"-" json:"sites,omitempty"`
-	SiteTemplates   []*SiteTemplate      `db:"-" json:"siteTemplates,omitempty"`
-	SshCredentials  []*SSHCredential     `db:"-" json:"sshCredentials,omitempty"`
+	Id                   string                 `db:"id" json:"id"`
+	CreatorId            string                 `db:"creator_id" json:"creatorId"`
+	Name                 string                 `db:"name" json:"name"`
+	PrimaryHostname      *string                `db:"primary_hostname" json:"primaryHostname"`
+	CreatedAt            time.Time              `db:"created_at" json:"createdAt"`
+	UpdatedAt            time.Time              `db:"updated_at" json:"updatedAt"`
+	Creator              *User                  `db:"-" json:"creator,omitempty"`
+	Members              []*ClusterMember       `db:"-" json:"members,omitempty"`
+	Nodes                []*Node                `db:"-" json:"nodes,omitempty"`
+	Groups               []*ClusterGroup        `db:"-" json:"groups,omitempty"`
+	Regions              []*ClusterRegion       `db:"-" json:"regions,omitempty"`
+	DnsLines             []*DNSLine             `db:"-" json:"dnsLines,omitempty"`
+	DnsProviders         []*DNSProviderConfig   `db:"-" json:"dnsProviders,omitempty"`
+	DnsRecords           []*DNSManagedRecord    `db:"-" json:"dnsRecords,omitempty"`
+	DnsSyncJobs          []*DNSSyncJob          `db:"-" json:"dnsSyncJobs,omitempty"`
+	Certificates         []*Certificate         `db:"-" json:"certificates,omitempty"`
+	AcmeAccounts         []*ACMEAccount         `db:"-" json:"acmeAccounts,omitempty"`
+	OriginPools          []*OriginPool          `db:"-" json:"originPools,omitempty"`
+	Sites                []*Site                `db:"-" json:"sites,omitempty"`
+	SiteTemplates        []*SiteTemplate        `db:"-" json:"siteTemplates,omitempty"`
+	SshCredentials       []*SSHCredential       `db:"-" json:"sshCredentials,omitempty"`
+	NotificationChannels []*NotificationChannel `db:"-" json:"notificationChannels,omitempty"`
 }
 
 // ClusterGroup represents the ClusterGroup model.
@@ -459,6 +460,19 @@ type NodeSiteConfigVersion struct {
 	UpdatedAt time.Time    `db:"updated_at" json:"updatedAt"`
 	Node      *Node        `db:"-" json:"node,omitempty"`
 	Site      *Site        `db:"-" json:"site,omitempty"`
+}
+
+// NotificationChannel represents the NotificationChannel model.
+type NotificationChannel struct {
+	Id           string    `db:"id" json:"id"`
+	ClusterId    string    `db:"cluster_id" json:"clusterId"`
+	Name         string    `db:"name" json:"name"`
+	Service      string    `db:"service" json:"service"`
+	UrlEncrypted string    `db:"url_encrypted" json:"urlEncrypted"`
+	Enabled      bool      `db:"enabled" json:"enabled"`
+	CreatedAt    time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt    time.Time `db:"updated_at" json:"updatedAt"`
+	Cluster      *Cluster  `db:"-" json:"cluster,omitempty"`
 }
 
 // OriginBackend represents the OriginBackend model.

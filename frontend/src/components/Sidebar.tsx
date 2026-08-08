@@ -3,6 +3,7 @@ import type { LucideIcon } from 'lucide-react';
 import { Avatar, Button, Tooltip } from '@heroui/react';
 import {
     BarChart3,
+    BellRing,
     Cloud,
     FileClock,
     Flame,
@@ -62,7 +63,10 @@ const nav: NavItemConfig[] = [
 ];
 
 function settingsNav(isInstanceOwner: boolean): NavItemConfig {
-    const children: NavItemConfig[] = [{ path: '/settings', label: 'Security', icon: ShieldCheck }];
+    const children: NavItemConfig[] = [
+        { path: '/settings', label: 'Security', icon: ShieldCheck },
+        { path: '/settings/notifications', label: 'Notifications', icon: BellRing },
+    ];
     if (isInstanceOwner) {
         children.push({ path: '/settings/admin', label: 'Admin settings', icon: ShieldCog });
     }

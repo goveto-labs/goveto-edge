@@ -30,27 +30,28 @@ func ApplyClusterOptions(opts []ClusterQueryOption) ClusterQueryConfig {
 
 // ClusterQuery is the namespace for Cluster query operations.
 type ClusterQuery struct {
-	Id              clusterIdField
-	CreatorId       clusterCreatorIdField
-	Name            clusterNameField
-	PrimaryHostname clusterPrimaryHostnameField
-	CreatedAt       clusterCreatedAtField
-	UpdatedAt       clusterUpdatedAtField
-	Creator         clusterCreatorRelation
-	Members         clusterMembersRelation
-	Nodes           clusterNodesRelation
-	Groups          clusterGroupsRelation
-	Regions         clusterRegionsRelation
-	DnsLines        clusterDnsLinesRelation
-	DnsProviders    clusterDnsProvidersRelation
-	DnsRecords      clusterDnsRecordsRelation
-	DnsSyncJobs     clusterDnsSyncJobsRelation
-	Certificates    clusterCertificatesRelation
-	AcmeAccounts    clusterAcmeAccountsRelation
-	OriginPools     clusterOriginPoolsRelation
-	Sites           clusterSitesRelation
-	SiteTemplates   clusterSiteTemplatesRelation
-	SshCredentials  clusterSshCredentialsRelation
+	Id                   clusterIdField
+	CreatorId            clusterCreatorIdField
+	Name                 clusterNameField
+	PrimaryHostname      clusterPrimaryHostnameField
+	CreatedAt            clusterCreatedAtField
+	UpdatedAt            clusterUpdatedAtField
+	Creator              clusterCreatorRelation
+	Members              clusterMembersRelation
+	Nodes                clusterNodesRelation
+	Groups               clusterGroupsRelation
+	Regions              clusterRegionsRelation
+	DnsLines             clusterDnsLinesRelation
+	DnsProviders         clusterDnsProvidersRelation
+	DnsRecords           clusterDnsRecordsRelation
+	DnsSyncJobs          clusterDnsSyncJobsRelation
+	Certificates         clusterCertificatesRelation
+	AcmeAccounts         clusterAcmeAccountsRelation
+	OriginPools          clusterOriginPoolsRelation
+	Sites                clusterSitesRelation
+	SiteTemplates        clusterSiteTemplatesRelation
+	SshCredentials       clusterSshCredentialsRelation
+	NotificationChannels clusterNotificationChannelsRelation
 }
 
 const ClusterTable = "clusters"
@@ -63,27 +64,28 @@ const ClusterUpdatedAtColumn = "updated_at"
 
 // ClusterQuery provides query building methods for the Cluster model.
 var Cluster = ClusterQuery{
-	Id:              clusterIdField{},
-	CreatorId:       clusterCreatorIdField{},
-	Name:            clusterNameField{},
-	PrimaryHostname: clusterPrimaryHostnameField{},
-	CreatedAt:       clusterCreatedAtField{},
-	UpdatedAt:       clusterUpdatedAtField{},
-	Creator:         clusterCreatorRelation{},
-	Members:         clusterMembersRelation{},
-	Nodes:           clusterNodesRelation{},
-	Groups:          clusterGroupsRelation{},
-	Regions:         clusterRegionsRelation{},
-	DnsLines:        clusterDnsLinesRelation{},
-	DnsProviders:    clusterDnsProvidersRelation{},
-	DnsRecords:      clusterDnsRecordsRelation{},
-	DnsSyncJobs:     clusterDnsSyncJobsRelation{},
-	Certificates:    clusterCertificatesRelation{},
-	AcmeAccounts:    clusterAcmeAccountsRelation{},
-	OriginPools:     clusterOriginPoolsRelation{},
-	Sites:           clusterSitesRelation{},
-	SiteTemplates:   clusterSiteTemplatesRelation{},
-	SshCredentials:  clusterSshCredentialsRelation{},
+	Id:                   clusterIdField{},
+	CreatorId:            clusterCreatorIdField{},
+	Name:                 clusterNameField{},
+	PrimaryHostname:      clusterPrimaryHostnameField{},
+	CreatedAt:            clusterCreatedAtField{},
+	UpdatedAt:            clusterUpdatedAtField{},
+	Creator:              clusterCreatorRelation{},
+	Members:              clusterMembersRelation{},
+	Nodes:                clusterNodesRelation{},
+	Groups:               clusterGroupsRelation{},
+	Regions:              clusterRegionsRelation{},
+	DnsLines:             clusterDnsLinesRelation{},
+	DnsProviders:         clusterDnsProvidersRelation{},
+	DnsRecords:           clusterDnsRecordsRelation{},
+	DnsSyncJobs:          clusterDnsSyncJobsRelation{},
+	Certificates:         clusterCertificatesRelation{},
+	AcmeAccounts:         clusterAcmeAccountsRelation{},
+	OriginPools:          clusterOriginPoolsRelation{},
+	Sites:                clusterSitesRelation{},
+	SiteTemplates:        clusterSiteTemplatesRelation{},
+	SshCredentials:       clusterSshCredentialsRelation{},
+	NotificationChannels: clusterNotificationChannelsRelation{},
 }
 
 // ClusterWhereClause represents a WHERE condition for Cluster.
@@ -681,6 +683,14 @@ func (clusterSshCredentialsRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "sshCredentials"}
 }
 
+// NotificationChannelsRelation provides relation query helpers for notificationChannels.
+type clusterNotificationChannelsRelation struct{}
+
+// Fetch creates an include clause to fetch related notificationChannels.
+func (clusterNotificationChannelsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "notificationChannels"}
+}
+
 // ClusterSetClause represents a field set operation for create/update.
 type ClusterSetClause struct {
 	Field string
@@ -714,27 +724,28 @@ type ClusterGroupByResult struct {
 
 // ClusterCreateInput holds data for creating a Cluster record.
 type ClusterCreateInput struct {
-	Id              string
-	CreatorId       string
-	Name            string
-	PrimaryHostname **string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	Creator         *UserCreateNestedInput
-	Members         *ClusterMemberCreateNestedInput
-	Nodes           *NodeCreateNestedInput
-	Groups          *ClusterGroupCreateNestedInput
-	Regions         *ClusterRegionCreateNestedInput
-	DnsLines        *DNSLineCreateNestedInput
-	DnsProviders    *DNSProviderConfigCreateNestedInput
-	DnsRecords      *DNSManagedRecordCreateNestedInput
-	DnsSyncJobs     *DNSSyncJobCreateNestedInput
-	Certificates    *CertificateCreateNestedInput
-	AcmeAccounts    *ACMEAccountCreateNestedInput
-	OriginPools     *OriginPoolCreateNestedInput
-	Sites           *SiteCreateNestedInput
-	SiteTemplates   *SiteTemplateCreateNestedInput
-	SshCredentials  *SSHCredentialCreateNestedInput
+	Id                   string
+	CreatorId            string
+	Name                 string
+	PrimaryHostname      **string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Creator              *UserCreateNestedInput
+	Members              *ClusterMemberCreateNestedInput
+	Nodes                *NodeCreateNestedInput
+	Groups               *ClusterGroupCreateNestedInput
+	Regions              *ClusterRegionCreateNestedInput
+	DnsLines             *DNSLineCreateNestedInput
+	DnsProviders         *DNSProviderConfigCreateNestedInput
+	DnsRecords           *DNSManagedRecordCreateNestedInput
+	DnsSyncJobs          *DNSSyncJobCreateNestedInput
+	Certificates         *CertificateCreateNestedInput
+	AcmeAccounts         *ACMEAccountCreateNestedInput
+	OriginPools          *OriginPoolCreateNestedInput
+	Sites                *SiteCreateNestedInput
+	SiteTemplates        *SiteTemplateCreateNestedInput
+	SshCredentials       *SSHCredentialCreateNestedInput
+	NotificationChannels *NotificationChannelCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

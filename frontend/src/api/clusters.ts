@@ -5,9 +5,11 @@ import type {
     ClusterMember,
     ClusterRegion,
     DNSLine,
+    NotificationChannel,
+    NotificationChannelInput,
 } from './types.ts';
 
-import { get, post, put } from './client.ts';
+import { del, get, post, put } from './client.ts';
 
 export const clustersApi = {
     list: () => get<ClusterListResponse>('/clusters'),
@@ -34,4 +36,25 @@ export const clusterApi = (clusterId: string) => ({
     members: () => get<ClusterMember[]>(clusterPath(clusterId, '/members')),
     addMember: (payload: { user_id: string; permission: string }) =>
         post<ClusterMember>(clusterPath(clusterId, '/members'), payload),
+
+    notificationChannels: () =>
+        get<NotificationChannel[]>(clusterPath(clusterId, '/notification-channels')),
+    createNotificationChannel: (payload: NotificationChannelInput) =>
+        post<NotificationChannel>(clusterPath(clusterId, '/notification-channels'), payload),
+    updateNotificationChannel: (channelId: string, payload: NotificationChannelInput) =>
+        put<NotificationChannel>(
+            clusterPath(clusterId, `/notification-channels/${channelId}`),
+            payload
+        ),
+    deleteNotificationChannel: (channelId: string) =>
+        del(clusterPath(clusterId, `/notification-channels/${channelId}`)),
+    testNotificationChannel: (channelId: string) =>
+        post<{ delivered: boolean }>(
+            clusterPath(clusterId, `/notification-channels/${channelId}/test`)
+        ),
+    testDraftNotificationChannel: (payload: { url: string; name?: string }) =>
+        post<{ delivered: boolean }>(
+            clusterPath(clusterId, '/notification-channels/test'),
+            payload
+        ),
 });

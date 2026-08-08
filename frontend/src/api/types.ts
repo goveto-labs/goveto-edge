@@ -213,6 +213,23 @@ export interface ClusterMember {
     created_at: string;
 }
 
+export interface NotificationChannel {
+    id: string;
+    name: string;
+    service: string;
+    masked_url: string;
+    enabled: boolean;
+    url_configured: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface NotificationChannelInput {
+    name: string;
+    url?: string;
+    enabled: boolean;
+}
+
 export interface NodeAddress {
     id: string;
     address: string;

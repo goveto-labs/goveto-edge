@@ -28,6 +28,11 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/members", "cluster_member.add", "cluster_member", ""},
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/members/:user_id", "cluster_member.update", "cluster_member", "user_id"},
 	{http.MethodDelete, "/api/v1/clusters/:cluster_id/members/:user_id", "cluster_member.remove", "cluster_member", "user_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/notification-channels", "notification_channel.create", "notification_channel", ""},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/notification-channels/test", "notification_channel.test_draft", "notification_channel", ""},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id", "notification_channel.update", "notification_channel", "channel_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id", "notification_channel.delete", "notification_channel", "channel_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id/test", "notification_channel.test", "notification_channel", "channel_id"},
 
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes", "node.create", "node", ""},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/ssh-credentials", "ssh_credential.create", "ssh_credential", ""},

@@ -11,6 +11,7 @@ import (
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/node"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
@@ -20,7 +21,7 @@ type nameRequest struct {
 	Name string `json:"name"`
 }
 
-func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, credentialCipher ...*node.CredentialCipher) {
 	registerSelection(e, db, sessions)
 	group := e.Group("/api/v1/clusters/:cluster_id", authn.RequireAuth, clusteraccess.Require(db))
 	group.GET("/dns-lines", listDNSLines(db))
@@ -30,6 +31,11 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore) {
 	group.POST("/regions", createRegion(db), clusteraccess.RequirePermission(db, rbac.PermissionNodeManage))
 	group.POST("/members", addMember(db), clusteraccess.RequirePermission(db, rbac.PermissionMemberManage))
 	registerMemberManagement(group, db)
+	var cipher *node.CredentialCipher
+	if len(credentialCipher) > 0 {
+		cipher = credentialCipher[0]
+	}
+	registerNotificationChannels(group, db, cipher)
 }
 
 // @summary List DNS lines

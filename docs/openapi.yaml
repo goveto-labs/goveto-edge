@@ -24,6 +24,7 @@ tags:
     - name: clusters-certificates
     - name: clusters-jobs
     - name: clusters-nodes
+    - name: clusters-notifications
     - name: clusters-site-templates
     - name: clusters-sites
     - name: clusters-ssh-credentials
@@ -6172,6 +6173,353 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/clusters/{cluster_id}/notification-channels:
+        get:
+            operationId: listNotificationChannels
+            summary: List notification channels
+            description: List the cluster's notification channels without exposing their Shoutrrr URLs.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/clusters_notificationChannelResponse'
+        post:
+            operationId: createNotificationChannel
+            summary: Create notification channel
+            description: Create an encrypted Shoutrrr notification destination scoped to the cluster.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                enabled:
+                                    type: boolean
+                                name:
+                                    type: string
+                                url:
+                                    type: string
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            enabled:
+                                                type: boolean
+                                            id:
+                                                type: string
+                                            masked_url:
+                                                type: string
+                                            name:
+                                                type: string
+                                            service:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            url_configured:
+                                                type: boolean
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/notification-channels/{channel_id}:
+        put:
+            operationId: updateNotificationChannel
+            summary: Update notification channel
+            description: Update channel metadata and optionally replace its encrypted Shoutrrr URL; omit URL to retain it.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: channel_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                enabled:
+                                    type: boolean
+                                name:
+                                    type: string
+                                url:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            enabled:
+                                                type: boolean
+                                            id:
+                                                type: string
+                                            masked_url:
+                                                type: string
+                                            name:
+                                                type: string
+                                            service:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            url_configured:
+                                                type: boolean
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+        delete:
+            operationId: deleteNotificationChannel
+            summary: Delete notification channel
+            description: Delete a notification channel from the cluster.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: channel_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: OK
+    /api/v1/clusters/{cluster_id}/notification-channels/{channel_id}/test:
+        post:
+            operationId: testNotificationChannel
+            summary: Test notification channel
+            description: Send a test message through the channel's stored Shoutrrr destination.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: channel_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            delivered:
+                                                type: boolean
+                                                enum:
+                                                    - true
+                                        required:
+                                            - delivered
+    /api/v1/clusters/{cluster_id}/notification-channels/test:
+        post:
+            operationId: testDraftNotificationChannel
+            summary: Test a draft notification channel
+            description: Validate an unsaved Shoutrrr URL and deliver a test message through it.
+            tags:
+                - clusters-notifications
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                name:
+                                    type: string
+                                url:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            delivered:
+                                                type: boolean
+                                                enum:
+                                                    - true
+                                        required:
+                                            - delivered
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/publish/events:
         get:
             operationId: clusterEvents
@@ -10076,6 +10424,29 @@ components:
                     type: string
                 role:
                     type: string
+        clusters_notificationChannelResponse:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                masked_url:
+                    type: string
+                name:
+                    type: string
+                service:
+                    type: string
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                url_configured:
+                    type: boolean
         dnsprovider_Domain:
             type: object
             properties:

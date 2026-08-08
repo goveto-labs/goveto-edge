@@ -6,18 +6,19 @@ package rbac
 type Permission string
 
 const (
-	PermissionClusterRead       Permission = "cluster.read"
-	PermissionSiteWrite         Permission = "site.write"
-	PermissionSiteDelete        Permission = "site.delete"
-	PermissionPublish           Permission = "site.publish"
-	PermissionCacheOperate      Permission = "cache.operate"
-	PermissionNodeManage        Permission = "node.manage"
-	PermissionNodeDelete        Permission = "node.delete"
-	PermissionCredentialManage  Permission = "credential.manage"
-	PermissionCertificateManage Permission = "certificate.manage"
-	PermissionCertificateDelete Permission = "certificate.delete"
-	PermissionMemberManage      Permission = "cluster.member.manage"
-	PermissionClusterTransfer   Permission = "cluster.transfer"
+	PermissionClusterRead        Permission = "cluster.read"
+	PermissionSiteWrite          Permission = "site.write"
+	PermissionSiteDelete         Permission = "site.delete"
+	PermissionPublish            Permission = "site.publish"
+	PermissionCacheOperate       Permission = "cache.operate"
+	PermissionNodeManage         Permission = "node.manage"
+	PermissionNodeDelete         Permission = "node.delete"
+	PermissionCredentialManage   Permission = "credential.manage"
+	PermissionCertificateManage  Permission = "certificate.manage"
+	PermissionCertificateDelete  Permission = "certificate.delete"
+	PermissionMemberManage       Permission = "cluster.member.manage"
+	PermissionClusterTransfer    Permission = "cluster.transfer"
+	PermissionNotificationManage Permission = "cluster.notification.manage"
 
 	PermissionPlatformUserManage     Permission = "platform.user.manage"
 	PermissionPlatformSettingsManage Permission = "platform.settings.manage"
@@ -91,6 +92,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionCertificateDelete,
 		PermissionMemberManage,
 		PermissionClusterTransfer,
+		PermissionNotificationManage,
 	),
 	RoleAdmin: permissionSet(
 		PermissionClusterRead,
@@ -105,6 +107,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionCertificateDelete,
 		PermissionMemberManage,
 		PermissionClusterTransfer,
+		PermissionNotificationManage,
 		PermissionPlatformUserManage,
 		PermissionPlatformSettingsManage,
 		PermissionPlatformAuditRead,

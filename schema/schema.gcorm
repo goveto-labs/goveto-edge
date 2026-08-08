@@ -302,27 +302,28 @@ model CertificateJob {
 }
 
 model Cluster {
-  id              String              @id @default(uuid())
-  creatorId       String              @map("creator_id")
-  name            String
-  primaryHostname String?             @unique @map("primary_hostname")
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @default(now()) @updatedAt @map("updated_at")
-  creator         User                @relation(fields: [creatorId], references: [id])
-  members         ClusterMember[]
-  nodes           Node[]
-  groups          ClusterGroup[]
-  regions         ClusterRegion[]
-  dnsLines        DNSLine[]
-  dnsProviders    DNSProviderConfig[]
-  dnsRecords      DNSManagedRecord[]
-  dnsSyncJobs     DNSSyncJob[]
-  certificates    Certificate[]
-  acmeAccounts    ACMEAccount[]
-  originPools     OriginPool[]
-  sites           Site[]
-  siteTemplates   SiteTemplate[]
-  sshCredentials  SSHCredential[]
+  id                   String                @id @default(uuid())
+  creatorId            String                @map("creator_id")
+  name                 String
+  primaryHostname      String?               @unique @map("primary_hostname")
+  createdAt            DateTime              @default(now()) @map("created_at")
+  updatedAt            DateTime              @default(now()) @updatedAt @map("updated_at")
+  creator              User                  @relation(fields: [creatorId], references: [id])
+  members              ClusterMember[]
+  nodes                Node[]
+  groups               ClusterGroup[]
+  regions              ClusterRegion[]
+  dnsLines             DNSLine[]
+  dnsProviders         DNSProviderConfig[]
+  dnsRecords           DNSManagedRecord[]
+  dnsSyncJobs          DNSSyncJob[]
+  certificates         Certificate[]
+  acmeAccounts         ACMEAccount[]
+  originPools          OriginPool[]
+  sites                Site[]
+  siteTemplates        SiteTemplate[]
+  sshCredentials       SSHCredential[]
+  notificationChannels NotificationChannel[]
 
   @@unique([name])
   @@index([creatorId])
@@ -687,6 +688,22 @@ model NodeSiteConfigVersion {
   @@id([nodeId, siteId])
   @@index([siteId, status])
   @@map("node_site_config_versions")
+}
+
+model NotificationChannel {
+  id           UUID     @id @default(uuid())
+  clusterId    String   @map("cluster_id")
+  name         String
+  service      String
+  urlEncrypted String   @map("url_encrypted") @db.Text
+  enabled      Boolean  @default(true)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @default(now()) @updatedAt @map("updated_at")
+  cluster      Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([clusterId, name])
+  @@index([clusterId, enabled])
+  @@map("notification_channels")
 }
 
 model OriginBackend {

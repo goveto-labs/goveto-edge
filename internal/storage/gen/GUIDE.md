@@ -581,6 +581,20 @@ query.PostAuthorIdColumn
   - `Status` ()
   - `Updatedat` (DateTime)
 
+### NotificationChannel
+
+- Client handle: `c.NotificationChannel`
+- Query namespace: `query.NotificationChannel`
+- Fields:
+  - `Id` (UUID, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Service` (String)
+  - `Urlencrypted` (String)
+  - `Enabled` (Boolean)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### OriginBackend
 
 - Client handle: `c.OriginBackend`

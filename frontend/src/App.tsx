@@ -19,6 +19,7 @@ import Jobs from '@/pages/Jobs.tsx';
 import Login from '@/pages/Login.tsx';
 import NodeDetail from '@/pages/NodeDetail.tsx';
 import Nodes from '@/pages/Nodes.tsx';
+import Notifications from '@/pages/Notifications.tsx';
 import PurgeJobs from '@/pages/PurgeJobs.tsx';
 import Register from '@/pages/Register.tsx';
 import Settings from '@/pages/Settings.tsx';
@@ -66,6 +67,10 @@ export default function App() {
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />
                                     <Route element={<Settings />} path='/settings' />
+                                    <Route
+                                        element={<Notifications />}
+                                        path='/settings/notifications'
+                                    />
                                     <Route element={<AdminSettings />} path='/settings/admin/*' />
                                 </Route>
                             </Routes>
