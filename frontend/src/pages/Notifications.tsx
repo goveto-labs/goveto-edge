@@ -400,7 +400,7 @@ export default function Notifications() {
                                         />
                                     </FormField>
                                 ))}
-                                <p className='text-xs text-muted'>
+                                <p className='text-xs text-muted -mt-2'>
                                     <a
                                         className='underline'
                                         href={activeTemplate.docsURL}
