@@ -61,6 +61,25 @@ func TestAgentSecurityEndToEnd(t *testing.T) {
 		}
 	})
 
+	t.Run("Coraza CRS blocks with a concrete rule id", func(t *testing.T) {
+		config.Version++
+		waf.Engine = securitypolicy.WAFEngineCorazaCRS
+		config.WAF = toMap(t, waf)
+		if err := manager.ApplySite(config); err != nil {
+			t.Fatal(err)
+		}
+		response := requestEdge(t, port, config.Domains[0], http.MethodGet, "/?id=1%20UNION%20SELECT%20password%20FROM%20users", nil)
+		if response.status != http.StatusForbidden || !strings.HasPrefix(response.header.Get("X-Goveto-WAF-Rule"), "crs:") {
+			t.Fatalf("Coraza SQL injection response: status=%d headers=%v", response.status, response.header)
+		}
+		if source := response.header.Get("X-Goveto-WAF-Source"); source != securitypolicy.WAFEngineCorazaCRS+":"+securitypolicy.LatestCorazaCRSVersion {
+			t.Fatalf("Coraza source=%q", source)
+		}
+		if originRequests.Load() != 0 {
+			t.Fatalf("Coraza-blocked request reached origin: %d", originRequests.Load())
+		}
+	})
+
 	t.Run("monitor mode records match and allows request", func(t *testing.T) {
 		config.Version++
 		waf.Mode = "MONITOR"

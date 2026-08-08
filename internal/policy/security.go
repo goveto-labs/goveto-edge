@@ -14,6 +14,7 @@ import (
 
 const (
 	WAFEngineGovetoCompat = "GOVETO_COMPAT"
+	WAFEngineCorazaCRS    = "CORAZA_CRS"
 	WAFModeBlock          = "BLOCK"
 	WAFModeMonitor        = "MONITOR"
 
@@ -38,9 +39,12 @@ const (
 // and agents with AutoUpdate enabled normalize up to LatestWAFRuleSetVersion.
 var KnownWAFRuleSetVersions = []string{"2026.07.1"}
 
-// LatestWAFRuleSetVersion is the newest known rule set version. CurrentWAFRuleSetVersion
-// is kept as an alias for backward compatibility with existing callers and configs.
-const LatestWAFRuleSetVersion = "2026.07.1"
+const (
+	// LatestWAFRuleSetVersion is the newest compatibility rule set version.
+	LatestWAFRuleSetVersion = "2026.07.1"
+	// LatestCorazaCRSVersion is the embedded OWASP Core Rule Set version.
+	LatestCorazaCRSVersion = "4.25.0"
+)
 
 // CurrentWAFRuleSetVersion is the newest known rule set version (alias).
 const CurrentWAFRuleSetVersion = LatestWAFRuleSetVersion
@@ -188,16 +192,16 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 	if p.Engine == "" {
 		p.Engine = WAFEngineGovetoCompat
 	}
-	if p.Engine != WAFEngineGovetoCompat {
+	if p.Engine != WAFEngineGovetoCompat && p.Engine != WAFEngineCorazaCRS {
 		return fmt.Errorf("unsupported WAF engine %q", p.Engine)
 	}
 	p.RuleSetVersion = strings.TrimSpace(p.RuleSetVersion)
 	if p.AutoUpdate || p.RuleSetVersion == "" {
 		// AutoUpdate normalizes empty and older versions up to the latest
 		// known rule set, so agents roll forward without a config push.
-		p.RuleSetVersion = LatestWAFRuleSetVersion
+		p.RuleSetVersion = latestWAFRuleSetVersion(p.Engine)
 	}
-	if _, ok := knownWAFRuleSetVersions[p.RuleSetVersion]; !ok {
+	if !knownWAFRuleSetVersion(p.Engine, p.RuleSetVersion) {
 		return fmt.Errorf("unsupported WAF rule set version %q", p.RuleSetVersion)
 	}
 	if p.RolloutPercentage == 0 {
@@ -344,6 +348,21 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 		return err
 	}
 	return nil
+}
+
+func latestWAFRuleSetVersion(engine string) string {
+	if engine == WAFEngineCorazaCRS {
+		return LatestCorazaCRSVersion
+	}
+	return LatestWAFRuleSetVersion
+}
+
+func knownWAFRuleSetVersion(engine, version string) bool {
+	if engine == WAFEngineCorazaCRS {
+		return version == LatestCorazaCRSVersion
+	}
+	_, ok := knownWAFRuleSetVersions[version]
+	return ok
 }
 
 func normalizeWAFAutoBan(ban *WAFAutoBan, location string) error {

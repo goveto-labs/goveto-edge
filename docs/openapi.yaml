@@ -177,6 +177,110 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/audit/events:
+        get:
+            operationId: listEvents
+            summary: List audit events
+            description: |-
+                read-only surface that complements the existing write recorder.
+                Paginated audit log query with filters by actor, action and resource; requires the platform audit-read permission.
+            tags:
+                - audit
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.RequirePlatform
+            parameters:
+                - name: action
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: actor
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: from
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int64
+                - name: page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int64
+                - name: request_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: resource_id
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: resource_type
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: result
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+                - name: to
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_AuditLogWhereClause'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/auditapi_auditEvent'
+                                            page:
+                                                type: integer
+                                                format: int32
+                                            page_size:
+                                                type: integer
+                                                format: int32
+                                            total:
+                                                type: integer
+                                                format: int64
     /api/v1/auth/login:
         post:
             operationId: login
@@ -9169,84 +9273,6 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/nodes_sshCredentialNodeResponse'
-    /api/v1/audit/events:
-        get:
-            operationId: listAuditEvents
-            summary: List audit events
-            description: Paginated, filterable audit log query; requires the platform audit-read permission.
-            tags:
-                - audit
-            security:
-                - cookie_goveto_session: []
-            x-middlewares:
-                - httpsecurity.Middleware
-                - sessions.Session
-                - sessions.RequireActiveUser
-                - authapi.RequireTOTPEnrollment
-                - audit.Middleware
-                - authn.RequireAuth
-                - clusteraccess.RequirePlatform
-            parameters:
-                - name: page
-                  in: query
-                  schema:
-                    type: integer
-                    minimum: 1
-                    default: 1
-                - name: page_size
-                  in: query
-                  schema:
-                    type: integer
-                    minimum: 1
-                    maximum: 500
-                    default: 100
-                - name: actor
-                  in: query
-                  schema:
-                    type: string
-                - name: action
-                  in: query
-                  schema:
-                    type: string
-                - name: resource_type
-                  in: query
-                  schema:
-                    type: string
-                - name: resource_id
-                  in: query
-                  schema:
-                    type: string
-                - name: request_id
-                  in: query
-                  schema:
-                    type: string
-                - name: result
-                  in: query
-                  schema:
-                    type: string
-                    enum:
-                        - SUCCESS
-                        - FAILURE
-                - name: from
-                  in: query
-                  schema:
-                    type: string
-                    format: date-time
-                - name: to
-                  in: query
-                  description: Exclusive upper bound; a date-only value means midnight after that date.
-                  schema:
-                    type: string
-                    format: date-time
-            responses:
-                "200":
-                    description: Paginated audit events.
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/auditapi_auditListResponse'
-                "403":
-                    description: Caller lacks the platform audit-read permission.
     /api/v1/init:
         post:
             operationId: initialize
@@ -9475,55 +9501,6 @@ paths:
                                         type: string
 components:
     schemas:
-        auditapi_auditEvent:
-            type: object
-            properties:
-                id:
-                    type: string
-                actor_id:
-                    type: string
-                actor:
-                    type: string
-                user:
-                    $ref: '#/components/schemas/auditapi_userSummary'
-                source_ip:
-                    type: string
-                user_agent:
-                    type: string
-                action:
-                    type: string
-                resource_type:
-                    type: string
-                resource_id:
-                    type: string
-                before: {}
-                after: {}
-                request_id:
-                    type: string
-                result:
-                    type: string
-                    enum: [SUCCESS, FAILURE]
-                failure_reason:
-                    type: string
-                created_at:
-                    type: string
-                    format: date-time
-        auditapi_userSummary:
-            type: object
-            properties:
-                id: {type: string}
-                email: {type: string}
-                name: {type: string}
-        auditapi_auditListResponse:
-            type: object
-            properties:
-                items:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/auditapi_auditEvent'
-                total: {type: integer}
-                page: {type: integer}
-                page_size: {type: integer}
         adminsettings_authenticationProviderRequest:
             type: object
             properties:
@@ -9994,6 +9971,50 @@ components:
                 unique_ips:
                     type: integer
                     format: int64
+        auditapi_auditEvent:
+            type: object
+            properties:
+                action:
+                    type: string
+                actor:
+                    type: string
+                actor_id:
+                    type: string
+                after:
+                    type: object
+                before:
+                    type: object
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                failure_reason:
+                    type: string
+                id:
+                    type: string
+                request_id:
+                    type: string
+                resource_id:
+                    type: string
+                resource_type:
+                    type: string
+                result:
+                    type: string
+                source_ip:
+                    type: string
+                user:
+                    $ref: '#/components/schemas/auditapi_userSummary'
+                user_agent:
+                    type: string
+        auditapi_userSummary:
+            type: object
+            properties:
+                email:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
         auth_authProviderPublicResponse:
             type: object
             properties:
@@ -11041,6 +11062,15 @@ components:
                     type: boolean
                 url:
                     type: string
+        query_AuditLogWhereClause:
+            type: object
+            properties:
+                field:
+                    type: string
+                operator:
+                    type: string
+                value:
+                    type: object
         securitystate_TemporaryBlock:
             type: object
             properties:

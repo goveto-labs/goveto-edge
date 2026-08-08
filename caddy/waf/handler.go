@@ -18,6 +18,7 @@ import (
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
+	"github.com/corazawaf/coraza/v3"
 	"github.com/google/uuid"
 
 	"goveto-edge/internal/policy"
@@ -39,6 +40,7 @@ type Handler struct {
 	distributed    distributedStore
 	distributedErr error
 	autoBan        autoBanStore
+	crs            coraza.WAF
 }
 
 type compiledGroup struct {
@@ -157,6 +159,12 @@ func (h *Handler) Provision(_ caddy.Context) error {
 	if h.WAF.Enabled && len(h.WAF.Presets) > 0 {
 		h.inspectBody = true
 	}
+	if h.WAF.Enabled && h.WAF.Engine == policy.WAFEngineCorazaCRS && len(h.WAF.Presets) > 0 {
+		h.crs, err = acquireCRSEngine(h.WAF.MaxBodyBytes)
+		if err != nil {
+			return fmt.Errorf("initialize Coraza CRS %s: %w", h.WAF.RuleSetVersion, err)
+		}
+	}
 
 	h.rateRules = make([]compiledRateRule, 0, len(h.RateLimit.Rules))
 	for _, rule := range h.RateLimit.Rules {
@@ -249,7 +257,11 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	}
 
 	if h.WAF.Enabled && inRollout(h.WAF.RolloutPercentage, h.SiteID+":waf", data) {
-		if decision := h.matchWAF(data); decision != nil {
+		decision, err := h.matchWAF(data)
+		if err != nil {
+			return err
+		}
+		if decision != nil {
 			if decision.action == policy.WAFActionAllow {
 				return next.ServeHTTP(w, r)
 			}
@@ -297,7 +309,7 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 	return next.ServeHTTP(w, r)
 }
 
-func (h Handler) matchWAF(data requestData) *wafDecision {
+func (h Handler) matchWAF(data requestData) (*wafDecision, error) {
 	for _, group := range h.groups {
 		if group.Action != policy.WAFActionAllow {
 			continue
@@ -306,20 +318,30 @@ func (h Handler) matchWAF(data requestData) *wafDecision {
 			continue
 		}
 		if matched, detail := group.match(data); matched {
-			return decisionForGroup(group, detail)
+			return decisionForGroup(group, detail), nil
+		}
+	}
+	if h.crs != nil {
+		decision, err := h.matchCoraza(data)
+		if err != nil || decision != nil {
+			return decision, err
 		}
 	}
 	for _, preset := range h.WAF.Presets {
 		ruleID := "preset:" + preset
-		if !h.excepted(ruleID, data) && matchPreset(preset, data) {
+		if matched, detail := matchPreset(preset, data); !h.excepted(ruleID, data) && matched {
+			source := h.WAF.Engine + ":" + h.WAF.RuleSetVersion
+			if h.crs != nil {
+				source = policy.WAFEngineGovetoCompat + ":fallback"
+			}
 			return &wafDecision{
 				id:       ruleID,
 				action:   policy.WAFActionShowPage,
 				status:   h.WAF.BlockStatus,
 				response: h.WAF.BlockResponse,
-				source:   h.WAF.Engine + ":" + h.WAF.RuleSetVersion,
-				match:    preset,
-			}
+				source:   source,
+				match:    detail,
+			}, nil
 		}
 	}
 	for _, group := range h.groups {
@@ -330,10 +352,10 @@ func (h Handler) matchWAF(data requestData) *wafDecision {
 			continue
 		}
 		if matched, detail := group.match(data); matched {
-			return decisionForGroup(group, detail)
+			return decisionForGroup(group, detail), nil
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 func decisionForGroup(group compiledGroup, match string) *wafDecision {
@@ -755,23 +777,36 @@ var presetPatterns = map[string]*regexp.Regexp{
 	"BAD_BOTS":          regexp.MustCompile(`(?i)(?:sqlmap|nikto|nuclei|masscan|zgrab|acunetix|nessus|metasploit|dirbuster|gobuster)`),
 }
 
-func matchPreset(preset string, data requestData) bool {
+func matchPreset(preset string, data requestData) (bool, string) {
 	pattern := presetPatterns[preset]
 	if pattern == nil {
-		return false
+		return false, ""
 	}
 	switch preset {
 	case "PATH_TRAVERSAL", "SCANNER":
-		return pattern.MatchString(data.request.URL.EscapedPath() + "?" + data.request.URL.RawQuery)
+		value := data.request.URL.EscapedPath() + "?" + data.request.URL.RawQuery
+		return presetPatternMatch(pattern, "REQUEST_TARGET", value, false)
 	case "BAD_BOTS":
-		return pattern.MatchString(data.request.UserAgent())
+		return presetPatternMatch(pattern, "USER_AGENT", data.request.UserAgent(), false)
 	default:
-		values := make([]string, 0)
-		for _, items := range data.request.URL.Query() {
-			values = append(values, items...)
+		query := data.request.URL.Query()
+		for _, name := range sortedQueryNames(query) {
+			for _, value := range query[name] {
+				if matched, detail := presetPatternMatch(pattern, "QUERY:"+name, value, sensitiveMatchKey(name)); matched {
+					return true, detail
+				}
+			}
 		}
-		return pattern.MatchString(strings.Join(values, "\n") + "\n" + data.body)
+		return presetPatternMatch(pattern, "BODY", data.body, false)
 	}
+}
+
+func presetPatternMatch(pattern *regexp.Regexp, location, value string, sensitive bool) (bool, string) {
+	match := pattern.FindString(value)
+	if match == "" {
+		return false, ""
+	}
+	return true, "variable=" + location + ";match=" + sanitizeMatchText(match, sensitive)
 }
 
 type counterStore struct {

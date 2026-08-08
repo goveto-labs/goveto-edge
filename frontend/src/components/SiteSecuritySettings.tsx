@@ -782,7 +782,27 @@ export function SiteSecuritySettings({
                 </div>
 
                 <div className='space-y-6 p-5'>
-                    <div className='grid gap-4 md:grid-cols-3'>
+                    <div className='grid gap-4 md:grid-cols-4'>
+                        <SelectField
+                            label='WAF engine'
+                            options={[
+                                { id: 'GOVETO_COMPAT', label: 'Goveto compatibility' },
+                                { id: 'CORAZA_CRS', label: 'Coraza + OWASP CRS' },
+                            ]}
+                            value={policy.waf.engine}
+                            variant='secondary'
+                            onChange={(engine) =>
+                                onChange({
+                                    ...policy,
+                                    waf: {
+                                        ...policy.waf,
+                                        engine,
+                                        rule_set_version:
+                                            engine === 'CORAZA_CRS' ? '4.25.0' : '2026.07.1',
+                                    },
+                                })
+                            }
+                        />
                         <SelectField
                             label='Operating mode'
                             options={[

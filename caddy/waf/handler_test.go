@@ -438,8 +438,8 @@ func BenchmarkVerifyProofOfWork(b *testing.B) {
 	}
 	proof := solveChallenge(b, token, testBrowserEnvironment(request))
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		assessment, valid := handler.validChallengeClaim(claim, request, "shield", "192.0.2.1", proof)
 		if !valid || !assessment.Accepted {
 			b.Fatal("proof rejected")
@@ -737,8 +737,8 @@ func BenchmarkWAFRuleEvaluation(b *testing.B) {
 	request.RemoteAddr = "192.0.2.1:1234"
 	data := requestData{request: request, ip: "192.0.2.1"}
 	b.ReportAllocs()
-	b.ResetTimer()
-	for range b.N {
+
+	for b.Loop() {
 		handler.matchWAF(data)
 	}
 }
@@ -840,6 +840,98 @@ func TestCustomGroupMatchReportsAndGroupAllMatchedRules(t *testing.T) {
 	}
 	if !strings.Contains(match, "rule[1]:PATH:PREFIX") || !strings.Contains(match, "rule[2]:METHOD:EQUALS") {
 		t.Fatalf("AND group match detail missing rules in %q", match)
+	}
+}
+
+func TestCompatibilityPresetReportsSanitizedMatchDetail(t *testing.T) {
+	handler := Handler{SiteID: "compat-detail", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = []string{"SQL_INJECTION"}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/?token=secret-value-1234567890-UNION-SELECT-password-FROM-users", nil)
+	response := httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	match := response.Header().Get("X-Goveto-WAF-Match")
+	if response.Code != http.StatusForbidden || !strings.Contains(match, "variable=QUERY:token") || !strings.Contains(match, "[REDACTED]") {
+		t.Fatalf("compat preset detail was not sanitized: status=%d match=%q", response.Code, match)
+	}
+	if strings.Contains(match, "secret-value") {
+		t.Fatalf("compat preset leaked a sensitive value: %q", match)
+	}
+}
+
+func TestCorazaCRSBlocksAndReportsRuleDetail(t *testing.T) {
+	handler := Handler{SiteID: "coraza", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Engine = policy.WAFEngineCorazaCRS
+	handler.WAF.Presets = []string{"SQL_INJECTION"}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/?id=1%20UNION%20SELECT%20password%20FROM%20users", nil)
+	response := httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	match := response.Header().Get("X-Goveto-WAF-Match")
+	if response.Code != http.StatusForbidden || !strings.HasPrefix(response.Header().Get("X-Goveto-WAF-Rule"), "crs:") {
+		t.Fatalf("CRS did not block SQL injection: status=%d headers=%v", response.Code, response.Header())
+	}
+	for _, expected := range []string{"preset=SQL_INJECTION", "rule=", "variable=", "match="} {
+		if !strings.Contains(match, expected) {
+			t.Fatalf("CRS detail missing %q in %q", expected, match)
+		}
+	}
+	if source := response.Header().Get("X-Goveto-WAF-Source"); source != policy.WAFEngineCorazaCRS+":"+policy.LatestCorazaCRSVersion {
+		t.Fatalf("CRS source=%q", source)
+	}
+}
+
+func TestCorazaCRSPresetExceptionBypassesCategory(t *testing.T) {
+	handler := Handler{SiteID: "coraza-exception", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Engine = policy.WAFEngineCorazaCRS
+	handler.WAF.Presets = []string{"SQL_INJECTION"}
+	handler.WAF.Exceptions = []policy.WAFException{{
+		ID: "allow-search", Enabled: true, RuleIDs: []string{"preset:SQL_INJECTION"},
+		Conditions: policy.RequestConditions{Groups: []policy.RequestConditionGroup{{
+			Operator: "AND", Rules: []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/search"}},
+		}}},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	next := &nextHandler{}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/search?id=1%20UNION%20SELECT%20password%20FROM%20users", nil)
+	response := httptest.NewRecorder()
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(next)); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || next.calls != 1 {
+		t.Fatalf("preset exception did not bypass CRS category: status=%d calls=%d", response.Code, next.calls)
+	}
+}
+
+func BenchmarkCorazaCRSRuleEvaluation(b *testing.B) {
+	handler := Handler{SiteID: "coraza-bench", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Engine = policy.WAFEngineCorazaCRS
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		b.Fatal(err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/assets/app.js?v=1", nil)
+	request.RemoteAddr = "192.0.2.1:1234"
+	request.Header.Set("X-Request-ID", "benchmark")
+	data := requestData{request: request, ip: "192.0.2.1"}
+	b.ReportAllocs()
+
+	for b.Loop() {
+		if _, err := handler.matchWAF(data); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

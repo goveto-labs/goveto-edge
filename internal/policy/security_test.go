@@ -230,3 +230,21 @@ func TestWAFRuleSetVersionAcceptsKnownAndAutoUpdates(t *testing.T) {
 		t.Fatal("expected unknown version to be rejected")
 	}
 }
+
+func TestCorazaCRSRuleSetVersionNormalizesPerEngine(t *testing.T) {
+	waf := DefaultWAFPolicy()
+	waf.Engine = WAFEngineCorazaCRS
+	waf.RuleSetVersion = CurrentWAFRuleSetVersion
+	if err := waf.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if waf.RuleSetVersion != LatestCorazaCRSVersion {
+		t.Fatalf("Coraza auto-update version=%q", waf.RuleSetVersion)
+	}
+
+	waf.AutoUpdate = false
+	waf.RuleSetVersion = CurrentWAFRuleSetVersion
+	if err := waf.NormalizeAndValidate(); err == nil {
+		t.Fatal("Coraza accepted a compatibility-engine rule set version")
+	}
+}
