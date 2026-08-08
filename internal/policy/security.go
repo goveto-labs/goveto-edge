@@ -13,10 +13,9 @@ import (
 )
 
 const (
-	WAFEngineGovetoCompat    = "GOVETO_COMPAT"
-	CurrentWAFRuleSetVersion = "2026.07.1"
-	WAFModeBlock             = "BLOCK"
-	WAFModeMonitor           = "MONITOR"
+	WAFEngineGovetoCompat = "GOVETO_COMPAT"
+	WAFModeBlock          = "BLOCK"
+	WAFModeMonitor        = "MONITOR"
 
 	WAFActionShowPage = "SHOW_PAGE"
 	WAFActionBlock    = "BLOCK"
@@ -31,6 +30,28 @@ const (
 	WAFResponseText    = "TEXT"
 	WAFResponseJSON    = "JSON"
 )
+
+// KnownWAFRuleSetVersions is the ordered list of rule set versions the
+// engine accepts, oldest first. The final entry is the latest version and
+// the target for AutoUpdate. Adding a version here is the only change
+// needed to ship a new rule set: validation accepts any listed version,
+// and agents with AutoUpdate enabled normalize up to LatestWAFRuleSetVersion.
+var KnownWAFRuleSetVersions = []string{"2026.07.1"}
+
+// LatestWAFRuleSetVersion is the newest known rule set version. CurrentWAFRuleSetVersion
+// is kept as an alias for backward compatibility with existing callers and configs.
+const LatestWAFRuleSetVersion = "2026.07.1"
+
+// CurrentWAFRuleSetVersion is the newest known rule set version (alias).
+const CurrentWAFRuleSetVersion = LatestWAFRuleSetVersion
+
+var knownWAFRuleSetVersions = func() map[string]int {
+	order := map[string]int{}
+	for index, version := range KnownWAFRuleSetVersions {
+		order[version] = index
+	}
+	return order
+}()
 
 var supportedWAFPresets = map[string]struct{}{
 	"BAD_BOTS":          {},
@@ -68,7 +89,26 @@ type WAFRuleGroup struct {
 	RedirectURL       string           `json:"redirect_url,omitempty"`
 	RedirectStatus    int              `json:"redirect_status,omitempty"`
 	Tag               string           `json:"tag,omitempty"`
+	AutoBan           WAFAutoBan       `json:"auto_ban,omitempty"`
 	Rules             []WAFRequestRule `json:"rules"`
+}
+
+// WAFAutoBan closes the loop between detection and enforcement: after a
+// group fires Hits times within WindowSeconds for the same client IP, the
+// edge agent writes a temporary block (site-scoped or global) that subsequent
+// requests consult before re-evaluating the WAF. This turns a noisy repeat
+// offender into an enforced ban without a control-plane round-trip.
+//
+// Hits are only accrued for enforcement actions (BLOCK, SHOW_PAGE, REDIRECT,
+// CAPTCHA). MONITOR and TAG never count, and the entire auto-ban path is
+// idle while the engine Mode is MONITOR so observation-only deploys cannot
+// hard-block clients.
+type WAFAutoBan struct {
+	Enabled       bool   `json:"enabled"`
+	Hits          int    `json:"hits"`
+	WindowSeconds int    `json:"window_seconds"`
+	BanSeconds    int    `json:"ban_seconds"`
+	Scope         string `json:"scope,omitempty"`
 }
 
 type WAFException struct {
@@ -151,10 +191,13 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 	if p.Engine != WAFEngineGovetoCompat {
 		return fmt.Errorf("unsupported WAF engine %q", p.Engine)
 	}
-	if p.AutoUpdate || strings.TrimSpace(p.RuleSetVersion) == "" {
-		p.RuleSetVersion = CurrentWAFRuleSetVersion
+	p.RuleSetVersion = strings.TrimSpace(p.RuleSetVersion)
+	if p.AutoUpdate || p.RuleSetVersion == "" {
+		// AutoUpdate normalizes empty and older versions up to the latest
+		// known rule set, so agents roll forward without a config push.
+		p.RuleSetVersion = LatestWAFRuleSetVersion
 	}
-	if p.RuleSetVersion != CurrentWAFRuleSetVersion {
+	if _, ok := knownWAFRuleSetVersions[p.RuleSetVersion]; !ok {
 		return fmt.Errorf("unsupported WAF rule set version %q", p.RuleSetVersion)
 	}
 	if p.RolloutPercentage == 0 {
@@ -260,6 +303,9 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 				return fmt.Errorf("groups[%d].tag must be 1-64 safe characters", index)
 			}
 		}
+		if err := normalizeWAFAutoBan(&group.AutoBan, fmt.Sprintf("groups[%d].auto_ban", index)); err != nil {
+			return err
+		}
 		if len(group.Rules) == 0 || len(group.Rules) > 64 {
 			return fmt.Errorf("groups[%d] must contain between 1 and 64 rules", index)
 		}
@@ -296,6 +342,32 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 	}
 	if err := normalizeWAFResponse(&p.BlockResponse, "block_response"); err != nil {
 		return err
+	}
+	return nil
+}
+
+func normalizeWAFAutoBan(ban *WAFAutoBan, location string) error {
+	ban.Scope = strings.ToUpper(strings.TrimSpace(ban.Scope))
+	if !ban.Enabled {
+		if ban.Scope == "" {
+			ban.Scope = "SITE"
+		}
+		return nil
+	}
+	if ban.Hits < 1 || ban.Hits > 100000 {
+		return fmt.Errorf("%s.hits must be between 1 and 100000", location)
+	}
+	if ban.WindowSeconds < 1 || ban.WindowSeconds > 86400 {
+		return fmt.Errorf("%s.window_seconds must be between 1 and 86400", location)
+	}
+	if ban.BanSeconds < 1 || ban.BanSeconds > 86400 {
+		return fmt.Errorf("%s.ban_seconds must be between 1 and 86400", location)
+	}
+	if ban.Scope == "" {
+		ban.Scope = "SITE"
+	}
+	if ban.Scope != "SITE" && ban.Scope != "GLOBAL" {
+		return fmt.Errorf("%s.scope must be SITE or GLOBAL", location)
 	}
 	return nil
 }

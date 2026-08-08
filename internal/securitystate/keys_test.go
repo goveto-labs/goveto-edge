@@ -14,6 +14,7 @@ func TestSecurityStateKeySpacesAreStableAndSeparated(t *testing.T) {
 		ChallengeKey("token"),
 		GlobalBlockKey(address),
 		SiteBlockKey("site", address),
+		WAFAutoBanCounterKey("site", "group", address),
 	}
 	seen := map[string]bool{}
 	for _, key := range keys {

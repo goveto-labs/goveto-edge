@@ -169,3 +169,64 @@ func TestRateLimitPolicyValidatesCCRule(t *testing.T) {
 		t.Fatalf("rate-limit policy was not normalized: %#v", policy.Rules[0])
 	}
 }
+
+func TestWAFAutoBanValidation(t *testing.T) {
+	for _, mutate := range []func(*WAFAutoBan){
+		func(b *WAFAutoBan) { b.Hits = 0 },
+		func(b *WAFAutoBan) { b.Hits = 100001 },
+		func(b *WAFAutoBan) { b.WindowSeconds = 0 },
+		func(b *WAFAutoBan) { b.BanSeconds = 0 },
+		func(b *WAFAutoBan) { b.Scope = "PLANET" },
+	} {
+		policy := DefaultWAFPolicy()
+		policy.Groups = []WAFRuleGroup{{
+			ID: "g", Enabled: true, Operator: "AND", Action: WAFActionBlock,
+			AutoBan: WAFAutoBan{Enabled: true, Hits: 3, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
+			Rules:   []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/x"}},
+		}}
+		mutate(&policy.Groups[0].AutoBan)
+		if err := policy.NormalizeAndValidate(); err == nil {
+			t.Fatalf("expected auto-ban validation error for %#v", policy.Groups[0].AutoBan)
+		}
+	}
+}
+
+func TestWAFAutoBanDisabledIsDefaulted(t *testing.T) {
+	policy := DefaultWAFPolicy()
+	policy.Groups = []WAFRuleGroup{{
+		ID: "g", Enabled: true, Operator: "AND", Action: WAFActionBlock,
+		Rules: []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/x"}},
+	}}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.Groups[0].AutoBan.Enabled || policy.Groups[0].AutoBan.Scope != "SITE" {
+		t.Fatalf("disabled auto-ban should default scope to SITE: %#v", policy.Groups[0].AutoBan)
+	}
+}
+
+func TestWAFRuleSetVersionAcceptsKnownAndAutoUpdates(t *testing.T) {
+	policy := DefaultWAFPolicy()
+	policy.AutoUpdate = true
+	policy.RuleSetVersion = ""
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.RuleSetVersion != LatestWAFRuleSetVersion {
+		t.Fatalf("AutoUpdate did not pin latest: %q", policy.RuleSetVersion)
+	}
+
+	policy = DefaultWAFPolicy()
+	policy.AutoUpdate = false
+	policy.RuleSetVersion = KnownWAFRuleSetVersions[0]
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatalf("known version rejected: %v", err)
+	}
+
+	policy = DefaultWAFPolicy()
+	policy.AutoUpdate = false
+	policy.RuleSetVersion = "2999.01.1"
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("expected unknown version to be rejected")
+	}
+}

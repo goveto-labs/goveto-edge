@@ -2,6 +2,7 @@ package waf
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"fmt"
 	"hash/fnv"
@@ -37,6 +38,7 @@ type Handler struct {
 	access         compiledAccess
 	distributed    distributedStore
 	distributedErr error
+	autoBan        autoBanStore
 }
 
 type compiledGroup struct {
@@ -175,6 +177,14 @@ func (h *Handler) Provision(_ caddy.Context) error {
 	if h.RateLimit.Backend == "REDIS" || (h.Access.Enabled && h.Access.TemporaryBlocks) || h.hasCaptchaGroup() {
 		h.distributed, h.distributedErr = configuredRedisStore()
 	}
+	if h.WAF.Enabled && h.hasAutoBanGroup() {
+		h.autoBan = processLocalAutoBanStore
+		if store, err := configuredRedisStore(); err == nil {
+			if backend, ok := store.(*redisStore); ok {
+				h.autoBan = &redisAutoBanStore{client: backend.client}
+			}
+		}
+	}
 	return nil
 }
 
@@ -227,6 +237,17 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 		}
 	}
 
+	// Auto-ban enforcement is skipped entirely in WAF monitor mode so an
+	// observation-only deployment cannot hard-block clients.
+	if h.autoBan != nil && h.WAF.Mode != policy.WAFModeMonitor {
+		if blocked, retry, err := h.autoBan.Blocked(r.Context(), h.SiteID, data.ip); err == nil && blocked {
+			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()+0.5))))
+			setSecurityEvent(w.Header(), "BLOCK", "waf:auto-ban", "waf", "auto_ban")
+			http.Error(w, http.StatusText(h.WAF.BlockStatus), h.WAF.BlockStatus)
+			return nil
+		}
+	}
+
 	if h.WAF.Enabled && inRollout(h.WAF.RolloutPercentage, h.SiteID+":waf", data) {
 		if decision := h.matchWAF(data); decision != nil {
 			if decision.action == policy.WAFActionAllow {
@@ -241,6 +262,9 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 			} else if decision.action == policy.WAFActionCaptcha && h.hasClearance(r, decision.id, data.ip) {
 				setSecurityEvent(w.Header(), "CAPTCHA-PASS", decision.id, decision.source, decision.match)
 			} else {
+				if autoBanCountsHit(decision.action, h.WAF.Mode) {
+					h.recordAutoBan(r.Context(), decision.id, data.ip)
+				}
 				return h.executeDecision(w, r, data.ip, *decision)
 			}
 		}
@@ -275,10 +299,15 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 
 func (h Handler) matchWAF(data requestData) *wafDecision {
 	for _, group := range h.groups {
-		if group.Action != policy.WAFActionAllow || !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) || !group.match(data) {
+		if group.Action != policy.WAFActionAllow {
 			continue
 		}
-		return decisionForGroup(group)
+		if !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) {
+			continue
+		}
+		if matched, detail := group.match(data); matched {
+			return decisionForGroup(group, detail)
+		}
 	}
 	for _, preset := range h.WAF.Presets {
 		ruleID := "preset:" + preset
@@ -294,14 +323,20 @@ func (h Handler) matchWAF(data requestData) *wafDecision {
 		}
 	}
 	for _, group := range h.groups {
-		if group.Action != policy.WAFActionAllow && inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) && !h.excepted(group.ID, data) && group.match(data) {
-			return decisionForGroup(group)
+		if group.Action == policy.WAFActionAllow {
+			continue
+		}
+		if !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) {
+			continue
+		}
+		if matched, detail := group.match(data); matched {
+			return decisionForGroup(group, detail)
 		}
 	}
 	return nil
 }
 
-func decisionForGroup(group compiledGroup) *wafDecision {
+func decisionForGroup(group compiledGroup, match string) *wafDecision {
 	return &wafDecision{
 		id:             group.ID,
 		action:         group.Action,
@@ -311,7 +346,7 @@ func decisionForGroup(group compiledGroup) *wafDecision {
 		redirectStatus: group.RedirectStatus,
 		tag:            group.Tag,
 		source:         "custom",
-		match:          "conditions",
+		match:          match,
 	}
 }
 
@@ -351,6 +386,42 @@ func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip stri
 		_, _ = io.WriteString(w, page)
 	}
 	return nil
+}
+
+// autoBanCountsHit reports whether a matched WAF action should accrue toward
+// an auto-ban threshold. Monitor mode (engine or group) and soft actions such
+// as TAG never write bans; only enforcement actions do.
+func autoBanCountsHit(action, wafMode string) bool {
+	if wafMode == policy.WAFModeMonitor {
+		return false
+	}
+	switch action {
+	case policy.WAFActionBlock, policy.WAFActionShowPage, policy.WAFActionRedirect, policy.WAFActionCaptcha:
+		return true
+	default:
+		return false
+	}
+}
+
+// recordAutoBan accrues a hit for the matched group's auto-ban policy. When
+// the configured threshold is reached within the window the store writes a
+// temporary block; subsequent requests are rejected before re-evaluating the
+// WAF (unless the engine is in monitor mode).
+func (h Handler) recordAutoBan(ctx context.Context, groupID, ip string) {
+	if h.autoBan == nil {
+		return
+	}
+	for _, group := range h.WAF.Groups {
+		if group.ID != groupID || !group.AutoBan.Enabled {
+			continue
+		}
+		if _, _, err := h.autoBan.RecordHit(ctx, h.SiteID, groupID, ip, group.AutoBan); err != nil {
+			// A Redis hiccup must not suppress the WAF verdict itself; the hit
+			// is simply lost and the next request tries again.
+			break
+		}
+		break
+	}
 }
 
 func (h Handler) excepted(ruleID string, data requestData) bool {
@@ -468,12 +539,31 @@ func renderPage(name string, data any) (string, error) {
 	return output.String(), nil
 }
 
-func (g compiledGroup) match(data requestData) bool {
+// match evaluates the group's rules against the request and reports whether
+// the group matched plus a human-readable summary of every rule that fired,
+// e.g. "rule[2]:PATH:EQUALS,rule[3]:QUERY:REGEX". OR and AND groups both
+// list all matched rule indices so operators can see which sub-rules tripped.
+// This replaces the opaque "conditions" match string.
+func (g compiledGroup) match(data requestData) (bool, string) {
 	matches := make([]bool, len(g.rules))
 	for index := range g.rules {
 		matches[index] = g.rules[index].match(data)
 	}
-	return combine(g.Operator, matches)
+	if !combine(g.Operator, matches) {
+		return false, ""
+	}
+	var detail strings.Builder
+	for index, matched := range matches {
+		if !matched {
+			continue
+		}
+		if detail.Len() > 0 {
+			detail.WriteByte(',')
+		}
+		rule := g.rules[index].WAFRequestRule
+		fmt.Fprintf(&detail, "rule[%d]:%s:%s", index+1, rule.Field, rule.Operator)
+	}
+	return true, detail.String()
 }
 
 func compileConditions(conditions policy.RequestConditions) (compiledConditions, bool, error) {

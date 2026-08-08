@@ -3,7 +3,9 @@ package waf
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +18,7 @@ import (
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 
 	"goveto-edge/internal/policy"
+	"goveto-edge/internal/securitystate"
 )
 
 type fakeDistributedStore struct {
@@ -144,7 +147,8 @@ func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
 	handler.WAF.Presets = nil
 	handler.WAF.Groups = []policy.WAFRuleGroup{{
 		ID: "shield", Enabled: true, Operator: "AND", Action: policy.WAFActionCaptcha,
-		Rules: []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/protected"}},
+		AutoBan: policy.WAFAutoBan{Enabled: true, Hits: 2, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
+		Rules:   []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/protected"}},
 	}}
 	if err := handler.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
@@ -167,15 +171,17 @@ func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
 		t.Fatalf("challenge completion status=%d cookies=%v", result.StatusCode, result.Cookies())
 	}
 
-	request := captchaRequest("http://example.test/protected", ip)
-	request.AddCookie(result.Cookies()[0])
-	response := httptest.NewRecorder()
-	next := &nextHandler{}
-	if err = handler.ServeHTTP(response, request, caddyhttp.Handler(next)); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusOK || next.calls != 1 || response.Header().Get("X-Goveto-WAF") != "CAPTCHA-PASS" {
-		t.Fatalf("clearance status=%d calls=%d header=%q", response.Code, next.calls, response.Header().Get("X-Goveto-WAF"))
+	for attempt := range 2 {
+		request := captchaRequest("http://example.test/protected", ip)
+		request.AddCookie(result.Cookies()[0])
+		response := httptest.NewRecorder()
+		next := &nextHandler{}
+		if err = handler.ServeHTTP(response, request, caddyhttp.Handler(next)); err != nil {
+			t.Fatal(err)
+		}
+		if response.Code != http.StatusOK || next.calls != 1 || response.Header().Get("X-Goveto-WAF") != "CAPTCHA-PASS" {
+			t.Fatalf("clearance attempt=%d status=%d calls=%d header=%q", attempt+1, response.Code, next.calls, response.Header().Get("X-Goveto-WAF"))
+		}
 	}
 }
 
@@ -774,5 +780,333 @@ func TestRateLimiterFixedWindowAndBanSemantics(t *testing.T) {
 	}
 	if allowed, _ := withBan.allow("client", started.Add(120*time.Second), rule); allowed {
 		t.Fatal("fixed-window reset bypassed an active ban")
+	}
+}
+
+func TestCustomGroupMatchReportsSubRuleDetail(t *testing.T) {
+	handler := Handler{SiteID: "detail", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{{
+		ID: "detect", Enabled: true, Operator: "OR", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+		Rules: []policy.WAFRequestRule{
+			{Field: "PATH", Operator: "EQUALS", Value: "/safe"},
+			{Field: "USER_AGENT", Operator: "CONTAINS", Value: "sqlmap"},
+			{Field: "QUERY", Name: "id", Operator: "REGEX", Value: "union"},
+		},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "http://example.test/?id=union", nil)
+	request.Header.Set("User-Agent", "sqlmap/1.2")
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	match := response.Header().Get("X-Goveto-WAF-Match")
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d", response.Code)
+	}
+	for _, expected := range []string{"rule[2]:USER_AGENT:CONTAINS", "rule[3]:QUERY:REGEX"} {
+		if !strings.Contains(match, expected) {
+			t.Fatalf("match detail missing %q in %q", expected, match)
+		}
+	}
+}
+
+func TestCustomGroupMatchReportsAndGroupAllMatchedRules(t *testing.T) {
+	handler := Handler{SiteID: "detail-and", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{{
+		ID: "detect", Enabled: true, Operator: "AND", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+		Rules: []policy.WAFRequestRule{
+			{Field: "PATH", Operator: "PREFIX", Value: "/admin"},
+			{Field: "METHOD", Operator: "EQUALS", Value: http.MethodPost},
+		},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "http://example.test/admin", nil)
+	if err := handler.ServeHTTP(response, request, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	match := response.Header().Get("X-Goveto-WAF-Match")
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status=%d", response.Code)
+	}
+	if !strings.Contains(match, "rule[1]:PATH:PREFIX") || !strings.Contains(match, "rule[2]:METHOD:EQUALS") {
+		t.Fatalf("AND group match detail missing rules in %q", match)
+	}
+}
+
+func TestLocalAutoBanStoreThresholdBlocks(t *testing.T) {
+	store := newLocalAutoBanStore()
+	ctx := context.Background()
+	cfg := policy.WAFAutoBan{Enabled: true, Hits: 3, WindowSeconds: 60, BanSeconds: 120, Scope: "SITE"}
+	for range 2 {
+		banned, _, err := store.RecordHit(ctx, "site", "g", "198.51.100.7", cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if banned {
+			t.Fatal("banned before threshold")
+		}
+	}
+	banned, retry, err := store.RecordHit(ctx, "site", "g", "198.51.100.7", cfg)
+	if err != nil || !banned {
+		t.Fatalf("threshold should ban: banned=%v err=%v", banned, err)
+	}
+	if retry <= 0 || retry > 120*time.Second {
+		t.Fatalf("ban retry out of range: %v", retry)
+	}
+	blocked, _, err := store.Blocked(ctx, "site", "198.51.100.7")
+	if err != nil || !blocked {
+		t.Fatalf("client should be blocked after threshold: %v %v", blocked, err)
+	}
+	// Other clients are unaffected.
+	blockedOther, _, _ := store.Blocked(ctx, "site", "198.51.100.8")
+	if blockedOther {
+		t.Fatal("unrelated IP was blocked")
+	}
+}
+
+func TestLocalAutoBanDoesNotShortenExistingBan(t *testing.T) {
+	store := newLocalAutoBanStore()
+	ctx := context.Background()
+	long := policy.WAFAutoBan{Enabled: true, Hits: 1, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"}
+	short := policy.WAFAutoBan{Enabled: true, Hits: 1, WindowSeconds: 60, BanSeconds: 30, Scope: "SITE"}
+	if _, _, err := store.RecordHit(ctx, "site", "long", "198.51.100.9", long); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.RecordHit(ctx, "site", "short", "198.51.100.9", short); err != nil {
+		t.Fatal(err)
+	}
+	blocked, retry, err := store.Blocked(ctx, "site", "198.51.100.9")
+	if err != nil || !blocked || retry < 290*time.Second {
+		t.Fatalf("short ban replaced existing long ban: blocked=%v retry=%v err=%v", blocked, retry, err)
+	}
+}
+
+func TestLocalAutoBanGlobalScopeIsSharedAcrossHandlers(t *testing.T) {
+	t.Setenv("EDGE_AGENT_REDIS_URL", "")
+	newHandler := func(siteID string) Handler {
+		handler := Handler{SiteID: siteID, WAF: policy.DefaultWAFPolicy()}
+		handler.WAF.Enabled = true
+		handler.WAF.Presets = nil
+		handler.WAF.Groups = []policy.WAFRuleGroup{{
+			ID: "global", Enabled: true, Operator: "AND", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+			AutoBan: policy.WAFAutoBan{Enabled: true, Hits: 1, WindowSeconds: 60, BanSeconds: 300, Scope: "GLOBAL"},
+			Rules:   []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/attack"}},
+		}}
+		if err := handler.Provision(caddy.Context{}); err != nil {
+			t.Fatal(err)
+		}
+		return handler
+	}
+
+	siteA := newHandler("global-a")
+	siteB := newHandler("global-b")
+	if siteA.autoBan != siteB.autoBan {
+		t.Fatal("local auto-ban store is not shared across handlers")
+	}
+	ip := "192.0.2.240"
+	if _, _, err := siteA.autoBan.RecordHit(context.Background(), siteA.SiteID, "global", ip, siteA.WAF.Groups[0].AutoBan); err != nil {
+		t.Fatal(err)
+	}
+	blocked, _, err := siteB.autoBan.Blocked(context.Background(), siteB.SiteID, ip)
+	if err != nil || !blocked {
+		t.Fatalf("global ban from site A not visible to site B: blocked=%v err=%v", blocked, err)
+	}
+}
+
+func TestAutoBanBlockValueMatchesTemporaryBlockSchema(t *testing.T) {
+	now := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.FixedZone("test", 8*60*60))
+	cfg := policy.WAFAutoBan{Enabled: true, Hits: 2, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"}
+	encoded := autoBanBlockValue("site", "group", "198.51.100.7", cfg, now)
+	var record securitystate.TemporaryBlock
+	if err := json.Unmarshal([]byte(encoded), &record); err != nil {
+		t.Fatalf("auto-ban block is not valid JSON: %v", err)
+	}
+	if record.Scope != "SITE" || record.SiteID != "site" || record.Address != "198.51.100.7" || record.CreatedBy != "waf:auto_ban" {
+		t.Fatalf("unexpected auto-ban record: %#v", record)
+	}
+	if !record.ExpiresAt.Equal(record.CreatedAt.Add(300 * time.Second)) {
+		t.Fatalf("unexpected auto-ban expiry: created=%v expires=%v", record.CreatedAt, record.ExpiresAt)
+	}
+}
+
+func TestHandlerAutoBanBlocksAfterThresholdHits(t *testing.T) {
+	handler := Handler{SiteID: "autoban", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{{
+		ID: "repeat", Enabled: true, Operator: "AND", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+		AutoBan: policy.WAFAutoBan{Enabled: true, Hits: 2, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
+		Rules:   []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/attack"}},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	if handler.autoBan == nil {
+		t.Fatal("auto-ban store was not provisioned")
+	}
+	ip := "203.0.113.5"
+	for i := range 2 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/attack", nil)
+		req.RemoteAddr = ip + ":1234"
+		if err := handler.ServeHTTP(rec, req, caddyhttp.Handler(&nextHandler{})); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("hit %d status=%d (expected WAF block)", i+1, rec.Code)
+		}
+	}
+	// Third request: previously accrued threshold from hit #2 triggers the ban,
+	// so the client is blocked before the WAF even re-evaluates.
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/attack", nil)
+	req.RemoteAddr = ip + ":1234"
+	if err := handler.ServeHTTP(rec, req, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusForbidden || rec.Header().Get("X-Goveto-WAF-Rule") != "waf:auto-ban" {
+		t.Fatalf("auto-ban did not take over: status=%d rule=%q", rec.Code, rec.Header().Get("X-Goveto-WAF-Rule"))
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Fatal("Retry-After missing on auto-ban block")
+	}
+}
+
+func TestRedisScriptMillisecondDuration(t *testing.T) {
+	if got := redisScriptMillisecondDuration(300000); got != 300*time.Second {
+		t.Fatalf("script ms conversion = %v, want 300s", got)
+	}
+	if got := redisScriptMillisecondDuration(0); got != 0 {
+		t.Fatalf("zero ms = %v", got)
+	}
+	if got := redisScriptMillisecondDuration(-2); got != 0 {
+		t.Fatalf("negative ms = %v", got)
+	}
+}
+
+func TestAutoBanCountsHitActionWhitelist(t *testing.T) {
+	for _, action := range []string{
+		policy.WAFActionBlock, policy.WAFActionShowPage, policy.WAFActionRedirect, policy.WAFActionCaptcha,
+	} {
+		if !autoBanCountsHit(action, policy.WAFModeBlock) {
+			t.Fatalf("enforcing action %s should count", action)
+		}
+	}
+	for _, action := range []string{policy.WAFActionMonitor, policy.WAFActionTag, policy.WAFActionAllow} {
+		if autoBanCountsHit(action, policy.WAFModeBlock) {
+			t.Fatalf("soft action %s must not count", action)
+		}
+	}
+	if autoBanCountsHit(policy.WAFActionBlock, policy.WAFModeMonitor) {
+		t.Fatal("engine monitor mode must not count hits")
+	}
+}
+
+func TestHandlerAutoBanSkippedInMonitorMode(t *testing.T) {
+	handler := Handler{SiteID: "monitor", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Mode = policy.WAFModeMonitor
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{{
+		ID: "repeat", Enabled: true, Operator: "AND", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+		AutoBan: policy.WAFAutoBan{Enabled: true, Hits: 1, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
+		Rules:   []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/attack"}},
+	}}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	ip := "203.0.113.9"
+	for range 3 {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "http://example.test/attack", nil)
+		req.RemoteAddr = ip + ":1234"
+		if err := handler.ServeHTTP(rec, req, caddyhttp.Handler(&nextHandler{})); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusOK || rec.Header().Get("X-Goveto-WAF") != "MONITOR" {
+			t.Fatalf("monitor mode leaked enforcement: status=%d waf=%q rule=%q",
+				rec.Code, rec.Header().Get("X-Goveto-WAF"), rec.Header().Get("X-Goveto-WAF-Rule"))
+		}
+		if rec.Header().Get("X-Goveto-WAF-Rule") == "waf:auto-ban" {
+			t.Fatal("auto-ban must not enforce while WAF mode is MONITOR")
+		}
+	}
+	// Even if a ban were present in the store, monitor mode must not hard-block.
+	_, _, _ = handler.autoBan.RecordHit(context.Background(), handler.SiteID, "repeat", ip,
+		policy.WAFAutoBan{Enabled: true, Hits: 1, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/", nil)
+	req.RemoteAddr = ip + ":1234"
+	if err := handler.ServeHTTP(rec, req, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK || rec.Header().Get("X-Goveto-WAF-Rule") == "waf:auto-ban" {
+		t.Fatalf("stored ban enforced under monitor mode: status=%d rule=%q", rec.Code, rec.Header().Get("X-Goveto-WAF-Rule"))
+	}
+}
+
+func TestLocalAutoBanStoreCapsDistinctCounters(t *testing.T) {
+	store := newLocalAutoBanStore()
+	ctx := context.Background()
+	cfg := policy.WAFAutoBan{Enabled: true, Hits: 100, WindowSeconds: 60, BanSeconds: 120, Scope: "SITE"}
+	for index := 0; index < localAutoBanMaxKeys; index++ {
+		ip := fmt.Sprintf("198.51.100.%d", index%250+1)
+		// Use unique group ids so keys stay distinct beyond the /24.
+		_, _, err := store.RecordHit(ctx, "site", fmt.Sprintf("g-%d", index), ip, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := len(store.counts); got > localAutoBanMaxKeys {
+		t.Fatalf("counter map grew past cap: %d", got)
+	}
+	// One more distinct key must not expand the map beyond the cap.
+	before := len(store.counts)
+	_, _, _ = store.RecordHit(ctx, "site", "overflow", "203.0.113.50", cfg)
+	if got := len(store.counts); got > localAutoBanMaxKeys {
+		t.Fatalf("counter map exceeded cap after overflow hit: before=%d after=%d", before, got)
+	}
+}
+
+func TestHandlerAutoBanLocalStoreIsolatedPerGroup(t *testing.T) {
+	handler := Handler{SiteID: "iso", WAF: policy.DefaultWAFPolicy()}
+	handler.WAF.Enabled = true
+	handler.WAF.Presets = nil
+	handler.WAF.Groups = []policy.WAFRuleGroup{
+		{
+			ID: "a", Enabled: true, Operator: "AND", Action: policy.WAFActionBlock, StatusCode: http.StatusForbidden,
+			AutoBan: policy.WAFAutoBan{Enabled: true, Hits: 2, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
+			Rules:   []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/a"}},
+		},
+		{
+			ID: "b", Enabled: true, Operator: "AND", Action: policy.WAFActionTag, Tag: "b-hit",
+			Rules: []policy.WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/b"}},
+		},
+	}
+	if err := handler.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/a", nil)
+	req.RemoteAddr = "198.18.0.1:1"
+	_ = handler.ServeHTTP(httptest.NewRecorder(), req, caddyhttp.Handler(&nextHandler{}))
+	// One hit against group a must not block group b's path on next request.
+	rec := httptest.NewRecorder()
+	reqB := httptest.NewRequest(http.MethodGet, "http://example.test/b", nil)
+	reqB.RemoteAddr = "198.18.0.1:1"
+	if err := handler.ServeHTTP(rec, reqB, caddyhttp.Handler(&nextHandler{})); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unrelated group b should be reachable, got status=%d", rec.Code)
 	}
 }

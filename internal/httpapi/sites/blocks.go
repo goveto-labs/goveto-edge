@@ -27,15 +27,7 @@ type blockMutationRequest struct {
 	Reason          string `json:"reason,omitempty"`
 }
 
-type temporaryBlock struct {
-	Scope     string    `json:"scope"`
-	SiteID    string    `json:"site_id,omitempty"`
-	Address   string    `json:"address"`
-	Reason    string    `json:"reason,omitempty"`
-	CreatedBy string    `json:"created_by"`
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
+type temporaryBlock = securitystate.TemporaryBlock
 
 func createTemporaryBlock(db *client.Client, redisClient *redis.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {

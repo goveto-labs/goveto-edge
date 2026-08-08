@@ -79,7 +79,11 @@ func (s *redisStore) Blocked(ctx context.Context, siteID, address string) (bool,
 	if _, err = pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
 		return false, 0, err
 	}
-	retry := max(global.Val(), site.Val())
+	// go-redis PTTL returns a DurationCmd already scaled to time.Duration.
+	retry := global.Val()
+	if site.Val() > retry {
+		retry = site.Val()
+	}
 	return retry > 0, retry, nil
 }
 

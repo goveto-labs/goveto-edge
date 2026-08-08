@@ -106,6 +106,15 @@ func (h Handler) hasCaptchaGroup() bool {
 	return false
 }
 
+func (h Handler) hasAutoBanGroup() bool {
+	for _, group := range h.WAF.Groups {
+		if group.Enabled && group.AutoBan.Enabled {
+			return true
+		}
+	}
+	return false
+}
+
 func (h Handler) challengeToken(groupID string, r *http.Request, ip string) (string, error) {
 	cacheKey := h.challengeCacheKey(groupID, r, ip)
 	now := time.Now()

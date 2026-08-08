@@ -10,6 +10,13 @@ func RateCounterKey(siteID, ruleID, value string) string {
 	return "rl:" + siteID + ":" + ruleID + ":" + digest(value)
 }
 
+// WAFAutoBanCounterKey is the Redis counter key backing WAF auto-ban. It is
+// scoped per site, group, and client IP so independent groups and addresses
+// accrue hits independently.
+func WAFAutoBanCounterKey(siteID, groupID string, address netip.Addr) string {
+	return "waf:autoban:" + siteID + ":" + groupID + ":" + digest(address.String())
+}
+
 func RateBlockKey(siteID, ruleID, value string) string {
 	return "block:rate:" + siteID + ":" + ruleID + ":" + digest(value)
 }
