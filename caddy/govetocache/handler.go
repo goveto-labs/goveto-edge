@@ -207,6 +207,19 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		return next.ServeHTTP(w, request)
 	}
 	defer captured.Close()
+	_, ranged := cacherange.FromContext(request.Context())
+	if stale == nil && !ranged {
+		captured.enableStreaming(func(header http.Header, status int) {
+			h.prepareResponse(header, status)
+			size := declaredResponseSize(header)
+			_, varyOK := h.variedHeaders(request, header)
+			if h.cacheable(request, status, header, size) && varyOK {
+				h.setResultHeaders(header, "MISS", baseRaw, h.ttl(status))
+			} else {
+				h.setResultHeaders(header, "BYPASS", baseRaw, 0)
+			}
+		})
+	}
 	err := callNext(captured, originRequest, next)
 	status := captured.Status()
 	incomplete := responseIncomplete(originRequest.Method, status, captured.Header(), captured.Size())
@@ -219,10 +232,14 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		}
 		// After any 1xx was already flushed to the client, do not retry the
 		// full upstream chain — that can emit another 1xx/final response pair.
-		if captured.writeErr != nil && !captured.wrote1xx {
+		if captured.captureErr != nil && !captured.wrote1xx && !captured.isStreamed() {
 			return next.ServeHTTP(w, request)
 		}
-		if err != nil || incomplete || captured.writeErr != nil {
+		if captured.isStreamed() {
+			captured.forwardTrailers()
+			return nil
+		}
+		if err != nil || incomplete || captured.captureErr != nil {
 			writeBadGateway(w)
 			return nil
 		}
@@ -237,7 +254,10 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	h.prepareResponse(captured.Header(), status)
 	varied, varyOK := h.variedHeaders(request, captured.Header())
 	if !h.cacheable(request, status, captured.Header(), uint64(captured.Size())) || !varyOK {
-		h.setResultHeaders(captured.Header(), "BYPASS", baseRaw, 0)
+		if !captured.isStreamed() {
+			h.setResultHeaders(captured.Header(), "BYPASS", baseRaw, 0)
+		}
+		captured.forwardTrailers()
 		return captured.WriteResponse(w)
 	}
 	headerBytes, err := serializedHeader(status, h.cacheStorageHeader(captured.Header()), captured.Size(), request.Method)
@@ -250,14 +270,29 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 			err = h.storage.PutReader(baseKey, variedKey, io.MultiReader(bytes.NewReader(headerBytes), captured), uint64(len(headerBytes))+uint64(captured.Size()), groups, varied, captured.Header().Get("ETag"), time.Duration(ttl)*time.Second, purgeKey(request))
 		}
 	}
-	h.setResultHeaders(captured.Header(), "MISS", baseRaw, h.ttl(status))
+	if !captured.isStreamed() {
+		h.setResultHeaders(captured.Header(), "MISS", baseRaw, h.ttl(status))
+	}
 	if _, ranged := cacherange.FromContext(request.Context()); ranged && err == nil {
 		fresh, _, storedMetadata := h.storage.LookupEntry(baseKey, request)
 		if fresh != nil {
 			return h.serveCached(w, fresh, "MISS", baseRaw, storedMetadata)
 		}
 	}
+	captured.forwardTrailers()
 	return captured.WriteResponse(w)
+}
+
+func declaredResponseSize(header http.Header) uint64 {
+	value := strings.TrimSpace(header.Get("Content-Length"))
+	if value == "" {
+		return 0
+	}
+	size, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return size
 }
 
 func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw, baseKey string) {
@@ -859,15 +894,18 @@ func sortStrings(values []string) {
 }
 
 type capturedResponse struct {
-	header      http.Header
-	status      int
-	size        int64
-	file        *os.File
-	path        string
-	downstream  http.ResponseWriter
-	wroteHeader bool
-	wrote1xx    bool
-	writeErr    error
+	header        http.Header
+	status        int
+	size          int64
+	file          *os.File
+	path          string
+	downstream    http.ResponseWriter
+	wroteHeader   bool
+	wrote1xx      bool
+	streamed      bool
+	stream        func(http.Header, int)
+	captureErr    error
+	downstreamErr error
 }
 
 func newCapturedResponse(directory string, downstream http.ResponseWriter) (*capturedResponse, error) {
@@ -885,6 +923,10 @@ func newCapturedResponse(directory string, downstream http.ResponseWriter) (*cap
 
 func (w *capturedResponse) Header() http.Header { return w.header }
 
+func (w *capturedResponse) enableStreaming(prepare func(http.Header, int)) {
+	w.stream = prepare
+}
+
 func (w *capturedResponse) WriteHeader(status int) {
 	if w.wroteHeader {
 		return
@@ -895,6 +937,12 @@ func (w *capturedResponse) WriteHeader(status int) {
 	}
 	w.wroteHeader = true
 	w.status = status
+	if w.stream != nil && w.downstream != nil {
+		w.stream(w.header, status)
+		transferHeader(w.downstream.Header(), w.header)
+		w.downstream.WriteHeader(status)
+		w.streamed = true
+	}
 }
 
 // forwardInformational passes an interim 1xx response through to the real
@@ -923,7 +971,16 @@ func (w *capturedResponse) Write(value []byte) (int, error) {
 	count, err := w.file.Write(value)
 	w.size += int64(count)
 	if err != nil {
-		w.writeErr = err
+		w.captureErr = err
+	}
+	if w.streamed {
+		written, downstreamErr := w.downstream.Write(value)
+		if downstreamErr != nil {
+			w.downstreamErr = downstreamErr
+			return written, downstreamErr
+		}
+		// A cache-disk failure must not interrupt an otherwise healthy response.
+		return len(value), nil
 	}
 	return count, err
 }
@@ -936,6 +993,9 @@ func (w *capturedResponse) Flush() {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
+	// Do not force the downstream writer to flush. Middleware such as response
+	// compression needs to finish transforming the current representation; body
+	// chunks are already passed downstream as they arrive.
 }
 func (w *capturedResponse) Status() int {
 	if w.status == 0 {
@@ -943,9 +1003,41 @@ func (w *capturedResponse) Status() int {
 	}
 	return w.status
 }
-func (w *capturedResponse) Size() int64 { return w.size }
+func (w *capturedResponse) Size() int64      { return w.size }
+func (w *capturedResponse) isStreamed() bool { return w.streamed }
+
+func (w *capturedResponse) forwardTrailers() {
+	if !w.streamed || w.downstream == nil {
+		return
+	}
+	for _, name := range trailerNames(w.header) {
+		if values := w.header.Values(name); len(values) > 0 {
+			w.downstream.Header()[http.CanonicalHeaderKey(name)] = append([]string(nil), values...)
+		}
+	}
+	for name, values := range w.header {
+		if strings.HasPrefix(name, http.TrailerPrefix) {
+			w.downstream.Header()[name] = append([]string(nil), values...)
+		}
+	}
+}
+
+func trailerNames(header http.Header) []string {
+	var names []string
+	for _, value := range header.Values("Trailer") {
+		for _, name := range strings.Split(value, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
 
 func (w *capturedResponse) WriteResponse(target http.ResponseWriter) error {
+	if w.streamed {
+		return w.downstreamErr
+	}
 	if _, err := w.Seek(0, io.SeekStart); err != nil {
 		return err
 	}

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"go.uber.org/zap"
@@ -156,6 +157,19 @@ type recordedWrite struct {
 type recordingWriter struct {
 	header http.Header
 	writes []recordedWrite
+}
+
+type streamingWriter struct {
+	header http.Header
+	status chan int
+	body   chan string
+}
+
+func (w *streamingWriter) Header() http.Header    { return w.header }
+func (w *streamingWriter) WriteHeader(status int) { w.status <- status }
+func (w *streamingWriter) Write(value []byte) (int, error) {
+	w.body <- string(value)
+	return len(value), nil
 }
 
 func (w *recordingWriter) Header() http.Header { return w.header }
@@ -349,12 +363,102 @@ func TestFetchAndServeDoesNotRetryOriginAfter1xxOnWriteError(t *testing.T) {
 	if downstream.writes[0].status != http.StatusEarlyHints {
 		t.Fatalf("first write=%+v, want 103", downstream.writes[0])
 	}
-	if downstream.writes[1].status != http.StatusBadGateway {
-		t.Fatalf("final write=%+v, want 502", downstream.writes[1])
+	if downstream.writes[1].status != http.StatusOK {
+		t.Fatalf("final write=%+v, want streamed 200", downstream.writes[1])
 	}
 }
 
-func TestFetchAndServeRetriesOriginOnWriteErrorWithout1xx(t *testing.T) {
+func TestFetchAndServeStreamsBeforeOriginCompletes(t *testing.T) {
+	storage, err := simplefs.Acquire(simplefs.Config{Path: t.TempDir(), MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+
+	releaseOrigin := make(chan struct{})
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("first"))
+		<-releaseOrigin
+		_, _ = w.Write([]byte("second"))
+		return nil
+	})
+
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	downstream := &streamingWriter{header: http.Header{}, status: make(chan int, 1), body: make(chan string, 2)}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/"}, Header: http.Header{}}
+	done := make(chan error, 1)
+	go func() {
+		done <- handler.fetchAndServe(downstream, req, next, "raw", "base", nil, simplefs.LookupMetadata{})
+	}()
+
+	select {
+	case status := <-downstream.status:
+		if status != http.StatusOK {
+			t.Fatalf("status=%d, want 200", status)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response headers were buffered until origin completion")
+	}
+	select {
+	case body := <-downstream.body:
+		if body != "first" {
+			t.Fatalf("first body chunk=%q", body)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("response body was buffered until origin completion")
+	}
+	close(releaseOrigin)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if body := <-downstream.body; body != "second" {
+		t.Fatalf("second body chunk=%q", body)
+	}
+}
+
+func TestFetchAndServeBuffersWhileStaleFallbackIsPossible(t *testing.T) {
+	storage, err := simplefs.Acquire(simplefs.Config{Path: t.TempDir(), MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+
+	releaseOrigin := make(chan struct{})
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("first"))
+		<-releaseOrigin
+		_, _ = w.Write([]byte("second"))
+		return nil
+	})
+
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60, StaleIfErrorTTL: 60}
+	downstream := &streamingWriter{header: http.Header{}, status: make(chan int, 1), body: make(chan string, 2)}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/"}, Header: http.Header{}}
+	stale := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: http.NoBody}
+	done := make(chan error, 1)
+	go func() {
+		done <- handler.fetchAndServe(downstream, req, next, "raw", "base", stale, simplefs.LookupMetadata{FreshUntil: time.Now()})
+	}()
+
+	select {
+	case status := <-downstream.status:
+		t.Fatalf("response status %d was streamed before stale fallback was resolved", status)
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(releaseOrigin)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if status := <-downstream.status; status != http.StatusOK {
+		t.Fatalf("status=%d, want 200", status)
+	}
+}
+
+func TestFetchAndServeDoesNotRetryAfterStreamingOnCaptureError(t *testing.T) {
 	storage, err := simplefs.Acquire(simplefs.Config{Path: t.TempDir(), MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
 	if err != nil {
 		t.Fatal(err)
@@ -363,21 +467,14 @@ func TestFetchAndServeRetriesOriginOnWriteErrorWithout1xx(t *testing.T) {
 
 	var calls atomic.Int32
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
-		n := calls.Add(1)
-		if n == 1 {
-			if captured, ok := w.(*capturedResponse); ok {
-				_ = captured.file.Close()
-			}
-			w.Header().Set("Content-Type", "text/plain")
-			w.Header().Set("Content-Length", "4")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write([]byte("body"))
-			return nil
+		calls.Add(1)
+		if captured, ok := w.(*capturedResponse); ok {
+			_ = captured.file.Close()
 		}
-		// Retry path writes directly to the real client writer.
 		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "4")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("body"))
 		return nil
 	})
 
@@ -388,8 +485,8 @@ func TestFetchAndServeRetriesOriginOnWriteErrorWithout1xx(t *testing.T) {
 	if err := handler.fetchAndServe(downstream, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("origin calls=%d, want 2 (retry when no 1xx)", got)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("origin calls=%d, want 1 after response streaming starts", got)
 	}
 	if len(downstream.writes) != 1 || downstream.writes[0].status != http.StatusOK {
 		t.Fatalf("downstream writes=%v", downstream.writes)
