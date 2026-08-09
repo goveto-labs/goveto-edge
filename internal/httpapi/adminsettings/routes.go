@@ -22,11 +22,12 @@ import (
 )
 
 type response struct {
-	AgentGatewayPublicAddress string                   `json:"agent_gateway_public_address"`
-	HTTPProxy                 settings.HTTPProxyConfig `json:"http_proxy"`
-	Authentication            authenticationResponse   `json:"authentication"`
-	RestartRequired           bool                     `json:"restart_required"`
-	Restarting                bool                     `json:"restarting"`
+	AgentGatewayPublicAddress string                      `json:"agent_gateway_public_address"`
+	HTTPProxy                 settings.HTTPProxyConfig    `json:"http_proxy"`
+	Authentication            authenticationResponse      `json:"authentication"`
+	JobRetention              settings.JobRetentionConfig `json:"job_retention"`
+	RestartRequired           bool                        `json:"restart_required"`
+	Restarting                bool                        `json:"restarting"`
 }
 
 type authenticationResponse struct {
@@ -54,10 +55,11 @@ type authenticationProviderResponse struct {
 }
 
 type updateRequest struct {
-	AgentGatewayPublicAddress string                   `json:"agent_gateway_public_address"`
-	HTTPProxy                 settings.HTTPProxyConfig `json:"http_proxy"`
-	Authentication            authenticationRequest    `json:"authentication"`
-	Restart                   bool                     `json:"restart"`
+	AgentGatewayPublicAddress string                      `json:"agent_gateway_public_address"`
+	HTTPProxy                 settings.HTTPProxyConfig    `json:"http_proxy"`
+	Authentication            authenticationRequest       `json:"authentication"`
+	JobRetention              settings.JobRetentionConfig `json:"job_retention"`
+	Restart                   bool                        `json:"restart"`
 }
 
 type authenticationRequest struct {
@@ -123,6 +125,9 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		if err = input.HTTPProxy.NormalizeAndValidate(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
+		if err = input.JobRetention.Validate(); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 
 		currentAddress, _, err := settingStore.AgentGatewayPublicAddress(c.Request().Context())
 		if err != nil {
@@ -137,6 +142,10 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 			return err
 		}
 		currentLocalLogin, err := settingStore.LocalLoginEnabled(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		currentRetention, err := settingStore.JobRetention(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -173,6 +182,11 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		}
 		if currentLocalLogin != input.Authentication.LocalLoginEnabled {
 			if err = settingStore.SetLocalLoginEnabled(c.Request().Context(), input.Authentication.LocalLoginEnabled); err != nil {
+				return err
+			}
+		}
+		if currentRetention != input.JobRetention {
+			if err = settingStore.SetJobRetention(c.Request().Context(), input.JobRetention); err != nil {
 				return err
 			}
 		}
@@ -290,6 +304,10 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 	if err != nil {
 		return response{}, err
 	}
+	retention, err := settingStore.JobRetention(c.Request().Context())
+	if err != nil {
+		return response{}, err
+	}
 	providerResponses := make([]authenticationProviderResponse, 0, len(providers))
 	for _, provider := range providers {
 		providerResponses = append(providerResponses, authenticationProviderResponse{
@@ -305,6 +323,7 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 	return response{
 		AgentGatewayPublicAddress: address,
 		HTTPProxy:                 proxy,
+		JobRetention:              retention,
 		Authentication: authenticationResponse{
 			LocalLoginEnabled: localEnabled,
 			RequireTOTP:       requireTOTP,

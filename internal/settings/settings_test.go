@@ -75,6 +75,22 @@ func TestHTTPProxyConfigRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestJobRetentionConfigValidation(t *testing.T) {
+	if err := DefaultJobRetention.Validate(); err != nil {
+		t.Fatalf("default retention policy is invalid: %v", err)
+	}
+	for _, config := range []JobRetentionConfig{
+		{HistoryDays: 6, VersionsPerSite: 20},
+		{HistoryDays: 3651, VersionsPerSite: 20},
+		{HistoryDays: 90, VersionsPerSite: 1},
+		{HistoryDays: 90, VersionsPerSite: 1001},
+	} {
+		if err := config.Validate(); err == nil {
+			t.Fatalf("invalid retention policy was accepted: %#v", config)
+		}
+	}
+}
+
 func TestOIDCProviderNormalizeAndValidate(t *testing.T) {
 	config := AuthProviderConfig{
 		ID: "provider-1", Enabled: true, IssuerURL: " https://id.example.com/ ", ClientID: " client-id ",

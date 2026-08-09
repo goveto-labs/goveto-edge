@@ -11,6 +11,7 @@ import (
 func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	encoded, err := json.Marshal(response{
 		Authentication: authenticationResponse{Providers: []authenticationProviderResponse{{ClientSecretConfigured: true}}},
+		JobRetention:   settings.DefaultJobRetention,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -20,6 +21,9 @@ func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	}
 	if !strings.Contains(string(encoded), `"client_secret_configured":true`) {
 		t.Fatalf("OIDC secret configuration state missing from response: %s", encoded)
+	}
+	if !strings.Contains(string(encoded), `"job_retention":{"history_days":90,"versions_per_site":20}`) {
+		t.Fatalf("job retention setting missing from response: %s", encoded)
 	}
 }
 

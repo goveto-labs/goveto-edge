@@ -48,6 +48,16 @@ type Job struct {
 	Error             *string          `db:"error" json:"error,omitempty"`
 	CreatedAt         time.Time        `db:"created_at" json:"created_at"`
 	UpdatedAt         time.Time        `db:"updated_at" json:"updated_at"`
+	PublishContext    *PublishContext  `json:"publish_context,omitempty"`
+}
+
+type PublishContext struct {
+	Version         int64              `db:"version" json:"version"`
+	Status          model.ConfigStatus `db:"status" json:"status"`
+	Hash            string             `db:"hash" json:"hash"`
+	CreatedAt       time.Time          `db:"created_at" json:"created_at"`
+	BaselineVersion *int64             `db:"baseline_version" json:"baseline_version,omitempty"`
+	BaselineConfig  *json.RawMessage   `db:"baseline_config" json:"baseline_config,omitempty"`
 }
 
 type JobPage struct {
@@ -172,6 +182,7 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 		}
 		manager := jobqueue.New(db)
 		responseID := c.Param("job_id")
+		mode := "cancel"
 		if cancel {
 			err = manager.Cancel(c.Request().Context(), kind, c.Param("job_id"))
 		} else if kind == jobqueue.Publish {
@@ -184,11 +195,14 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 			default:
 				return echo.NewHTTPError(http.StatusConflict, "job is not replayable")
 			}
-			newJob, enqueueErr := publishService.Enqueue(c.Request().Context(), oldJob.SiteId)
+			result, enqueueErr := publishService.EnqueueDetailed(c.Request().Context(), oldJob.SiteId)
 			if enqueueErr != nil {
 				err = enqueueErr
 			} else {
-				responseID = newJob.Id
+				responseID = result.Job.Id
+				if result.Mode == publisher.EnqueueCurrentReused {
+					mode = "current"
+				}
 			}
 		} else {
 			err = manager.Replay(c.Request().Context(), kind, c.Param("job_id"))
@@ -200,11 +214,14 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 			}
 			return err
 		}
-		mode := "cancel"
-		if !cancel && kind == jobqueue.Publish {
-			mode = "create"
-		} else if !cancel {
-			mode = "reset"
+		if !cancel {
+			if kind == jobqueue.Publish {
+				if mode != "current" {
+					mode = "create"
+				}
+			} else {
+				mode = "reset"
+			}
 		}
 		response := map[string]string{
 			"id": responseID, "source_id": c.Param("job_id"), "status": "accepted", "mode": mode,
@@ -319,6 +336,30 @@ func loadJobDetail(ctx context.Context, db *client.Client, clusterID string, kin
 	}
 	if err = redactSensitiveInput(rows[0].InputJSON); err != nil {
 		return nil, fmt.Errorf("redact job input: %w", err)
+	}
+	if kind == jobqueue.Publish {
+		contexts, contextErr := client.Raw[PublishContext](ctx, db, `SELECT cv.version, cv.status::text,
+			cv.hash, cv.created_at, baseline.version AS baseline_version,
+			baseline.config_json AS baseline_config
+			FROM publish_jobs j
+			JOIN sites s ON s.id=j.site_id
+			JOIN config_versions cv ON cv.site_id=j.site_id AND cv.version=j.version
+			LEFT JOIN LATERAL (
+				SELECT previous.version, previous.config_json FROM config_versions previous
+				WHERE previous.site_id=j.site_id AND previous.version < j.version
+				AND previous.status IN ('PUBLISHED', 'ROLLED_BACK')
+				ORDER BY previous.version DESC LIMIT 1
+			) baseline ON true
+			WHERE j.id=$1 AND s.cluster_id=$2`, id, clusterID)
+		if contextErr != nil {
+			return nil, contextErr
+		}
+		if len(contexts) == 1 {
+			if err = redactSensitiveInput(contexts[0].BaselineConfig); err != nil {
+				return nil, fmt.Errorf("redact publish baseline: %w", err)
+			}
+			rows[0].PublishContext = &contexts[0]
+		}
 	}
 	return &rows[0], nil
 }

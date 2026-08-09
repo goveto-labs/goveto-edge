@@ -21,8 +21,6 @@ import (
 )
 
 const (
-	jobRetention = 30 * 24 * time.Hour
-
 	NodeDNSOfflineGracePeriod = 5 * time.Minute
 )
 
@@ -349,11 +347,6 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 func (s *Service) enqueuePeriodic(ctx context.Context) {
-	_, _ = s.db.RawExec(
-		ctx,
-		"DELETE FROM dns_sync_jobs WHERE status IN ('SUCCEEDED', 'FAILED', 'DEAD_LETTER', 'CANCELLED') AND updated_at < NOW() - ($1 * INTERVAL '1 second')",
-		int64(jobRetention/time.Second),
-	)
 	configs, err := s.db.DNSProviderConfig.Query().
 		Where(
 			query.DNSProviderConfig.Enabled.Equals(true),

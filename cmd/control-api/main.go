@@ -25,6 +25,7 @@ import (
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi"
 	"goveto-edge/internal/httpsecurity"
+	"goveto-edge/internal/jobretention"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
@@ -222,6 +223,7 @@ func main() {
 	go purgeService.Run(ctx)
 
 	go dnsService.Run(ctx)
+	go jobretention.New(orm, settingStore).Run(ctx)
 
 	installQueue := node.NewInstallQueue(orm)
 	go node.NewInstallWorker(orm, installQueue, credentialCipher).Run(ctx)

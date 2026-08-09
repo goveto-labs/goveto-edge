@@ -1,4 +1,10 @@
-import type { JobExecution, ManagedJob, ManagedJobKind, ManagedJobPage } from './types.ts';
+import type {
+    JobExecution,
+    JobMutationResponse,
+    ManagedJob,
+    ManagedJobKind,
+    ManagedJobPage,
+} from './types.ts';
 
 import { buildQuery, get, post } from './client.ts';
 
@@ -21,11 +27,7 @@ export const jobsApi = (clusterId: string) => ({
     executions: (kind: ManagedJobKind, jobId: string) =>
         get<JobExecution[]>(clusterPath(clusterId, `/jobs/${kind}/${jobId}/executions`)),
     cancel: (kind: ManagedJobKind, jobId: string) =>
-        post<{ id: string; status: string }>(
-            clusterPath(clusterId, `/jobs/${kind}/${jobId}/cancel`)
-        ),
+        post<JobMutationResponse>(clusterPath(clusterId, `/jobs/${kind}/${jobId}/cancel`)),
     replay: (kind: ManagedJobKind, jobId: string) =>
-        post<{ id: string; status: string }>(
-            clusterPath(clusterId, `/jobs/${kind}/${jobId}/replay`)
-        ),
+        post<JobMutationResponse>(clusterPath(clusterId, `/jobs/${kind}/${jobId}/replay`)),
 });

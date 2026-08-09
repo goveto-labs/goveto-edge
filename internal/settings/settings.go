@@ -28,6 +28,7 @@ const (
 	HTTPProxyKey           = "http.proxy"
 	LocalLoginEnabledKey   = "auth.local_login.enabled"
 	AuthProvidersKey       = "auth.external_providers"
+	JobRetentionKey        = "jobs.retention"
 )
 
 const agentGatewayAddressDescription = "Public host and port used by edge nodes to reach the agent gateway"
@@ -36,6 +37,7 @@ const (
 	httpProxyDescription     = "Client IP forwarding headers used by the control plane"
 	localLoginDescription    = "Whether email and password login is available"
 	authProvidersDescription = "OAuth 2.0 and OpenID Connect login providers"
+	jobRetentionDescription  = "Retention policy for terminal jobs, executions, and site configuration versions"
 )
 
 var DefaultClientIPHeaders = []string{"X-Forwarded-For", "X-Real-IP", "Forwarded"}
@@ -48,6 +50,23 @@ type SecretCipher interface {
 type HTTPProxyConfig struct {
 	TrustAll        bool     `json:"trust_all"`
 	ClientIPHeaders []string `json:"client_ip_headers"`
+}
+
+type JobRetentionConfig struct {
+	HistoryDays     int `json:"history_days"`
+	VersionsPerSite int `json:"versions_per_site"`
+}
+
+var DefaultJobRetention = JobRetentionConfig{HistoryDays: 90, VersionsPerSite: 20}
+
+func (c JobRetentionConfig) Validate() error {
+	if c.HistoryDays < 7 || c.HistoryDays > 3650 {
+		return errors.New("job history days must be between 7 and 3650")
+	}
+	if c.VersionsPerSite < 2 || c.VersionsPerSite > 1000 {
+		return errors.New("configuration versions per site must be between 2 and 1000")
+	}
+	return nil
 }
 
 type AuthProviderType string
@@ -196,6 +215,24 @@ func (s *Store) SetHTTPProxy(ctx context.Context, config HTTPProxyConfig) error 
 		return err
 	}
 	return s.Set(ctx, HTTPProxyKey, config, httpProxyDescription)
+}
+
+func (s *Store) JobRetention(ctx context.Context) (JobRetentionConfig, error) {
+	config := DefaultJobRetention
+	if _, err := s.Get(ctx, JobRetentionKey, &config); err != nil {
+		return JobRetentionConfig{}, err
+	}
+	if err := config.Validate(); err != nil {
+		return JobRetentionConfig{}, fmt.Errorf("stored job retention setting is invalid: %w", err)
+	}
+	return config, nil
+}
+
+func (s *Store) SetJobRetention(ctx context.Context, config JobRetentionConfig) error {
+	if err := config.Validate(); err != nil {
+		return err
+	}
+	return s.Set(ctx, JobRetentionKey, config, jobRetentionDescription)
 }
 
 func (c *HTTPProxyConfig) NormalizeAndValidate() error {

@@ -32,8 +32,14 @@ export interface AdminSettings {
     agent_gateway_public_address: string;
     http_proxy: HTTPProxySettings;
     authentication: AuthenticationSettings;
+    job_retention: JobRetentionSettings;
     restart_required: boolean;
     restarting: boolean;
+}
+
+export interface JobRetentionSettings {
+    history_days: number;
+    versions_per_site: number;
 }
 
 export interface HTTPProxySettings {
@@ -929,6 +935,12 @@ export interface PublishJob {
     error?: string;
     created_at: string;
     updated_at?: string;
+    enqueue_mode?:
+        | 'CREATED'
+        | 'PENDING_UPDATED'
+        | 'RUNNING_REUSED'
+        | 'CURRENT_REUSED'
+        | 'IDEMPOTENT_REUSED';
 }
 
 export type ManagedJobKind = 'PUBLISH' | 'PURGE' | 'INSTALL' | 'DNS' | 'CERTIFICATE';
@@ -956,6 +968,23 @@ export interface ManagedJob {
     error?: string;
     created_at: string;
     updated_at: string;
+    publish_context?: PublishContext;
+}
+
+export interface PublishContext {
+    version: number;
+    status: string;
+    hash: string;
+    created_at: string;
+    baseline_version?: number;
+    baseline_config?: unknown;
+}
+
+export interface JobMutationResponse {
+    id: string;
+    source_id: string;
+    status: string;
+    mode: 'cancel' | 'create' | 'current' | 'reset';
 }
 
 export interface ManagedJobPage {

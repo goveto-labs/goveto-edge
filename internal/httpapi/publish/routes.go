@@ -193,16 +193,20 @@ func enqueue(db *client.Client, service *publisher.Service) echo.HandlerFunc {
 		if err = jobqueue.ValidateIdempotencyKey(idempotencyKey); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		job, err := service.EnqueueIdempotent(c.Request().Context(), site.Id, idempotencyKey)
+		result, err := service.EnqueueIdempotentDetailed(c.Request().Context(), site.Id, idempotencyKey)
 		if err != nil {
 			if errors.Is(err, jobqueue.ErrIdempotencyConflict) {
 				return echo.NewHTTPError(http.StatusConflict, err.Error())
 			}
 			return err
 		}
-		response := types.NewPublishJob(job)
+		response := types.NewPublishJob(result.Job, string(result.Mode))
 		audit.SetChange(c, map[string]any{"site_id": site.Id, "version": site.Version}, response)
-		return types.JSON(c, http.StatusAccepted, response)
+		status := http.StatusAccepted
+		if result.Mode == publisher.EnqueueCurrentReused {
+			status = http.StatusOK
+		}
+		return types.JSON(c, status, response)
 	}
 }
 

@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout.tsx';
 import { ProtectedRoute } from '@/components/ProtectedRoute.tsx';
@@ -74,15 +74,6 @@ export default function App() {
                                         path='/settings/notifications'
                                     />
                                     <Route element={<AdminSettings />} path='/settings/admin/*' />
-                                    {/* Legacy paths before Users and Audit log moved under Admin settings. */}
-                                    <Route
-                                        element={<Navigate replace to='/settings/admin/users' />}
-                                        path='/settings/users'
-                                    />
-                                    <Route
-                                        element={<Navigate replace to='/settings/admin/audit' />}
-                                        path='/settings/audit'
-                                    />
                                 </Route>
                             </Routes>
                         </ClusterProvider>

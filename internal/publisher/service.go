@@ -34,6 +34,21 @@ type Service struct {
 	concurrency int
 }
 
+type EnqueueMode string
+
+const (
+	EnqueueCreated          EnqueueMode = "CREATED"
+	EnqueuePendingUpdated   EnqueueMode = "PENDING_UPDATED"
+	EnqueueRunningReused    EnqueueMode = "RUNNING_REUSED"
+	EnqueueCurrentReused    EnqueueMode = "CURRENT_REUSED"
+	EnqueueIdempotentReused EnqueueMode = "IDEMPOTENT_REUSED"
+)
+
+type EnqueueResult struct {
+	Job  *model.PublishJob
+	Mode EnqueueMode
+}
+
 func New(db *client.Client, cipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
 	return &Service{db: db, cipher: cipher, gateway: gateway, jobs: jobqueue.New(db), concurrency: 8}
 }
@@ -72,14 +87,25 @@ func (s *Service) EnqueueAll(ctx context.Context) error {
 }
 
 func (s *Service) Enqueue(ctx context.Context, siteID string) (*model.PublishJob, error) {
-	return s.EnqueueIdempotent(ctx, siteID, "")
+	result, err := s.EnqueueDetailed(ctx, siteID)
+	return result.Job, err
 }
 
 func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey string) (*model.PublishJob, error) {
+	result, err := s.EnqueueIdempotentDetailed(ctx, siteID, idempotencyKey)
+	return result.Job, err
+}
+
+func (s *Service) EnqueueDetailed(ctx context.Context, siteID string) (EnqueueResult, error) {
+	return s.EnqueueIdempotentDetailed(ctx, siteID, "")
+}
+
+func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempotencyKey string) (EnqueueResult, error) {
 	if err := jobqueue.ValidateIdempotencyKey(idempotencyKey); err != nil {
-		return nil, err
+		return EnqueueResult{}, err
 	}
 	var job *model.PublishJob
+	mode := EnqueueCreated
 	err := s.db.Tx(ctx, func(tx *client.Client) error {
 		if idempotencyKey != "" {
 			if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", "publish:"+idempotencyKey); err != nil {
@@ -94,6 +120,7 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 					return fmt.Errorf("%w: key is already used by another publish request", jobqueue.ErrIdempotencyConflict)
 				}
 				job = existing
+				mode = EnqueueIdempotentReused
 				return nil
 			}
 		}
@@ -181,11 +208,36 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 					}
 				}
 				job = running
+				mode = EnqueueRunningReused
+				return nil
+			}
+		}
+		if pending == nil && running == nil && site.Version > 0 {
+			currentConfig, loadErr := tx.ConfigVersion.Query().Where(
+				query.ConfigVersion.SiteId.Equals(siteID),
+				query.ConfigVersion.Version.Equals(site.Version),
+				query.ConfigVersion.Status.Equals(model.ConfigStatusPUBLISHED),
+			).First(ctx)
+			if loadErr != nil {
+				return loadErr
+			}
+			currentJob, loadErr := tx.PublishJob.Query().Where(
+				query.PublishJob.SiteId.Equals(siteID),
+				query.PublishJob.Version.Equals(site.Version),
+				query.PublishJob.Status.Equals(model.JobStatusSUCCEEDED),
+			).OrderBy(query.PublishJob.CreatedAt.Desc()).First(ctx)
+			if loadErr != nil {
+				return loadErr
+			}
+			if currentConfig != nil && currentJob != nil &&
+				samePublishRequest(config, targets, currentConfig.ConfigJson, currentJob.Targets) {
+				job = currentJob
+				mode = EnqueueCurrentReused
 				return nil
 			}
 		}
 
-		hash := sha256.Sum256(configJSON)
+		hash := semanticConfigHash(config)
 		if pending != nil {
 			if _, err = tx.ConfigVersion.Update().
 				Where(
@@ -212,6 +264,7 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 				).
 				Set(sets...).
 				Do(ctx)
+			mode = EnqueuePendingUpdated
 			return err
 		}
 
@@ -239,7 +292,13 @@ func (s *Service) EnqueueIdempotent(ctx context.Context, siteID, idempotencyKey 
 		job, err = tx.PublishJob.Create().Set(sets...).Do(ctx)
 		return err
 	})
-	return job, err
+	return EnqueueResult{Job: job, Mode: mode}, err
+}
+
+func semanticConfigHash(config edgeprotocol.SiteConfig) [sha256.Size]byte {
+	config.Version = 0
+	encoded, _ := json.Marshal(config)
+	return sha256.Sum256(encoded)
 }
 
 func canCoalesceIdempotencyKey(job *model.PublishJob, key string) bool {

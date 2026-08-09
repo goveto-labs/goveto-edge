@@ -1,6 +1,7 @@
 package publisher
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -10,6 +11,17 @@ import (
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/model"
 )
+
+func TestSemanticConfigHashIgnoresVersion(t *testing.T) {
+	left := edgeprotocol.SiteConfig{SiteID: "site-1", Version: 4, Domains: []string{"example.test"}}
+	right := left
+	right.Version = 99
+	leftHash := semanticConfigHash(left)
+	rightHash := semanticConfigHash(right)
+	if !bytes.Equal(leftHash[:], rightHash[:]) {
+		t.Fatal("semantic config hash changed for a version-only update")
+	}
+}
 
 func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
 	targets := []target{{NodeID: "a"}, {NodeID: "b"}, {NodeID: "c"}}

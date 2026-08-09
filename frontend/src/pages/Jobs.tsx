@@ -1,14 +1,16 @@
 import type { ReactNode } from 'react';
 import type { JobExecution, ManagedJob, ManagedJobKind } from '@/api';
 
-import { Button, Input, Pagination, Tooltip } from '@heroui/react';
-import { Eye, FileJson, RefreshCw, RotateCcw, XCircle } from 'lucide-react';
+import { Button, Input, Pagination, Tabs, Tooltip } from '@heroui/react';
+import { Copy, ExternalLink, Eye, FileJson, RefreshCw, RotateCcw, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { ApiError, jobsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
-import { DialogShell } from '@/components/DialogShell.tsx';
+import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
+import { JsonDiff } from '@/components/JsonDiff.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
@@ -55,6 +57,17 @@ function formatTime(value?: string) {
         minute: '2-digit',
         second: '2-digit',
     }).format(new Date(value));
+}
+
+function formatDuration(start?: string, end?: string) {
+    if (!start || !end) return '-';
+    const milliseconds = new Date(end).getTime() - new Date(start).getTime();
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) return '-';
+    if (milliseconds < 1000) return `${milliseconds} ms`;
+    if (milliseconds < 60_000) return `${(milliseconds / 1000).toFixed(1)} s`;
+    const minutes = Math.floor(milliseconds / 60_000);
+    const seconds = Math.floor((milliseconds % 60_000) / 1000);
+    return `${minutes}m ${seconds}s`;
 }
 
 function humanize(value: string) {
@@ -109,149 +122,317 @@ function JSONBlock({ title, value }: { title: string; value: unknown }) {
     );
 }
 
-function JobInput({ job }: { job: ManagedJob }) {
-    const input = asRecord(job.input_json);
-    if (!input) return <JSONBlock title='Input' value={job.input_json} />;
-
-    if (job.kind === 'PUBLISH') {
-        return (
-            <div className='space-y-4'>
-                <dl className='grid gap-4 sm:grid-cols-2'>
-                    <DetailValue label='Config version' mono value={String(input.version ?? '')} />
-                    <DetailValue
-                        label='Target count'
-                        mono
-                        value={Array.isArray(input.targets) ? input.targets.length : '-'}
-                    />
-                </dl>
-                <JSONBlock title='Target resources' value={input.target_resources} />
-                <JSONBlock title='Target payload' value={input.targets} />
-                <JSONBlock
-                    title='Published configuration (secrets redacted)'
-                    value={input.config}
-                />
-            </div>
-        );
-    }
-
-    return <JSONBlock title='Input payload' value={job.input_json} />;
+function CopyButton({ label, value }: { label: string; value: string }) {
+    return (
+        <Tooltip>
+            <Tooltip.Trigger>
+                <Button
+                    isIconOnly
+                    aria-label={`Copy ${label}`}
+                    size='sm'
+                    variant='ghost'
+                    onPress={() => void navigator.clipboard.writeText(value)}
+                >
+                    <Copy className='h-3.5 w-3.5' />
+                </Button>
+            </Tooltip.Trigger>
+            <Tooltip.Content>Copy {label}</Tooltip.Content>
+        </Tooltip>
+    );
 }
 
-function JobDetails({
-    job,
-    executions,
-    historyLoading,
-}: {
-    job: ManagedJob;
-    executions: JobExecution[];
-    historyLoading: boolean;
-}) {
+function RawJSON({ title, value }: { title: string; value: unknown }) {
+    const text = jsonText(value);
     return (
-        <div className='max-h-[76vh] space-y-6 overflow-y-auto p-6'>
+        <details className='rounded-lg border border-border'>
+            <summary className='flex cursor-pointer items-center justify-between px-3 py-2 text-xs font-medium'>
+                {title}
+                <CopyButton label={title.toLowerCase()} value={text} />
+            </summary>
+            <pre className='max-h-80 overflow-auto border-t border-border bg-surface-secondary p-3 font-mono text-xs leading-5'>
+                {text}
+            </pre>
+        </details>
+    );
+}
+
+function SummaryTab({ job, onNavigate }: { job: ManagedJob; onNavigate: () => void }) {
+    const hasScheduling =
+        ['PENDING', 'RUNNING'].includes(job.status) ||
+        Boolean(job.lease_owner || job.lease_until || job.heartbeat_at || job.cancel_requested_at);
+    return (
+        <div className='space-y-6 pt-3'>
+            {job.error && (
+                <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
+                    {job.error}
+                </div>
+            )}
             <DetailSection title='Overview'>
-                <dl className='grid gap-x-6 gap-y-4 sm:grid-cols-2'>
-                    <DetailValue label='Resource' value={job.resource_name} />
-                    <DetailValue label='Resource type' value={humanize(job.resource_type)} />
-                    <DetailValue label='Resource hint' value={job.resource_hint} />
-                    <DetailValue label='Operation' value={humanize(job.operation)} />
+                <dl className='grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
                     <DetailValue label='Status' value={<StatusBadge status={job.status} />} />
+                    <DetailValue label='Resource' value={job.resource_name} />
+                    <DetailValue label='Operation' value={humanize(job.operation)} />
+                    <DetailValue
+                        label='Duration'
+                        value={formatDuration(job.created_at, job.updated_at)}
+                    />
                     <DetailValue
                         label='Attempts'
                         mono
                         value={`${job.attempts}/${job.max_attempts}`}
                     />
+                    <DetailValue label='Resource hint' value={job.resource_hint} />
                     <DetailValue label='Created' value={formatTime(job.created_at)} />
                     <DetailValue label='Updated' value={formatTime(job.updated_at)} />
-                    <DetailValue label='Job ID' mono value={job.id} />
-                    <DetailValue label='Resource ID' mono value={job.resource_id} />
+                    <DetailValue label='Type' value={humanize(job.resource_type)} />
                 </dl>
-            </DetailSection>
-
-            <DetailSection title='Input'>
-                <JobInput job={job} />
-            </DetailSection>
-
-            {(job.result_json !== undefined ||
-                job.compensation_json !== undefined ||
-                job.error) && (
-                <DetailSection title='Outcome'>
-                    <div className='space-y-4'>
-                        {job.error && (
-                            <div className='rounded-lg border border-danger/20 bg-danger/10 px-3 py-2 text-sm text-danger'>
-                                {job.error}
-                            </div>
+                <div className='mt-5 grid gap-2'>
+                    <div className='flex min-w-0 items-center gap-2 rounded-lg bg-surface-secondary px-3 py-2'>
+                        <span className='w-24 shrink-0 text-xs text-muted'>Job ID</span>
+                        <code className='min-w-0 flex-1 truncate text-xs'>{job.id}</code>
+                        <CopyButton label='job ID' value={job.id} />
+                    </div>
+                    <div className='flex min-w-0 items-center gap-2 rounded-lg bg-surface-secondary px-3 py-2'>
+                        <span className='w-24 shrink-0 text-xs text-muted'>Resource ID</span>
+                        <code className='min-w-0 flex-1 truncate text-xs'>{job.resource_id}</code>
+                        <CopyButton label='resource ID' value={job.resource_id} />
+                        {['SITE', 'NODE'].includes(job.resource_type) && (
+                            <Button
+                                isIconOnly
+                                aria-label='Open resource'
+                                size='sm'
+                                variant='ghost'
+                                onPress={onNavigate}
+                            >
+                                <ExternalLink className='h-3.5 w-3.5' />
+                            </Button>
                         )}
-                        <div className='grid gap-4'>
-                            {job.result_json !== undefined && (
-                                <JSONBlock title='Result' value={job.result_json} />
-                            )}
-                            {job.compensation_json !== undefined && (
-                                <JSONBlock title='Compensation' value={job.compensation_json} />
-                            )}
-                        </div>
+                    </div>
+                </div>
+            </DetailSection>
+            {hasScheduling && (
+                <DetailSection title='Scheduling and lease'>
+                    <dl className='grid gap-x-6 gap-y-4 sm:grid-cols-2 lg:grid-cols-3'>
+                        <DetailValue label='Next attempt' value={formatTime(job.next_attempt_at)} />
+                        <DetailValue label='Timeout' value={formatTime(job.timeout_at)} />
+                        <DetailValue label='Lease owner' mono value={job.lease_owner} />
+                        <DetailValue label='Lease until' value={formatTime(job.lease_until)} />
+                        <DetailValue label='Heartbeat' value={formatTime(job.heartbeat_at)} />
+                        <DetailValue
+                            label='Cancel requested'
+                            value={formatTime(job.cancel_requested_at)}
+                        />
+                    </dl>
+                </DetailSection>
+            )}
+            {(job.result_json !== undefined || job.compensation_json !== undefined) && (
+                <DetailSection title='Outcome'>
+                    <div className='grid gap-4'>
+                        {job.result_json !== undefined && (
+                            <JSONBlock title='Result' value={job.result_json} />
+                        )}
+                        {job.compensation_json !== undefined && (
+                            <JSONBlock title='Compensation' value={job.compensation_json} />
+                        )}
                     </div>
                 </DetailSection>
             )}
+        </div>
+    );
+}
 
-            <DetailSection title='Scheduling and lease'>
-                <dl className='grid gap-x-6 gap-y-4 sm:grid-cols-2'>
-                    <DetailValue label='Next attempt' value={formatTime(job.next_attempt_at)} />
-                    <DetailValue label='Timeout' value={formatTime(job.timeout_at)} />
-                    <DetailValue label='Lease owner' mono value={job.lease_owner} />
-                    <DetailValue label='Lease until' value={formatTime(job.lease_until)} />
-                    <DetailValue label='Heartbeat' value={formatTime(job.heartbeat_at)} />
-                    <DetailValue
-                        label='Cancel requested'
-                        value={formatTime(job.cancel_requested_at)}
-                    />
-                </dl>
-            </DetailSection>
-
-            <DetailSection title='Execution history'>
-                {historyLoading ? (
-                    <div className='h-24 animate-pulse rounded-lg bg-surface-secondary' />
-                ) : executions.length === 0 ? (
-                    <div className='py-4 text-sm text-muted'>No execution attempts recorded.</div>
+function ChangeTab({ job }: { job: ManagedJob }) {
+    const input = asRecord(job.input_json);
+    if (job.kind !== 'PUBLISH') {
+        return (
+            <div className='pt-5'>
+                <RawJSON title='Raw input' value={job.input_json} />
+            </div>
+        );
+    }
+    const after = input?.config;
+    const context = job.publish_context;
+    return (
+        <div className='space-y-6 pt-3'>
+            <dl className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                <DetailValue
+                    label='Version'
+                    mono
+                    value={String(context?.version ?? input?.version ?? '')}
+                />
+                <DetailValue
+                    label='Version status'
+                    value={context ? <StatusBadge status={context.status} /> : '-'}
+                />
+                <DetailValue
+                    label='Baseline version'
+                    mono
+                    value={
+                        context?.baseline_version
+                            ? String(context.baseline_version)
+                            : 'Initial publish'
+                    }
+                />
+                <DetailValue
+                    label='Targets'
+                    mono
+                    value={Array.isArray(input?.targets) ? String(input.targets.length) : '-'}
+                />
+            </dl>
+            <DetailSection title='Configuration change'>
+                {context?.baseline_config !== undefined ? (
+                    <JsonDiff before={context.baseline_config} after={after} />
                 ) : (
-                    <div className='divide-y divide-border'>
-                        {executions.map((execution) => (
-                            <div className='space-y-3 py-3 first:pt-0' key={execution.id}>
-                                <div className='grid gap-3 sm:grid-cols-[6rem_8rem_1fr_auto] sm:items-center'>
-                                    <div className='font-mono text-xs'>
-                                        Attempt {execution.attempt}
-                                    </div>
-                                    <div>
-                                        <StatusBadge status={execution.status} />
-                                    </div>
-                                    <div
-                                        className='min-w-0 truncate font-mono text-xs'
-                                        title={execution.worker_id}
-                                    >
-                                        {execution.worker_id}
-                                    </div>
-                                    <div className='whitespace-nowrap text-xs text-muted'>
-                                        {formatTime(execution.finished_at ?? execution.started_at)}
-                                    </div>
-                                </div>
-                                {execution.error && (
-                                    <div className='text-xs text-danger'>{execution.error}</div>
-                                )}
-                                {execution.result_json !== undefined && (
-                                    <JSONBlock
-                                        title='Attempt result'
-                                        value={execution.result_json}
-                                    />
-                                )}
-                            </div>
-                        ))}
+                    <div className='space-y-3'>
+                        <p className='text-sm text-muted'>
+                            No earlier published configuration is available for comparison.
+                        </p>
+                        <JSONBlock
+                            title='Published configuration (secrets redacted)'
+                            value={after}
+                        />
                     </div>
                 )}
             </DetailSection>
+            <DetailSection title='Targets'>
+                <JSONBlock title='Target resources' value={input?.target_resources ?? []} />
+            </DetailSection>
+            <RawJSON title='Raw publish input' value={job.input_json} />
+        </div>
+    );
+}
+
+function AttemptsTab({
+    executions,
+    error,
+    loading,
+}: {
+    executions: JobExecution[];
+    error: string;
+    loading: boolean;
+}) {
+    if (loading) return <div className='mt-5 h-28 animate-pulse rounded-lg bg-surface-secondary' />;
+    return (
+        <div className='space-y-3 pt-3'>
+            {error && (
+                <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
+                    {error}
+                </div>
+            )}
+            {executions.length === 0 && !error ? (
+                <div className='py-8 text-center text-sm text-muted'>
+                    No execution attempts recorded.
+                </div>
+            ) : (
+                executions.map((execution) => (
+                    <details
+                        className='rounded-lg border border-border'
+                        key={execution.id}
+                        open={Boolean(execution.error)}
+                    >
+                        <summary className='cursor-pointer px-4 py-3'>
+                            <div className='grid gap-2 sm:grid-cols-[7rem_8rem_1fr_auto] sm:items-center'>
+                                <span className='font-mono text-xs'>
+                                    Attempt {execution.attempt}
+                                </span>
+                                <span>
+                                    <StatusBadge status={execution.status} />
+                                </span>
+                                <span
+                                    className='truncate font-mono text-xs'
+                                    title={execution.worker_id}
+                                >
+                                    {execution.worker_id}
+                                </span>
+                                <span className='text-xs text-muted'>
+                                    {formatDuration(execution.started_at, execution.finished_at)}
+                                </span>
+                            </div>
+                        </summary>
+                        <div className='space-y-4 border-t border-border px-4 py-4'>
+                            <dl className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
+                                <DetailValue
+                                    label='Started'
+                                    value={formatTime(execution.started_at)}
+                                />
+                                <DetailValue
+                                    label='Finished'
+                                    value={formatTime(execution.finished_at)}
+                                />
+                                <DetailValue
+                                    label='Heartbeat'
+                                    value={formatTime(execution.heartbeat_at)}
+                                />
+                                <DetailValue label='Execution ID' mono value={execution.id} />
+                            </dl>
+                            {execution.error && (
+                                <div className='rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger'>
+                                    {execution.error}
+                                </div>
+                            )}
+                            {execution.result_json !== undefined && (
+                                <JSONBlock title='Attempt result' value={execution.result_json} />
+                            )}
+                        </div>
+                    </details>
+                ))
+            )}
+        </div>
+    );
+}
+
+function JobDetails({
+    job,
+    executions,
+    historyError,
+    historyLoading,
+    onNavigate,
+}: {
+    job: ManagedJob;
+    executions: JobExecution[];
+    historyError: string;
+    historyLoading: boolean;
+    onNavigate: () => void;
+}) {
+    return (
+        <div className='max-h-[76vh] overflow-y-auto px-6 py-6'>
+            <Tabs className="w-full" aria-label='Job details' defaultSelectedKey='summary'>
+                <Tabs.ListContainer>
+                    <Tabs.List aria-label="Options">
+                        <Tabs.Tab id='summary'>
+                            Summary
+                            <Tabs.Indicator />
+                        </Tabs.Tab>
+                        <Tabs.Tab id='change'>
+                            {job.kind === 'PUBLISH' ? 'Change' : 'Input'}
+                            <Tabs.Indicator />
+                        </Tabs.Tab>
+                        <Tabs.Tab id='attempts'>
+                            Attempts
+                            <Tabs.Indicator />
+                        </Tabs.Tab>
+                    </Tabs.List>
+                </Tabs.ListContainer>
+                <Tabs.Panel id='summary'>
+                    <SummaryTab job={job} onNavigate={onNavigate} />
+                </Tabs.Panel>
+                <Tabs.Panel id='change'>
+                    <ChangeTab job={job} />
+                </Tabs.Panel>
+                <Tabs.Panel id='attempts'>
+                    <AttemptsTab
+                        error={historyError}
+                        executions={executions}
+                        loading={historyLoading}
+                    />
+                </Tabs.Panel>
+            </Tabs>
         </div>
     );
 }
 
 export default function Jobs() {
+    const navigate = useNavigate();
     const { clusterId, clusters } = useCluster();
     const role = clusters.find((cluster) => cluster.id === clusterId)?.role;
     const canOperate = canOperateCluster(role);
@@ -274,6 +455,7 @@ export default function Jobs() {
     const [mutating, setMutating] = useState('');
     const [loadError, setLoadError] = useState('');
     const [detailError, setDetailError] = useState('');
+    const [historyError, setHistoryError] = useState('');
     const [actionError, setActionError] = useState('');
     const listRequestVersion = useRef(0);
     const detailRequestVersion = useRef(0);
@@ -349,51 +531,74 @@ export default function Jobs() {
         setHistoryLoading(false);
         setLoadError('');
         setDetailError('');
+        setHistoryError('');
         setActionError('');
     }, [clusterId]);
 
     useAutoRefresh(load, Boolean(clusterId));
 
-    const loadDetails = async (job: ManagedJob) => {
-        const version = ++detailRequestVersion.current;
-        const requestedClusterID = clusterId;
-        setSelected(job);
-        setSelectedDetail(null);
-        setExecutions([]);
-        setDetailError('');
-        setDetailLoading(true);
-        setHistoryLoading(true);
-        try {
-            const [detail, history] = await Promise.all([
-                api.detail(job.kind, job.id),
-                api.executions(job.kind, job.id),
-            ]);
-            if (
-                version !== detailRequestVersion.current ||
-                requestedClusterID !== activeClusterID.current
-            )
-                return;
-            setSelectedDetail(detail);
-            setExecutions(history ?? []);
-        } catch (loadError) {
-            if (
-                version !== detailRequestVersion.current ||
-                requestedClusterID !== activeClusterID.current
-            )
-                return;
-            setDetailError(
-                loadError instanceof ApiError ? loadError.message : 'Failed to load job details'
-            );
-        } finally {
-            if (
-                version === detailRequestVersion.current &&
-                requestedClusterID === activeClusterID.current
-            ) {
-                setDetailLoading(false);
-                setHistoryLoading(false);
+    const loadDetails = useCallback(
+        async (job: ManagedJob, refresh = false) => {
+            const version = ++detailRequestVersion.current;
+            const requestedClusterID = clusterId;
+            if (!refresh) {
+                setSelected(job);
+                setSelectedDetail(null);
+                setExecutions([]);
+                setDetailError('');
+                setHistoryError('');
+                setDetailLoading(true);
+                setHistoryLoading(true);
             }
-        }
-    };
+            const current = () =>
+                version === detailRequestVersion.current &&
+                requestedClusterID === activeClusterID.current;
+            const detailRequest = api
+                .detail(job.kind, job.id)
+                .then((detail) => {
+                    if (!current()) return;
+                    setSelectedDetail(detail);
+                    setDetailError('');
+                })
+                .catch((loadError) => {
+                    if (!current()) return;
+                    setDetailError(
+                        loadError instanceof ApiError
+                            ? loadError.message
+                            : 'Failed to load job details'
+                    );
+                })
+                .finally(() => {
+                    if (current()) setDetailLoading(false);
+                });
+            const historyRequest = api
+                .executions(job.kind, job.id)
+                .then((history) => {
+                    if (!current()) return;
+                    setExecutions(history ?? []);
+                    setHistoryError('');
+                })
+                .catch((loadError) => {
+                    if (!current()) return;
+                    setHistoryError(
+                        loadError instanceof ApiError
+                            ? loadError.message
+                            : 'Failed to load execution attempts'
+                    );
+                })
+                .finally(() => {
+                    if (current()) setHistoryLoading(false);
+                });
+            await Promise.allSettled([detailRequest, historyRequest]);
+        },
+        [api, clusterId]
+    );
+
+    useEffect(() => {
+        if (!selectedDetail || !['PENDING', 'RUNNING'].includes(selectedDetail.status)) return;
+        const timer = window.setInterval(() => void loadDetails(selectedDetail, true), 5000);
+        return () => window.clearInterval(timer);
+    }, [loadDetails, selectedDetail]);
 
     const mutate = async (job: ManagedJob, action: 'cancel' | 'replay') => {
         const version = ++mutationRequestVersion.current;
@@ -401,7 +606,7 @@ export default function Jobs() {
         setMutating(`${action}:${job.id}`);
         setActionError('');
         try {
-            await api[action](job.kind, job.id);
+            const result = await api[action](job.kind, job.id);
             if (
                 version !== mutationRequestVersion.current ||
                 requestedClusterID !== activeClusterID.current
@@ -413,7 +618,17 @@ export default function Jobs() {
                 requestedClusterID !== activeClusterID.current
             )
                 return;
-            if (selected?.id === job.id) await loadDetails(job);
+            if (selected?.id === job.id) {
+                const nextJob =
+                    action === 'replay'
+                        ? {
+                              ...job,
+                              id: result.id,
+                              status: result.mode === 'current' ? 'SUCCEEDED' : 'PENDING',
+                          }
+                        : job;
+                await loadDetails(nextJob);
+            }
         } catch (mutationError) {
             if (
                 version !== mutationRequestVersion.current ||
@@ -693,7 +908,7 @@ export default function Jobs() {
             <DialogShell
                 icon={<FileJson className='h-5 w-5' />}
                 isOpen={selected !== null}
-                size='lg'
+                size='xl'
                 subtitle={selected?.resource_name}
                 title={selected ? `${kindLabel(selected.kind)} job details` : 'Job details'}
                 onOpenChange={(open) => {
@@ -703,10 +918,11 @@ export default function Jobs() {
                         setSelectedDetail(null);
                         setExecutions([]);
                         setDetailError('');
+                        setHistoryError('');
                     }
                 }}
             >
-                {detailError ? (
+                {detailError && !selectedDetail ? (
                     <div className='m-6 rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
                         {detailError}
                     </div>
@@ -716,12 +932,62 @@ export default function Jobs() {
                         <div className='h-48 animate-pulse rounded-lg bg-surface-secondary' />
                     </div>
                 ) : (
-                    <JobDetails
-                        executions={executions}
-                        historyLoading={historyLoading}
-                        job={selectedDetail}
-                    />
+                    <>
+                        {detailError && (
+                            <div className='mx-6 mt-5 rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
+                                {detailError}
+                            </div>
+                        )}
+                        <JobDetails
+                            executions={executions}
+                            historyLoading={historyLoading}
+                            historyError={historyError}
+                            job={selectedDetail}
+                            onNavigate={() => {
+                                const path =
+                                    selectedDetail.resource_type === 'SITE'
+                                        ? `/sites/${selectedDetail.resource_id}`
+                                        : `/nodes/${selectedDetail.resource_id}`;
+                                detailRequestVersion.current++;
+                                setSelected(null);
+                                navigate(path);
+                            }}
+                        />
+                    </>
                 )}
+                <DialogFooter>
+                    {selectedDetail &&
+                        mayMutate(selectedDetail) &&
+                        ['PENDING', 'RUNNING'].includes(selectedDetail.status) && (
+                            <Button
+                                isDisabled={Boolean(mutating)}
+                                variant='secondary'
+                                onPress={() => void mutate(selectedDetail, 'cancel')}
+                            >
+                                <XCircle className='h-4 w-4' /> Cancel
+                            </Button>
+                        )}
+                    {selectedDetail &&
+                        mayMutate(selectedDetail) &&
+                        ['FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(selectedDetail.status) && (
+                            <Button
+                                isDisabled={Boolean(mutating)}
+                                variant='secondary'
+                                onPress={() => void mutate(selectedDetail, 'replay')}
+                            >
+                                <RotateCcw className='h-4 w-4' /> Replay
+                            </Button>
+                        )}
+                    <Button
+                        variant='primary'
+                        onPress={() => {
+                            detailRequestVersion.current++;
+                            setSelected(null);
+                        }}
+                    >
+                        Close
+                    </Button>
+                </DialogFooter>
             </DialogShell>
         </div>
     );

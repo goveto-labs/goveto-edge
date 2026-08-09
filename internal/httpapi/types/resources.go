@@ -312,13 +312,18 @@ type PublishJob struct {
 	Error          *string         `json:"error,omitempty"`
 	CreatedAt      time.Time       `json:"created_at"`
 	UpdatedAt      time.Time       `json:"updated_at"`
+	EnqueueMode    string          `json:"enqueue_mode,omitempty"`
 }
 
-func NewPublishJob(value *model.PublishJob) PublishJob {
-	return PublishJob{ID: value.Id, SiteID: value.SiteId, Version: value.Version, Status: value.Status,
+func NewPublishJob(value *model.PublishJob, enqueueMode ...string) PublishJob {
+	result := PublishJob{ID: value.Id, SiteID: value.SiteId, Version: value.Version, Status: value.Status,
 		Attempts: value.Attempts, MaxAttempts: value.MaxAttempts, NextAttemptAt: value.NextAttemptAt,
 		LeaseOwner: value.LeaseOwner, LeaseUntil: value.LeaseUntil, HeartbeatAt: value.HeartbeatAt,
 		CancellationAt: value.CancelRequestedAt, Error: value.Error, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	if len(enqueueMode) > 0 {
+		result.EnqueueMode = enqueueMode[0]
+	}
+	return result
 }
 
 type PurgeJob struct {

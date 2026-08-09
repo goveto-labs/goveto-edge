@@ -9,6 +9,7 @@ import {
     AlertTriangle,
     FileClock,
     KeyRound,
+    ListTodo,
     Network,
     Pencil,
     Plus,
@@ -38,7 +39,7 @@ import { useAuth } from '@/hooks/useAuth.ts';
 import AuditLog from '@/pages/AuditLog.tsx';
 import Users from '@/pages/Users.tsx';
 
-type AdminTab = 'general' | 'authentication' | 'providers' | 'users' | 'audit';
+type AdminTab = 'general' | 'jobs' | 'authentication' | 'providers' | 'users' | 'audit';
 
 const tabs: Array<{
     id: AdminTab;
@@ -47,6 +48,7 @@ const tabs: Array<{
     dividerBefore?: boolean;
 }> = [
     { id: 'general', label: 'General', icon: Settings2 },
+    { id: 'jobs', label: 'Jobs', icon: ListTodo },
     { id: 'authentication', label: 'Authentication', icon: ShieldCheck },
     { id: 'providers', label: 'Providers', icon: KeyRound },
     { id: 'users', label: 'Users', icon: UserRoundCog, dividerBefore: true },
@@ -92,6 +94,7 @@ function editable(settings: AdminSettingsData) {
         agent_gateway_public_address: settings.agent_gateway_public_address,
         http_proxy: settings.http_proxy,
         authentication: settings.authentication,
+        job_retention: settings.job_retention,
     };
 }
 
@@ -166,7 +169,8 @@ export default function AdminSettings() {
     const tab: AdminTab = tabs.some((item) => item.id === requestedTab)
         ? (requestedTab as AdminTab)
         : 'general';
-    const settingsTab = tab === 'general' || tab === 'authentication' || tab === 'providers';
+    const settingsTab =
+        tab === 'general' || tab === 'jobs' || tab === 'authentication' || tab === 'providers';
 
     const [form, setForm] = useState<AdminSettingsData | null>(null);
     const [baseline, setBaseline] = useState('');
@@ -192,6 +196,12 @@ export default function AdminSettings() {
         [baseline, form, providerSecrets]
     );
     const restartAffected = form !== null && networkSnapshot(form) !== baselineNetwork;
+    const retentionValid =
+        form !== null &&
+        form.job_retention.history_days >= 7 &&
+        form.job_retention.history_days <= 3650 &&
+        form.job_retention.versions_per_site >= 2 &&
+        form.job_retention.versions_per_site <= 1000;
     const enabledProviderCount =
         form?.authentication.providers.filter((provider) => provider.enabled).length ?? 0;
 
@@ -604,6 +614,80 @@ export default function AdminSettings() {
                                     </div>
                                 )}
 
+                                {tab === 'jobs' && (
+                                    <ContentCard
+                                        title={
+                                            <span className='flex items-center gap-2'>
+                                                <ListTodo className='h-4 w-4 text-muted' />
+                                                History retention
+                                            </span>
+                                        }
+                                    >
+                                        <div className='grid gap-5 sm:grid-cols-2'>
+                                            <FormField
+                                                htmlFor='job-history-days'
+                                                label='Job history (days)'
+                                                hint={
+                                                    "Terminal jobs and their execution attempts older than this window are removed. Active jobs and each site's latest successful publish remain protected."
+                                                }
+                                            >
+                                                <Input
+                                                    id='job-history-days'
+                                                    max={3650}
+                                                    min={7}
+                                                    required
+                                                    type='number'
+                                                    value={String(form.job_retention.history_days)}
+                                                    variant='secondary'
+                                                    onChange={(event) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            job_retention: {
+                                                                ...form.job_retention,
+                                                                history_days: Number(
+                                                                    event.target.value
+                                                                ),
+                                                            },
+                                                        })
+                                                    }
+                                                />
+                                            </FormField>
+                                            <FormField
+                                                htmlFor='config-versions-per-site'
+                                                label='Minimum versions per site'
+                                                hint='Keep at least this many recent configuration versions per site, even after the history window expires. Current and rollback baseline versions are always protected.'
+                                            >
+                                                <Input
+                                                    id='config-versions-per-site'
+                                                    max={1000}
+                                                    min={2}
+                                                    required
+                                                    type='number'
+                                                    value={String(
+                                                        form.job_retention.versions_per_site
+                                                    )}
+                                                    variant='secondary'
+                                                    onChange={(event) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            job_retention: {
+                                                                ...form.job_retention,
+                                                                versions_per_site: Number(
+                                                                    event.target.value
+                                                                ),
+                                                            },
+                                                        })
+                                                    }
+                                                />
+                                            </FormField>
+                                        </div>
+                                        <p className='mt-5 border-t border-border pt-4 text-xs leading-5 text-muted'>
+                                            Cleanup runs hourly in batches. Changes apply without a
+                                            control-plane restart.
+                                        </p>
+                                    </ContentCard>
+                                )}
+
                                 {tab === 'providers' && (
                                     <ContentCard
                                         action={
@@ -755,6 +839,7 @@ export default function AdminSettings() {
                                         isDisabled={
                                             saving ||
                                             !dirty ||
+                                            !retentionValid ||
                                             !form.agent_gateway_public_address.trim()
                                         }
                                         type='submit'

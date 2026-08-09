@@ -110,6 +110,8 @@ paths:
                                                 $ref: '#/components/schemas/adminsettings_authenticationResponse'
                                             http_proxy:
                                                 $ref: '#/components/schemas/settings_HTTPProxyConfig'
+                                            job_retention:
+                                                $ref: '#/components/schemas/settings_JobRetentionConfig'
                                             restart_required:
                                                 type: boolean
                                             restarting:
@@ -143,6 +145,8 @@ paths:
                                     $ref: '#/components/schemas/adminsettings_authenticationRequest'
                                 http_proxy:
                                     $ref: '#/components/schemas/settings_HTTPProxyConfig'
+                                job_retention:
+                                    $ref: '#/components/schemas/settings_JobRetentionConfig'
                                 restart:
                                     type: boolean
             responses:
@@ -164,6 +168,8 @@ paths:
                                                 $ref: '#/components/schemas/adminsettings_authenticationResponse'
                                             http_proxy:
                                                 $ref: '#/components/schemas/settings_HTTPProxyConfig'
+                                            job_retention:
+                                                $ref: '#/components/schemas/settings_JobRetentionConfig'
                                             restart_required:
                                                 type: boolean
                                             restarting:
@@ -338,8 +344,6 @@ paths:
                                                 $ref: '#/components/schemas/model_UserStatus'
                                             totp_enabled:
                                                 type: boolean
-                                            totp_required:
-                                                type: boolean
                 "400":
                     description: Client Error
                     content:
@@ -453,8 +457,6 @@ paths:
                                             status:
                                                 $ref: '#/components/schemas/model_UserStatus'
                                             totp_enabled:
-                                                type: boolean
-                                            totp_required:
                                                 type: boolean
                 "401":
                     description: Client Error
@@ -8291,7 +8293,7 @@ paths:
                   schema:
                     type: string
             responses:
-                "202":
+                "200":
                     description: OK
                     content:
                         application/json:
@@ -8301,51 +8303,7 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        type: object
-                                        properties:
-                                            attempts:
-                                                type: integer
-                                                format: int32
-                                            cancel_requested_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            created_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            error:
-                                                type: string
-                                            heartbeat_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            id:
-                                                type: string
-                                            lease_owner:
-                                                type: string
-                                            lease_until:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            max_attempts:
-                                                type: integer
-                                                format: int32
-                                            next_attempt_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            site_id:
-                                                type: string
-                                            status:
-                                                $ref: '#/components/schemas/model_JobStatus'
-                                            updated_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            version:
-                                                type: integer
-                                                format: int64
+                                        $ref: '#/components/schemas/types_PublishJob'
                 "400":
                     description: Client Error
                     content:
@@ -8423,51 +8381,7 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        type: object
-                                        properties:
-                                            attempts:
-                                                type: integer
-                                                format: int32
-                                            cancel_requested_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            created_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            error:
-                                                type: string
-                                            heartbeat_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            id:
-                                                type: string
-                                            lease_owner:
-                                                type: string
-                                            lease_until:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            max_attempts:
-                                                type: integer
-                                                format: int32
-                                            next_attempt_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            site_id:
-                                                type: string
-                                            status:
-                                                $ref: '#/components/schemas/model_JobStatus'
-                                            updated_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            version:
-                                                type: integer
-                                                format: int64
+                                        $ref: '#/components/schemas/types_PublishJob'
                 "404":
                     description: Client Error
                     content:
@@ -10787,6 +10701,8 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 operation:
                     type: string
+                publish_context:
+                    $ref: '#/components/schemas/jobs_PublishContext'
                 resource_hint:
                     type: string
                 resource_id:
@@ -10807,6 +10723,25 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+        jobs_PublishContext:
+            type: object
+            properties:
+                baseline_config:
+                    type: object
+                baseline_version:
+                    type: integer
+                    format: int64
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hash:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                version:
+                    type: integer
+                    format: int64
         model_ACMEChallengeType:
             type: string
             enum:
@@ -11621,6 +11556,15 @@ components:
                         type: string
                 trust_all:
                     type: boolean
+        settings_JobRetentionConfig:
+            type: object
+            properties:
+                history_days:
+                    type: integer
+                    format: int32
+                versions_per_site:
+                    type: integer
+                    format: int32
         sites_bulkResult:
             type: object
             properties:
@@ -12136,6 +12080,8 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+                enqueue_mode:
+                    type: string
                 error:
                     type: string
                 heartbeat_at:
