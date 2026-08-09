@@ -6,7 +6,6 @@ export interface User {
     status: string;
     totp_enabled?: boolean;
     totp_required?: boolean;
-    is_instance_owner: boolean;
 }
 
 export interface LoginRequest {

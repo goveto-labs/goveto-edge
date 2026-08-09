@@ -28,25 +28,20 @@ type loginRequest struct {
 }
 
 type userResponse struct {
-	ID              string           `json:"id"`
-	Email           string           `json:"email"`
-	Name            string           `json:"name"`
-	Role            model.UserRole   `json:"role"`
-	Status          model.UserStatus `json:"status"`
-	TOTPEnabled     bool             `json:"totp_enabled"`
-	TOTPRequired    bool             `json:"totp_required,omitempty"`
-	IsInstanceOwner bool             `json:"is_instance_owner"`
+	ID           string           `json:"id"`
+	Email        string           `json:"email"`
+	Name         string           `json:"name"`
+	Role         model.UserRole   `json:"role"`
+	Status       model.UserStatus `json:"status"`
+	TOTPEnabled  bool             `json:"totp_enabled"`
+	TOTPRequired bool             `json:"totp_required,omitempty"`
 }
 
-func newUserResponse(ctx context.Context, settingStore *settings.Store, user *model.User) (userResponse, error) {
-	owner, err := settingStore.IsInstanceOwner(ctx, user.Id)
-	if err != nil {
-		return userResponse{}, err
-	}
+func newUserResponse(user *model.User) userResponse {
 	return userResponse{
 		ID: user.Id, Email: user.Email, Name: user.Name,
-		Role: user.Role, Status: user.Status, TOTPEnabled: hasTOTP(user), IsInstanceOwner: owner,
-	}, nil
+		Role: user.Role, Status: user.Status, TOTPEnabled: hasTOTP(user),
+	}
 }
 
 func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, secretCipher settings.SecretCipher, captchaVerifier *captcha.Verifier, limiter *httpsecurity.RateLimiter) {
@@ -165,10 +160,7 @@ func login(db *client.Client, sessions *authn.SessionStore, settingStore *settin
 		if err := sessions.SetCookie(c, token); err != nil {
 			return err
 		}
-		response, err := newUserResponse(c.Request().Context(), settingStore, user)
-		if err != nil {
-			return err
-		}
+		response := newUserResponse(user)
 		response.TOTPRequired = totpRequired
 		audit.SetChange(c, nil, response)
 		return types.JSON(c, http.StatusOK, response)
@@ -190,10 +182,7 @@ func me(db *client.Client, settingStore *settings.Store) echo.HandlerFunc {
 		if user == nil || user.Status != model.UserStatusACTIVE {
 			return echo.NewHTTPError(http.StatusUnauthorized, "user is unavailable")
 		}
-		response, err := newUserResponse(c.Request().Context(), settingStore, user)
-		if err != nil {
-			return err
-		}
+		response := newUserResponse(user)
 		response.TOTPRequired, err = settingStore.RequireTOTP(c.Request().Context())
 		if err != nil {
 			return err

@@ -1,4 +1,4 @@
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout.tsx';
 import { ProtectedRoute } from '@/components/ProtectedRoute.tsx';
@@ -8,7 +8,6 @@ import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
 import AdminSettings from '@/pages/AdminSettings.tsx';
 import Analytics from '@/pages/Analytics.tsx';
-import AuditLog from '@/pages/AuditLog.tsx';
 import Certificates from '@/pages/Certificates.tsx';
 import ClusterMembers from '@/pages/ClusterMembers.tsx';
 import CreateNode from '@/pages/CreateNode.tsx';
@@ -29,7 +28,6 @@ import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
 import SitesAccessLogs from '@/pages/SitesAccessLogs.tsx';
 import SSHCredentials from '@/pages/SSHCredentials.tsx';
-import Users from '@/pages/Users.tsx';
 
 export default function App() {
     return (
@@ -71,13 +69,20 @@ export default function App() {
                                     <Route element={<Analytics />} path='/analytics' />
                                     <Route element={<Settings />} path='/settings' />
                                     <Route element={<ClusterMembers />} path='/settings/members' />
-                                    <Route element={<AuditLog />} path='/settings/audit' />
-                                    <Route element={<Users />} path='/settings/users' />
                                     <Route
                                         element={<Notifications />}
                                         path='/settings/notifications'
                                     />
                                     <Route element={<AdminSettings />} path='/settings/admin/*' />
+                                    {/* Legacy paths before Users and Audit log moved under Admin settings. */}
+                                    <Route
+                                        element={<Navigate replace to='/settings/admin/users' />}
+                                        path='/settings/users'
+                                    />
+                                    <Route
+                                        element={<Navigate replace to='/settings/admin/audit' />}
+                                        path='/settings/audit'
+                                    />
                                 </Route>
                             </Routes>
                         </ClusterProvider>

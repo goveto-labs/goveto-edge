@@ -60,7 +60,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	health.Register(e, nil)
 	initialization.Register(e, nil, nil, nil)
 	authapi.Register(e, nil, nil, nil, nil, nil, nil)
-	adminsettings.Register(e, nil, nil, nil)
+	adminsettings.Register(e, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)
 	certificates.Register(e, nil, nil)
 	dnsapi.Register(e, nil, nil, nil)

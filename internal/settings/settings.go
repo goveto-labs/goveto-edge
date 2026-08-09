@@ -24,7 +24,6 @@ const (
 	CaptchaKey             = "auth.captcha"
 	RequireTOTPKey         = "auth.totp.required"
 	InstanceInitializedKey = "instance.initialized"
-	InstanceOwnerUserIDKey = "instance.owner_user_id"
 	AgentGatewayAddressKey = "agent.gateway.public_address"
 	HTTPProxyKey           = "http.proxy"
 	LocalLoginEnabledKey   = "auth.local_login.enabled"
@@ -416,17 +415,6 @@ func validateAuthenticationURL(name, raw string) error {
 		}
 	}
 	return nil
-}
-
-func (s *Store) InstanceOwnerUserID(ctx context.Context) (string, bool, error) {
-	var userID string
-	found, err := s.Get(ctx, InstanceOwnerUserIDKey, &userID)
-	return userID, found, err
-}
-
-func (s *Store) IsInstanceOwner(ctx context.Context, userID string) (bool, error) {
-	ownerID, found, err := s.InstanceOwnerUserID(ctx)
-	return found && ownerID != "" && ownerID == userID, err
 }
 
 func (s *Store) AgentGatewayPublicAddress(ctx context.Context) (string, bool, error) {

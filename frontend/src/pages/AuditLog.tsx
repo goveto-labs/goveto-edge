@@ -24,7 +24,7 @@ function formatTime(value: string) {
     return new Date(value).toLocaleString();
 }
 
-export default function AuditLog() {
+export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
     const { user } = useAuth();
     const [items, setItems] = useState<AuditEvent[]>([]);
     const [total, setTotal] = useState(0);
@@ -88,6 +88,7 @@ export default function AuditLog() {
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
                 }
+                embedded={embedded}
                 subtitle='Review security-relevant control-plane activity.'
                 title='Audit log'
             />

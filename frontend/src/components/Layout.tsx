@@ -25,22 +25,19 @@ function Greeting() {
     );
 }
 
-function PageTitle({
-    pathname,
-    isInstanceOwner,
-    isPlatformAdmin,
-}: {
-    pathname: string;
-    isInstanceOwner: boolean;
-    isPlatformAdmin: boolean;
-}) {
-    const item = useMemo(
-        () =>
-            navigationFor(isInstanceOwner, isPlatformAdmin)
-                .flatMap((entry) => [entry, ...(entry.children ?? [])])
-                .find((n) => n.path === pathname),
-        [isInstanceOwner, isPlatformAdmin, pathname]
-    );
+function PageTitle({ pathname, isPlatformAdmin }: { pathname: string; isPlatformAdmin: boolean }) {
+    const item = useMemo(() => {
+        const entries = navigationFor(isPlatformAdmin).flatMap((entry) => [
+            entry,
+            ...(entry.children ?? []),
+        ]);
+        return (
+            entries.find((entry) => entry.path === pathname) ??
+            entries
+                .filter((entry) => entry.path !== '/' && pathname.startsWith(`${entry.path}/`))
+                .sort((left, right) => right.path.length - left.path.length)[0]
+        );
+    }, [isPlatformAdmin, pathname]);
     const title = item?.label ?? 'Dashboard';
 
     return <span className='text-lg font-semibold'>{title}</span>;
@@ -137,7 +134,6 @@ export function Layout() {
                                 <span className='text-xs font-bold'>G</span>
                             </div>
                             <PageTitle
-                                isInstanceOwner={Boolean(user?.is_instance_owner)}
                                 isPlatformAdmin={user?.role === 'ADMIN'}
                                 pathname={location.pathname}
                             />

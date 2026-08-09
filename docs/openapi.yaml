@@ -78,7 +78,7 @@ paths:
         get:
             operationId: get
             summary: Get instance settings
-            description: Return system-level settings visible only to the instance owner.
+            description: Return system-level settings visible to platform administrators.
             tags:
                 - admin-settings
             security:
@@ -90,7 +90,7 @@ paths:
                 - authapi.RequireTOTPEnrollment
                 - audit.Middleware
                 - authn.RequireAuth
-                - requireInstanceOwner
+                - clusteraccess.RequirePlatform
             responses:
                 "200":
                     description: OK
@@ -117,7 +117,7 @@ paths:
         put:
             operationId: update
             summary: Update instance settings
-            description: Update system-level settings as the instance owner.
+            description: Update system-level settings as a platform administrator.
             tags:
                 - admin-settings
             security:
@@ -129,7 +129,7 @@ paths:
                 - authapi.RequireTOTPEnrollment
                 - audit.Middleware
                 - authn.RequireAuth
-                - requireInstanceOwner
+                - clusteraccess.RequirePlatform
             requestBody:
                 required: true
                 content:
@@ -330,8 +330,6 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
-                                            is_instance_owner:
-                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -448,8 +446,6 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
-                                            is_instance_owner:
-                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -784,8 +780,6 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
-                                            is_instance_owner:
-                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -924,6 +918,7 @@ paths:
                 - authapi.RequireTOTPEnrollment
                 - audit.Middleware
                 - authn.RequireAuth
+                - clusteraccess.RequirePlatform
             requestBody:
                 required: true
                 content:
@@ -946,17 +941,6 @@ paths:
                                     data:
                                         $ref: '#/components/schemas/auth_securityPolicyResponse'
                 "400":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "403":
                     description: Client Error
                     content:
                         application/json:
@@ -4657,11 +4641,10 @@ paths:
                         schema:
                             type: object
                             properties:
-                                permission:
-                                    $ref: '#/components/schemas/model_ClusterPermission'
                                 email:
                                     type: string
-                                    format: email
+                                permission:
+                                    $ref: '#/components/schemas/model_ClusterPermission'
                                 user_id:
                                     type: string
             responses:
@@ -4675,25 +4658,30 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        type: object
-                                        properties:
-                                            cluster_id:
-                                                type: string
-                                            email:
-                                                type: string
-                                            name:
-                                                type: string
-                                            status:
-                                                $ref: '#/components/schemas/model_UserStatus'
-                                            created_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            permission:
-                                                $ref: '#/components/schemas/model_ClusterPermission'
-                                            user_id:
-                                                type: string
+                                        $ref: '#/components/schemas/types_ClusterMember'
                 "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
                     description: Client Error
                     content:
                         application/json:
@@ -4753,24 +4741,7 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        type: object
-                                        properties:
-                                            cluster_id:
-                                                type: string
-                                            email:
-                                                type: string
-                                            name:
-                                                type: string
-                                            status:
-                                                $ref: '#/components/schemas/model_UserStatus'
-                                            created_at:
-                                                type: string
-                                                format: date-time
-                                                example: "2026-01-02T15:04:05Z"
-                                            permission:
-                                                $ref: '#/components/schemas/model_ClusterPermission'
-                                            user_id:
-                                                type: string
+                                        $ref: '#/components/schemas/types_ClusterMember'
                 "400":
                     description: Client Error
                     content:
@@ -9686,8 +9657,6 @@ paths:
                                                 type: string
                                             id:
                                                 type: string
-                                            is_instance_owner:
-                                                type: boolean
                                             name:
                                                 type: string
                                             role:
@@ -9796,6 +9765,156 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/users:
+        get:
+            operationId: listUsers
+            summary: List platform users
+            description: Paginated user directory with search, role and status filters; requires platform user management permission.
+            tags:
+                - users
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.RequirePlatform
+            parameters:
+                - name: page
+                  in: query
+                  schema:
+                    type: string
+                - name: page_size
+                  in: query
+                  schema:
+                    type: string
+                - name: role
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_UserWhereClause'
+                - name: search
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_UserWhereClause'
+                - name: status
+                  in: query
+                  schema:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/query_UserWhereClause'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/users_userResponse'
+                                            page:
+                                                type: integer
+                                                format: int32
+                                            page_size:
+                                                type: integer
+                                                format: int32
+                                            total:
+                                                type: integer
+                                                format: int64
+    /api/v1/users/{user_id}/status:
+        patch:
+            operationId: updateStatus
+            summary: Update user status
+            description: Enable or disable a platform user; disabling revokes all sessions and cannot target the caller or final active administrator.
+            tags:
+                - users
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.RequirePlatform
+            parameters:
+                - name: user_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                status:
+                                    $ref: '#/components/schemas/model_UserStatus'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            email:
+                                                type: string
+                                            id:
+                                                type: string
+                                            last_login_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            name:
+                                                type: string
+                                            role:
+                                                $ref: '#/components/schemas/model_UserRole'
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
+                                            totp_enabled:
+                                                type: boolean
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /health/live:
         get:
             operationId: live
@@ -9863,105 +9982,6 @@ paths:
                                         type: string
                                     msg:
                                         type: string
-    /api/v1/users:
-        get:
-            operationId: listUsers
-            summary: List platform users
-            description: Paginated user directory with search, role and status filters; requires platform user management permission.
-            tags:
-                - users
-            security:
-                - cookie_goveto_session: []
-            parameters:
-                - name: search
-                  in: query
-                  schema:
-                      type: string
-                - name: role
-                  in: query
-                  schema:
-                      $ref: '#/components/schemas/model_UserRole'
-                - name: status
-                  in: query
-                  schema:
-                      $ref: '#/components/schemas/model_UserStatus'
-                - name: page
-                  in: query
-                  schema:
-                      type: integer
-                      minimum: 1
-                - name: page_size
-                  in: query
-                  schema:
-                      type: integer
-                      minimum: 1
-                      maximum: 200
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    data:
-                                        type: object
-                                        properties:
-                                            items:
-                                                type: array
-                                                items:
-                                                    $ref: '#/components/schemas/users_userResponse'
-                                            total:
-                                                type: integer
-                                                format: int64
-                                            page:
-                                                type: integer
-                                            page_size:
-                                                type: integer
-    /api/v1/users/{user_id}/status:
-        patch:
-            operationId: updateUserStatus
-            summary: Update user status
-            description: Enable or disable a platform user; disabling revokes all sessions and cannot target the caller or final active administrator.
-            tags:
-                - users
-            security:
-                - cookie_goveto_session: []
-            parameters:
-                - name: user_id
-                  in: path
-                  required: true
-                  schema:
-                      type: string
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            required:
-                                - status
-                            properties:
-                                status:
-                                    $ref: '#/components/schemas/model_UserStatus'
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    data:
-                                        $ref: '#/components/schemas/users_userResponse'
-                "404":
-                    description: User not found
-                "409":
-                    description: Self-disable or final active administrator conflict
 components:
     schemas:
         adminsettings_authenticationProviderRequest:
@@ -11557,6 +11577,15 @@ components:
                     type: string
                 value:
                     type: object
+        query_UserWhereClause:
+            type: object
+            properties:
+                field:
+                    type: string
+                operator:
+                    type: string
+                value:
+                    type: object
         securitystate_TemporaryBlock:
             type: object
             properties:
@@ -11821,31 +11850,6 @@ components:
                     $ref: '#/components/schemas/model_UserStatus'
                 user_id:
                     type: string
-        users_userResponse:
-            type: object
-            properties:
-                id:
-                    type: string
-                email:
-                    type: string
-                    format: email
-                name:
-                    type: string
-                role:
-                    $ref: '#/components/schemas/model_UserRole'
-                status:
-                    $ref: '#/components/schemas/model_UserStatus'
-                totp_enabled:
-                    type: boolean
-                last_login_at:
-                    type: string
-                    format: date-time
-                created_at:
-                    type: string
-                    format: date-time
-                updated_at:
-                    type: string
-                    format: date-time
         types_ClusterRegion:
             type: object
             properties:
@@ -12221,6 +12225,33 @@ components:
                 version:
                     type: integer
                     format: int64
+        users_userResponse:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                email:
+                    type: string
+                id:
+                    type: string
+                last_login_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                name:
+                    type: string
+                role:
+                    $ref: '#/components/schemas/model_UserRole'
+                status:
+                    $ref: '#/components/schemas/model_UserStatus'
+                totp_enabled:
+                    type: boolean
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
     securitySchemes:
         cookie_goveto_session:
             type: apiKey

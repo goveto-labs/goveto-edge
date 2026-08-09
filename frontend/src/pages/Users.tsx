@@ -19,7 +19,7 @@ function errorMessage(error: unknown) {
         : 'Failed to load users';
 }
 
-export default function Users() {
+export default function Users({ embedded = false }: { embedded?: boolean }) {
     const { user: currentUser } = useAuth();
     const [items, setItems] = useState<PlatformUser[]>([]);
     const [total, setTotal] = useState(0);
@@ -89,6 +89,7 @@ export default function Users() {
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                     </Button>
                 }
+                embedded={embedded}
                 subtitle='Review accounts and control access to this Goveto instance.'
                 title='Users'
             />

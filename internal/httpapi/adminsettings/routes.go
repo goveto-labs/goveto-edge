@@ -1,4 +1,4 @@
-// Package adminsettings exposes instance-level settings to the instance owner.
+// Package adminsettings exposes instance-level settings to platform administrators.
 package adminsettings
 
 import (
@@ -14,8 +14,11 @@ import (
 	"github.com/labstack/echo/v5"
 
 	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/settings"
+	"goveto-edge/internal/storage/gen/client"
 )
 
 type response struct {
@@ -81,33 +84,18 @@ type authenticationProviderRequest struct {
 	AutoCreateUsers  bool                      `json:"auto_create_users"`
 }
 
-func Register(e *echo.Echo, settingStore *settings.Store, cipher settings.SecretCipher, restartControlPlane func()) {
+func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, cipher settings.SecretCipher, restartControlPlane func()) {
 	group := e.Group(
 		"/api/v1/admin/settings",
 		authn.RequireAuth,
-		requireInstanceOwner(settingStore),
+		clusteraccess.RequirePlatform(db, rbac.PermissionPlatformSettingsManage),
 	)
 	group.GET("", get(settingStore, cipher))
 	group.PUT("", update(settingStore, cipher, restartControlPlane))
 }
 
-func requireInstanceOwner(settingStore *settings.Store) echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c *echo.Context) error {
-			allowed, err := settingStore.IsInstanceOwner(c.Request().Context(), authn.CurrentUID(c))
-			if err != nil {
-				return err
-			}
-			if !allowed {
-				return echo.NewHTTPError(http.StatusForbidden, "instance owner access required")
-			}
-			return next(c)
-		}
-	}
-}
-
 // @summary Get instance settings
-// @description Return system-level settings visible only to the instance owner.
+// @description Return system-level settings visible to platform administrators.
 // @Tags admin settings
 func get(settingStore *settings.Store, cipher settings.SecretCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -120,7 +108,7 @@ func get(settingStore *settings.Store, cipher settings.SecretCipher) echo.Handle
 }
 
 // @summary Update instance settings
-// @description Update system-level settings as the instance owner.
+// @description Update system-level settings as a platform administrator.
 // @Tags admin settings
 func update(settingStore *settings.Store, cipher settings.SecretCipher, restartControlPlane func()) echo.HandlerFunc {
 	return func(c *echo.Context) error {

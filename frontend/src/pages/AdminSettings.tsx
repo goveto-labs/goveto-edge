@@ -7,6 +7,7 @@ import type {
 import { Alert, Button, Input, Spinner, Tooltip } from '@heroui/react';
 import {
     AlertTriangle,
+    FileClock,
     KeyRound,
     Network,
     Pencil,
@@ -16,6 +17,7 @@ import {
     Settings2,
     ShieldCheck,
     Trash2,
+    UserRoundCog,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
@@ -33,13 +35,22 @@ import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { ValueListAddField } from '@/components/ValueListAddField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
+import AuditLog from '@/pages/AuditLog.tsx';
+import Users from '@/pages/Users.tsx';
 
-type AdminTab = 'general' | 'authentication' | 'providers';
+type AdminTab = 'general' | 'authentication' | 'providers' | 'users' | 'audit';
 
-const tabs: Array<{ id: AdminTab; label: string; icon: typeof Settings2 }> = [
+const tabs: Array<{
+    id: AdminTab;
+    label: string;
+    icon: typeof Settings2;
+    dividerBefore?: boolean;
+}> = [
     { id: 'general', label: 'General', icon: Settings2 },
     { id: 'authentication', label: 'Authentication', icon: ShieldCheck },
     { id: 'providers', label: 'Providers', icon: KeyRound },
+    { id: 'users', label: 'Users', icon: UserRoundCog, dividerBefore: true },
+    { id: 'audit', label: 'Audit log', icon: FileClock },
 ];
 
 const headerPresets = [
@@ -155,6 +166,7 @@ export default function AdminSettings() {
     const tab: AdminTab = tabs.some((item) => item.id === requestedTab)
         ? (requestedTab as AdminTab)
         : 'general';
+    const settingsTab = tab === 'general' || tab === 'authentication' || tab === 'providers';
 
     const [form, setForm] = useState<AdminSettingsData | null>(null);
     const [baseline, setBaseline] = useState('');
@@ -191,7 +203,7 @@ export default function AdminSettings() {
     }, []);
 
     useEffect(() => {
-        if (!user?.is_instance_owner) return;
+        if (user?.role !== 'ADMIN' || !settingsTab || form) return;
         let active = true;
         setLoading(true);
         adminSettingsApi
@@ -210,9 +222,9 @@ export default function AdminSettings() {
         return () => {
             active = false;
         };
-    }, [applySettings, user?.is_instance_owner]);
+    }, [applySettings, form, settingsTab, user?.role]);
 
-    if (!authLoading && !user?.is_instance_owner) {
+    if (!authLoading && user?.role !== 'ADMIN') {
         return <Navigate replace to='/' />;
     }
 
@@ -304,415 +316,460 @@ export default function AdminSettings() {
     };
 
     return (
-        <div className='mx-auto max-w-5xl space-y-5'>
+        <div className='mx-auto max-w-[1400px] space-y-5'>
             <PageHeader
-                subtitle='Instance-wide connectivity, request identity, and sign-in settings.'
+                subtitle='Instance-wide configuration, access, and audit controls.'
                 title='Admin settings'
             />
 
-            <div className='grid w-full grid-cols-2 gap-1 rounded-xl bg-surface p-1 sm:flex sm:w-fit sm:items-center'>
-                {tabs.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                        <button
-                            className={`flex min-w-0 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors sm:shrink-0 ${tab === item.id ? 'bg-surface-secondary shadow-sm' : 'text-muted hover:text-foreground'}`}
-                            key={item.id}
-                            type='button'
-                            onClick={() => navigate(`/settings/admin/${item.id}`)}
-                        >
-                            <Icon className='h-4 w-4' />
-                            {item.label}
-                        </button>
-                    );
-                })}
-            </div>
-
-            {error && <FormError message={error} />}
-            {restarting && (
-                <Alert status='success'>
-                    <Alert.Indicator />
-                    <Alert.Content>
-                        <Alert.Title>Restart requested</Alert.Title>
-                        <Alert.Description>
-                            The control plane is shutting down gracefully. Its service supervisor
-                            must start it again before this page can reconnect.
-                        </Alert.Description>
-                    </Alert.Content>
-                </Alert>
-            )}
-            {saved && (
-                <Alert status='success'>
-                    <Alert.Indicator />
-                    <Alert.Content>
-                        <Alert.Title>Settings saved</Alert.Title>
-                        <Alert.Description>The changes are active.</Alert.Description>
-                    </Alert.Content>
-                </Alert>
-            )}
-
-            {loading || authLoading || !form ? (
-                <ContentCard>
-                    <div className='flex min-h-32 items-center justify-center'>
-                        <Spinner />
-                    </div>
-                </ContentCard>
-            ) : (
-                <form className='space-y-5' onSubmit={saveSettings}>
-                    {tab === 'general' && (
-                        <div className='space-y-5'>
-                            <ContentCard
-                                title={
-                                    <span className='flex items-center gap-2'>
-                                        <ServerCog className='h-4 w-4 text-muted' />
-                                        Connectivity
-                                    </span>
-                                }
-                            >
-                                <FormField
-                                    htmlFor='agent-gateway-public-address'
-                                    label='Agent gateway public address'
-                                    hint='Use host:port. IPv6 addresses require brackets.'
-                                    required
-                                >
-                                    <Input
-                                        autoCapitalize='none'
-                                        autoComplete='off'
-                                        id='agent-gateway-public-address'
-                                        placeholder='edge.example.com:8443'
-                                        required
-                                        spellCheck={false}
-                                        value={form.agent_gateway_public_address}
-                                        variant='secondary'
-                                        onChange={(event) =>
-                                            updateForm({
-                                                ...form,
-                                                agent_gateway_public_address: event.target.value,
-                                            })
-                                        }
-                                    />
-                                </FormField>
-                            </ContentCard>
-                            <ContentCard
-                                title={
-                                    <span className='flex items-center gap-2'>
-                                        <Network className='h-4 w-4 text-muted' />
-                                        Client IP resolution
-                                    </span>
-                                }
-                            >
-                                <div className='gap-3 grid'>
-                                    <SettingToggle
-                                        description='Accept the configured client IP headers from every direct connection.'
-                                        label='Trust headers from all sources'
-                                        selected={form.http_proxy.trust_all}
-                                        onChange={(trustAll) =>
-                                            updateForm({
-                                                ...form,
-                                                http_proxy: {
-                                                    ...form.http_proxy,
-                                                    trust_all: trustAll,
-                                                },
-                                            })
-                                        }
-                                    />
-                                    {form.http_proxy.trust_all && (
-                                        <div className='flex items-center gap-2 py-3 text-xs text-warning'>
-                                            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
-                                            Direct clients can spoof these headers unless an
-                                            external proxy strips them.
-                                        </div>
-                                    )}
-                                    <SelectField
-                                        label='Header preset'
-                                        options={[
-                                            ...headerPresets.map((preset) => ({
-                                                id: preset.id,
-                                                label: preset.label,
-                                            })),
-                                            { id: 'custom', label: 'Custom' },
-                                        ]}
-                                        value={presetFor(form.http_proxy.client_ip_headers)}
-                                        variant='secondary'
-                                        onChange={(value) => {
-                                            const preset = headerPresets.find(
-                                                (item) => item.id === value
-                                            );
-                                            if (!preset) return;
-                                            updateForm({
-                                                ...form,
-                                                http_proxy: {
-                                                    ...form.http_proxy,
-                                                    client_ip_headers: [...preset.headers],
-                                                },
-                                            });
-                                        }}
-                                    />
-                                    <ValueListAddField
-                                        addLabel='Add header'
-                                        dialogTitle='Add client IP header'
-                                        emptyLabel='No headers selected'
-                                        label='Allowed client IP headers'
-                                        placeholder='X-Forwarded-For'
-                                        validate={validHeader}
-                                        values={form.http_proxy.client_ip_headers}
-                                        onChange={(headers) =>
-                                            updateForm({
-                                                ...form,
-                                                http_proxy: {
-                                                    ...form.http_proxy,
-                                                    client_ip_headers: headers,
-                                                },
-                                            })
-                                        }
-                                    />
-                                </div>
-                            </ContentCard>
-                        </div>
-                    )}
-
-                    {tab === 'authentication' && (
-                        <div className='space-y-5'>
-                            <ContentCard
-                                title={
-                                    <span className='flex items-center gap-2'>
-                                        <ShieldCheck className='h-4 w-4 text-muted' />
-                                        Sign-in policy
-                                    </span>
-                                }
-                            >
-                                <div className='grid gap-3'>
-                                    <SettingToggle
-                                        description='Allow email and password sign-in. Keep this enabled while setting up or changing providers.'
-                                        label='Local login'
-                                        selected={form.authentication.local_login_enabled}
-                                        onChange={(localLoginEnabled) =>
-                                            updateForm({
-                                                ...form,
-                                                authentication: {
-                                                    ...form.authentication,
-                                                    local_login_enabled: localLoginEnabled,
-                                                },
-                                            })
-                                        }
-                                    />
-                                    <SettingToggle
-                                        description='Require active users to enroll a time-based one-time password.'
-                                        label='Require TOTP'
-                                        selected={form.authentication.require_totp}
-                                        onChange={(requireTOTP) =>
-                                            updateForm({
-                                                ...form,
-                                                authentication: {
-                                                    ...form.authentication,
-                                                    require_totp: requireTOTP,
-                                                    providers: requireTOTP
-                                                        ? form.authentication.providers.map(
-                                                              (provider) => ({
-                                                                  ...provider,
-                                                                  auto_create_users: false,
-                                                              })
-                                                          )
-                                                        : form.authentication.providers,
-                                                },
-                                            })
-                                        }
-                                    />
-                                </div>
-                            </ContentCard>
-
-                            <ContentCard
-                                action={
-                                    <Button
-                                        size='sm'
-                                        type='button'
-                                        variant='secondary'
-                                        onPress={() => navigate('/settings/admin/providers')}
-                                    >
-                                        Manage providers
-                                    </Button>
-                                }
-                                title='External sign-in'
-                            >
-                                <div className='grid gap-4 sm:grid-cols-3'>
-                                    <div>
-                                        <div className='text-xs text-muted'>Configured</div>
-                                        <div className='mt-1 text-xl font-semibold'>
-                                            {form.authentication.providers.length}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className='text-xs text-muted'>Enabled</div>
-                                        <div className='mt-1 text-xl font-semibold'>
-                                            {enabledProviderCount}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <div className='text-xs text-muted'>Automatic users</div>
-                                        <div className='mt-1 text-xl font-semibold'>
-                                            {
-                                                form.authentication.providers.filter(
-                                                    (provider) => provider.auto_create_users
-                                                ).length
-                                            }
-                                        </div>
-                                    </div>
-                                </div>
-                            </ContentCard>
-                        </div>
-                    )}
-
-                    {tab === 'providers' && (
-                        <ContentCard
-                            action={
-                                <Button
-                                    size='sm'
+            <div className='grid gap-6 lg:grid-cols-[200px_minmax(0,1fr)]'>
+                <nav
+                    aria-label='Admin settings sections'
+                    className='flex flex-col gap-1 lg:sticky lg:top-0 lg:self-start'
+                >
+                    {tabs.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                            <div key={item.id}>
+                                {item.dividerBefore && (
+                                    <div className='my-2 border-t border-border' />
+                                )}
+                                <button
+                                    aria-current={tab === item.id ? 'page' : undefined}
+                                    className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${tab === item.id ? 'bg-surface-secondary text-foreground' : 'text-muted hover:bg-surface-secondary hover:text-foreground'}`}
                                     type='button'
-                                    variant='primary'
-                                    onPress={() => openProviderDialog(null)}
+                                    onClick={() => navigate(`/settings/admin/${item.id}`)}
                                 >
-                                    <Plus className='h-4 w-4' />
-                                    Add provider
-                                </Button>
-                            }
-                            noPadding
-                            title={
-                                <span className='flex items-center gap-2'>
-                                    <KeyRound className='h-4 w-4 text-muted' />
-                                    OAuth 2.0 and OpenID Connect providers
-                                </span>
-                            }
-                        >
-                            {form.authentication.providers.length === 0 ? (
-                                <div className='flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center'>
-                                    <KeyRound className='h-8 w-8 text-muted' />
-                                    <div className='mt-3 text-sm font-medium'>
-                                        No providers configured
-                                    </div>
-                                    <p className='mt-1 max-w-sm text-xs leading-5 text-muted'>
-                                        Add a provider to offer single sign-on on the login page.
-                                    </p>
+                                    <Icon className='h-4 w-4 shrink-0' />
+                                    {item.label}
+                                </button>
+                            </div>
+                        );
+                    })}
+                </nav>
+
+                <div className='min-w-0 space-y-5'>
+                    {tab === 'users' && <Users embedded />}
+                    {tab === 'audit' && <AuditLog embedded />}
+
+                    {settingsTab && error && <FormError message={error} />}
+                    {settingsTab && restarting && (
+                        <Alert status='success'>
+                            <Alert.Indicator />
+                            <Alert.Content>
+                                <Alert.Title>Restart requested</Alert.Title>
+                                <Alert.Description>
+                                    The control plane is shutting down gracefully. Its service
+                                    supervisor must start it again before this page can reconnect.
+                                </Alert.Description>
+                            </Alert.Content>
+                        </Alert>
+                    )}
+                    {settingsTab && saved && (
+                        <Alert status='success'>
+                            <Alert.Indicator />
+                            <Alert.Content>
+                                <Alert.Title>Settings saved</Alert.Title>
+                                <Alert.Description>The changes are active.</Alert.Description>
+                            </Alert.Content>
+                        </Alert>
+                    )}
+
+                    {settingsTab &&
+                        (loading || authLoading || !form ? (
+                            <ContentCard>
+                                <div className='flex min-h-32 items-center justify-center'>
+                                    <Spinner />
                                 </div>
-                            ) : (
-                                <div className='divide-y divide-border'>
-                                    {form.authentication.providers.map((provider) => (
-                                        <div
-                                            className='flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between'
-                                            key={provider.id}
+                            </ContentCard>
+                        ) : (
+                            <form className='space-y-5' onSubmit={saveSettings}>
+                                {tab === 'general' && (
+                                    <div className='space-y-5'>
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <ServerCog className='h-4 w-4 text-muted' />
+                                                    Connectivity
+                                                </span>
+                                            }
                                         >
-                                            <div className='min-w-0'>
-                                                <div className='flex flex-wrap items-center gap-2'>
-                                                    <span className='truncate text-sm font-semibold'>
-                                                        {provider.provider_name}
-                                                    </span>
-                                                    <span
-                                                        className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${provider.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-surface-secondary text-muted'}`}
-                                                    >
-                                                        {provider.enabled ? 'Enabled' : 'Disabled'}
-                                                    </span>
-                                                </div>
-                                                <p className='mt-1 truncate text-xs text-muted'>
-                                                    {providerPresetLabel(provider)}, {provider.type}
-                                                    .
-                                                    {provider.client_id
-                                                        ? ` Client ${provider.client_id}`
-                                                        : ' Client ID not set'}
-                                                </p>
-                                            </div>
-                                            <div className='flex shrink-0 items-center gap-2'>
-                                                <ToggleSwitch
-                                                    isSelected={provider.enabled}
-                                                    label={`Enable ${provider.provider_name}`}
-                                                    onChange={(enabled) =>
+                                            <FormField
+                                                htmlFor='agent-gateway-public-address'
+                                                label='Agent gateway public address'
+                                                hint='Use host:port. IPv6 addresses require brackets.'
+                                                required
+                                            >
+                                                <Input
+                                                    autoCapitalize='none'
+                                                    autoComplete='off'
+                                                    id='agent-gateway-public-address'
+                                                    placeholder='edge.example.com:8443'
+                                                    required
+                                                    spellCheck={false}
+                                                    value={form.agent_gateway_public_address}
+                                                    variant='secondary'
+                                                    onChange={(event) =>
                                                         updateForm({
                                                             ...form,
-                                                            authentication: {
-                                                                ...form.authentication,
-                                                                providers:
-                                                                    form.authentication.providers.map(
-                                                                        (item) =>
-                                                                            item.id === provider.id
-                                                                                ? {
-                                                                                      ...item,
-                                                                                      enabled,
-                                                                                  }
-                                                                                : item
-                                                                    ),
+                                                            agent_gateway_public_address:
+                                                                event.target.value,
+                                                        })
+                                                    }
+                                                />
+                                            </FormField>
+                                        </ContentCard>
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <Network className='h-4 w-4 text-muted' />
+                                                    Client IP resolution
+                                                </span>
+                                            }
+                                        >
+                                            <div className='gap-3 grid'>
+                                                <SettingToggle
+                                                    description='Accept the configured client IP headers from every direct connection.'
+                                                    label='Trust headers from all sources'
+                                                    selected={form.http_proxy.trust_all}
+                                                    onChange={(trustAll) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            http_proxy: {
+                                                                ...form.http_proxy,
+                                                                trust_all: trustAll,
                                                             },
                                                         })
                                                     }
                                                 />
-                                                <Tooltip>
-                                                    <Tooltip.Trigger>
-                                                        <Button
-                                                            isIconOnly
-                                                            aria-label={`Edit ${provider.provider_name}`}
-                                                            size='sm'
-                                                            type='button'
-                                                            variant='ghost'
-                                                            onPress={() =>
-                                                                openProviderDialog(provider)
-                                                            }
-                                                        >
-                                                            <Pencil className='h-4 w-4' />
-                                                        </Button>
-                                                    </Tooltip.Trigger>
-                                                    <Tooltip.Content>Edit provider</Tooltip.Content>
-                                                </Tooltip>
-                                                <Tooltip>
-                                                    <Tooltip.Trigger>
-                                                        <Button
-                                                            isIconOnly
-                                                            aria-label={`Delete ${provider.provider_name}`}
-                                                            className='text-danger'
-                                                            size='sm'
-                                                            type='button'
-                                                            variant='ghost'
-                                                            onPress={() =>
-                                                                setPendingDeleteProvider(provider)
-                                                            }
-                                                        >
-                                                            <Trash2 className='h-4 w-4' />
-                                                        </Button>
-                                                    </Tooltip.Trigger>
-                                                    <Tooltip.Content>
-                                                        Delete provider
-                                                    </Tooltip.Content>
-                                                </Tooltip>
+                                                {form.http_proxy.trust_all && (
+                                                    <div className='flex items-center gap-2 py-3 text-xs text-warning'>
+                                                        <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
+                                                        Direct clients can spoof these headers
+                                                        unless an external proxy strips them.
+                                                    </div>
+                                                )}
+                                                <SelectField
+                                                    label='Header preset'
+                                                    options={[
+                                                        ...headerPresets.map((preset) => ({
+                                                            id: preset.id,
+                                                            label: preset.label,
+                                                        })),
+                                                        { id: 'custom', label: 'Custom' },
+                                                    ]}
+                                                    value={presetFor(
+                                                        form.http_proxy.client_ip_headers
+                                                    )}
+                                                    variant='secondary'
+                                                    onChange={(value) => {
+                                                        const preset = headerPresets.find(
+                                                            (item) => item.id === value
+                                                        );
+                                                        if (!preset) return;
+                                                        updateForm({
+                                                            ...form,
+                                                            http_proxy: {
+                                                                ...form.http_proxy,
+                                                                client_ip_headers: [
+                                                                    ...preset.headers,
+                                                                ],
+                                                            },
+                                                        });
+                                                    }}
+                                                />
+                                                <ValueListAddField
+                                                    addLabel='Add header'
+                                                    dialogTitle='Add client IP header'
+                                                    emptyLabel='No headers selected'
+                                                    label='Allowed client IP headers'
+                                                    placeholder='X-Forwarded-For'
+                                                    validate={validHeader}
+                                                    values={form.http_proxy.client_ip_headers}
+                                                    onChange={(headers) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            http_proxy: {
+                                                                ...form.http_proxy,
+                                                                client_ip_headers: headers,
+                                                            },
+                                                        })
+                                                    }
+                                                />
                                             </div>
-                                        </div>
-                                    ))}
+                                        </ContentCard>
+                                    </div>
+                                )}
+
+                                {tab === 'authentication' && (
+                                    <div className='space-y-5'>
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <ShieldCheck className='h-4 w-4 text-muted' />
+                                                    Sign-in policy
+                                                </span>
+                                            }
+                                        >
+                                            <div className='grid gap-3'>
+                                                <SettingToggle
+                                                    description='Allow email and password sign-in. Keep this enabled while setting up or changing providers.'
+                                                    label='Local login'
+                                                    selected={
+                                                        form.authentication.local_login_enabled
+                                                    }
+                                                    onChange={(localLoginEnabled) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            authentication: {
+                                                                ...form.authentication,
+                                                                local_login_enabled:
+                                                                    localLoginEnabled,
+                                                            },
+                                                        })
+                                                    }
+                                                />
+                                                <SettingToggle
+                                                    description='Require active users to enroll a time-based one-time password.'
+                                                    label='Require TOTP'
+                                                    selected={form.authentication.require_totp}
+                                                    onChange={(requireTOTP) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            authentication: {
+                                                                ...form.authentication,
+                                                                require_totp: requireTOTP,
+                                                                providers: requireTOTP
+                                                                    ? form.authentication.providers.map(
+                                                                          (provider) => ({
+                                                                              ...provider,
+                                                                              auto_create_users: false,
+                                                                          })
+                                                                      )
+                                                                    : form.authentication.providers,
+                                                            },
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                        </ContentCard>
+
+                                        <ContentCard
+                                            action={
+                                                <Button
+                                                    size='sm'
+                                                    type='button'
+                                                    variant='secondary'
+                                                    onPress={() =>
+                                                        navigate('/settings/admin/providers')
+                                                    }
+                                                >
+                                                    Manage providers
+                                                </Button>
+                                            }
+                                            title='External sign-in'
+                                        >
+                                            <div className='grid gap-4 sm:grid-cols-3'>
+                                                <div>
+                                                    <div className='text-xs text-muted'>
+                                                        Configured
+                                                    </div>
+                                                    <div className='mt-1 text-xl font-semibold'>
+                                                        {form.authentication.providers.length}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className='text-xs text-muted'>
+                                                        Enabled
+                                                    </div>
+                                                    <div className='mt-1 text-xl font-semibold'>
+                                                        {enabledProviderCount}
+                                                    </div>
+                                                </div>
+                                                <div>
+                                                    <div className='text-xs text-muted'>
+                                                        Automatic users
+                                                    </div>
+                                                    <div className='mt-1 text-xl font-semibold'>
+                                                        {
+                                                            form.authentication.providers.filter(
+                                                                (provider) =>
+                                                                    provider.auto_create_users
+                                                            ).length
+                                                        }
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </ContentCard>
+                                    </div>
+                                )}
+
+                                {tab === 'providers' && (
+                                    <ContentCard
+                                        action={
+                                            <Button
+                                                size='sm'
+                                                type='button'
+                                                variant='primary'
+                                                onPress={() => openProviderDialog(null)}
+                                            >
+                                                <Plus className='h-4 w-4' />
+                                                Add provider
+                                            </Button>
+                                        }
+                                        noPadding
+                                        title={
+                                            <span className='flex items-center gap-2'>
+                                                <KeyRound className='h-4 w-4 text-muted' />
+                                                OAuth 2.0 and OpenID Connect providers
+                                            </span>
+                                        }
+                                    >
+                                        {form.authentication.providers.length === 0 ? (
+                                            <div className='flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center'>
+                                                <KeyRound className='h-8 w-8 text-muted' />
+                                                <div className='mt-3 text-sm font-medium'>
+                                                    No providers configured
+                                                </div>
+                                                <p className='mt-1 max-w-sm text-xs leading-5 text-muted'>
+                                                    Add a provider to offer single sign-on on the
+                                                    login page.
+                                                </p>
+                                            </div>
+                                        ) : (
+                                            <div className='divide-y divide-border'>
+                                                {form.authentication.providers.map((provider) => (
+                                                    <div
+                                                        className='flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between'
+                                                        key={provider.id}
+                                                    >
+                                                        <div className='min-w-0'>
+                                                            <div className='flex flex-wrap items-center gap-2'>
+                                                                <span className='truncate text-sm font-semibold'>
+                                                                    {provider.provider_name}
+                                                                </span>
+                                                                <span
+                                                                    className={`rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${provider.enabled ? 'border-success/30 bg-success/10 text-success' : 'border-border bg-surface-secondary text-muted'}`}
+                                                                >
+                                                                    {provider.enabled
+                                                                        ? 'Enabled'
+                                                                        : 'Disabled'}
+                                                                </span>
+                                                            </div>
+                                                            <p className='mt-1 truncate text-xs text-muted'>
+                                                                {providerPresetLabel(provider)},{' '}
+                                                                {provider.type}.
+                                                                {provider.client_id
+                                                                    ? ` Client ${provider.client_id}`
+                                                                    : ' Client ID not set'}
+                                                            </p>
+                                                        </div>
+                                                        <div className='flex shrink-0 items-center gap-2'>
+                                                            <ToggleSwitch
+                                                                isSelected={provider.enabled}
+                                                                label={`Enable ${provider.provider_name}`}
+                                                                onChange={(enabled) =>
+                                                                    updateForm({
+                                                                        ...form,
+                                                                        authentication: {
+                                                                            ...form.authentication,
+                                                                            providers:
+                                                                                form.authentication.providers.map(
+                                                                                    (item) =>
+                                                                                        item.id ===
+                                                                                        provider.id
+                                                                                            ? {
+                                                                                                  ...item,
+                                                                                                  enabled,
+                                                                                              }
+                                                                                            : item
+                                                                                ),
+                                                                        },
+                                                                    })
+                                                                }
+                                                            />
+                                                            <Tooltip>
+                                                                <Tooltip.Trigger>
+                                                                    <Button
+                                                                        isIconOnly
+                                                                        aria-label={`Edit ${provider.provider_name}`}
+                                                                        size='sm'
+                                                                        type='button'
+                                                                        variant='ghost'
+                                                                        onPress={() =>
+                                                                            openProviderDialog(
+                                                                                provider
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Pencil className='h-4 w-4' />
+                                                                    </Button>
+                                                                </Tooltip.Trigger>
+                                                                <Tooltip.Content>
+                                                                    Edit provider
+                                                                </Tooltip.Content>
+                                                            </Tooltip>
+                                                            <Tooltip>
+                                                                <Tooltip.Trigger>
+                                                                    <Button
+                                                                        isIconOnly
+                                                                        aria-label={`Delete ${provider.provider_name}`}
+                                                                        className='text-danger'
+                                                                        size='sm'
+                                                                        type='button'
+                                                                        variant='ghost'
+                                                                        onPress={() =>
+                                                                            setPendingDeleteProvider(
+                                                                                provider
+                                                                            )
+                                                                        }
+                                                                    >
+                                                                        <Trash2 className='h-4 w-4' />
+                                                                    </Button>
+                                                                </Tooltip.Trigger>
+                                                                <Tooltip.Content>
+                                                                    Delete provider
+                                                                </Tooltip.Content>
+                                                            </Tooltip>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </ContentCard>
+                                )}
+
+                                <div className='sticky bottom-4 flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between'>
+                                    <div className='flex min-w-0 items-center gap-2 text-xs text-muted'>
+                                        {restartAffected && (
+                                            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
+                                        )}
+                                        {restartAffected
+                                            ? 'Connectivity and client IP changes restart the control plane after saving.'
+                                            : dirty
+                                              ? 'These changes take effect only after you save them.'
+                                              : 'Changes on this page remain a draft until you save them.'}
+                                    </div>
+                                    <Button
+                                        className='shrink-0'
+                                        isDisabled={
+                                            saving ||
+                                            !dirty ||
+                                            !form.agent_gateway_public_address.trim()
+                                        }
+                                        type='submit'
+                                        variant='primary'
+                                    >
+                                        <Save className='h-4 w-4' />
+                                        {saving ? 'Saving...' : 'Save changes'}
+                                    </Button>
                                 </div>
-                            )}
-                        </ContentCard>
-                    )}
+                            </form>
+                        ))}
+                </div>
+            </div>
 
-                    <div className='sticky bottom-4 flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between'>
-                        <div className='flex min-w-0 items-center gap-2 text-xs text-muted'>
-                            {restartAffected && (
-                                <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
-                            )}
-                            {restartAffected
-                                ? 'Connectivity and client IP changes restart the control plane after saving.'
-                                : dirty
-                                  ? 'These changes take effect only after you save them.'
-                                  : 'Changes on this page remain a draft until you save them.'}
-                        </div>
-                        <Button
-                            className='shrink-0'
-                            isDisabled={
-                                saving || !dirty || !form.agent_gateway_public_address.trim()
-                            }
-                            type='submit'
-                            variant='primary'
-                        >
-                            <Save className='h-4 w-4' />
-                            {saving ? 'Saving...' : 'Save changes'}
-                        </Button>
-                    </div>
-                </form>
-            )}
-
-            {form && (
+            {settingsTab && form && (
                 <AdminAuthProviderDialog
                     clientSecret={
                         editingProvider ? (providerSecrets[editingProvider.id] ?? '') : ''

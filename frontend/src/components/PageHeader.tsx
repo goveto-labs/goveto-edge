@@ -8,6 +8,8 @@ interface Tab {
 interface PageHeaderProps {
     title: string;
     subtitle?: string;
+    /** Render a compact variant for pages embedded inside another page. */
+    embedded?: boolean;
     tabs?: Tab[];
     activeTab?: string;
     onTabChange?: (id: string) => void;
@@ -19,6 +21,7 @@ interface PageHeaderProps {
 export function PageHeader({
     title,
     subtitle,
+    embedded,
     tabs,
     activeTab,
     onTabChange,
@@ -29,9 +32,15 @@ export function PageHeader({
     const rightActions = actions ?? children;
     return (
         <div className='space-y-4'>
-            <div className='flex flex-col gap-4 pt-2 sm:flex-row sm:items-start sm:justify-between'>
+            <div
+                className={`flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between ${embedded ? '' : 'pt-2'}`}
+            >
                 <div>
-                    <h1 className='text-2xl font-bold tracking-tight'>{title}</h1>
+                    {embedded ? (
+                        <h2 className='text-lg font-semibold'>{title}</h2>
+                    ) : (
+                        <h1 className='text-2xl font-bold tracking-tight'>{title}</h1>
+                    )}
                     {subtitle && <p className='mt-1 text-sm text-muted'>{subtitle}</p>}
                 </div>
                 {(rightActions || filters) && (

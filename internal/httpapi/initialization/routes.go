@@ -32,12 +32,11 @@ type statusResponse struct {
 }
 
 type userResponse struct {
-	ID              string           `json:"id"`
-	Email           string           `json:"email"`
-	Name            string           `json:"name"`
-	Role            model.UserRole   `json:"role"`
-	Status          model.UserStatus `json:"status"`
-	IsInstanceOwner bool             `json:"is_instance_owner"`
+	ID     string           `json:"id"`
+	Email  string           `json:"email"`
+	Name   string           `json:"name"`
+	Role   model.UserRole   `json:"role"`
+	Status model.UserStatus `json:"status"`
 }
 
 func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, limiter *httpsecurity.RateLimiter) {
@@ -114,9 +113,6 @@ func initialize(db *client.Client) echo.HandlerFunc {
 			if err != nil {
 				return err
 			}
-			if err := store.Set(ctx, settings.InstanceOwnerUserIDKey, administrator.Id, "User allowed to manage instance-level settings"); err != nil {
-				return err
-			}
 			if err := store.SetAgentGatewayPublicAddress(ctx, gatewayAddress); err != nil {
 				return err
 			}
@@ -128,7 +124,7 @@ func initialize(db *client.Client) echo.HandlerFunc {
 
 		response := userResponse{
 			ID: administrator.Id, Email: administrator.Email, Name: administrator.Name,
-			Role: administrator.Role, Status: administrator.Status, IsInstanceOwner: true,
+			Role: administrator.Role, Status: administrator.Status,
 		}
 		audit.SetActor(c, administrator.Id, administrator.Email)
 		audit.SetResourceID(c, administrator.Id)
