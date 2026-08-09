@@ -30,6 +30,7 @@ import (
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
 	"goveto-edge/internal/httpapi/sites"
+	"goveto-edge/internal/httpapi/users"
 )
 
 // openAPISpecPath is relative to this package's directory.
@@ -69,6 +70,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	jobsapi.Register(e, nil, nil)
 	sites.Register(e, nil, nil, nil, nil)
 	auditapi.Register(e, nil)
+	users.Register(e, nil, nil)
 	analyticsapi.Register(e, nil, analytics.NewStore(nil, 0))
 	return routes
 }

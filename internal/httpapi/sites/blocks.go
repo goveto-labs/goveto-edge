@@ -14,10 +14,11 @@ import (
 
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
+	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/securitystate"
 	"goveto-edge/internal/storage/gen/client"
-	"goveto-edge/internal/storage/gen/model"
 )
 
 type blockMutationRequest struct {
@@ -45,7 +46,7 @@ func createTemporaryBlock(db *client.Client, redisClient *redis.Client) echo.Han
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		if err = requireGlobalBlockAdmin(c, scope); err != nil {
+		if err = requireGlobalBlockPermission(c, db, scope); err != nil {
 			return err
 		}
 		if input.DurationSeconds < 1 || input.DurationSeconds > 86400 {
@@ -92,7 +93,7 @@ func deleteTemporaryBlock(db *client.Client, redisClient *redis.Client) echo.Han
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		if err = requireGlobalBlockAdmin(c, scope); err != nil {
+		if err = requireGlobalBlockPermission(c, db, scope); err != nil {
 			return err
 		}
 		key := securitystate.GlobalBlockKey(address)
@@ -120,7 +121,13 @@ func listTemporaryBlocks(db *client.Client, redisClient *redis.Client) echo.Hand
 			return err
 		}
 		patterns := []string{"block:site:" + c.Param("site_id") + ":*"}
-		if user, ok := auth.CurrentUser(c.Request().Context(), auth.CurrentUID(c)); ok && user.Role == model.UserRoleADMIN {
+		platformAccess, err := clusteraccess.AuthorizePlatform(
+			c.Request().Context(), db, auth.CurrentUID(c), rbac.PermissionPlatformPolicyManage,
+		)
+		if err != nil {
+			return err
+		}
+		if platformAccess {
 			patterns = append(patterns, "block:global:*")
 		}
 		items := make([]temporaryBlock, 0)
@@ -170,13 +177,18 @@ func normalizeTemporaryBlock(scope, rawAddress string) (string, netip.Addr, erro
 	return scope, address.Unmap(), nil
 }
 
-func requireGlobalBlockAdmin(c *echo.Context, scope string) error {
+func requireGlobalBlockPermission(c *echo.Context, db *client.Client, scope string) error {
 	if scope != "GLOBAL" {
 		return nil
 	}
-	user, ok := auth.CurrentUser(c.Request().Context(), auth.CurrentUID(c))
-	if !ok || user.Role != model.UserRoleADMIN {
-		return echo.NewHTTPError(http.StatusForbidden, "administrator role required for global blocks")
+	allowed, err := clusteraccess.AuthorizePlatform(
+		c.Request().Context(), db, auth.CurrentUID(c), rbac.PermissionPlatformPolicyManage,
+	)
+	if err != nil {
+		return err
+	}
+	if !allowed {
+		return echo.NewHTTPError(http.StatusForbidden, "permission denied: "+string(rbac.PermissionPlatformPolicyManage))
 	}
 	return nil
 }

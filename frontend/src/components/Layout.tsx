@@ -25,13 +25,21 @@ function Greeting() {
     );
 }
 
-function PageTitle({ pathname, isInstanceOwner }: { pathname: string; isInstanceOwner: boolean }) {
+function PageTitle({
+    pathname,
+    isInstanceOwner,
+    isPlatformAdmin,
+}: {
+    pathname: string;
+    isInstanceOwner: boolean;
+    isPlatformAdmin: boolean;
+}) {
     const item = useMemo(
         () =>
-            navigationFor(isInstanceOwner)
+            navigationFor(isInstanceOwner, isPlatformAdmin)
                 .flatMap((entry) => [entry, ...(entry.children ?? [])])
                 .find((n) => n.path === pathname),
-        [isInstanceOwner, pathname]
+        [isInstanceOwner, isPlatformAdmin, pathname]
     );
     const title = item?.label ?? 'Dashboard';
 
@@ -130,6 +138,7 @@ export function Layout() {
                             </div>
                             <PageTitle
                                 isInstanceOwner={Boolean(user?.is_instance_owner)}
+                                isPlatformAdmin={user?.role === 'ADMIN'}
                                 pathname={location.pathname}
                             />
                         </div>

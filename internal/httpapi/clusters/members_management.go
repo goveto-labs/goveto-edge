@@ -37,7 +37,9 @@ type updateMemberRequest struct {
 func listMembers(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		clusterID := c.Param("cluster_id")
-		cluster, err := db.Cluster.FindUnique(c.Request().Context(), query.Cluster.Id.Equals(clusterID))
+		cluster, err := db.Cluster.Query().
+			Where(query.Cluster.Id.Equals(clusterID)).
+			Include(query.Cluster.Creator.Fetch()).First(c.Request().Context())
 		if err != nil {
 			return err
 		}
@@ -46,6 +48,7 @@ func listMembers(db *client.Client) echo.HandlerFunc {
 		}
 		members, err := db.ClusterMember.Query().
 			Where(query.ClusterMember.ClusterId.Equals(clusterID)).
+			Include(query.ClusterMember.User.Fetch()).
 			OrderBy(query.ClusterMember.CreatedAt.Asc()).
 			Do(c.Request().Context())
 		if err != nil {
@@ -58,10 +61,16 @@ func listMembers(db *client.Client) echo.HandlerFunc {
 
 func memberResources(cluster *model.Cluster, members []model.ClusterMember) []types.ClusterMember {
 	result := make([]types.ClusterMember, 0, len(members)+1)
-	result = append(result, types.ClusterMember{
+	creator := types.ClusterMember{
 		ClusterID: cluster.Id, UserID: cluster.CreatorId,
 		Permission: model.ClusterPermissionOWNER, CreatedAt: cluster.CreatedAt,
-	})
+	}
+	if cluster.Creator != nil {
+		creator.Email = cluster.Creator.Email
+		creator.Name = cluster.Creator.Name
+		creator.Status = cluster.Creator.Status
+	}
+	result = append(result, creator)
 	for index := range members {
 		if members[index].UserId != cluster.CreatorId {
 			result = append(result, types.NewClusterMember(&members[index]))

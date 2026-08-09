@@ -36,6 +36,7 @@ tags:
     - name: purge
     - name: session
     - name: sites
+    - name: users
 paths:
     /.well-known/acme-challenge/{token}:
         get:
@@ -4658,6 +4659,9 @@ paths:
                             properties:
                                 permission:
                                     $ref: '#/components/schemas/model_ClusterPermission'
+                                email:
+                                    type: string
+                                    format: email
                                 user_id:
                                     type: string
             responses:
@@ -4675,6 +4679,12 @@ paths:
                                         properties:
                                             cluster_id:
                                                 type: string
+                                            email:
+                                                type: string
+                                            name:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
                                             created_at:
                                                 type: string
                                                 format: date-time
@@ -4747,6 +4757,12 @@ paths:
                                         properties:
                                             cluster_id:
                                                 type: string
+                                            email:
+                                                type: string
+                                            name:
+                                                type: string
+                                            status:
+                                                $ref: '#/components/schemas/model_UserStatus'
                                             created_at:
                                                 type: string
                                                 format: date-time
@@ -9847,6 +9863,105 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/users:
+        get:
+            operationId: listUsers
+            summary: List platform users
+            description: Paginated user directory with search, role and status filters; requires platform user management permission.
+            tags:
+                - users
+            security:
+                - cookie_goveto_session: []
+            parameters:
+                - name: search
+                  in: query
+                  schema:
+                      type: string
+                - name: role
+                  in: query
+                  schema:
+                      $ref: '#/components/schemas/model_UserRole'
+                - name: status
+                  in: query
+                  schema:
+                      $ref: '#/components/schemas/model_UserStatus'
+                - name: page
+                  in: query
+                  schema:
+                      type: integer
+                      minimum: 1
+                - name: page_size
+                  in: query
+                  schema:
+                      type: integer
+                      minimum: 1
+                      maximum: 200
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/users_userResponse'
+                                            total:
+                                                type: integer
+                                                format: int64
+                                            page:
+                                                type: integer
+                                            page_size:
+                                                type: integer
+    /api/v1/users/{user_id}/status:
+        patch:
+            operationId: updateUserStatus
+            summary: Update user status
+            description: Enable or disable a platform user; disabling revokes all sessions and cannot target the caller or final active administrator.
+            tags:
+                - users
+            security:
+                - cookie_goveto_session: []
+            parameters:
+                - name: user_id
+                  in: path
+                  required: true
+                  schema:
+                      type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            required:
+                                - status
+                            properties:
+                                status:
+                                    $ref: '#/components/schemas/model_UserStatus'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        $ref: '#/components/schemas/users_userResponse'
+                "404":
+                    description: User not found
+                "409":
+                    description: Self-disable or final active administrator conflict
 components:
     schemas:
         adminsettings_authenticationProviderRequest:
@@ -11696,10 +11811,41 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+                email:
+                    type: string
+                name:
+                    type: string
                 permission:
                     $ref: '#/components/schemas/model_ClusterPermission'
+                status:
+                    $ref: '#/components/schemas/model_UserStatus'
                 user_id:
                     type: string
+        users_userResponse:
+            type: object
+            properties:
+                id:
+                    type: string
+                email:
+                    type: string
+                    format: email
+                name:
+                    type: string
+                role:
+                    $ref: '#/components/schemas/model_UserRole'
+                status:
+                    $ref: '#/components/schemas/model_UserStatus'
+                totp_enabled:
+                    type: boolean
+                last_login_at:
+                    type: string
+                    format: date-time
+                created_at:
+                    type: string
+                    format: date-time
+                updated_at:
+                    type: string
+                    format: date-time
         types_ClusterRegion:
             type: object
             properties:

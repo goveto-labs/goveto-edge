@@ -2,6 +2,7 @@ package clusters
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 
@@ -14,6 +15,7 @@ import (
 
 type addMemberRequest struct {
 	UserID     string                  `json:"user_id"`
+	Email      string                  `json:"email"`
 	Permission model.ClusterPermission `json:"permission"`
 }
 
@@ -33,20 +35,52 @@ func addMember(db *client.Client) echo.HandlerFunc {
 			return echo.NewHTTPError(http.StatusBadRequest, "permission must be VIEWER or OPERATOR")
 		}
 
-		user, err := db.User.FindUnique(
-			c.Request().Context(),
-			query.User.Id.Equals(input.UserID),
-		)
+		input.UserID = strings.TrimSpace(input.UserID)
+		input.Email = strings.ToLower(strings.TrimSpace(input.Email))
+		if input.UserID == "" && input.Email == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, "user_id or email is required")
+		}
+		var user *model.User
+		var err error
+		if input.UserID != "" {
+			user, err = db.User.FindUnique(c.Request().Context(), query.User.Id.Equals(input.UserID))
+		} else {
+			user, err = db.User.FindUnique(c.Request().Context(), query.User.Email.Equals(input.Email))
+		}
 		if err != nil {
 			return err
 		}
 		if user == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "user not found")
 		}
+		if user.Status != model.UserStatusACTIVE {
+			return echo.NewHTTPError(http.StatusConflict, "disabled users cannot be added to a cluster")
+		}
+		input.UserID = user.Id
+		clusterID := c.Param("cluster_id")
+		cluster, err := db.Cluster.FindUnique(c.Request().Context(), query.Cluster.Id.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		if cluster == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+		}
+		if cluster.CreatorId == user.Id {
+			return echo.NewHTTPError(http.StatusConflict, "user is already the cluster owner")
+		}
+		existing, err := db.ClusterMember.Query().Where(
+			query.ClusterMember.ClusterId.Equals(clusterID), query.ClusterMember.UserId.Equals(user.Id),
+		).Count(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		if existing > 0 {
+			return echo.NewHTTPError(http.StatusConflict, "user is already a cluster member")
+		}
 
 		item, err := db.ClusterMember.Create().
 			Set(
-				query.ClusterMember.ClusterId.Set(c.Param("cluster_id")),
+				query.ClusterMember.ClusterId.Set(clusterID),
 				query.ClusterMember.UserId.Set(input.UserID),
 				query.ClusterMember.Permission.Set(input.Permission),
 			).
@@ -54,6 +88,7 @@ func addMember(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		item.User = user
 		audit.SetResourceID(c, item.ClusterId+":"+item.UserId)
 		audit.SetChange(c, nil, types.NewClusterMember(item))
 		return types.JSON(c, http.StatusCreated, types.NewClusterMember(item))

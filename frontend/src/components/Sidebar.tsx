@@ -17,6 +17,8 @@ import {
     Settings,
     ShieldCheck,
     ShieldCog,
+    UserRoundCog,
+    Users,
     Waypoints,
 } from 'lucide-react';
 import { useLocation } from 'react-router-dom';
@@ -62,11 +64,18 @@ const nav: NavItemConfig[] = [
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
-function settingsNav(isInstanceOwner: boolean): NavItemConfig {
+function settingsNav(isInstanceOwner: boolean, isPlatformAdmin: boolean): NavItemConfig {
     const children: NavItemConfig[] = [
         { path: '/settings', label: 'Security', icon: ShieldCheck },
+        { path: '/settings/members', label: 'Cluster members', icon: Users },
         { path: '/settings/notifications', label: 'Notifications', icon: BellRing },
     ];
+    if (isPlatformAdmin) {
+        children.push(
+            { path: '/settings/users', label: 'Users', icon: UserRoundCog },
+            { path: '/settings/audit', label: 'Audit log', icon: FileClock }
+        );
+    }
     if (isInstanceOwner) {
         children.push({ path: '/settings/admin', label: 'Admin settings', icon: ShieldCog });
     }
@@ -78,8 +87,8 @@ function settingsNav(isInstanceOwner: boolean): NavItemConfig {
     };
 }
 
-export function navigationFor(isInstanceOwner: boolean) {
-    return [...nav, settingsNav(isInstanceOwner)];
+export function navigationFor(isInstanceOwner: boolean, isPlatformAdmin = false) {
+    return [...nav, settingsNav(isInstanceOwner, isPlatformAdmin)];
 }
 
 interface SidebarProps {
@@ -125,7 +134,7 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
 function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
     const location = useLocation();
     const { user } = useAuth();
-    const visibleNav = navigationFor(Boolean(user?.is_instance_owner));
+    const visibleNav = navigationFor(Boolean(user?.is_instance_owner), user?.role === 'ADMIN');
 
     return (
         <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>

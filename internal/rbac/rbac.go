@@ -21,6 +21,7 @@ const (
 	PermissionNotificationManage Permission = "cluster.notification.manage"
 
 	PermissionPlatformUserManage     Permission = "platform.user.manage"
+	PermissionPlatformClusterRead    Permission = "platform.cluster.read"
 	PermissionPlatformSettingsManage Permission = "platform.settings.manage"
 	PermissionPlatformAuditRead      Permission = "platform.audit.read"
 	PermissionPlatformPolicyManage   Permission = "platform.policy.manage"
@@ -109,6 +110,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionClusterTransfer,
 		PermissionNotificationManage,
 		PermissionPlatformUserManage,
+		PermissionPlatformClusterRead,
 		PermissionPlatformSettingsManage,
 		PermissionPlatformAuditRead,
 		PermissionPlatformPolicyManage,

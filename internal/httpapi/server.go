@@ -29,6 +29,7 @@ import (
 	purgeapi "goveto-edge/internal/httpapi/purge"
 	"goveto-edge/internal/httpapi/sites"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/httpapi/users"
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/publisher"
@@ -91,6 +92,7 @@ func New(
 	jobsapi.Register(e, orm, publishService)
 	sites.Register(e, orm, publishService, analyticsData, redisClient)
 	auditapi.Register(e, orm)
+	users.Register(e, orm, sessions)
 
 	if analyticsData != nil {
 		analyticsapi.Register(e, orm, analyticsData)

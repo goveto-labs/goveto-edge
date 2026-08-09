@@ -54,7 +54,11 @@ func available(ctx context.Context, db *client.Client, uid string) ([]clusterCho
 	if user == nil || user.Status != model.UserStatusACTIVE {
 		return nil, nil
 	}
-	if user.Role == model.UserRoleADMIN {
+	platformAccess, err := clusteraccess.AuthorizePlatform(ctx, db, uid, rbac.PermissionPlatformClusterRead)
+	if err != nil {
+		return nil, err
+	}
+	if platformAccess {
 		return client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name, 'ADMIN' AS role, c.created_at
 			FROM clusters c ORDER BY c.created_at, c.name`)
 	}

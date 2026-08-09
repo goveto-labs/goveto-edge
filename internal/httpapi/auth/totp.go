@@ -15,8 +15,10 @@ import (
 
 	"goveto-edge/internal/audit"
 	authn "goveto-edge/internal/auth"
+	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/password"
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -51,7 +53,7 @@ func registerTOTP(group *echo.Group, db *client.Client, sessions *authn.SessionS
 	group.POST("/totp/recovery-codes", regenerateRecoveryCodes(db, sessions), authn.RequireAuth, sensitive)
 	group.DELETE("/totp", disableTOTP(db, sessions, settingStore), authn.RequireAuth, sensitive)
 	group.GET("/security-policy", getSecurityPolicy(settingStore), authn.RequireAuth)
-	group.PUT("/security-policy", updateSecurityPolicy(settingStore), authn.RequireAuth)
+	group.PUT("/security-policy", updateSecurityPolicy(settingStore), authn.RequireAuth, clusteraccess.RequirePlatform(db, rbac.PermissionPlatformPolicyManage))
 }
 
 func setupTOTP(db *client.Client) echo.HandlerFunc {
@@ -234,10 +236,6 @@ func getSecurityPolicy(settingStore *settings.Store) echo.HandlerFunc {
 
 func updateSecurityPolicy(settingStore *settings.Store) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		user, ok := authn.CurrentUser(c.Request().Context(), authn.CurrentUID(c))
-		if !ok || user.Role != model.UserRoleADMIN {
-			return echo.NewHTTPError(http.StatusForbidden, "administrator role required")
-		}
 		var input securityPolicyResponse
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")

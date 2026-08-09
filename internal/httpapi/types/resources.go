@@ -28,12 +28,21 @@ func NewClusterRegion(value *model.ClusterRegion) ClusterRegion {
 type ClusterMember struct {
 	ClusterID  string                  `json:"cluster_id"`
 	UserID     string                  `json:"user_id"`
+	Email      string                  `json:"email"`
+	Name       string                  `json:"name"`
+	Status     model.UserStatus        `json:"status"`
 	Permission model.ClusterPermission `json:"permission"`
 	CreatedAt  time.Time               `json:"created_at"`
 }
 
 func NewClusterMember(value *model.ClusterMember) ClusterMember {
-	return ClusterMember{ClusterID: value.ClusterId, UserID: value.UserId, Permission: value.Permission, CreatedAt: value.CreatedAt}
+	result := ClusterMember{ClusterID: value.ClusterId, UserID: value.UserId, Permission: value.Permission, CreatedAt: value.CreatedAt}
+	if value.User != nil {
+		result.Email = value.User.Email
+		result.Name = value.User.Name
+		result.Status = value.User.Status
+	}
+	return result
 }
 
 type Certificate struct {

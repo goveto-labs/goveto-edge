@@ -4,6 +4,7 @@ import type {
     ClusterListResponse,
     ClusterMember,
     ClusterRegion,
+    ClusterRole,
     DNSLine,
     NotificationChannel,
     NotificationChannelInput,
@@ -36,6 +37,11 @@ export const clusterApi = (clusterId: string) => ({
     members: () => get<ClusterMember[]>(clusterPath(clusterId, '/members')),
     addMember: (payload: { user_id: string; permission: string }) =>
         post<ClusterMember>(clusterPath(clusterId, '/members'), payload),
+    addMemberByEmail: (payload: { email: string; permission: 'VIEWER' | 'OPERATOR' }) =>
+        post<ClusterMember>(clusterPath(clusterId, '/members'), payload),
+    updateMember: (userId: string, permission: ClusterRole) =>
+        put<ClusterMember>(clusterPath(clusterId, `/members/${userId}`), { permission }),
+    removeMember: (userId: string) => del<void>(clusterPath(clusterId, `/members/${userId}`)),
 
     notificationChannels: () =>
         get<NotificationChannel[]>(clusterPath(clusterId, '/notification-channels')),

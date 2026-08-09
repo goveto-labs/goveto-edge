@@ -209,8 +209,63 @@ export interface ClusterRegion {
 export interface ClusterMember {
     cluster_id: string;
     user_id: string;
-    permission: string;
+    email: string;
+    name: string;
+    status: UserStatus;
+    permission: ClusterRole;
     created_at: string;
+}
+
+export type UserStatus = 'ACTIVE' | 'DISABLED';
+
+export interface PlatformUser {
+    id: string;
+    email: string;
+    name: string;
+    role: 'ADMIN' | 'OPERATOR' | 'VIEWER';
+    status: UserStatus;
+    totp_enabled: boolean;
+    last_login_at?: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface PlatformUserList {
+    items: PlatformUser[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+export interface AuditUserSummary {
+    id: string;
+    email: string;
+    name: string;
+}
+
+export interface AuditEvent {
+    id: string;
+    actor_id?: string;
+    actor: string;
+    user?: AuditUserSummary;
+    source_ip: string;
+    user_agent: string;
+    action: string;
+    resource_type: string;
+    resource_id: string;
+    before?: unknown;
+    after?: unknown;
+    request_id: string;
+    result: string;
+    failure_reason?: string;
+    created_at: string;
+}
+
+export interface AuditEventList {
+    items: AuditEvent[];
+    total: number;
+    page: number;
+    page_size: number;
 }
 
 export interface NotificationChannel {

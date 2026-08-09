@@ -8,6 +8,7 @@ export type * from './types.ts';
 
 export { adminSettingsApi } from './adminSettings.ts';
 export { analyticsApi } from './analytics.ts';
+export { auditApi } from './audit.ts';
 export { authApi } from './auth.ts';
 export { certificatesApi } from './certificates.ts';
 export { ApiError, apiClient, buildQuery } from './client.ts';
@@ -24,3 +25,4 @@ export { publishApi } from './publish.ts';
 export { purgeApi } from './purge.ts';
 export { sitesApi } from './sites.ts';
 export { sshCredentialsApi } from './sshCredentials.ts';
+export { usersApi } from './users.ts';

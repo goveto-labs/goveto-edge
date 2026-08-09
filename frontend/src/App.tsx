@@ -8,7 +8,9 @@ import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
 import AdminSettings from '@/pages/AdminSettings.tsx';
 import Analytics from '@/pages/Analytics.tsx';
+import AuditLog from '@/pages/AuditLog.tsx';
 import Certificates from '@/pages/Certificates.tsx';
+import ClusterMembers from '@/pages/ClusterMembers.tsx';
 import CreateNode from '@/pages/CreateNode.tsx';
 import CreateSite from '@/pages/CreateSite.tsx';
 import Dashboard from '@/pages/Dashboard.tsx';
@@ -27,6 +29,7 @@ import SiteDetail from '@/pages/SiteDetail.tsx';
 import Sites from '@/pages/Sites.tsx';
 import SitesAccessLogs from '@/pages/SitesAccessLogs.tsx';
 import SSHCredentials from '@/pages/SSHCredentials.tsx';
+import Users from '@/pages/Users.tsx';
 
 export default function App() {
     return (
@@ -67,6 +70,9 @@ export default function App() {
                                     <Route element={<PurgeJobs />} path='/purge' />
                                     <Route element={<Analytics />} path='/analytics' />
                                     <Route element={<Settings />} path='/settings' />
+                                    <Route element={<ClusterMembers />} path='/settings/members' />
+                                    <Route element={<AuditLog />} path='/settings/audit' />
+                                    <Route element={<Users />} path='/settings/users' />
                                     <Route
                                         element={<Notifications />}
                                         path='/settings/notifications'

@@ -47,6 +47,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 
 	for _, permission := range []Permission{
 		PermissionPlatformUserManage,
+		PermissionPlatformClusterRead,
 		PermissionPlatformSettingsManage,
 		PermissionPlatformAuditRead,
 		PermissionPlatformPolicyManage,

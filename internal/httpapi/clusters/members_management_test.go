@@ -9,10 +9,10 @@ import (
 
 func TestMemberResourcesIncludesCreatorAndAvoidsDuplicates(t *testing.T) {
 	createdAt := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
-	cluster := &model.Cluster{Id: "cluster", CreatorId: "creator", CreatedAt: createdAt}
+	cluster := &model.Cluster{Id: "cluster", CreatorId: "creator", CreatedAt: createdAt, Creator: &model.User{Email: "creator@example.com", Name: "Creator", Status: model.UserStatusACTIVE}}
 	members := []model.ClusterMember{
-		{ClusterId: "cluster", UserId: "creator", Permission: model.ClusterPermissionVIEWER, CreatedAt: createdAt.Add(time.Minute)},
-		{ClusterId: "cluster", UserId: "operator", Permission: model.ClusterPermissionOPERATOR, CreatedAt: createdAt.Add(2 * time.Minute)},
+		{ClusterId: "cluster", UserId: "creator", Permission: model.ClusterPermissionVIEWER, CreatedAt: createdAt.Add(time.Minute), User: &model.User{Email: "creator@example.com"}},
+		{ClusterId: "cluster", UserId: "operator", Permission: model.ClusterPermissionOPERATOR, CreatedAt: createdAt.Add(2 * time.Minute), User: &model.User{Email: "operator@example.com", Name: "Operator", Status: model.UserStatusACTIVE}},
 	}
 
 	result := memberResources(cluster, members)
@@ -24,5 +24,8 @@ func TestMemberResourcesIncludesCreatorAndAvoidsDuplicates(t *testing.T) {
 	}
 	if result[1].UserID != "operator" || result[1].Permission != model.ClusterPermissionOPERATOR {
 		t.Fatalf("ordinary member changed unexpectedly: %#v", result[1])
+	}
+	if result[0].Email != "creator@example.com" || result[1].Email != "operator@example.com" {
+		t.Fatalf("member user summaries missing: %#v", result)
 	}
 }
