@@ -5,6 +5,7 @@ import type {
     NodeRuntimePoint,
     SiteSummary,
     TrafficPoint,
+    WAFPoint,
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
@@ -23,6 +24,7 @@ import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { percentile } from '@/utils/statistics.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type Period = '24h' | '30d';
@@ -140,6 +142,7 @@ export default function Dashboard() {
     const [statuses, setStatuses] = useState<DistributionItem[]>([]);
     const [methods, setMethods] = useState<DistributionItem[]>([]);
     const [countries, setCountries] = useState<DistributionItem[]>([]);
+    const [waf, setWaf] = useState<WAFPoint[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -159,6 +162,7 @@ export default function Dashboard() {
                 statusData,
                 methodData,
                 countryData,
+                wafData,
             ] = await Promise.all([
                 nodeApi.list(),
                 siteApi.list(),
@@ -195,6 +199,7 @@ export default function Dashboard() {
                     sort: 'traffic',
                     limit: 100,
                 }),
+                analytics.wafTraffic({ period }),
             ]);
             setNodes(nodeData);
             setSites(siteData);
@@ -207,6 +212,7 @@ export default function Dashboard() {
             setStatuses(statusData);
             setMethods(methodData);
             setCountries(countryData);
+            setWaf(wafData.series);
             setError('');
         } catch (loadError) {
             setError(
@@ -228,6 +234,10 @@ export default function Dashboard() {
         bucket: point.bucket,
         values: { bandwidth: totalTraffic(point) / bucketSeconds },
     }));
+    const bandwidthP95 = percentile(
+        bandwidthChart.map((point) => point.values.bandwidth),
+        0.95
+    );
     const trafficChart = chartTraffic.map((point) => ({
         bucket: point.bucket,
         values: {
@@ -238,6 +248,20 @@ export default function Dashboard() {
     const requestChart = chartTraffic.map((point) => ({
         bucket: point.bucket,
         values: { requests: point.requests },
+    }));
+    const wafTraffic = fillTrafficSeries(
+        waf.map((point) => ({
+            bucket: point.bucket,
+            requests: point.hits,
+            ingress_bytes: 0,
+            egress_bytes: 0,
+            cache_egress_bytes: 0,
+        })),
+        period
+    );
+    const wafChart = wafTraffic.map((point) => ({
+        bucket: point.bucket,
+        values: { hits: point.requests },
     }));
     const aggregatedRuntime = aggregateRuntime(runtime);
     const cpuMemoryChart = aggregatedRuntime.map((point) => ({
@@ -443,6 +467,11 @@ export default function Dashboard() {
                         ariaLabel={`${period} cluster bandwidth`}
                         data={bandwidthChart}
                         height={220}
+                        referenceLines={
+                            bandwidthP95 > 0
+                                ? [{ value: bandwidthP95, label: 'P95', color: '#f59e0b' }]
+                                : []
+                        }
                         series={[
                             {
                                 key: 'bandwidth',
@@ -481,6 +510,19 @@ export default function Dashboard() {
                         data={requestChart}
                         height={220}
                         series={[{ key: 'requests', label: 'Requests', color: '#2563eb' }]}
+                    />
+                </ContentCard>
+                <ContentCard
+                    allowOverflow
+                    className='flex h-full min-h-[310px] flex-col'
+                    contentClassName='flex min-h-0 flex-1 flex-col text-sm'
+                    title={`WAF hits · ${period}`}
+                >
+                    <TimeSeriesChart
+                        ariaLabel={`${period} cluster WAF hits`}
+                        data={wafChart}
+                        height={220}
+                        series={[{ key: 'hits', label: 'WAF hits', color: '#dc2626' }]}
                     />
                 </ContentCard>
                 <ContentCard

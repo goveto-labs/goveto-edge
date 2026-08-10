@@ -2231,6 +2231,58 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/clusters/{cluster_id}/analytics/waf/traffic:
+        get:
+            operationId: wafTraffic
+            summary: WAF hit series
+            description: 'Time-series WAF hit counts for a cluster or site (period: 24h or 30d).'
+            tags:
+                - analytics
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - auth.RequireAuth
+                - clusteraccess.Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: period
+                  in: query
+                  schema:
+                    type: string
+                - name: site_id
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            granularity:
+                                                type: string
+                                            period:
+                                                type: string
+                                            series:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/analytics_WAFPoint'
     /api/v1/clusters/{cluster_id}/certificates:
         get:
             operationId: list
@@ -10363,6 +10415,16 @@ components:
                     format: int64
                 rule_id:
                     type: string
+        analytics_WAFPoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hits:
+                    type: integer
+                    format: int64
                 source:
                     type: string
                 unique_ips:

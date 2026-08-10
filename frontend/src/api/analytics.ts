@@ -10,6 +10,7 @@ import type {
     TopItem,
     TrafficResponse,
     WAFRuleStat,
+    WAFTrafficResponse,
 } from './types.ts';
 
 import { get } from './client.ts';
@@ -52,6 +53,13 @@ export const analyticsApi = (clusterId: string) => ({
             clusterPath(
                 clusterId,
                 `/analytics/traffic${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
+            )
+        ),
+    wafTraffic: (params: Pick<AnalyticsParams, 'site_id'> & { period: '24h' | '30d' }) =>
+        get<WAFTrafficResponse>(
+            clusterPath(
+                clusterId,
+                `/analytics/waf/traffic${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
     rankings: (

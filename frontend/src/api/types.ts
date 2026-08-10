@@ -480,6 +480,17 @@ export interface WAFRuleStat {
     last_seen: string;
 }
 
+export interface WAFPoint {
+    bucket: string;
+    hits: number;
+}
+
+export interface WAFTrafficResponse {
+    period: string;
+    granularity: string;
+    series: WAFPoint[];
+}
+
 export interface CreateNodeRequest {
     name: string;
     addresses: string[];

@@ -14,6 +14,8 @@ func TestContinuousAggregateRefreshPolicies(t *testing.T) {
 		"analytics.request_client_ip_hourly":    {endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 		"analytics.request_country_hourly":      {endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 		"analytics.request_region_hourly":       {endOffset: "5 minutes", scheduleInterval: "5 minutes"},
+		"analytics.request_isp_hourly":          {endOffset: "5 minutes", scheduleInterval: "5 minutes"},
+		"analytics.waf_hits_hourly":             {endOffset: "5 minutes", scheduleInterval: "5 minutes"},
 		"analytics.request_usage_daily":         {endOffset: "1 hour", scheduleInterval: "1 hour"},
 		"analytics.request_method_daily":        {endOffset: "1 hour", scheduleInterval: "1 hour"},
 		"analytics.request_status_daily":        {endOffset: "1 hour", scheduleInterval: "1 hour"},
@@ -24,6 +26,8 @@ func TestContinuousAggregateRefreshPolicies(t *testing.T) {
 		"analytics.request_client_ip_daily":     {endOffset: "1 hour", scheduleInterval: "1 hour"},
 		"analytics.request_country_daily":       {endOffset: "1 hour", scheduleInterval: "1 hour"},
 		"analytics.request_region_daily":        {endOffset: "1 hour", scheduleInterval: "1 hour"},
+		"analytics.request_isp_daily":           {endOffset: "1 hour", scheduleInterval: "1 hour"},
+		"analytics.waf_hits_daily":              {endOffset: "1 hour", scheduleInterval: "1 hour"},
 		"analytics.node_traffic_metrics_minute": {endOffset: "1 minute", scheduleInterval: "1 minute"},
 	}
 	if len(continuousAggregateRefreshPolicies) != len(expected) {

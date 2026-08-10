@@ -90,6 +90,7 @@ type NodeRequestLog struct {
 	ClientIP            string    `json:"client_ip"`
 	Country             string    `json:"country,omitempty"`
 	Region              string    `json:"region,omitempty"`
+	ISP                 string    `json:"isp,omitempty"`
 	StatusCode          uint16    `json:"status_code"`
 	RequestHeaderBytes  uint64    `json:"request_header_bytes"`
 	RequestBodyBytes    uint64    `json:"request_body_bytes"`
@@ -119,7 +120,7 @@ type RequestLogPage struct {
 }
 
 const requestLogColumns = `event_time, source_log_id, request_id, node_id::text, site_id::text, config_version,
-	hostname, method, scheme, protocol, path, query_string, host(client_ip), country, region,
+	hostname, method, scheme, protocol, path, query_string, host(client_ip), country, region, isp,
 	status_code, request_header_bytes, request_body_bytes, response_header_bytes, response_body_bytes,
 	duration_us, upstream_address, upstream_status, handler_error, cache_status, content_type, file_extension,
 	referer, user_agent, waf_action, waf_rule_id, waf_source, waf_match, waf_tags`
@@ -132,7 +133,7 @@ func scanRequestLog(row rowScanner, item *NodeRequestLog) error {
 	return row.Scan(
 		&item.EventTime, &item.SourceLogID, &item.RequestID, &item.NodeID, &item.SiteID, &item.ConfigVersion,
 		&item.Hostname, &item.Method, &item.Scheme, &item.Protocol, &item.Path, &item.QueryString,
-		&item.ClientIP, &item.Country, &item.Region, &item.StatusCode, &item.RequestHeaderBytes,
+		&item.ClientIP, &item.Country, &item.Region, &item.ISP, &item.StatusCode, &item.RequestHeaderBytes,
 		&item.RequestBodyBytes, &item.ResponseHeaderBytes, &item.ResponseBodyBytes, &item.DurationUS,
 		&item.UpstreamAddress, &item.UpstreamStatus, &item.HandlerError, &item.CacheStatus, &item.ContentType,
 		&item.FileExtension, &item.Referer, &item.UserAgent, &item.WAFAction, &item.WAFRuleID,

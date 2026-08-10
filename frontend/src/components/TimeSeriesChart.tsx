@@ -13,6 +13,12 @@ interface ChartSeries {
     color: string;
 }
 
+interface ReferenceLine {
+    value: number;
+    label: string;
+    color?: string;
+}
+
 interface TimeSeriesChartProps {
     data: TimeSeriesDatum[];
     series: ChartSeries[];
@@ -20,6 +26,7 @@ interface TimeSeriesChartProps {
     valueFormatter?: (value: number) => string;
     height?: number;
     includeZero?: boolean;
+    referenceLines?: ReferenceLine[];
 }
 
 const defaultWidth = 560;
@@ -68,6 +75,7 @@ export function TimeSeriesChart({
     valueFormatter = (value) => value.toLocaleString(undefined, { maximumFractionDigits: 1 }),
     height = 224,
     includeZero = true,
+    referenceLines = [],
 }: TimeSeriesChartProps) {
     const gradientPrefix = useId().replace(/[^a-zA-Z0-9]/g, '');
     const [hoverIndex, setHoverIndex] = useState<number | null>(null);
@@ -120,6 +128,7 @@ export function TimeSeriesChart({
     const values = data.flatMap((point) =>
         series.map((item) => Math.max(0, point.values[item.key] ?? 0))
     );
+    values.push(...referenceLines.map((line) => Math.max(0, line.value)));
     const rawMin = includeZero ? 0 : Math.min(...values);
     const rawMax = Math.max(...values);
     let minValue = rawMin;
@@ -233,6 +242,37 @@ export function TimeSeriesChart({
                                     y1={y}
                                     y2={y}
                                 />
+                            </g>
+                        );
+                    })}
+                    {referenceLines.map((line) => {
+                        const y = yAt(line.value);
+                        const labelY = y < paddingTop + 14 ? y + 13 : y - 6;
+                        return (
+                            <g key={`${line.label}-${line.value}`}>
+                                <line
+                                    stroke={line.color ?? '#f59e0b'}
+                                    strokeDasharray='6 4'
+                                    strokeOpacity={0.8}
+                                    vectorEffect='non-scaling-stroke'
+                                    x1={paddingX}
+                                    x2={width - paddingX}
+                                    y1={y}
+                                    y2={y}
+                                />
+                                <text
+                                    fill={line.color ?? '#f59e0b'}
+                                    fontSize='11'
+                                    fontWeight='600'
+                                    paintOrder='stroke'
+                                    stroke='var(--color-surface)'
+                                    strokeWidth='4'
+                                    textAnchor='end'
+                                    x={width - paddingX - 6}
+                                    y={labelY}
+                                >
+                                    {line.label} · {valueFormatter(line.value)}
+                                </text>
                             </g>
                         );
                     })}

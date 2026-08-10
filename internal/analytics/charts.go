@@ -24,6 +24,11 @@ type DistributionItem struct {
 	EgressBytes  uint64 `json:"egress_bytes"`
 }
 
+type WAFPoint struct {
+	Bucket time.Time `json:"bucket"`
+	Hits   uint64    `json:"hits"`
+}
+
 type NodeRuntimePoint struct {
 	Bucket              time.Time `json:"bucket"`
 	NodeID              string    `json:"node_id"`
@@ -219,6 +224,65 @@ func (s *Store) TrafficSeries(ctx context.Context, cluster, site, nodeID, period
 	return out, rows.Err()
 }
 
+func (s *Store) WAFSeries(ctx context.Context, cluster, site, period string) ([]WAFPoint, error) {
+	ctx, cancel := s.queryContext(ctx)
+	defer cancel()
+	q, args := wafSeriesQuery(time.Now().UTC(), cluster, site, period)
+	rows, err := s.db.Query(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]WAFPoint, 0)
+	for rows.Next() {
+		var point WAFPoint
+		if err := rows.Scan(&point.Bucket, &point.Hits); err != nil {
+			return nil, err
+		}
+		out = append(out, point)
+	}
+	return out, rows.Err()
+}
+
+func wafSeriesQuery(now time.Time, cluster, site, period string) (string, []any) {
+	from := now.Add(-24 * time.Hour)
+	fullStart, fullEnd := completeHourRange(from, now)
+	args := []any{cluster, from, fullStart, fullEnd, now}
+	filter := ""
+	if site != "" {
+		filter = fmt.Sprintf(" AND site_id = $%d", len(args)+1)
+		args = append(args, site)
+	}
+	q := `SELECT bucket, sum(hits)::bigint FROM (
+		SELECT time_bucket(INTERVAL '1 hour', event_time) AS bucket, count(*)::bigint AS hits
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $2 AND event_time < $3 AND waf_action <> ''` + filter + ` GROUP BY 1
+		UNION ALL
+		SELECT bucket, hits FROM analytics.waf_hits_hourly
+		WHERE cluster_id = $1 AND bucket >= $3 AND bucket < $4` + filter + `
+		UNION ALL
+		SELECT time_bucket(INTERVAL '1 hour', event_time), count(*)::bigint
+		FROM analytics.web_request_logs
+		WHERE cluster_id = $1 AND event_time >= $4 AND event_time < $5 AND waf_action <> ''` + filter + ` GROUP BY 1
+	) totals GROUP BY bucket ORDER BY bucket`
+	if period == "30d" {
+		from, today := utcDayRange(now, 30)
+		args = []any{cluster, from, today}
+		dailyFilter := analyticsDimensions(&args, site, "")
+		args = append(args, cluster, today, now)
+		hourlyFilter := analyticsDimensions(&args, site, "")
+		base := 4 + dimensionCount(site, "")
+		q = `SELECT bucket, sum(hits)::bigint FROM (
+			SELECT bucket, hits FROM analytics.waf_hits_daily
+			WHERE cluster_id = $1 AND bucket >= $2 AND bucket < $3` + dailyFilter + `
+			UNION ALL
+			SELECT time_bucket(INTERVAL '1 day', bucket), hits FROM analytics.waf_hits_hourly
+			WHERE cluster_id = $` + fmt.Sprint(base) + ` AND bucket >= $` + fmt.Sprint(base+1) + ` AND bucket < $` + fmt.Sprint(base+2) + hourlyFilter + `
+		) totals GROUP BY bucket ORDER BY bucket`
+	}
+	return q, args
+}
+
 func analyticsDimensions(args *[]any, site, nodeID string) string {
 	filter := ""
 	if site != "" {
@@ -248,6 +312,7 @@ var dimensions = map[string]string{
 	"hostname": "hostname", "domain": "hostname", "referer": "referer",
 	"status": "status_code::text", "method": "method", "path": "path",
 	"ip": "host(client_ip)", "country": "country", "region": "region", "node": "node_id::text",
+	"isp": "isp",
 }
 
 func (s *Store) Ranking(ctx context.Context, cluster, site, nodeID, period, dimension, sortBy string, limit int) ([]DistributionItem, error) {
@@ -307,6 +372,7 @@ func (s *Store) ranking24h(ctx context.Context, cluster, site, dimension, rawCol
 		"referer": "request_referer_hourly", "path": "request_path_hourly",
 		"ip": "request_client_ip_hourly", "country": "request_country_hourly",
 		"region": "request_region_hourly", "node": "request_usage_hourly",
+		"isp": "request_isp_hourly",
 	}[dimension]
 	if view == "" {
 		return nil, ErrInvalidDimension
@@ -394,7 +460,7 @@ func (s *Store) rankingNode30d(ctx context.Context, cluster, site, sortBy string
 }
 
 func (s *Store) ranking30d(ctx context.Context, cluster, site, dimension, sortBy string, limit int) ([]DistributionItem, error) {
-	view := map[string]string{"extension": "extension", "status": "status", "method": "method", "hostname": "hostname", "referer": "referer", "path": "path", "ip": "client_ip", "country": "country", "region": "region"}[dimension]
+	view := map[string]string{"extension": "extension", "status": "status", "method": "method", "hostname": "hostname", "referer": "referer", "path": "path", "ip": "client_ip", "country": "country", "region": "region", "isp": "isp"}[dimension]
 	if view == "" {
 		return nil, ErrInvalidDimension
 	}

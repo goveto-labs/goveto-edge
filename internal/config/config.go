@@ -51,6 +51,7 @@ type Config struct {
 	SessionTTL                     time.Duration
 	SessionCookieSecure            bool
 	GeoIPDatabasePath              string
+	GeoIPASNDatabasePath           string
 	GeoIPDatabasePollInterval      time.Duration
 }
 
@@ -124,8 +125,10 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	defaultGeoIPPath := "./GeoLite2-City.mmdb"
+	defaultGeoIPASNPath := "./GeoLite2-ASN.mmdb"
 	if appEnv != "development" && appEnv != "test" {
 		defaultGeoIPPath = ""
+		defaultGeoIPASNPath = ""
 	}
 	defaultDataDir := ".data"
 	if appEnv != "development" && appEnv != "test" {
@@ -162,6 +165,7 @@ func Load() (Config, error) {
 		AnalyticsArchiveS3SessionToken: strings.TrimSpace(os.Getenv("ANALYTICS_ARCHIVE_S3_SESSION_TOKEN")),
 		SessionCookieName:              envString("SESSION_COOKIE_NAME", "goveto_session"),
 		GeoIPDatabasePath:              strings.TrimSpace(envString("GEOIP_DATABASE_PATH", defaultGeoIPPath)),
+		GeoIPASNDatabasePath:           strings.TrimSpace(envString("GEOIP_ASN_DATABASE_PATH", defaultGeoIPASNPath)),
 		GeoIPDatabasePollInterval:      geoIPPollInterval,
 		SessionCookieSecure:            envBool("SESSION_COOKIE_SECURE", false),
 	}

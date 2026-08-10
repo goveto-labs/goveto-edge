@@ -38,6 +38,7 @@ type WebRequestLog struct {
 	UserAgent           string
 	Country             string
 	Region              string
+	ISP                 string
 	WAFAction           string
 	WAFRuleID           string
 	WAFSource           string
@@ -66,6 +67,7 @@ const (
 	DimensionContentType   = "content_type"
 	DimensionCountry       = "country"
 	DimensionRegion        = "region"
+	DimensionISP           = "isp"
 	DimensionPath          = "path"
 	DimensionClientIP      = "client_ip"
 	DimensionHostname      = "hostname"

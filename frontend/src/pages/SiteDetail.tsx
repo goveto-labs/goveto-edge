@@ -25,6 +25,7 @@ import {
     HardDrive,
     LockKeyhole,
     Plus,
+    RadioTower,
     Rocket,
     Route,
     Save,
@@ -33,6 +34,7 @@ import {
     Settings,
     ShieldCheck,
     Trash2,
+    UsersRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -66,14 +68,16 @@ import { SiteDevelopmentMode } from '@/components/SiteDevelopmentMode.tsx';
 import { SiteSecuritySettings } from '@/components/SiteSecuritySettings.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
+import { countryOptions } from '@/data/countries.ts';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { SiteAccessLogsView } from '@/pages/SitesAccessLogs.tsx';
 import { defaultDeliveryPolicy, normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
+import { percentile } from '@/utils/statistics.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
-type DetailTab = 'overview' | 'logs' | 'settings';
+type DetailTab = 'overview' | 'audience' | 'logs' | 'settings';
 type SettingsPage =
     | 'basic'
     | 'domains'
@@ -163,6 +167,7 @@ function originsEqual(drafts: OriginDraft[], saved: SiteOrigin[]) {
 
 const tabs = [
     { id: 'overview' as const, label: 'Overview', icon: BarChart3 },
+    { id: 'audience' as const, label: 'Audience', icon: UsersRound },
     { id: 'logs' as const, label: 'Logs', icon: ScrollText },
     { id: 'settings' as const, label: 'Settings', icon: Settings },
 ];
@@ -202,6 +207,7 @@ const settingsNav: SettingsNavEntry[] = [
     { kind: 'page', id: 'compression' },
 ];
 const palette = ['#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#64748b'];
+const countryNames = new Map(countryOptions.map((country) => [country.id, country.name]));
 
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
@@ -230,7 +236,7 @@ function toSlices(items: DistributionItem[], colorOffset = 0): DonutSlice[] {
     }));
 }
 
-function SectionHeader({ title, description }: { title: string; description: string }) {
+function SectionHeader({ title, description }: { title: React.ReactNode; description: string }) {
     return (
         <div className='border-b border-border px-5 py-4'>
             <h2 className='text-sm font-semibold'>{title}</h2>
@@ -253,20 +259,28 @@ function RankingTable({
     title,
     label,
     items,
+    description,
+    limit = 10,
+    formatValue = (value) => value || '(empty)',
+    scrollable = false,
 }: {
-    title: string;
+    title: React.ReactNode;
     label: string;
     items: DistributionItem[];
+    description?: string;
+    limit?: number;
+    formatValue?: (value: string) => string;
+    scrollable?: boolean;
 }) {
     return (
         <ContentCard className='h-full' noPadding>
             <SectionHeader
                 title={title}
-                description={`Top ${label.toLowerCase()} for the selected period.`}
+                description={description ?? `Top ${label.toLowerCase()} for the selected period.`}
             />
-            <div className='overflow-x-auto'>
+            <div className={scrollable ? 'max-h-[520px] overflow-auto' : 'overflow-x-auto'}>
                 <table className='w-full min-w-[520px] text-left text-sm'>
-                    <thead className='bg-surface-secondary/50 text-xs text-muted'>
+                    <thead className='sticky top-0 z-10 bg-surface-secondary text-xs text-muted'>
                         <tr>
                             <th className='px-4 py-2.5'>{label}</th>
                             <th className='px-4 py-2.5 text-right'>Requests</th>
@@ -274,13 +288,13 @@ function RankingTable({
                         </tr>
                     </thead>
                     <tbody className='divide-y divide-border'>
-                        {items.slice(0, 10).map((item) => (
+                        {items.slice(0, limit).map((item) => (
                             <tr key={item.value}>
                                 <td
                                     className='max-w-sm truncate px-4 py-2.5 font-mono text-xs'
                                     title={item.value}
                                 >
-                                    {item.value || '(empty)'}
+                                    {formatValue(item.value)}
                                 </td>
                                 <td className='px-4 py-2.5 text-right font-mono'>
                                     {item.requests.toLocaleString()}
@@ -389,8 +403,13 @@ export default function SiteDetail() {
     const [ipsRequests, setIpsRequests] = useState<DistributionItem[]>([]);
     const [ipsTraffic, setIpsTraffic] = useState<DistributionItem[]>([]);
     const [countries, setCountries] = useState<DistributionItem[]>([]);
+    const [countryRequests, setCountryRequests] = useState<DistributionItem[]>([]);
+    const [countryTraffic, setCountryTraffic] = useState<DistributionItem[]>([]);
+    const [ispRequests, setISPRequests] = useState<DistributionItem[]>([]);
+    const [ispTraffic, setISPTraffic] = useState<DistributionItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [monitoringLoading, setMonitoringLoading] = useState(false);
+    const [audienceLoading, setAudienceLoading] = useState(false);
     const [saving, setSaving] = useState(false);
     const [publishingSite, setPublishingSite] = useState(false);
     const [error, setError] = useState('');
@@ -544,6 +563,32 @@ export default function SiteDetail() {
         }
     }, [analytics, clusterId, period, siteId]);
 
+    const loadAudience = useCallback(async () => {
+        if (!clusterId || !siteId) return;
+        setAudienceLoading(true);
+        const params = { site_id: siteId, period, limit: 500 } as const;
+        try {
+            const [countryRequestData, countryTrafficData, ispRequestData, ispTrafficData] =
+                await Promise.all([
+                    analytics.rankings('country', { ...params, sort: 'requests' }),
+                    analytics.rankings('country', { ...params, sort: 'traffic' }),
+                    analytics.rankings('isp', { ...params, sort: 'requests' }),
+                    analytics.rankings('isp', { ...params, sort: 'traffic' }),
+                ]);
+            setCountryRequests(countryRequestData.filter((item) => item.value));
+            setCountryTraffic(countryTrafficData.filter((item) => item.value));
+            setISPRequests(ispRequestData.filter((item) => item.value));
+            setISPTraffic(ispTrafficData.filter((item) => item.value));
+            setError('');
+        } catch (loadError) {
+            setError(
+                loadError instanceof ApiError ? loadError.message : 'Failed to load audience data'
+            );
+        } finally {
+            setAudienceLoading(false);
+        }
+    }, [analytics, clusterId, period, siteId]);
+
     useEffect(() => {
         void loadBase();
     }, [loadBase]);
@@ -562,6 +607,7 @@ export default function SiteDetail() {
     }, [api, loadOverview, siteId]);
 
     useAutoRefresh(loadSiteOverview, tab === 'overview' && Boolean(clusterId && siteId));
+    useAutoRefresh(loadAudience, tab === 'audience' && Boolean(clusterId && siteId));
 
     useEffect(() => {
         if (!siteId || detailPath === canonicalDetailPath) return;
@@ -701,6 +747,10 @@ export default function SiteDetail() {
         bucket: point.bucket,
         values: { bandwidth: trafficOf(point) / bucketSeconds },
     }));
+    const bandwidthP95 = percentile(
+        bandwidthChart.map((point) => point.values.bandwidth),
+        0.95
+    );
     const trafficChart = chartTraffic.map((point) => ({
         bucket: point.bucket,
         values: {
@@ -734,10 +784,17 @@ export default function SiteDetail() {
     const compressionDirty = !valuesEqual(compression, savedCompressionRef.current);
     const deliveryDirty = !valuesEqual(delivery, savedDeliveryRef.current);
     const securityDirty = !valuesEqual(security, savedSecurityRef.current);
-    const enteringDataTab = previousDetailPathRef.current !== detailPath && tab === 'overview';
+    const enteringDataTab =
+        previousDetailPathRef.current !== detailPath && (tab === 'overview' || tab === 'audience');
     const tabContentLoading =
         enteringDataTab ||
-        (tab === 'overview' ? monitoringLoading : tab === 'settings' ? saving : false);
+        (tab === 'overview'
+            ? monitoringLoading
+            : tab === 'audience'
+              ? audienceLoading
+              : tab === 'settings'
+                ? saving
+                : false);
 
     if (!clusterId) return <FormError message='Select a cluster to view this site.' />;
 
@@ -900,6 +957,17 @@ export default function SiteDetail() {
                                                         color: '#2563eb',
                                                     },
                                                 ]}
+                                                referenceLines={
+                                                    bandwidthP95 > 0
+                                                        ? [
+                                                              {
+                                                                  value: bandwidthP95,
+                                                                  label: 'P95',
+                                                                  color: '#f59e0b',
+                                                              },
+                                                          ]
+                                                        : []
+                                                }
                                                 valueFormatter={formatBandwidth}
                                             />
                                         </ContentCard>
@@ -981,6 +1049,105 @@ export default function SiteDetail() {
                                             title='Unique IPs by traffic'
                                             label='Client IP'
                                             items={ipsTraffic}
+                                        />
+                                    </div>
+                                </div>
+                            )}
+                            {tab === 'audience' && (
+                                <div className='space-y-4'>
+                                    <div className='flex flex-col gap-3 border-b border-border pb-4 sm:flex-row sm:items-end sm:justify-between'>
+                                        <div>
+                                            <h2 className='text-base font-semibold'>
+                                                Audience rankings
+                                            </h2>
+                                            <p className='mt-1 text-sm text-muted'>
+                                                Compare request volume and transferred traffic by
+                                                visitor country and network provider.
+                                            </p>
+                                        </div>
+                                        <div className='flex w-fit rounded-lg bg-surface p-1'>
+                                            {(['24h', '30d'] as Period[]).map((value) => (
+                                                <button
+                                                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${period === value ? 'bg-surface-secondary shadow-sm' : 'text-muted'}`}
+                                                    key={value}
+                                                    type='button'
+                                                    onClick={() => {
+                                                        if (value === period) return;
+                                                        setAudienceLoading(true);
+                                                        setPeriod(value);
+                                                    }}
+                                                >
+                                                    {value}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                    <div className='grid gap-4 xl:grid-cols-2'>
+                                        <RankingTable
+                                            scrollable
+                                            description='All geolocated countries, ordered by request count.'
+                                            formatValue={(code) => {
+                                                const normalized = code.toUpperCase();
+                                                const name = countryNames.get(normalized);
+                                                return name
+                                                    ? `${name} (${normalized})`
+                                                    : normalized;
+                                            }}
+                                            items={countryRequests}
+                                            label='Country'
+                                            limit={500}
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <Globe2 className='h-4 w-4 text-primary' />
+                                                    Countries by requests
+                                                </span>
+                                            }
+                                        />
+                                        <RankingTable
+                                            scrollable
+                                            description='All geolocated countries, ordered by transferred traffic.'
+                                            formatValue={(code) => {
+                                                const normalized = code.toUpperCase();
+                                                const name = countryNames.get(normalized);
+                                                return name
+                                                    ? `${name} (${normalized})`
+                                                    : normalized;
+                                            }}
+                                            items={countryTraffic}
+                                            label='Country'
+                                            limit={500}
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <Globe2 className='h-4 w-4 text-primary' />
+                                                    Countries by traffic
+                                                </span>
+                                            }
+                                        />
+                                        <RankingTable
+                                            scrollable
+                                            description='Network providers ordered by request count.'
+                                            items={ispRequests}
+                                            label='ISP / ASN'
+                                            limit={500}
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <RadioTower className='h-4 w-4 text-primary' />
+                                                    ISPs by requests
+                                                </span>
+                                            }
+                                        />
+                                        <RankingTable
+                                            scrollable
+                                            description='Network providers ordered by transferred traffic.'
+                                            items={ispTraffic}
+                                            label='ISP / ASN'
+                                            limit={500}
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <RadioTower className='h-4 w-4 text-primary' />
+                                                    ISPs by traffic
+                                                </span>
+                                            }
                                         />
                                     </div>
                                 </div>

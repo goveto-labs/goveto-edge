@@ -30,6 +30,7 @@ func Register(e *echo.Echo, db *client.Client, store *analytics.Store) {
 	e.GET("/api/v1/clusters/:cluster_id/analytics/top-urls", top(store, "url"), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/top-ips", top(store, "ip"), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/traffic", traffic(store), require...)
+	e.GET("/api/v1/clusters/:cluster_id/analytics/waf/traffic", wafTraffic(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/rankings/:dimension", ranking(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/distributions/:dimension", ranking(store), require...)
 	e.GET("/api/v1/clusters/:cluster_id/analytics/nodes/runtime", nodeRuntime(store), require...)
@@ -188,6 +189,11 @@ type trafficResponse struct {
 	Granularity string                   `json:"granularity"`
 	Series      []analytics.TrafficPoint `json:"series"`
 }
+type wafTrafficResponse struct {
+	Period      string               `json:"period"`
+	Granularity string               `json:"granularity"`
+	Series      []analytics.WAFPoint `json:"series"`
+}
 type nodeRuntimeResponse struct {
 	Period string                       `json:"period"`
 	Series []analytics.NodeRuntimePoint `json:"series"`
@@ -247,6 +253,31 @@ func traffic(s *analytics.Store) echo.HandlerFunc {
 	}
 }
 
+func wafTraffic(s *analytics.Store) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		p, err := chartPeriod(c)
+		if err != nil {
+			return err
+		}
+		items, err := s.WAFSeries(
+			c.Request().Context(),
+			c.Param("cluster_id"),
+			c.QueryParam("site_id"),
+			p,
+		)
+		if err != nil {
+			return err
+		}
+		granularity := "hour"
+		if p == "30d" {
+			granularity = "day"
+		}
+		return types.JSON(c, http.StatusOK, wafTrafficResponse{
+			Period: p, Granularity: granularity, Series: items,
+		})
+	}
+}
+
 // @summary Ranking / distribution
 // @description Rank or distribute traffic by dimension (period, sort, limit query params; node_id filter supported for 24h).
 // @Tags analytics
@@ -263,7 +294,7 @@ func ranking(s *analytics.Store) echo.HandlerFunc {
 		}
 
 		limit := 20
-		if v, e := strconv.Atoi(c.QueryParam("limit")); e == nil && v > 0 && v <= 100 {
+		if v, e := strconv.Atoi(c.QueryParam("limit")); e == nil && v > 0 && v <= 500 {
 			limit = v
 		}
 

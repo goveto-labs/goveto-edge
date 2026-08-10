@@ -107,13 +107,16 @@ func TestGeoIPConfigurationDefaultsAndProductionOptIn(t *testing.T) {
 	t.Setenv("GOVETO_DATA_DIR", t.TempDir())
 	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", base64.StdEncoding.EncodeToString(make([]byte, 32)))
 	t.Setenv("GEOIP_DATABASE_PATH", "")
+	t.Setenv("GEOIP_ASN_DATABASE_PATH", "")
 	t.Setenv("GEOIP_DATABASE_POLL_INTERVAL", "")
 	t.Setenv("APP_ENV", "test")
 	cfg, err := Load()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GeoIPDatabasePath != "./GeoLite2-City.mmdb" || cfg.GeoIPDatabasePollInterval != 30*time.Second {
+	if cfg.GeoIPDatabasePath != "./GeoLite2-City.mmdb" ||
+		cfg.GeoIPASNDatabasePath != "./GeoLite2-ASN.mmdb" ||
+		cfg.GeoIPDatabasePollInterval != 30*time.Second {
 		t.Fatalf("unexpected test GeoIP defaults: %#v", cfg)
 	}
 	t.Setenv("APP_ENV", "production")
@@ -121,8 +124,8 @@ func TestGeoIPConfigurationDefaultsAndProductionOptIn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.GeoIPDatabasePath != "" {
-		t.Fatalf("production GeoIP should require opt-in, got %q", cfg.GeoIPDatabasePath)
+	if cfg.GeoIPDatabasePath != "" || cfg.GeoIPASNDatabasePath != "" {
+		t.Fatalf("production GeoIP should require opt-in, got city=%q ASN=%q", cfg.GeoIPDatabasePath, cfg.GeoIPASNDatabasePath)
 	}
 }
 

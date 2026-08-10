@@ -28,3 +28,12 @@ func TestGeoIPEnricherDoesNotBlockIngestWithoutDatabase(t *testing.T) {
 		t.Fatalf("unexpected GEO result: %#v", events[0])
 	}
 }
+
+func TestFormatISP(t *testing.T) {
+	if got := formatISP(13335, "", "Cloudflare, Inc."); got != "AS13335 · Cloudflare, Inc." {
+		t.Fatalf("unexpected ISP label: %q", got)
+	}
+	if got := formatISP(0, "Example ISP", "Example Org"); got != "Example ISP" {
+		t.Fatalf("unexpected ISP-only label: %q", got)
+	}
+}

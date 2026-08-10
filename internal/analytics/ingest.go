@@ -21,7 +21,9 @@ type Ingest struct {
 
 func (i *Ingest) SetArchive(archive LogArchive) { i.archive = archive }
 
-func (i *Ingest) ConfigureGeoIP(path string) { i.geoIP = newGeoIPEnricher(path) }
+func (i *Ingest) ConfigureGeoIP(cityPath, asnPath string) {
+	i.geoIP = newGeoIPEnricher(cityPath, asnPath)
+}
 
 func NewIngest(db *client.Client, _ *node.CredentialCipher, s *Store) *Ingest {
 	return NewIngestWithConcurrency(db, s, 4)

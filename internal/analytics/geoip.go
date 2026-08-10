@@ -1,6 +1,7 @@
 package analytics
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -10,18 +11,25 @@ import (
 )
 
 type geoIPEnricher struct {
-	path   string
-	mu     sync.Mutex
-	reader *geoip2.Reader
-	info   os.FileInfo
+	cityPath   string
+	asnPath    string
+	mu         sync.Mutex
+	cityReader *geoip2.Reader
+	cityInfo   os.FileInfo
+	asnReader  *geoip2.Reader
+	asnInfo    os.FileInfo
 }
 
-func newGeoIPEnricher(path string) *geoIPEnricher {
-	path = strings.TrimSpace(path)
-	if path == "" {
+func newGeoIPEnricher(cityPath string, asnPaths ...string) *geoIPEnricher {
+	cityPath = strings.TrimSpace(cityPath)
+	asnPath := ""
+	if len(asnPaths) > 0 {
+		asnPath = strings.TrimSpace(asnPaths[0])
+	}
+	if cityPath == "" && asnPath == "" {
 		return nil
 	}
-	return &geoIPEnricher{path: path}
+	return &geoIPEnricher{cityPath: cityPath, asnPath: asnPath}
 }
 
 func (g *geoIPEnricher) enrich(events []WebRequestLog) {
@@ -31,8 +39,9 @@ func (g *geoIPEnricher) enrich(events []WebRequestLog) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 
-	reader := g.currentReader()
-	if reader == nil {
+	cityReader := currentGeoIPReader(g.cityPath, &g.cityReader, &g.cityInfo)
+	asnReader := currentGeoIPReader(g.asnPath, &g.asnReader, &g.asnInfo)
+	if cityReader == nil && asnReader == nil {
 		return
 	}
 	for index := range events {
@@ -40,51 +49,78 @@ func (g *geoIPEnricher) enrich(events []WebRequestLog) {
 		if !ip.IsValid() || ip.IsUnspecified() {
 			continue
 		}
-		record, err := reader.City(net.IP(ip.Unmap().AsSlice()))
-		if err != nil {
-			continue
-		}
-		country := strings.ToUpper(record.Country.IsoCode)
-		region := ""
-		if len(record.Subdivisions) > 0 {
-			region = strings.ToUpper(record.Subdivisions[0].IsoCode)
-			if country != "" && region != "" {
-				region = country + "-" + region
+		netIP := net.IP(ip.Unmap().AsSlice())
+		if cityReader != nil {
+			record, err := cityReader.City(netIP)
+			if err == nil {
+				country := strings.ToUpper(record.Country.IsoCode)
+				region := ""
+				if len(record.Subdivisions) > 0 {
+					region = strings.ToUpper(record.Subdivisions[0].IsoCode)
+					if country != "" && region != "" {
+						region = country + "-" + region
+					}
+				}
+				events[index].Country = country
+				events[index].Region = region
 			}
 		}
-		events[index].Country = country
-		events[index].Region = region
+		if asnReader != nil {
+			if record, err := asnReader.ISP(netIP); err == nil {
+				events[index].ISP = formatISP(record.AutonomousSystemNumber, record.ISP, record.AutonomousSystemOrganization)
+			} else if record, asnErr := asnReader.ASN(netIP); asnErr == nil {
+				events[index].ISP = formatISP(record.AutonomousSystemNumber, "", record.AutonomousSystemOrganization)
+			}
+		}
 	}
 }
 
-func (g *geoIPEnricher) currentReader() *geoip2.Reader {
-	info, err := os.Stat(g.path)
+func formatISP(asn uint, isp, organization string) string {
+	name := strings.TrimSpace(isp)
+	if name == "" {
+		name = strings.TrimSpace(organization)
+	}
+	if asn == 0 {
+		return name
+	}
+	if name == "" {
+		return fmt.Sprintf("AS%d", asn)
+	}
+	return fmt.Sprintf("AS%d · %s", asn, name)
+}
+
+func currentGeoIPReader(path string, reader **geoip2.Reader, previous *os.FileInfo) *geoip2.Reader {
+	if path == "" {
+		resetGeoIPReader(reader, previous)
+		return nil
+	}
+	info, err := os.Stat(path)
 	if err != nil || !info.Mode().IsRegular() {
-		g.reset()
+		resetGeoIPReader(reader, previous)
 		return nil
 	}
-	if g.reader != nil && sameGeoIPFile(info, g.info) {
-		return g.reader
+	if *reader != nil && sameGeoIPFile(info, *previous) {
+		return *reader
 	}
-	reader, err := geoip2.Open(g.path)
+	next, err := geoip2.Open(path)
 	if err != nil {
-		g.reset()
+		resetGeoIPReader(reader, previous)
 		return nil
 	}
-	if g.reader != nil {
-		_ = g.reader.Close()
+	if *reader != nil {
+		_ = (*reader).Close()
 	}
-	g.reader = reader
-	g.info = info
-	return reader
+	*reader = next
+	*previous = info
+	return next
 }
 
-func (g *geoIPEnricher) reset() {
-	if g.reader != nil {
-		_ = g.reader.Close()
+func resetGeoIPReader(reader **geoip2.Reader, info *os.FileInfo) {
+	if *reader != nil {
+		_ = (*reader).Close()
 	}
-	g.reader = nil
-	g.info = nil
+	*reader = nil
+	*info = nil
 }
 
 func sameGeoIPFile(current, previous os.FileInfo) bool {
