@@ -58,6 +58,26 @@ func registerNotificationChannels(group *echo.Group, db *client.Client, cipher *
 	group.POST("/notification-channels/:channel_id/test", testNotificationChannel(db, cipher), manage)
 }
 
+func RewrapNotificationSecrets(ctx context.Context, db *client.Client, cipher *node.CredentialCipher) error {
+	items, err := db.NotificationChannel.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	for index := range items {
+		item := &items[index]
+		wrapped, changed, rewrapErr := cipher.RewrapScoped(notificationChannelScope(item.ClusterId, item.Id), item.UrlEncrypted)
+		if rewrapErr != nil {
+			return fmt.Errorf("rewrap notification channel %s: %w", item.Id, rewrapErr)
+		}
+		if changed {
+			if _, err = db.NotificationChannel.Update().Where(query.NotificationChannel.Id.Equals(item.Id)).Set(query.NotificationChannel.UrlEncrypted.Set(wrapped)).Do(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // @summary List notification channels
 // @description List the cluster's notification channels without exposing their Shoutrrr URLs.
 // @Tags clusters-notifications

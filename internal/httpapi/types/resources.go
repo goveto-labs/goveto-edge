@@ -46,29 +46,33 @@ func NewClusterMember(value *model.ClusterMember) ClusterMember {
 }
 
 type Certificate struct {
-	ID                   string                   `json:"id"`
-	Name                 string                   `json:"name"`
-	Source               model.CertificateSource  `json:"source"`
-	Status               model.CertificateStatus  `json:"status"`
-	Fingerprint          *string                  `json:"fingerprint"`
-	SerialNumber         *string                  `json:"serial_number"`
-	Domains              []string                 `json:"domains"`
-	NotBefore            *time.Time               `json:"not_before"`
-	ExpiresAt            *time.Time               `json:"expires_at"`
-	Issuer               *string                  `json:"issuer"`
-	KeyAlgorithm         *string                  `json:"key_algorithm"`
-	ACMEDirectoryURL     *string                  `json:"acme_directory_url,omitempty"`
-	ACMEEmail            *string                  `json:"acme_email,omitempty"`
-	ACMEChallengeType    *model.ACMEChallengeType `json:"acme_challenge_type,omitempty"`
-	AutoRenew            bool                     `json:"auto_renew"`
-	RenewBeforeDays      int                      `json:"renew_before_days"`
-	LastIssuedAt         *time.Time               `json:"last_issued_at"`
-	LastRenewalAttemptAt *time.Time               `json:"last_renewal_attempt_at"`
-	LastRenewalError     *string                  `json:"last_renewal_error"`
-	LastPublishedAt      *time.Time               `json:"last_published_at"`
-	LastPublishError     *string                  `json:"last_publish_error"`
-	CreatedAt            time.Time                `json:"created_at"`
-	UpdatedAt            time.Time                `json:"updated_at"`
+	ID                      string                   `json:"id"`
+	Name                    string                   `json:"name"`
+	Source                  model.CertificateSource  `json:"source"`
+	Status                  model.CertificateStatus  `json:"status"`
+	Fingerprint             *string                  `json:"fingerprint"`
+	SerialNumber            *string                  `json:"serial_number"`
+	Domains                 []string                 `json:"domains"`
+	NotBefore               *time.Time               `json:"not_before"`
+	ExpiresAt               *time.Time               `json:"expires_at"`
+	Issuer                  *string                  `json:"issuer"`
+	KeyAlgorithm            *string                  `json:"key_algorithm"`
+	ACMEDirectoryURL        *string                  `json:"acme_directory_url,omitempty"`
+	ACMEEmail               *string                  `json:"acme_email,omitempty"`
+	ACMEChallengeType       *model.ACMEChallengeType `json:"acme_challenge_type,omitempty"`
+	AutoRenew               bool                     `json:"auto_renew"`
+	RenewBeforeDays         int                      `json:"renew_before_days"`
+	LastIssuedAt            *time.Time               `json:"last_issued_at"`
+	LastRenewalAttemptAt    *time.Time               `json:"last_renewal_attempt_at"`
+	LastRenewalError        *string                  `json:"last_renewal_error"`
+	LastPublishedAt         *time.Time               `json:"last_published_at"`
+	LastPublishError        *string                  `json:"last_publish_error"`
+	RevokedAt               *time.Time               `json:"revoked_at"`
+	RevocationReason        *int                     `json:"revocation_reason"`
+	LastRevocationAttemptAt *time.Time               `json:"last_revocation_attempt_at"`
+	LastRevocationError     *string                  `json:"last_revocation_error"`
+	CreatedAt               time.Time                `json:"created_at"`
+	UpdatedAt               time.Time                `json:"updated_at"`
 }
 
 func NewCertificate(value *model.Certificate) Certificate {
@@ -82,6 +86,8 @@ func NewCertificate(value *model.Certificate) Certificate {
 		AutoRenew: value.AutoRenew, RenewBeforeDays: value.RenewBeforeDays, LastIssuedAt: value.LastIssuedAt,
 		LastRenewalAttemptAt: value.LastRenewalAttemptAt, LastRenewalError: value.LastRenewalError,
 		LastPublishedAt: value.LastPublishedAt, LastPublishError: value.LastPublishError,
+		RevokedAt: value.RevokedAt, RevocationReason: value.RevocationReason,
+		LastRevocationAttemptAt: value.LastRevocationAttemptAt, LastRevocationError: value.LastRevocationError,
 		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
 	}
 }

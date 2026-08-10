@@ -16,7 +16,11 @@ func TestNewCertificateSurfacesLifecycleState(t *testing.T) {
 	notBefore := mustTime("2026-01-01T00:00:00Z")
 	expires := mustTime("2026-04-01T00:00:00Z")
 	lastRenewal := mustTime("2026-01-02T00:00:00Z")
+	revokedAt := mustTime("2026-01-03T00:00:00Z")
+	lastRevocation := mustTime("2026-01-03T00:01:00Z")
 	renewError := "acme: rate limited"
+	revocationError := "site rollout pending"
+	revocationReason := 1
 	issuer := "Let's Encrypt R3"
 	algo := "RSA-2048"
 	challenge := model.ACMEChallengeTypeHTTP_01
@@ -28,6 +32,8 @@ func TestNewCertificateSurfacesLifecycleState(t *testing.T) {
 		NotBefore:   &notBefore, ExpiresAt: &expires, Issuer: &issuer, KeyAlgorithm: &algo,
 		AcmeDirectoryUrl: &directory, AcmeChallengeType: &challenge, AutoRenew: true, RenewBeforeDays: 30,
 		LastRenewalAttemptAt: &lastRenewal, LastRenewalError: &renewError,
+		RevokedAt: &revokedAt, RevocationReason: &revocationReason,
+		LastRevocationAttemptAt: &lastRevocation, LastRevocationError: &revocationError,
 	}
 	response := NewCertificate(cert)
 	if response.ID != "cert-1" || response.Status != model.CertificateStatusACTIVE ||
@@ -45,6 +51,12 @@ func TestNewCertificateSurfacesLifecycleState(t *testing.T) {
 	}
 	if response.ACMEChallengeType == nil || *response.ACMEChallengeType != challenge {
 		t.Fatalf("challenge type not surfaced: %#v", response.ACMEChallengeType)
+	}
+	if response.RevokedAt == nil || !response.RevokedAt.Equal(revokedAt) ||
+		response.RevocationReason == nil || *response.RevocationReason != revocationReason ||
+		response.LastRevocationAttemptAt == nil || !response.LastRevocationAttemptAt.Equal(lastRevocation) ||
+		response.LastRevocationError == nil || *response.LastRevocationError != revocationError {
+		t.Fatalf("revocation fields lost: %#v", response)
 	}
 }
 
@@ -67,11 +79,11 @@ func TestNewCertificateToleratesMissingDomains(t *testing.T) {
 func TestNewCertificateJobMapsOperationAndError(t *testing.T) {
 	jobError := "dns-01 challenge timed out"
 	job := &model.CertificateJob{
-		Id: "job-1", CertificateId: "cert-1", Operation: model.CertificateOperationREISSUE,
+		Id: "job-1", CertificateId: "cert-1", Operation: model.CertificateOperationREVOKE,
 		Status: model.JobStatusFAILED, Attempts: 3, MaxAttempts: 5, Error: &jobError,
 	}
 	response := NewCertificateJob(job)
-	if response.Operation != model.CertificateOperationREISSUE || response.Status != model.JobStatusFAILED ||
+	if response.Operation != model.CertificateOperationREVOKE || response.Status != model.JobStatusFAILED ||
 		response.Attempts != 3 || response.MaxAttempts != 5 || response.Error == nil || *response.Error != jobError {
 		t.Fatalf("job lifecycle fields lost: %#v", response)
 	}

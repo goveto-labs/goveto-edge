@@ -47,6 +47,10 @@ type SecretCipher interface {
 	DecryptScoped(scope, value string) (string, error)
 }
 
+type SecretRewrapper interface {
+	RewrapScoped(scope, value string) (string, bool, error)
+}
+
 type HTTPProxyConfig struct {
 	TrustAll        bool     `json:"trust_all"`
 	ClientIPHeaders []string `json:"client_ip_headers"`
@@ -340,6 +344,72 @@ func (s *Store) SetAuthProviders(ctx context.Context, providers []AuthProviderCo
 		return errors.New("at most 20 authentication providers may be configured")
 	}
 	return s.Set(ctx, AuthProvidersKey, stored, authProvidersDescription)
+}
+
+// RewrapAuthProviderSecrets upgrades encrypted client secrets in place while
+// preserving provider fields that may have been written by a newer version.
+func (s *Store) RewrapAuthProviderSecrets(ctx context.Context, cipher SecretRewrapper) error {
+	setting, err := s.db.DynamicSetting.FindUnique(ctx, query.DynamicSetting.Key.Equals(AuthProvidersKey))
+	if err != nil {
+		return fmt.Errorf("read authentication providers for rewrap: %w", err)
+	}
+	if setting == nil {
+		return nil
+	}
+	encoded, changed, err := rewrapAuthProviderJSON(setting.ValueJson, cipher)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		return nil
+	}
+	_, err = s.db.DynamicSetting.Update().Where(query.DynamicSetting.Key.Equals(AuthProvidersKey)).Set(
+		query.DynamicSetting.ValueJson.Set(encoded),
+	).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("persist rewrapped authentication providers: %w", err)
+	}
+	return nil
+}
+
+func rewrapAuthProviderJSON(value json.RawMessage, cipher SecretRewrapper) (json.RawMessage, bool, error) {
+	var providers []map[string]json.RawMessage
+	if err := json.Unmarshal(value, &providers); err != nil {
+		return nil, false, fmt.Errorf("decode authentication providers for rewrap: %w", err)
+	}
+	changed := false
+	for index, provider := range providers {
+		var id, encrypted string
+		if raw := provider["id"]; raw != nil {
+			if err := json.Unmarshal(raw, &id); err != nil {
+				return nil, false, fmt.Errorf("decode authentication provider %d ID: %w", index, err)
+			}
+		}
+		if raw := provider["client_secret_encrypted"]; raw != nil {
+			if err := json.Unmarshal(raw, &encrypted); err != nil {
+				return nil, false, fmt.Errorf("decode authentication provider %q client secret: %w", id, err)
+			}
+		}
+		if encrypted == "" {
+			continue
+		}
+		wrapped, valueChanged, err := cipher.RewrapScoped(authProviderSecretScope(id), encrypted)
+		if err != nil {
+			return nil, false, fmt.Errorf("rewrap authentication provider %q client secret: %w", id, err)
+		}
+		if valueChanged {
+			provider["client_secret_encrypted"], _ = json.Marshal(wrapped)
+			changed = true
+		}
+	}
+	if !changed {
+		return value, false, nil
+	}
+	encoded, err := json.Marshal(providers)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode rewrapped authentication providers: %w", err)
+	}
+	return encoded, true, nil
 }
 
 func authProviderSecretScope(id string) string {

@@ -45,6 +45,25 @@ func New(db *client.Client, cipher *node.CredentialCipher) *Service {
 	return &Service{db: db, cipher: cipher, httpClient: &http.Client{Timeout: 20 * time.Second}, jobs: jobqueue.New(db)}
 }
 
+func (s *Service) RewrapSecrets(ctx context.Context) error {
+	configs, err := s.db.DNSProviderConfig.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	for index := range configs {
+		wrapped, changed, rewrapErr := s.cipher.Rewrap(configs[index].CredentialsEncrypted)
+		if rewrapErr != nil {
+			return fmt.Errorf("rewrap DNS provider %s: %w", configs[index].Id, rewrapErr)
+		}
+		if changed {
+			if _, err = s.db.DNSProviderConfig.Update().Where(query.DNSProviderConfig.Id.Equals(configs[index].Id)).Set(query.DNSProviderConfig.CredentialsEncrypted.Set(wrapped)).Do(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // LockClusterTx serializes configuration changes and reconciliation for a cluster.
 // The lock is released automatically when the supplied transaction ends.
 func LockClusterTx(ctx context.Context, db *client.Client, clusterID string) error {

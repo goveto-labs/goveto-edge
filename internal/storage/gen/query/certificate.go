@@ -32,36 +32,40 @@ func ApplyCertificateOptions(opts []CertificateQueryOption) CertificateQueryConf
 
 // CertificateQuery is the namespace for Certificate query operations.
 type CertificateQuery struct {
-	Id                   certificateIdField
-	ClusterId            certificateClusterIdField
-	Name                 certificateNameField
-	Source               certificateSourceField
-	Status               certificateStatusField
-	CertPem              certificateCertPemField
-	PrivateKeyEncrypted  certificatePrivateKeyEncryptedField
-	Fingerprint          certificateFingerprintField
-	SerialNumber         certificateSerialNumberField
-	DomainsJson          certificateDomainsJsonField
-	NotBefore            certificateNotBeforeField
-	ExpiresAt            certificateExpiresAtField
-	Issuer               certificateIssuerField
-	KeyAlgorithm         certificateKeyAlgorithmField
-	AcmeDirectoryUrl     certificateAcmeDirectoryUrlField
-	AcmeEmail            certificateAcmeEmailField
-	AcmeChallengeType    certificateAcmeChallengeTypeField
-	AutoRenew            certificateAutoRenewField
-	RenewBeforeDays      certificateRenewBeforeDaysField
-	LastIssuedAt         certificateLastIssuedAtField
-	LastRenewalAttemptAt certificateLastRenewalAttemptAtField
-	LastRenewalError     certificateLastRenewalErrorField
-	LastPublishedAt      certificateLastPublishedAtField
-	LastPublishError     certificateLastPublishErrorField
-	CreatedAt            certificateCreatedAtField
-	UpdatedAt            certificateUpdatedAtField
-	Cluster              certificateClusterRelation
-	Sites                certificateSitesRelation
-	Jobs                 certificateJobsRelation
-	Challenges           certificateChallengesRelation
+	Id                      certificateIdField
+	ClusterId               certificateClusterIdField
+	Name                    certificateNameField
+	Source                  certificateSourceField
+	Status                  certificateStatusField
+	CertPem                 certificateCertPemField
+	PrivateKeyEncrypted     certificatePrivateKeyEncryptedField
+	Fingerprint             certificateFingerprintField
+	SerialNumber            certificateSerialNumberField
+	DomainsJson             certificateDomainsJsonField
+	NotBefore               certificateNotBeforeField
+	ExpiresAt               certificateExpiresAtField
+	Issuer                  certificateIssuerField
+	KeyAlgorithm            certificateKeyAlgorithmField
+	AcmeDirectoryUrl        certificateAcmeDirectoryUrlField
+	AcmeEmail               certificateAcmeEmailField
+	AcmeChallengeType       certificateAcmeChallengeTypeField
+	AutoRenew               certificateAutoRenewField
+	RenewBeforeDays         certificateRenewBeforeDaysField
+	LastIssuedAt            certificateLastIssuedAtField
+	LastRenewalAttemptAt    certificateLastRenewalAttemptAtField
+	LastRenewalError        certificateLastRenewalErrorField
+	LastPublishedAt         certificateLastPublishedAtField
+	LastPublishError        certificateLastPublishErrorField
+	RevokedAt               certificateRevokedAtField
+	RevocationReason        certificateRevocationReasonField
+	LastRevocationAttemptAt certificateLastRevocationAttemptAtField
+	LastRevocationError     certificateLastRevocationErrorField
+	CreatedAt               certificateCreatedAtField
+	UpdatedAt               certificateUpdatedAtField
+	Cluster                 certificateClusterRelation
+	Sites                   certificateSitesRelation
+	Jobs                    certificateJobsRelation
+	Challenges              certificateChallengesRelation
 }
 
 const CertificateTable = "certificates"
@@ -89,41 +93,49 @@ const CertificateLastRenewalAttemptAtColumn = "last_renewal_attempt_at"
 const CertificateLastRenewalErrorColumn = "last_renewal_error"
 const CertificateLastPublishedAtColumn = "last_published_at"
 const CertificateLastPublishErrorColumn = "last_publish_error"
+const CertificateRevokedAtColumn = "revoked_at"
+const CertificateRevocationReasonColumn = "revocation_reason"
+const CertificateLastRevocationAttemptAtColumn = "last_revocation_attempt_at"
+const CertificateLastRevocationErrorColumn = "last_revocation_error"
 const CertificateCreatedAtColumn = "created_at"
 const CertificateUpdatedAtColumn = "updated_at"
 
 // CertificateQuery provides query building methods for the Certificate model.
 var Certificate = CertificateQuery{
-	Id:                   certificateIdField{},
-	ClusterId:            certificateClusterIdField{},
-	Name:                 certificateNameField{},
-	Source:               certificateSourceField{},
-	Status:               certificateStatusField{},
-	CertPem:              certificateCertPemField{},
-	PrivateKeyEncrypted:  certificatePrivateKeyEncryptedField{},
-	Fingerprint:          certificateFingerprintField{},
-	SerialNumber:         certificateSerialNumberField{},
-	DomainsJson:          certificateDomainsJsonField{},
-	NotBefore:            certificateNotBeforeField{},
-	ExpiresAt:            certificateExpiresAtField{},
-	Issuer:               certificateIssuerField{},
-	KeyAlgorithm:         certificateKeyAlgorithmField{},
-	AcmeDirectoryUrl:     certificateAcmeDirectoryUrlField{},
-	AcmeEmail:            certificateAcmeEmailField{},
-	AcmeChallengeType:    certificateAcmeChallengeTypeField{},
-	AutoRenew:            certificateAutoRenewField{},
-	RenewBeforeDays:      certificateRenewBeforeDaysField{},
-	LastIssuedAt:         certificateLastIssuedAtField{},
-	LastRenewalAttemptAt: certificateLastRenewalAttemptAtField{},
-	LastRenewalError:     certificateLastRenewalErrorField{},
-	LastPublishedAt:      certificateLastPublishedAtField{},
-	LastPublishError:     certificateLastPublishErrorField{},
-	CreatedAt:            certificateCreatedAtField{},
-	UpdatedAt:            certificateUpdatedAtField{},
-	Cluster:              certificateClusterRelation{},
-	Sites:                certificateSitesRelation{},
-	Jobs:                 certificateJobsRelation{},
-	Challenges:           certificateChallengesRelation{},
+	Id:                      certificateIdField{},
+	ClusterId:               certificateClusterIdField{},
+	Name:                    certificateNameField{},
+	Source:                  certificateSourceField{},
+	Status:                  certificateStatusField{},
+	CertPem:                 certificateCertPemField{},
+	PrivateKeyEncrypted:     certificatePrivateKeyEncryptedField{},
+	Fingerprint:             certificateFingerprintField{},
+	SerialNumber:            certificateSerialNumberField{},
+	DomainsJson:             certificateDomainsJsonField{},
+	NotBefore:               certificateNotBeforeField{},
+	ExpiresAt:               certificateExpiresAtField{},
+	Issuer:                  certificateIssuerField{},
+	KeyAlgorithm:            certificateKeyAlgorithmField{},
+	AcmeDirectoryUrl:        certificateAcmeDirectoryUrlField{},
+	AcmeEmail:               certificateAcmeEmailField{},
+	AcmeChallengeType:       certificateAcmeChallengeTypeField{},
+	AutoRenew:               certificateAutoRenewField{},
+	RenewBeforeDays:         certificateRenewBeforeDaysField{},
+	LastIssuedAt:            certificateLastIssuedAtField{},
+	LastRenewalAttemptAt:    certificateLastRenewalAttemptAtField{},
+	LastRenewalError:        certificateLastRenewalErrorField{},
+	LastPublishedAt:         certificateLastPublishedAtField{},
+	LastPublishError:        certificateLastPublishErrorField{},
+	RevokedAt:               certificateRevokedAtField{},
+	RevocationReason:        certificateRevocationReasonField{},
+	LastRevocationAttemptAt: certificateLastRevocationAttemptAtField{},
+	LastRevocationError:     certificateLastRevocationErrorField{},
+	CreatedAt:               certificateCreatedAtField{},
+	UpdatedAt:               certificateUpdatedAtField{},
+	Cluster:                 certificateClusterRelation{},
+	Sites:                   certificateSitesRelation{},
+	Jobs:                    certificateJobsRelation{},
+	Challenges:              certificateChallengesRelation{},
 }
 
 // CertificateWhereClause represents a WHERE condition for Certificate.
@@ -1784,6 +1796,305 @@ func (certificateLastPublishErrorField) Desc() CertificateOrderByClause {
 	return CertificateOrderByClause{Field: "last_publish_error", Direction: "DESC"}
 }
 
+// RevokedAtField provides query operations for the revokedAt field.
+type certificateRevokedAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateRevokedAtField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateRevokedAtField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateRevokedAtField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "revoked_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateRevokedAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "revoked_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateRevokedAtField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateRevokedAtField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateRevokedAtField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateRevokedAtField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateRevokedAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "revoked_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateRevokedAtField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "revoked_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateRevokedAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "revoked_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateRevokedAtField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "revoked_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateRevokedAtField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "revoked_at", Direction: "DESC"}
+}
+
+// RevocationReasonField provides query operations for the revocationReason field.
+type certificateRevocationReasonField struct{}
+
+// Equals creates an equality condition.
+func (certificateRevocationReasonField) Equals(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateRevocationReasonField) Not(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateRevocationReasonField) In(vals ...*int) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateRevocationReasonField) NotIn(vals ...*int) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateRevocationReasonField) Lt(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateRevocationReasonField) Lte(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateRevocationReasonField) Gt(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateRevocationReasonField) Gte(v *int) CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateRevocationReasonField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "revocation_reason", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateRevocationReasonField) Set(v int) CertificateSetClause {
+	return CertificateSetClause{Field: "revocation_reason", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateRevocationReasonField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "revocation_reason", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateRevocationReasonField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "revocation_reason", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateRevocationReasonField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "revocation_reason", Direction: "DESC"}
+}
+
+// LastRevocationAttemptAtField provides query operations for the lastRevocationAttemptAt field.
+type certificateLastRevocationAttemptAtField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastRevocationAttemptAtField) Equals(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastRevocationAttemptAtField) Not(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastRevocationAttemptAtField) In(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastRevocationAttemptAtField) NotIn(vals ...*time.Time) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (certificateLastRevocationAttemptAtField) Lt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (certificateLastRevocationAttemptAtField) Lte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (certificateLastRevocationAttemptAtField) Gt(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (certificateLastRevocationAttemptAtField) Gte(v *time.Time) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastRevocationAttemptAtField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_attempt_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastRevocationAttemptAtField) Set(v time.Time) CertificateSetClause {
+	return CertificateSetClause{Field: "last_revocation_attempt_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastRevocationAttemptAtField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_revocation_attempt_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastRevocationAttemptAtField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_revocation_attempt_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastRevocationAttemptAtField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_revocation_attempt_at", Direction: "DESC"}
+}
+
+// LastRevocationErrorField provides query operations for the lastRevocationError field.
+type certificateLastRevocationErrorField struct{}
+
+// Equals creates an equality condition.
+func (certificateLastRevocationErrorField) Equals(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (certificateLastRevocationErrorField) Not(v *string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (certificateLastRevocationErrorField) In(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (certificateLastRevocationErrorField) NotIn(vals ...*string) CertificateWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "NOT IN", Value: iVals}
+}
+
+// Contains creates a LIKE '%v%' condition.
+func (certificateLastRevocationErrorField) Contains(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "CONTAINS", Value: v}
+}
+
+// StartsWith creates a LIKE 'v%' condition.
+func (certificateLastRevocationErrorField) StartsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "STARTS_WITH", Value: v}
+}
+
+// EndsWith creates a LIKE '%v' condition.
+func (certificateLastRevocationErrorField) EndsWith(v string) CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "ENDS_WITH", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (certificateLastRevocationErrorField) IsNull() CertificateWhereClause {
+	return CertificateWhereClause{Field: "last_revocation_error", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (certificateLastRevocationErrorField) Set(v string) CertificateSetClause {
+	return CertificateSetClause{Field: "last_revocation_error", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (certificateLastRevocationErrorField) SetNull() CertificateSetClause {
+	return CertificateSetClause{Field: "last_revocation_error", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (certificateLastRevocationErrorField) Asc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_revocation_error", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (certificateLastRevocationErrorField) Desc() CertificateOrderByClause {
+	return CertificateOrderByClause{Field: "last_revocation_error", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type certificateCreatedAtField struct{}
 
@@ -1981,41 +2292,45 @@ type CertificateGroupByResult struct {
 
 // CertificateCreateInput holds data for creating a Certificate record.
 type CertificateCreateInput struct {
-	Id                   string
-	ClusterId            string
-	Name                 string
-	Source               model.CertificateSource
-	Status               model.CertificateStatus
-	CertPem              **string
-	PrivateKeyEncrypted  string
-	Fingerprint          **string
-	SerialNumber         **string
-	DomainsJson          json.RawMessage
-	NotBefore            **time.Time
-	ExpiresAt            **time.Time
-	Issuer               **string
-	KeyAlgorithm         **string
-	AcmeDirectoryUrl     **string
-	AcmeEmail            **string
-	AcmeChallengeType    *model.ACMEChallengeType
-	AutoRenew            bool
-	RenewBeforeDays      int
-	LastIssuedAt         **time.Time
-	LastRenewalAttemptAt **time.Time
-	LastRenewalError     **string
-	LastPublishedAt      **time.Time
-	LastPublishError     **string
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
-	Cluster              *ClusterCreateNestedInput
-	Sites                *SiteCertificateCreateNestedInput
-	Jobs                 *CertificateJobCreateNestedInput
-	Challenges           *ACMEChallengeCreateNestedInput
+	Id                      string
+	ClusterId               string
+	Name                    string
+	Source                  model.CertificateSource
+	Status                  model.CertificateStatus
+	CertPem                 **string
+	PrivateKeyEncrypted     string
+	Fingerprint             **string
+	SerialNumber            **string
+	DomainsJson             json.RawMessage
+	NotBefore               **time.Time
+	ExpiresAt               **time.Time
+	Issuer                  **string
+	KeyAlgorithm            **string
+	AcmeDirectoryUrl        **string
+	AcmeEmail               **string
+	AcmeChallengeType       *model.ACMEChallengeType
+	AutoRenew               bool
+	RenewBeforeDays         int
+	LastIssuedAt            **time.Time
+	LastRenewalAttemptAt    **time.Time
+	LastRenewalError        **string
+	LastPublishedAt         **time.Time
+	LastPublishError        **string
+	RevokedAt               **time.Time
+	RevocationReason        **int
+	LastRevocationAttemptAt **time.Time
+	LastRevocationError     **string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	Cluster                 *ClusterCreateNestedInput
+	Sites                   *SiteCertificateCreateNestedInput
+	Jobs                    *CertificateJobCreateNestedInput
+	Challenges              *ACMEChallengeCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.
 func (d CertificateCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Source, d.Status, d.CertPem, d.PrivateKeyEncrypted, d.Fingerprint, d.SerialNumber, d.DomainsJson, d.NotBefore, d.ExpiresAt, d.Issuer, d.KeyAlgorithm, d.AcmeDirectoryUrl, d.AcmeEmail, d.AcmeChallengeType, d.AutoRenew, d.RenewBeforeDays, d.LastIssuedAt, d.LastRenewalAttemptAt, d.LastRenewalError, d.LastPublishedAt, d.LastPublishError, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Source, d.Status, d.CertPem, d.PrivateKeyEncrypted, d.Fingerprint, d.SerialNumber, d.DomainsJson, d.NotBefore, d.ExpiresAt, d.Issuer, d.KeyAlgorithm, d.AcmeDirectoryUrl, d.AcmeEmail, d.AcmeChallengeType, d.AutoRenew, d.RenewBeforeDays, d.LastIssuedAt, d.LastRenewalAttemptAt, d.LastRenewalError, d.LastPublishedAt, d.LastPublishError, d.RevokedAt, d.RevocationReason, d.LastRevocationAttemptAt, d.LastRevocationError, d.CreatedAt, d.UpdatedAt}
 }
 
 // CertificateCreateNestedInput supports nested creates and connects.

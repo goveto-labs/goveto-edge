@@ -75,6 +75,13 @@ func EncryptSSHCredentialSecret(
 	)
 }
 
+func RewrapSSHCredentialSecret(cipher *CredentialCipher, credential *model.SSHCredential) (string, bool, error) {
+	return cipher.RewrapScoped(
+		SSHCredentialEncryptionContext(credential.ClusterId, credential.Id),
+		credential.SecretEncrypted,
+	)
+}
+
 func DecryptSSHCredentialSecret(
 	cipher *CredentialCipher,
 	credential *model.SSHCredential,

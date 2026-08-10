@@ -23,6 +23,9 @@ const statusMap: Record<string, { className: string; label: string }> = {
     EXPIRED: { className: 'bg-danger/15 text-danger', label: 'Expired' },
     RENEWAL_FAILED: { className: 'bg-danger/15 text-danger', label: 'Renewal failed' },
     DEPLOYMENT_FAILED: { className: 'bg-danger/15 text-danger', label: 'Publish failed' },
+    REVOKING: { className: 'bg-warning/15 text-warning', label: 'Revoking' },
+    REVOKED: { className: 'bg-default text-muted', label: 'Revoked' },
+    REVOCATION_FAILED: { className: 'bg-danger/15 text-danger', label: 'Revocation failed' },
     PAID: { className: 'bg-success/15 text-success', label: 'Paid' },
     REFUNDED: { className: 'bg-default text-muted', label: 'Refunded' },
 };

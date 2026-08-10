@@ -1,6 +1,7 @@
 package edgecontrol
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
@@ -150,4 +151,60 @@ func testAuthority(t *testing.T) *Authority {
 		t.Fatal(err)
 	}
 	return authority
+}
+
+func TestIndependentCAKeyPreservesLegacyTrustRoot(t *testing.T) {
+	cipher, err := node.NewCredentialCipher(base64.StdEncoding.EncodeToString(make([]byte, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := NewAuthority(cipher, "control.example:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	caKey := base64.StdEncoding.EncodeToString(cipher.Derive("goveto-edge/agent-mtls/ca/v1"))
+	separated, err := NewAuthorityWithCAKey(caKey, "control.example:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(legacy.caPEM) != string(separated.caPEM) {
+		t.Fatal("separating the CA key changed the existing trust root")
+	}
+}
+
+func TestPinAgentCADetectsImplicitRotation(t *testing.T) {
+	dir := t.TempDir()
+	ca := func(seed byte) *Authority {
+		t.Helper()
+		encoded := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{seed}, ed25519.SeedSize))
+		authority, err := NewAuthorityWithCAKey(encoded, "control.example:8443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return authority
+	}
+	original := ca(1)
+
+	// First boot records the fingerprint.
+	if err := PinAgentCA(dir, original, false); err != nil {
+		t.Fatalf("first boot: %v", err)
+	}
+	// Same CA on reboot is a no-op.
+	if err := PinAgentCA(dir, original, false); err != nil {
+		t.Fatalf("reboot: %v", err)
+	}
+
+	// Implicit (unpinned) rotation must fail-fast to avoid orphaning agents.
+	rotated := ca(2)
+	if err := PinAgentCA(dir, rotated, false); err == nil {
+		t.Fatal("expected failure when implicitly derived CA changed")
+	}
+
+	// Explicitly pinned rotation is allowed and updates the recorded fingerprint.
+	if err := PinAgentCA(dir, rotated, true); err != nil {
+		t.Fatalf("pinned rotation should be allowed: %v", err)
+	}
+	if err := PinAgentCA(dir, rotated, false); err != nil {
+		t.Fatalf("reboot after pinned rotation: %v", err)
+	}
 }

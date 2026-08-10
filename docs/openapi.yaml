@@ -2234,10 +2234,9 @@ paths:
     /api/v1/clusters/{cluster_id}/analytics/waf/traffic:
         get:
             operationId: wafTraffic
-            summary: WAF hit series
-            description: 'Time-series WAF hit counts for a cluster or site (period: 24h or 30d).'
+            summary: Waf traffic
             tags:
-                - analytics
+                - clusters-analytics
             security:
                 - cookie_goveto_session: []
             x-middlewares:
@@ -2416,6 +2415,12 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
                                                 type: string
+                                            last_revocation_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            last_revocation_error:
+                                                type: string
                                             name:
                                                 type: string
                                             not_before:
@@ -2425,6 +2430,13 @@ paths:
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
+                                            revocation_reason:
+                                                type: integer
+                                                format: int32
+                                            revoked_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
                                             serial_number:
                                                 type: string
                                             source:
@@ -2530,6 +2542,12 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
                                                 type: string
+                                            last_revocation_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            last_revocation_error:
+                                                type: string
                                             name:
                                                 type: string
                                             not_before:
@@ -2539,6 +2557,13 @@ paths:
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
+                                            revocation_reason:
+                                                type: integer
+                                                format: int32
+                                            revoked_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
                                             serial_number:
                                                 type: string
                                             source:
@@ -2646,6 +2671,12 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
                                                 type: string
+                                            last_revocation_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            last_revocation_error:
+                                                type: string
                                             name:
                                                 type: string
                                             not_before:
@@ -2655,6 +2686,13 @@ paths:
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
+                                            revocation_reason:
+                                                type: integer
+                                                format: int32
+                                            revoked_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
                                             serial_number:
                                                 type: string
                                             source:
@@ -2705,6 +2743,17 @@ paths:
             responses:
                 "204":
                     description: OK
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/certificates/{certificate_id}/jobs:
         get:
             operationId: listJobs
@@ -2843,6 +2892,12 @@ paths:
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
                                                 type: string
+                                            last_revocation_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            last_revocation_error:
+                                                type: string
                                             name:
                                                 type: string
                                             not_before:
@@ -2852,6 +2907,13 @@ paths:
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
+                                            revocation_reason:
+                                                type: integer
+                                                format: int32
+                                            revoked_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
                                             serial_number:
                                                 type: string
                                             source:
@@ -2863,6 +2925,17 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                 "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
                     description: Client Error
                     content:
                         application/json:
@@ -2952,6 +3025,17 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/certificates/{certificate_id}/reissue:
         post:
             operationId: post_api_v1_clusters_cluster_id_certificates_certificate_id_reissue
@@ -3031,6 +3115,17 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/certificates/{certificate_id}/renew:
         post:
             operationId: post_api_v1_clusters_cluster_id_certificates_certificate_id_renew
@@ -3100,6 +3195,128 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                 "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/certificates/{certificate_id}/revoke:
+        post:
+            operationId: revoke
+            summary: Revoke ACME certificate
+            description: Enqueue an RFC 5280 ACME revocation and remove the revoked certificate from every attached site.
+            tags:
+                - certificates
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - auth.RequireAuth
+                - manage
+            parameters:
+                - name: certificate_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                reason:
+                                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            attempts:
+                                                type: integer
+                                                format: int32
+                                            certificate_id:
+                                                type: string
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            error:
+                                                type: string
+                                            id:
+                                                type: string
+                                            max_attempts:
+                                                type: integer
+                                                format: int32
+                                            next_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            operation:
+                                                $ref: '#/components/schemas/model_CertificateOperation'
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
                     description: Client Error
                     content:
                         application/json:
@@ -3219,6 +3436,12 @@ paths:
                                                         example: "2026-01-02T15:04:05Z"
                                                     last_renewal_error:
                                                         type: string
+                                                    last_revocation_attempt_at:
+                                                        type: string
+                                                        format: date-time
+                                                        example: "2026-01-02T15:04:05Z"
+                                                    last_revocation_error:
+                                                        type: string
                                                     name:
                                                         type: string
                                                     not_before:
@@ -3228,6 +3451,13 @@ paths:
                                                     renew_before_days:
                                                         type: integer
                                                         format: int32
+                                                    revocation_reason:
+                                                        type: integer
+                                                        format: int32
+                                                    revoked_at:
+                                                        type: string
+                                                        format: date-time
+                                                        example: "2026-01-02T15:04:05Z"
                                                     serial_number:
                                                         type: string
                                                     source:
@@ -3273,6 +3503,17 @@ paths:
                                             - certificate
                                             - job
                 "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
                     description: Client Error
                     content:
                         application/json:
@@ -10104,6 +10345,8 @@ components:
                     type: string
                 hostname:
                     type: string
+                isp:
+                    type: string
                 method:
                     type: string
                 node_id:
@@ -10399,6 +10642,16 @@ components:
                 requests:
                     type: integer
                     format: int64
+        analytics_WAFPoint:
+            type: object
+            properties:
+                bucket:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hits:
+                    type: integer
+                    format: int64
         analytics_WAFRuleStat:
             type: object
             properties:
@@ -10415,16 +10668,6 @@ components:
                     format: int64
                 rule_id:
                     type: string
-        analytics_WAFPoint:
-            type: object
-            properties:
-                bucket:
-                    type: string
-                    format: date-time
-                    example: "2026-01-02T15:04:05Z"
-                hits:
-                    type: integer
-                    format: int64
                 source:
                     type: string
                 unique_ips:
@@ -10816,6 +11059,7 @@ components:
                 - RENEW
                 - REISSUE
                 - REPUBLISH
+                - REVOKE
         model_CertificateSource:
             type: string
             enum:
@@ -10831,6 +11075,9 @@ components:
                 - EXPIRED
                 - RENEWAL_FAILED
                 - DEPLOYMENT_FAILED
+                - REVOKING
+                - REVOKED
+                - REVOCATION_FAILED
         model_ClusterPermission:
             type: string
             enum:
@@ -11780,6 +12027,12 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 last_renewal_error:
                     type: string
+                last_revocation_attempt_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                last_revocation_error:
+                    type: string
                 name:
                     type: string
                 not_before:
@@ -11789,6 +12042,13 @@ components:
                 renew_before_days:
                     type: integer
                     format: int32
+                revocation_reason:
+                    type: integer
+                    format: int32
+                revoked_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
                 serial_number:
                     type: string
                 source:

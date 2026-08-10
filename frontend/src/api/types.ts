@@ -855,7 +855,10 @@ export interface Certificate {
         | 'EXPIRING'
         | 'EXPIRED'
         | 'RENEWAL_FAILED'
-        | 'DEPLOYMENT_FAILED';
+        | 'DEPLOYMENT_FAILED'
+        | 'REVOKING'
+        | 'REVOKED'
+        | 'REVOCATION_FAILED';
     fingerprint?: string;
     serial_number?: string;
     domains: string[];
@@ -873,6 +876,10 @@ export interface Certificate {
     last_renewal_error?: string;
     last_published_at?: string;
     last_publish_error?: string;
+    revoked_at?: string;
+    revocation_reason?: number;
+    last_revocation_attempt_at?: string;
+    last_revocation_error?: string;
     created_at: string;
     updated_at?: string;
 }
@@ -896,7 +903,7 @@ export interface CreateACMECertificateRequest {
 export interface CertificateJob {
     id: string;
     certificate_id: string;
-    operation: 'ISSUE' | 'RENEW' | 'REISSUE' | 'REPUBLISH';
+    operation: 'ISSUE' | 'RENEW' | 'REISSUE' | 'REPUBLISH' | 'REVOKE';
     status: string;
     attempts: number;
     max_attempts: number;

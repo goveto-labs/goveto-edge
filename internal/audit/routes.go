@@ -75,6 +75,7 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/renew", "certificate.renew", "certificate", "certificate_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/reissue", "certificate.reissue", "certificate", "certificate_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/publish", "certificate.publish", "certificate", "certificate_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/certificates/:certificate_id/revoke", "certificate.revoke", "certificate", "certificate_id"},
 
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites", "site.create", "site", ""},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/sites/import", "site.import", "site", ""},

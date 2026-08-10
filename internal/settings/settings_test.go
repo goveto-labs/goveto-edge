@@ -2,9 +2,22 @@ package settings
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
+
+type testSecretRewrapper struct{}
+
+func (testSecretRewrapper) RewrapScoped(scope, value string) (string, bool, error) {
+	if scope != authProviderSecretScope("provider-1") {
+		return "", false, fmt.Errorf("unexpected scope %q", scope)
+	}
+	if value == "current" {
+		return value, false, nil
+	}
+	return "current", true, nil
+}
 
 func TestValidateAgentGatewayPublicAddress(t *testing.T) {
 	tests := []struct {
@@ -161,5 +174,24 @@ func TestAuthenticationProviderRejectsInvalidID(t *testing.T) {
 	config := AuthProviderConfig{ID: "bad/provider", Type: AuthProviderOIDC}
 	if err := config.NormalizeAndValidate(); err == nil {
 		t.Fatal("invalid provider ID was accepted")
+	}
+}
+
+func TestRewrapAuthProviderJSONPreservesProviderFields(t *testing.T) {
+	input := json.RawMessage(`[{"id":"provider-1","client_secret_encrypted":"legacy","future_field":{"enabled":true}},{"id":"provider-2"}]`)
+	encoded, changed, err := rewrapAuthProviderJSON(input, testSecretRewrapper{})
+	if err != nil || !changed {
+		t.Fatalf("rewrapAuthProviderJSON() changed=%v err=%v", changed, err)
+	}
+	var providers []map[string]json.RawMessage
+	if err = json.Unmarshal(encoded, &providers); err != nil {
+		t.Fatal(err)
+	}
+	if string(providers[0]["client_secret_encrypted"]) != `"current"` || string(providers[0]["future_field"]) != `{"enabled":true}` {
+		t.Fatalf("unexpected rewrapped providers: %s", encoded)
+	}
+	encodedAgain, changedAgain, err := rewrapAuthProviderJSON(encoded, testSecretRewrapper{})
+	if err != nil || changedAgain || string(encodedAgain) != string(encoded) {
+		t.Fatalf("current value was rewritten: changed=%v err=%v value=%s", changedAgain, err, encodedAgain)
 	}
 }

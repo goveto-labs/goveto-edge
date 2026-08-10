@@ -47,6 +47,7 @@ const (
 	CertificateOperationRENEW     CertificateOperation = "RENEW"
 	CertificateOperationREISSUE   CertificateOperation = "REISSUE"
 	CertificateOperationREPUBLISH CertificateOperation = "REPUBLISH"
+	CertificateOperationREVOKE    CertificateOperation = "REVOKE"
 )
 
 // ValidCertificateOperationValues returns all valid values for the CertificateOperation enum.
@@ -56,6 +57,7 @@ func ValidCertificateOperationValues() []CertificateOperation {
 		CertificateOperationRENEW,
 		CertificateOperationREISSUE,
 		CertificateOperationREPUBLISH,
+		CertificateOperationREVOKE,
 	}
 }
 
@@ -86,6 +88,9 @@ const (
 	CertificateStatusEXPIRED           CertificateStatus = "EXPIRED"
 	CertificateStatusRENEWAL_FAILED    CertificateStatus = "RENEWAL_FAILED"
 	CertificateStatusDEPLOYMENT_FAILED CertificateStatus = "DEPLOYMENT_FAILED"
+	CertificateStatusREVOKING          CertificateStatus = "REVOKING"
+	CertificateStatusREVOKED           CertificateStatus = "REVOKED"
+	CertificateStatusREVOCATION_FAILED CertificateStatus = "REVOCATION_FAILED"
 )
 
 // ValidCertificateStatusValues returns all valid values for the CertificateStatus enum.
@@ -98,6 +103,9 @@ func ValidCertificateStatusValues() []CertificateStatus {
 		CertificateStatusEXPIRED,
 		CertificateStatusRENEWAL_FAILED,
 		CertificateStatusDEPLOYMENT_FAILED,
+		CertificateStatusREVOKING,
+		CertificateStatusREVOKED,
+		CertificateStatusREVOCATION_FAILED,
 	}
 }
 

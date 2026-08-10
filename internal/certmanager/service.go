@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -30,6 +31,32 @@ import (
 
 const defaultACMEDirectory = "https://acme-v02.api.letsencrypt.org/directory"
 
+var ErrCertificateMustBeRevoked = errors.New("issued ACME certificate must be revoked before deletion")
+var ErrCertificateNotFound = errors.New("certificate not found")
+var ErrCertificateNotRevocable = errors.New("certificate cannot be revoked through ACME")
+var ErrCertificateAlreadyRevoked = errors.New("certificate has already been revoked")
+var ErrCertificateLifecycleBusy = errors.New("certificate already has an active lifecycle operation")
+
+var revocationReasons = map[string]int{
+	"UNSPECIFIED":            acme.ReasonUnspecified,
+	"KEY_COMPROMISE":         acme.ReasonKeyCompromise,
+	"CA_COMPROMISE":          acme.ReasonCACompromise,
+	"AFFILIATION_CHANGED":    acme.ReasonAffiliationChanged,
+	"SUPERSEDED":             acme.ReasonSuperseded,
+	"CESSATION_OF_OPERATION": acme.ReasonCessationOfOperation,
+	"CERTIFICATE_HOLD":       acme.ReasonCertificateHold,
+	"PRIVILEGE_WITHDRAWN":    acme.ReasonPrivilegeWithdrawn,
+	"AA_COMPROMISE":          acme.ReasonAACompromise,
+}
+
+func ParseRevocationReason(value string) (int, error) {
+	reason, ok := revocationReasons[strings.ToUpper(strings.TrimSpace(value))]
+	if !ok {
+		return 0, errors.New("invalid revocation reason")
+	}
+	return reason, nil
+}
+
 type Publisher interface {
 	Enqueue(context.Context, string) (*model.PublishJob, error)
 }
@@ -48,6 +75,44 @@ func New(db *client.Client, cipher *node.CredentialCipher, publisher Publisher) 
 
 func (s *Service) EncryptPrivateKey(clusterID, certificateID, privateKey string) (string, error) {
 	return EncryptPrivateKey(s.cipher, clusterID, certificateID, privateKey)
+}
+
+func (s *Service) RewrapSecrets(ctx context.Context) error {
+	certificates, err := s.db.Certificate.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	for index := range certificates {
+		if certificates[index].PrivateKeyEncrypted == "" {
+			continue
+		}
+		wrapped, changed, rewrapErr := RewrapPrivateKey(s.cipher, &certificates[index])
+		if rewrapErr != nil {
+			return fmt.Errorf("rewrap certificate %s: %w", certificates[index].Id, rewrapErr)
+		}
+		if changed {
+			if _, err = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificates[index].Id)).Set(query.Certificate.PrivateKeyEncrypted.Set(wrapped)).Do(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	accounts, err := s.db.ACMEAccount.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	for index := range accounts {
+		account := &accounts[index]
+		wrapped, changed, rewrapErr := s.cipher.RewrapScoped(accountScope(account.ClusterId, account.DirectoryUrl, account.Email), account.PrivateKeyEncrypted)
+		if rewrapErr != nil {
+			return fmt.Errorf("rewrap ACME account %s: %w", account.Id, rewrapErr)
+		}
+		if changed {
+			if _, err = s.db.ACMEAccount.Update().Where(query.ACMEAccount.Id.Equals(account.Id)).Set(query.ACMEAccount.PrivateKeyEncrypted.Set(wrapped)).Do(ctx); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) Run(ctx context.Context) {
@@ -74,19 +139,24 @@ func (s *Service) reconcileTerminalJobs(ctx context.Context) {
 	defer ticker.Stop()
 	for {
 		_, err := s.db.RawExec(ctx, `WITH latest AS (
-			SELECT DISTINCT ON (certificate_id) certificate_id, status, error FROM certificate_jobs
+			SELECT DISTINCT ON (certificate_id) certificate_id, operation, status, error FROM certificate_jobs
 			ORDER BY certificate_id, updated_at DESC
-		) UPDATE certificates c SET status=CASE WHEN j.status='CANCELLED' THEN
+		) UPDATE certificates c SET status=CASE WHEN j.operation='REVOKE' THEN
+			CASE WHEN c.revoked_at IS NOT NULL THEN 'REVOKED' ELSE 'REVOCATION_FAILED' END
+			WHEN j.status='CANCELLED' THEN
 			CASE WHEN c.expires_at IS NULL THEN 'PENDING'
 				WHEN c.expires_at<=NOW() THEN 'EXPIRED'
 				WHEN c.expires_at<=NOW()+(c.renew_before_days*INTERVAL '1 day') THEN 'EXPIRING'
 				ELSE c.status END
 			ELSE 'RENEWAL_FAILED' END,
-			last_renewal_error=CASE WHEN j.status='CANCELLED' THEN NULL
+			last_renewal_error=CASE WHEN j.operation='REVOKE' OR j.status='CANCELLED' THEN NULL
 				ELSE COALESCE(j.error, 'certificate lifecycle job ended without completing') END,
+			last_revocation_error=CASE WHEN j.operation='REVOKE' THEN
+				COALESCE(j.error, c.last_revocation_error, 'certificate revocation job ended without completing')
+				ELSE c.last_revocation_error END,
 			updated_at=NOW() FROM latest j WHERE c.id=j.certificate_id
 			AND j.status IN ('FAILED','DEAD_LETTER','CANCELLED')
-			AND c.status IN ('PENDING','DEPLOYING') AND NOT EXISTS (
+			AND c.status IN ('PENDING','DEPLOYING','REVOKING') AND NOT EXISTS (
 				SELECT 1 FROM certificate_jobs active WHERE active.certificate_id=c.id
 				AND active.status IN ('PENDING','RUNNING'))`)
 		if err != nil && ctx.Err() == nil {
@@ -120,6 +190,9 @@ func (s *Service) enqueue(ctx context.Context, certificateID string, operation m
 			return err
 		}
 		if active != nil {
+			if active.Operation != operation {
+				return fmt.Errorf("%w: active %s operation", ErrCertificateLifecycleBusy, active.Operation)
+			}
 			job = active
 			return nil
 		}
@@ -133,7 +206,74 @@ func (s *Service) enqueue(ctx context.Context, certificateID string, operation m
 	return job, created, err
 }
 
+func (s *Service) EnqueueRevocation(ctx context.Context, certificateID string, reason int) (*model.CertificateJob, error) {
+	var job *model.CertificateJob
+	err := s.db.Tx(ctx, func(tx *client.Client) error {
+		if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1))", "certificate-job:"+certificateID); err != nil {
+			return err
+		}
+		certificate, err := tx.Certificate.FindUnique(ctx, query.Certificate.Id.Equals(certificateID))
+		if err != nil {
+			return err
+		}
+		if certificate == nil {
+			return ErrCertificateNotFound
+		}
+		if certificate.Source != model.CertificateSourceACME || certificate.CertPem == nil {
+			return ErrCertificateNotRevocable
+		}
+		if certificate.RevokedAt != nil {
+			linked, err := tx.SiteCertificate.Query().Where(query.SiteCertificate.CertificateId.Equals(certificateID)).Count(ctx)
+			if err != nil {
+				return err
+			}
+			if linked == 0 {
+				return ErrCertificateAlreadyRevoked
+			}
+			// ACME revocation already landed but site cleanup did not; allow
+			// the idempotent re-entry below to finish removing the links.
+		}
+		active, err := tx.CertificateJob.Query().Where(
+			query.CertificateJob.CertificateId.Equals(certificateID),
+			query.CertificateJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
+		).OrderBy(query.CertificateJob.CreatedAt.Desc()).First(ctx)
+		if err != nil {
+			return err
+		}
+		if active != nil {
+			if active.Operation != model.CertificateOperationREVOKE {
+				return fmt.Errorf("%w: active %s operation", ErrCertificateLifecycleBusy, active.Operation)
+			}
+			job = active
+			return nil
+		}
+		if _, err = tx.Certificate.Update().Where(query.Certificate.Id.Equals(certificateID)).Set(
+			query.Certificate.RevocationReason.Set(reason),
+			query.Certificate.Status.Set(model.CertificateStatusREVOKING),
+			query.Certificate.LastRevocationError.SetNull(),
+		).Do(ctx); err != nil {
+			return err
+		}
+		job, err = tx.CertificateJob.Create().Set(
+			query.CertificateJob.CertificateId.Set(certificateID),
+			query.CertificateJob.Operation.Set(model.CertificateOperationREVOKE),
+		).Do(ctx)
+		return err
+	})
+	return job, err
+}
+
 func (s *Service) Delete(ctx context.Context, certificateID string) error {
+	certificate, err := s.db.Certificate.FindUnique(ctx, query.Certificate.Id.Equals(certificateID))
+	if err != nil {
+		return err
+	}
+	if certificate == nil {
+		return errors.New("certificate not found")
+	}
+	if certificate.Source == model.CertificateSourceACME && certificate.CertPem != nil && certificate.RevokedAt == nil {
+		return ErrCertificateMustBeRevoked
+	}
 	active, err := s.db.CertificateJob.Query().Where(
 		query.CertificateJob.CertificateId.Equals(certificateID),
 		query.CertificateJob.Status.In(model.JobStatusPENDING, model.JobStatusRUNNING),
@@ -225,6 +365,9 @@ func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error 
 	if job.Operation == model.CertificateOperationREPUBLISH {
 		return s.publishCertificate(ctx, certificate)
 	}
+	if job.Operation == model.CertificateOperationREVOKE {
+		return s.revokeCertificate(ctx, certificate)
+	}
 	if certificate.Source != model.CertificateSourceACME {
 		return errors.New("only ACME certificates can be issued or renewed")
 	}
@@ -252,6 +395,104 @@ func (s *Service) execute(ctx context.Context, job *model.CertificateJob) error 
 		return err
 	}
 	return nil
+}
+
+func (s *Service) revokeCertificate(ctx context.Context, certificate *model.Certificate) error {
+	if certificate.Source != model.CertificateSourceACME {
+		return errors.New("only ACME certificates can be revoked through ACME")
+	}
+	if certificate.CertPem == nil || strings.TrimSpace(*certificate.CertPem) == "" {
+		return errors.New("certificate material is unavailable")
+	}
+	reason := acme.ReasonUnspecified
+	if certificate.RevocationReason != nil {
+		reason = *certificate.RevocationReason
+	}
+	now := time.Now().UTC()
+	_, _ = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(
+		query.Certificate.Status.Set(model.CertificateStatusREVOKING),
+		query.Certificate.LastRevocationAttemptAt.Set(now),
+		query.Certificate.LastRevocationError.SetNull(),
+	).Do(ctx)
+
+	if certificate.RevokedAt == nil {
+		certificates, err := ParsePEMCertificates(*certificate.CertPem)
+		if err != nil {
+			return s.recordRevocationError(ctx, certificate.Id, err)
+		}
+		privateKeyPEM, err := DecryptPrivateKey(s.cipher, certificate)
+		if err != nil {
+			return s.recordRevocationError(ctx, certificate.Id, err)
+		}
+		pair, err := tls.X509KeyPair([]byte(*certificate.CertPem), []byte(privateKeyPEM))
+		if err != nil {
+			return s.recordRevocationError(ctx, certificate.Id, errors.New("certificate private key is invalid"))
+		}
+		signer, ok := pair.PrivateKey.(crypto.Signer)
+		if !ok {
+			return s.recordRevocationError(ctx, certificate.Id, errors.New("certificate private key cannot sign revocation request"))
+		}
+		directory := defaultACMEDirectory
+		if certificate.AcmeDirectoryUrl != nil && strings.TrimSpace(*certificate.AcmeDirectoryUrl) != "" {
+			directory = strings.TrimSpace(*certificate.AcmeDirectoryUrl)
+		}
+		err = revokeACMECertificate(ctx, directory, certificates[0], signer, reason)
+		if err != nil {
+			return s.recordRevocationError(ctx, certificate.Id, fmt.Errorf("revoke ACME certificate: %w", err))
+		}
+		certificate.RevokedAt = &now
+		_, err = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(
+			query.Certificate.Status.Set(model.CertificateStatusREVOKED),
+			query.Certificate.RevokedAt.Set(now),
+			query.Certificate.RevocationReason.Set(reason),
+			query.Certificate.AutoRenew.Set(false),
+			query.Certificate.LastRevocationError.SetNull(),
+		).Do(ctx)
+		if err != nil {
+			return err
+		}
+	}
+
+	links, err := s.db.SiteCertificate.Query().Where(query.SiteCertificate.CertificateId.Equals(certificate.Id)).Do(ctx)
+	if err != nil {
+		return s.recordRevocationError(ctx, certificate.Id, err)
+	}
+	jobs := make([]string, 0, len(links))
+	for _, link := range links {
+		job, enqueueErr := s.publisher.Enqueue(ctx, link.SiteId)
+		if enqueueErr != nil {
+			return s.recordRevocationError(ctx, certificate.Id, enqueueErr)
+		}
+		jobs = append(jobs, job.Id)
+	}
+	if err = s.waitPublishJobs(ctx, jobs, 5*time.Minute); err != nil {
+		return s.recordRevocationError(ctx, certificate.Id, fmt.Errorf("remove revoked certificate from sites: %w", err))
+	}
+	if _, err = s.db.SiteCertificate.Delete().Where(query.SiteCertificate.CertificateId.Equals(certificate.Id)).DoMany(ctx); err != nil {
+		return s.recordRevocationError(ctx, certificate.Id, err)
+	}
+	_, err = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(
+		query.Certificate.Status.Set(model.CertificateStatusREVOKED),
+		query.Certificate.LastRevocationError.SetNull(),
+	).Do(ctx)
+	return err
+}
+
+func revokeACMECertificate(ctx context.Context, directory string, certificate *x509.Certificate, key crypto.Signer, reason int) error {
+	client := acme.Client{Directory: directory}
+	err := client.RevokeCertificate(ctx, acme.Account{}, certificate, key, reason)
+	var problem acme.Problem
+	if errors.As(err, &problem) && problem.Type == acme.ProblemTypeAlreadyRevoked {
+		return nil
+	}
+	return err
+}
+
+func (s *Service) recordRevocationError(ctx context.Context, certificateID string, err error) error {
+	_, _ = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificateID)).Set(
+		query.Certificate.LastRevocationError.Set(err.Error()),
+	).Do(ctx)
+	return err
 }
 
 func (s *Service) StoreManual(ctx context.Context, certificate *model.Certificate, material Material) error {
@@ -388,6 +629,9 @@ func (s *Service) reconcileLifecycle(ctx context.Context) {
 	now := time.Now().UTC()
 	for index := range items {
 		certificate := &items[index]
+		if certificate.RevokedAt != nil || certificate.Status == model.CertificateStatusREVOKED || certificate.Status == model.CertificateStatusREVOKING || certificate.Status == model.CertificateStatusREVOCATION_FAILED {
+			continue
+		}
 		status := statusAt(certificate.ExpiresAt, certificate.RenewBeforeDays, now)
 		if certificate.Status != model.CertificateStatusRENEWAL_FAILED && certificate.Status != model.CertificateStatusDEPLOYMENT_FAILED && certificate.Status != model.CertificateStatusPENDING && certificate.Status != model.CertificateStatusDEPLOYING && certificate.Status != status {
 			_, _ = s.db.Certificate.Update().Where(query.Certificate.Id.Equals(certificate.Id)).Set(query.Certificate.Status.Set(status)).Do(ctx)

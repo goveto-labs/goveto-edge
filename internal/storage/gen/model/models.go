@@ -84,36 +84,40 @@ type AuditLog struct {
 
 // Certificate represents the Certificate model.
 type Certificate struct {
-	Id                   string             `db:"id" json:"id"`
-	ClusterId            string             `db:"cluster_id" json:"clusterId"`
-	Name                 string             `db:"name" json:"name"`
-	Source               CertificateSource  `db:"source" json:"source"`
-	Status               CertificateStatus  `db:"status" json:"status"`
-	CertPem              *string            `db:"cert_pem" json:"certPem"`
-	PrivateKeyEncrypted  string             `db:"private_key_encrypted" json:"privateKeyEncrypted"`
-	Fingerprint          *string            `db:"fingerprint" json:"fingerprint"`
-	SerialNumber         *string            `db:"serial_number" json:"serialNumber"`
-	DomainsJson          json.RawMessage    `db:"domains_json" json:"domainsJson"`
-	NotBefore            *time.Time         `db:"not_before" json:"notBefore"`
-	ExpiresAt            *time.Time         `db:"expires_at" json:"expiresAt"`
-	Issuer               *string            `db:"issuer" json:"issuer"`
-	KeyAlgorithm         *string            `db:"key_algorithm" json:"keyAlgorithm"`
-	AcmeDirectoryUrl     *string            `db:"acme_directory_url" json:"acmeDirectoryUrl"`
-	AcmeEmail            *string            `db:"acme_email" json:"acmeEmail"`
-	AcmeChallengeType    *ACMEChallengeType `db:"acme_challenge_type" json:"acmeChallengeType"`
-	AutoRenew            bool               `db:"auto_renew" json:"autoRenew"`
-	RenewBeforeDays      int                `db:"renew_before_days" json:"renewBeforeDays"`
-	LastIssuedAt         *time.Time         `db:"last_issued_at" json:"lastIssuedAt"`
-	LastRenewalAttemptAt *time.Time         `db:"last_renewal_attempt_at" json:"lastRenewalAttemptAt"`
-	LastRenewalError     *string            `db:"last_renewal_error" json:"lastRenewalError"`
-	LastPublishedAt      *time.Time         `db:"last_published_at" json:"lastPublishedAt"`
-	LastPublishError     *string            `db:"last_publish_error" json:"lastPublishError"`
-	CreatedAt            time.Time          `db:"created_at" json:"createdAt"`
-	UpdatedAt            time.Time          `db:"updated_at" json:"updatedAt"`
-	Cluster              *Cluster           `db:"-" json:"cluster,omitempty"`
-	Sites                []*SiteCertificate `db:"-" json:"sites,omitempty"`
-	Jobs                 []*CertificateJob  `db:"-" json:"jobs,omitempty"`
-	Challenges           []*ACMEChallenge   `db:"-" json:"challenges,omitempty"`
+	Id                      string             `db:"id" json:"id"`
+	ClusterId               string             `db:"cluster_id" json:"clusterId"`
+	Name                    string             `db:"name" json:"name"`
+	Source                  CertificateSource  `db:"source" json:"source"`
+	Status                  CertificateStatus  `db:"status" json:"status"`
+	CertPem                 *string            `db:"cert_pem" json:"certPem"`
+	PrivateKeyEncrypted     string             `db:"private_key_encrypted" json:"privateKeyEncrypted"`
+	Fingerprint             *string            `db:"fingerprint" json:"fingerprint"`
+	SerialNumber            *string            `db:"serial_number" json:"serialNumber"`
+	DomainsJson             json.RawMessage    `db:"domains_json" json:"domainsJson"`
+	NotBefore               *time.Time         `db:"not_before" json:"notBefore"`
+	ExpiresAt               *time.Time         `db:"expires_at" json:"expiresAt"`
+	Issuer                  *string            `db:"issuer" json:"issuer"`
+	KeyAlgorithm            *string            `db:"key_algorithm" json:"keyAlgorithm"`
+	AcmeDirectoryUrl        *string            `db:"acme_directory_url" json:"acmeDirectoryUrl"`
+	AcmeEmail               *string            `db:"acme_email" json:"acmeEmail"`
+	AcmeChallengeType       *ACMEChallengeType `db:"acme_challenge_type" json:"acmeChallengeType"`
+	AutoRenew               bool               `db:"auto_renew" json:"autoRenew"`
+	RenewBeforeDays         int                `db:"renew_before_days" json:"renewBeforeDays"`
+	LastIssuedAt            *time.Time         `db:"last_issued_at" json:"lastIssuedAt"`
+	LastRenewalAttemptAt    *time.Time         `db:"last_renewal_attempt_at" json:"lastRenewalAttemptAt"`
+	LastRenewalError        *string            `db:"last_renewal_error" json:"lastRenewalError"`
+	LastPublishedAt         *time.Time         `db:"last_published_at" json:"lastPublishedAt"`
+	LastPublishError        *string            `db:"last_publish_error" json:"lastPublishError"`
+	RevokedAt               *time.Time         `db:"revoked_at" json:"revokedAt"`
+	RevocationReason        *int               `db:"revocation_reason" json:"revocationReason"`
+	LastRevocationAttemptAt *time.Time         `db:"last_revocation_attempt_at" json:"lastRevocationAttemptAt"`
+	LastRevocationError     *string            `db:"last_revocation_error" json:"lastRevocationError"`
+	CreatedAt               time.Time          `db:"created_at" json:"createdAt"`
+	UpdatedAt               time.Time          `db:"updated_at" json:"updatedAt"`
+	Cluster                 *Cluster           `db:"-" json:"cluster,omitempty"`
+	Sites                   []*SiteCertificate `db:"-" json:"sites,omitempty"`
+	Jobs                    []*CertificateJob  `db:"-" json:"jobs,omitempty"`
+	Challenges              []*ACMEChallenge   `db:"-" json:"challenges,omitempty"`
 }
 
 // CertificateJob represents the CertificateJob model.

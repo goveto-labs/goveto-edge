@@ -24,6 +24,7 @@ import (
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi"
+	clusterapi "goveto-edge/internal/httpapi/clusters"
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/jobretention"
 	"goveto-edge/internal/node"
@@ -118,14 +119,39 @@ func main() {
 		os.Exit(1)
 	}
 
-	credentialCipher, err := node.NewCredentialCipher(cfg.NodeCredentialMasterKey)
+	credentialCipher, err := node.NewCredentialCipherKeyring(cfg.NodeCredentialMasterKey, cfg.NodeCredentialPreviousKeys...)
 	if err != nil {
 		slog.Error("initialize node credential encryption", "error", err)
 		os.Exit(1)
 	}
-	authority, err := edgecontrol.NewAuthority(credentialCipher, agentGatewayPublicAddress)
+	certificatePreviousKeys := append(append([]string(nil), cfg.CertificatePreviousKeys...), cfg.NodeCredentialMasterKey)
+	certificatePreviousKeys = append(certificatePreviousKeys, cfg.NodeCredentialPreviousKeys...)
+	certificateCipher, err := node.NewCredentialCipherKeyring(cfg.CertificateMasterKey, certificatePreviousKeys...)
+	if err != nil {
+		slog.Error("initialize certificate encryption", "error", err)
+		os.Exit(1)
+	}
+	dnsPreviousKeys := append(append([]string(nil), cfg.DNSCredentialPreviousKeys...), cfg.NodeCredentialMasterKey)
+	dnsPreviousKeys = append(dnsPreviousKeys, cfg.NodeCredentialPreviousKeys...)
+	dnsCipher, err := node.NewCredentialCipherKeyring(cfg.DNSCredentialMasterKey, dnsPreviousKeys...)
+	if err != nil {
+		slog.Error("initialize DNS credential encryption", "error", err)
+		os.Exit(1)
+	}
+	notificationPreviousKeys := append(append([]string(nil), cfg.NotificationPreviousKeys...), cfg.NodeCredentialMasterKey)
+	notificationPreviousKeys = append(notificationPreviousKeys, cfg.NodeCredentialPreviousKeys...)
+	notificationCipher, err := node.NewCredentialCipherKeyring(cfg.NotificationMasterKey, notificationPreviousKeys...)
+	if err != nil {
+		slog.Error("initialize notification credential encryption", "error", err)
+		os.Exit(1)
+	}
+	authority, err := edgecontrol.NewAuthorityWithCAKey(cfg.AgentCAMasterKey, agentGatewayPublicAddress)
 	if err != nil {
 		slog.Error("initialize agent certificate authority", "error", err)
+		os.Exit(1)
+	}
+	if err = edgecontrol.PinAgentCA(cfg.DataDir, authority, cfg.AgentCAMasterKeyPinned); err != nil {
+		slog.Error("agent certificate authority identity check failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -171,7 +197,7 @@ func main() {
 	}
 
 	var publishService *publisher.Service
-	dnsService := dnssync.New(orm, credentialCipher)
+	dnsService := dnssync.New(orm, dnsCipher)
 	var consumeAgentLogs edgecontrol.LogConsumer = analyticsIngest.Consume
 	onNodeStatusChange := func(callbackCtx context.Context, clusterID string) {
 		callbackCtx = context.WithoutCancel(callbackCtx)
@@ -207,16 +233,40 @@ func main() {
 		consumeAgentLogs,
 		onNodeStatusChange,
 	)
-	publishService = publisher.New(orm, credentialCipher, gateway)
+	publishService = publisher.NewWithCiphers(orm, certificateCipher, credentialCipher, gateway)
 	gateway.ConfigureGeoIP(cfg.GeoIPDatabasePath, cfg.GeoIPDatabasePollInterval, func(callbackCtx context.Context) error {
 		if publishService != nil {
 			return publishService.EnqueueAll(context.WithoutCancel(callbackCtx))
 		}
 		return nil
 	})
+	certificateService := certmanager.New(orm, certificateCipher, publishService)
+	rewrapSkip, _ := strconv.ParseBool(strings.TrimSpace(os.Getenv("NODE_REWRAP_SKIP")))
+	rewrapCtx, cancelRewrap := context.WithTimeout(ctx, 2*time.Minute)
+	if rewrapSkip {
+		slog.Warn("skipping startup secret rewrap because NODE_REWRAP_SKIP is set; secrets encrypted with unavailable keys will fail when accessed")
+		err = nil
+	} else {
+		if err = node.RewrapStoredSecrets(rewrapCtx, orm, credentialCipher); err == nil {
+			err = settingStore.RewrapAuthProviderSecrets(rewrapCtx, credentialCipher)
+		}
+		if err == nil {
+			err = dnsService.RewrapSecrets(rewrapCtx)
+		}
+		if err == nil {
+			err = clusterapi.RewrapNotificationSecrets(rewrapCtx, orm, notificationCipher)
+		}
+		if err == nil {
+			err = certificateService.RewrapSecrets(rewrapCtx)
+		}
+	}
+	cancelRewrap()
+	if err != nil {
+		slog.Error("rewrap encrypted secrets", "error", err)
+		os.Exit(1)
+	}
 	go gateway.Run(ctx)
 	go publishService.Run(ctx)
-	certificateService := certmanager.New(orm, credentialCipher, publishService)
 	go certificateService.Run(ctx)
 
 	purgeService := purge.New(orm, gateway)
@@ -270,7 +320,7 @@ func main() {
 			db,
 			orm,
 			sessions,
-			credentialCipher,
+			httpapi.SecretCiphers{General: credentialCipher, DNS: dnsCipher, Notification: notificationCipher},
 			authority,
 			gateway,
 			installQueue,

@@ -4298,7 +4298,7 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 
 func quotedCertificateTable(c *Client) string { return c.quoteIdentifier("certificates") }
 func quotedCertificateColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "revoked_at", "revocation_reason", "last_revocation_attempt_at", "last_revocation_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -4354,6 +4354,14 @@ func quoteCertificateField(c *Client, field string) (string, error) {
 	case "last_published_at":
 		return c.quoteIdentifier(field), nil
 	case "last_publish_error":
+		return c.quoteIdentifier(field), nil
+	case "revoked_at":
+		return c.quoteIdentifier(field), nil
+	case "revocation_reason":
+		return c.quoteIdentifier(field), nil
+	case "last_revocation_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "last_revocation_error":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -4568,14 +4576,14 @@ func (b CertificateCreateManyBuilder) DoReturning(ctx context.Context) ([]model.
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"})
+		q, args := b.action.buildCertificateCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "revoked_at", "revocation_reason", "last_revocation_attempt_at", "last_revocation_error", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Certificate
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Certificate.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -4602,7 +4610,7 @@ func (b CertificateCreateManyBuilder) DoReturningValues(ctx context.Context) ([]
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "revoked_at", "revocation_reason", "last_revocation_attempt_at", "last_revocation_error", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -4854,7 +4862,7 @@ func (a CertificateActions) FindMany(ctx context.Context, opts ...query.Certific
 	var results []model.Certificate
 	for rows.Next() {
 		var item model.Certificate
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -4886,7 +4894,7 @@ func (a CertificateActions) FindUnique(ctx context.Context, where query.Certific
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Certificate
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -4917,7 +4925,7 @@ func (a CertificateActions) CreateOne(ctx context.Context, sets ...query.Certifi
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -4936,7 +4944,7 @@ func (a CertificateActions) CreateMany(ctx context.Context, data []query.Certifi
 }
 
 func (a CertificateActions) buildCertificateCreateManySQL(data []query.CertificateCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "source", "status", "cert_pem", "private_key_encrypted", "fingerprint", "serial_number", "domains_json", "not_before", "expires_at", "issuer", "key_algorithm", "acme_directory_url", "acme_email", "acme_challenge_type", "auto_renew", "renew_before_days", "last_issued_at", "last_renewal_attempt_at", "last_renewal_error", "last_published_at", "last_publish_error", "revoked_at", "revocation_reason", "last_revocation_attempt_at", "last_revocation_error", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -5009,7 +5017,7 @@ func (a CertificateActions) UpdateOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -5114,7 +5122,7 @@ func (a CertificateActions) UpsertOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Certificate.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -5138,7 +5146,7 @@ func (a CertificateActions) DeleteOne(ctx context.Context, where query.Certifica
 		q += " RETURNING " + quotedCertificateColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Certificate
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Source, &item.Status, &item.CertPem, &item.PrivateKeyEncrypted, &item.Fingerprint, &item.SerialNumber, &item.DomainsJson, &item.NotBefore, &item.ExpiresAt, &item.Issuer, &item.KeyAlgorithm, &item.AcmeDirectoryUrl, &item.AcmeEmail, &item.AcmeChallengeType, &item.AutoRenew, &item.RenewBeforeDays, &item.LastIssuedAt, &item.LastRenewalAttemptAt, &item.LastRenewalError, &item.LastPublishedAt, &item.LastPublishError, &item.RevokedAt, &item.RevocationReason, &item.LastRevocationAttemptAt, &item.LastRevocationError, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

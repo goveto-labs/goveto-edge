@@ -23,9 +23,11 @@ func TestOperationAllowed(t *testing.T) {
 		{"renew acme", model.CertificateSourceACME, model.CertificateOperationRENEW, true},
 		{"reissue acme", model.CertificateSourceACME, model.CertificateOperationREISSUE, true},
 		{"republish acme", model.CertificateSourceACME, model.CertificateOperationREPUBLISH, true},
+		{"revoke acme", model.CertificateSourceACME, model.CertificateOperationREVOKE, true},
 		{"renew manual rejected", model.CertificateSourceMANUAL, model.CertificateOperationRENEW, false},
 		{"reissue manual rejected", model.CertificateSourceMANUAL, model.CertificateOperationREISSUE, false},
 		{"republish manual", model.CertificateSourceMANUAL, model.CertificateOperationREPUBLISH, true},
+		{"revoke manual rejected", model.CertificateSourceMANUAL, model.CertificateOperationREVOKE, false},
 		{"issue manual", model.CertificateSourceMANUAL, model.CertificateOperationISSUE, true},
 	}
 	for _, test := range tests {

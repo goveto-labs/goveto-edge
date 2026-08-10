@@ -38,11 +38,17 @@ import (
 	"goveto-edge/internal/storage/gen/client"
 )
 
+type SecretCiphers struct {
+	General      *node.CredentialCipher
+	DNS          *node.CredentialCipher
+	Notification *node.CredentialCipher
+}
+
 func New(
 	db *sql.DB,
 	orm *client.Client,
 	sessions *auth.SessionStore,
-	credentialCipher *node.CredentialCipher,
+	secretCiphers SecretCiphers,
 	authority *edgecontrol.Authority,
 	gateway *edgecontrol.Gateway,
 	installQueue *node.InstallQueue,
@@ -81,12 +87,12 @@ func New(
 
 	health.Register(e, db, analyticsData)
 	initialization.Register(e, orm, settingStore, limiter)
-	authapi.Register(e, orm, sessions, settingStore, credentialCipher, captchaVerifier, limiter)
-	adminsettings.Register(e, orm, settingStore, credentialCipher, restartControlPlane)
-	clusters.Register(e, orm, sessions, credentialCipher)
+	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, captchaVerifier, limiter)
+	adminsettings.Register(e, orm, settingStore, secretCiphers.General, restartControlPlane)
+	clusters.Register(e, orm, sessions, secretCiphers.Notification)
 	certificates.Register(e, orm, certificateService)
-	dnsapi.Register(e, orm, credentialCipher, dnsService)
-	nodes.Register(e, orm, installQueue, credentialCipher, authority, gateway, dnsService)
+	dnsapi.Register(e, orm, secretCiphers.DNS, dnsService)
+	nodes.Register(e, orm, installQueue, secretCiphers.General, authority, gateway, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	jobsapi.Register(e, orm, publishService)

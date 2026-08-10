@@ -3,14 +3,20 @@ package edgecontrol
 import (
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -40,12 +46,27 @@ type Authority struct {
 }
 
 func NewAuthority(cipher *node.CredentialCipher, gatewayAddress string) (*Authority, error) {
+	return newAuthority(cipher.Derive("goveto-edge/agent-mtls/ca/v1")[:ed25519.SeedSize], gatewayAddress)
+}
+
+// NewAuthorityWithCAKey builds the Agent PKI from an independently managed CA
+// seed. Existing installations should initialize this key with the legacy
+// derived seed before rotating the shared credential master key.
+func NewAuthorityWithCAKey(encodedKey, gatewayAddress string) (*Authority, error) {
+	seed, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil || len(seed) != ed25519.SeedSize {
+		return nil, errors.New("agent CA master key must be base64-encoded 32 bytes")
+	}
+	return newAuthority(seed, gatewayAddress)
+}
+
+func newAuthority(caSeed []byte, gatewayAddress string) (*Authority, error) {
 	host, _, err := net.SplitHostPort(gatewayAddress)
 	if err != nil || strings.TrimSpace(host) == "" {
 		return nil, fmt.Errorf("agent gateway public address must be host:port: %w", err)
 	}
 
-	caKey := ed25519.NewKeyFromSeed(cipher.Derive("goveto-edge/agent-mtls/ca/v1")[:ed25519.SeedSize])
+	caKey := ed25519.NewKeyFromSeed(caSeed)
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{CommonName: "Goveto Edge Agent CA"},
@@ -65,7 +86,8 @@ func NewAuthority(cipher *node.CredentialCipher, gatewayAddress string) (*Author
 	}
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 
-	serverKey := ed25519.NewKeyFromSeed(cipher.Derive("goveto-edge/agent-mtls/server/v1\x00" + host)[:ed25519.SeedSize])
+	serverSeed := sha256.Sum256(append(append([]byte(nil), caSeed...), []byte("goveto-edge/agent-mtls/server/v2\x00"+host)...))
+	serverKey := ed25519.NewKeyFromSeed(serverSeed[:])
 	serverTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: host},
@@ -172,6 +194,51 @@ func (a *Authority) issue(nodeID string, publicKey any) (string, string, time.Ti
 		return "", "", time.Time{}, err
 	}
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})), serialNumber.Text(16), notAfter, nil
+}
+
+// CAFingerprint returns a short, stable identifier for the agent CA certificate
+// so callers can detect that the CA identity changed across restarts.
+func (a *Authority) CAFingerprint() string {
+	sum := sha256.Sum256(a.ca.Raw)
+	return hex.EncodeToString(sum[:8])
+}
+
+// PinAgentCA records the agent CA fingerprint in dataDir and fails when the CA
+// identity changed since the last successful boot. Rotating the agent CA
+// invalidates every issued agent mTLS credential, so when the CA key is not
+// explicitly pinned via AGENT_CA_MASTER_KEY (i.e. it is derived from the shared
+// credential master key) a changed fingerprint is treated as an accidental
+// rotation and the process refuses to start. When pinned is true a deliberate
+// rotation is allowed and the recorded fingerprint is updated after warning
+// that existing agent credentials must be re-issued.
+func PinAgentCA(dataDir string, authority *Authority, pinned bool) error {
+	secretsDir := filepath.Join(dataDir, "secrets")
+	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+		return fmt.Errorf("create secrets directory: %w", err)
+	}
+	path := filepath.Join(secretsDir, "agent-ca-fingerprint")
+	current := authority.CAFingerprint()
+	stored, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read agent CA fingerprint: %w", err)
+	}
+	if len(strings.TrimSpace(string(stored))) == 0 {
+		if err = os.WriteFile(path, []byte(current+"\n"), 0600); err != nil {
+			return fmt.Errorf("record agent CA fingerprint: %w", err)
+		}
+		return nil
+	}
+	if strings.TrimSpace(string(stored)) == current {
+		return nil
+	}
+	if !pinned {
+		return errors.New("agent certificate authority identity changed because the credential master key changed; pin the CA with AGENT_CA_MASTER_KEY or restore the previous master key to avoid invalidating every issued agent credential")
+	}
+	slog.Warn("agent certificate authority rotated via AGENT_CA_MASTER_KEY; existing agent credentials must be re-issued")
+	if err = os.WriteFile(path, []byte(current+"\n"), 0600); err != nil {
+		return fmt.Errorf("update agent CA fingerprint: %w", err)
+	}
+	return nil
 }
 
 func CertificateNodeID(certificate *x509.Certificate) string {

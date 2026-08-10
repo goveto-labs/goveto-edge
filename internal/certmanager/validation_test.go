@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
@@ -22,6 +23,22 @@ func TestCertificateRetryDelayUsesMinuteScale(t *testing.T) {
 	}
 	if got := certificateRetryDelay(4); got != 16*time.Minute {
 		t.Fatalf("fourth retry delay = %s", got)
+	}
+}
+
+func TestParseRevocationReason(t *testing.T) {
+	for input, want := range map[string]int{
+		"key_compromise": 1,
+		"SUPERSEDED":     4,
+		"unspecified":    0,
+	} {
+		got, err := ParseRevocationReason(input)
+		if err != nil || got != want {
+			t.Fatalf("ParseRevocationReason(%q) = %d, %v, want %d", input, got, err, want)
+		}
+	}
+	if _, err := ParseRevocationReason("delete_it"); err == nil {
+		t.Fatal("invalid revocation reason was accepted")
 	}
 }
 
@@ -68,6 +85,34 @@ func TestPrivateKeyEnvelopeIsScoped(t *testing.T) {
 	certificate.ClusterId = "cluster-b"
 	if _, err = DecryptPrivateKey(cipher, certificate); err == nil {
 		t.Fatal("ciphertext decrypted in another cluster scope")
+	}
+}
+
+func TestRewrapPrivateKeyUpgradesLegacyEnvelope(t *testing.T) {
+	oldKey := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	newKey := base64.StdEncoding.EncodeToString([]byte("abcdef0123456789abcdef0123456789"))
+	oldCipher, err := node.NewCredentialCipher(oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encrypted, err := EncryptPrivateKey(oldCipher, "cluster-a", "cert-a", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := legacyPrivateKeyEnvelope + strings.TrimPrefix(encrypted, "enc:v2:"+oldCipher.KeyID()+":")
+	rotated, err := node.NewCredentialCipherKeyring(newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := &model.Certificate{Id: "cert-a", ClusterId: "cluster-a", PrivateKeyEncrypted: legacy}
+	rewrapped, changed, err := RewrapPrivateKey(rotated, certificate)
+	if err != nil || !changed || !rotated.IsCurrent(rewrapped) {
+		t.Fatalf("RewrapPrivateKey() = %q, %v, %v", rewrapped, changed, err)
+	}
+	certificate.PrivateKeyEncrypted = rewrapped
+	plain, err := DecryptPrivateKey(rotated, certificate)
+	if err != nil || plain != "secret" {
+		t.Fatalf("DecryptPrivateKey() = %q, %v", plain, err)
 	}
 }
 

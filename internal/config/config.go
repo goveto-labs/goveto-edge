@@ -2,11 +2,15 @@
 package config
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,6 +50,15 @@ type Config struct {
 	AnalyticsArchiveS3SecretKey    string
 	AnalyticsArchiveS3SessionToken string
 	NodeCredentialMasterKey        string
+	NodeCredentialPreviousKeys     []string
+	CertificateMasterKey           string
+	CertificatePreviousKeys        []string
+	DNSCredentialMasterKey         string
+	DNSCredentialPreviousKeys      []string
+	NotificationMasterKey          string
+	NotificationPreviousKeys       []string
+	AgentCAMasterKey               string
+	AgentCAMasterKeyPinned         bool
 	DataDir                        string
 	SessionCookieName              string
 	SessionTTL                     time.Duration
@@ -221,15 +234,124 @@ func Load() (Config, error) {
 			return Config{}, errors.New("S3 analytics archive requires bucket, region, access key, and secret key")
 		}
 	}
-	if configuredMasterKey := strings.TrimSpace(os.Getenv("NODE_CREDENTIAL_MASTER_KEY")); configuredMasterKey != "" {
-		cfg.NodeCredentialMasterKey, err = validateMasterKey(configuredMasterKey, "NODE_CREDENTIAL_MASTER_KEY")
+	configuredMasterKey, externallyConfigured, configuredErr := configuredKey("NODE_CREDENTIAL_MASTER_KEY")
+	if configuredErr != nil {
+		return Config{}, configuredErr
+	}
+	if externallyConfigured {
+		cfg.NodeCredentialMasterKey = configuredMasterKey
 	} else {
 		cfg.NodeCredentialMasterKey, err = loadOrCreateMasterKey(cfg.DataDir)
 	}
 	if err != nil {
 		return Config{}, err
 	}
+	if cfg.NodeCredentialPreviousKeys, err = previousMasterKeys("NODE_CREDENTIAL_PREVIOUS_KEYS"); err != nil {
+		return Config{}, err
+	}
+	persistPurposeKeys := !externallyConfigured
+	if cfg.CertificateMasterKey, err = purposeMasterKey(cfg.DataDir, "CERTIFICATE_MASTER_KEY", "certificate-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/certificate/v1", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	if cfg.CertificatePreviousKeys, err = purposePreviousKeys("CERTIFICATE_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/certificate/v1"); err != nil {
+		return Config{}, err
+	}
+	if cfg.DNSCredentialMasterKey, err = purposeMasterKey(cfg.DataDir, "DNS_CREDENTIAL_MASTER_KEY", "dns-credential-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/dns/v1", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	if cfg.DNSCredentialPreviousKeys, err = purposePreviousKeys("DNS_CREDENTIAL_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/dns/v1"); err != nil {
+		return Config{}, err
+	}
+	if cfg.NotificationMasterKey, err = purposeMasterKey(cfg.DataDir, "NOTIFICATION_MASTER_KEY", "notification-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/notification/v1", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	if cfg.NotificationPreviousKeys, err = purposePreviousKeys("NOTIFICATION_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/notification/v1"); err != nil {
+		return Config{}, err
+	}
+	legacyCAKey := deriveEncodedMasterKey(cfg.NodeCredentialMasterKey, "goveto-edge/agent-mtls/ca/v1")
+	if cfg.AgentCAMasterKey, err = purposeMasterKey(cfg.DataDir, "AGENT_CA_MASTER_KEY", "agent-ca-master.key", legacyCAKey, "", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	cfg.AgentCAMasterKeyPinned = keyConfigured("AGENT_CA_MASTER_KEY")
 	return cfg, nil
+}
+
+func purposeMasterKey(dataDir, envName, fileName, rootKey, label string, persist bool) (string, error) {
+	if configured, ok, err := configuredKey(envName); err != nil {
+		return "", err
+	} else if ok {
+		return configured, nil
+	}
+	derived := rootKey
+	if label != "" {
+		derived = deriveEncodedMasterKey(rootKey, label)
+	}
+	if !persist {
+		return derived, nil
+	}
+	return loadOrMigrateNamedMasterKey(dataDir, fileName, derived, keyFingerprint(rootKey))
+}
+
+func configuredKey(envName string) (string, bool, error) {
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		key, err := validateMasterKey(value, envName)
+		return key, true, err
+	}
+	fileName := strings.TrimSpace(os.Getenv(envName + "_FILE"))
+	if fileName == "" {
+		return "", false, nil
+	}
+	value, err := os.ReadFile(fileName)
+	if err != nil {
+		return "", false, fmt.Errorf("read %s_FILE: %w", envName, err)
+	}
+	key, err := validateMasterKey(strings.TrimSpace(string(value)), envName+"_FILE")
+	return key, true, err
+}
+
+func purposePreviousKeys(envName string, rootPrevious []string, label string) ([]string, error) {
+	explicit, err := previousMasterKeys(envName)
+	if err != nil {
+		return nil, err
+	}
+	for _, previous := range rootPrevious {
+		explicit = append(explicit, deriveEncodedMasterKey(previous, label))
+	}
+	return explicit, nil
+}
+
+func previousMasterKeys(envName string) ([]string, error) {
+	value := strings.TrimSpace(os.Getenv(envName))
+	if value == "" {
+		fileName := strings.TrimSpace(os.Getenv(envName + "_FILE"))
+		if fileName != "" {
+			contents, err := os.ReadFile(fileName)
+			if err != nil {
+				return nil, fmt.Errorf("read %s_FILE: %w", envName, err)
+			}
+			value = strings.TrimSpace(string(contents))
+		}
+	}
+	if value == "" {
+		return nil, nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for index, part := range parts {
+		key, err := validateMasterKey(strings.TrimSpace(part), fmt.Sprintf("%s[%d]", envName, index))
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, key)
+	}
+	return result, nil
+}
+
+func deriveEncodedMasterKey(encodedRoot, label string) string {
+	root, _ := base64.StdEncoding.DecodeString(encodedRoot)
+	mac := hmac.New(sha256.New, root)
+	_, _ = io.WriteString(mac, label)
+	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
 }
 
 func envBool(key string, fallback bool) bool {
@@ -253,17 +375,21 @@ func (c Config) AgentGatewayAddress() string {
 }
 
 func loadOrCreateMasterKey(dataDir string) (string, error) {
-	path := filepath.Join(dataDir, "secrets", "node-credential-master.key")
+	return loadOrCreateNamedMasterKey(dataDir, "node-credential-master.key", "")
+}
+
+func loadOrCreateNamedMasterKey(dataDir, fileName, initialValue string) (string, error) {
+	path := filepath.Join(dataDir, "secrets", fileName)
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return "", fmt.Errorf("create secrets directory: %w", err)
 	}
 	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return "", fmt.Errorf("open node credential master key lock: %w", err)
+		return "", fmt.Errorf("open master key lock: %w", err)
 	}
 	defer lock.Close()
 	if err := unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
-		return "", fmt.Errorf("lock node credential master key: %w", err)
+		return "", fmt.Errorf("lock master key: %w", err)
 	}
 	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
 
@@ -272,15 +398,101 @@ func loadOrCreateMasterKey(dataDir string) (string, error) {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", err
 	}
-	raw := make([]byte, 32)
-	if _, err := rand.Read(raw); err != nil {
-		return "", fmt.Errorf("generate node credential master key: %w", err)
+	encoded := initialValue
+	if encoded == "" {
+		raw := make([]byte, 32)
+		if _, err := rand.Read(raw); err != nil {
+			return "", fmt.Errorf("generate master key: %w", err)
+		}
+		encoded = base64.StdEncoding.EncodeToString(raw)
 	}
-	encoded := base64.StdEncoding.EncodeToString(raw)
 	if err := writeMasterKeyAtomically(path, encoded, (*os.File).Write); err != nil {
-		return "", fmt.Errorf("persist node credential master key: %w", err)
+		return "", fmt.Errorf("persist master key: %w", err)
 	}
 	return encoded, nil
+}
+
+// loadOrMigrateNamedMasterKey persists a purpose-specific master key that is a
+// deterministic function of rootKey (the certificate, DNS, notification and
+// agent CA purpose keys). Unlike the shared root key these values must be
+// re-derived and overwritten when the root key rotates; otherwise callers keep
+// reading the value derived from the previous root and Rewrap becomes a no-op
+// (defeating the purpose of NODE_CREDENTIAL_PREVIOUS_KEYS). The companion
+// ".source" file records keyFingerprint(rootKey); on mismatch (or a legacy key
+// file written without one) the value is re-derived, compared, and rewritten
+// when it changed. Rewrap then migrates ciphertexts, which requires the
+// previous root key to be present in the matching *_PREVIOUS_KEYS keyring.
+func loadOrMigrateNamedMasterKey(dataDir, fileName, derivedValue, sourceFingerprint string) (string, error) {
+	path := filepath.Join(dataDir, "secrets", fileName)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return "", fmt.Errorf("create secrets directory: %w", err)
+	}
+	lock, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		return "", fmt.Errorf("open master key lock: %w", err)
+	}
+	defer lock.Close()
+	if err = unix.Flock(int(lock.Fd()), unix.LOCK_EX); err != nil {
+		return "", fmt.Errorf("lock master key: %w", err)
+	}
+	defer unix.Flock(int(lock.Fd()), unix.LOCK_UN) //nolint:errcheck
+
+	existing, readErr := readMasterKey(path)
+	if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+		return "", readErr
+	}
+	companionPath := path + ".source"
+	if readErr == nil {
+		stored, _ := os.ReadFile(companionPath)
+		if strings.TrimSpace(string(stored)) == sourceFingerprint {
+			return existing, nil
+		}
+		if existing == derivedValue {
+			// Legacy key file predating source tracking (or a no-op rotation):
+			// the persisted value already matches the current root key, so only
+			// backfill the companion.
+			if err = writeMasterKeyAtomically(companionPath, sourceFingerprint, (*os.File).Write); err != nil {
+				return "", fmt.Errorf("persist master key source: %w", err)
+			}
+			return existing, nil
+		}
+		slog.Warn("rotating persisted purpose master key after root key change; ensure the previous root key is listed in the matching PREVIOUS_KEYS setting", "key", fileName)
+		if err = writeMasterKeyAtomically(path, derivedValue, (*os.File).Write); err != nil {
+			return "", fmt.Errorf("rotate master key: %w", err)
+		}
+		if err = writeMasterKeyAtomically(companionPath, sourceFingerprint, (*os.File).Write); err != nil {
+			return "", fmt.Errorf("persist master key source: %w", err)
+		}
+		return derivedValue, nil
+	}
+	if err = writeMasterKeyAtomically(path, derivedValue, (*os.File).Write); err != nil {
+		return "", fmt.Errorf("persist master key: %w", err)
+	}
+	if err = writeMasterKeyAtomically(companionPath, sourceFingerprint, (*os.File).Write); err != nil {
+		return "", fmt.Errorf("persist master key source: %w", err)
+	}
+	return derivedValue, nil
+}
+
+// keyFingerprint returns a short, stable identifier for an encoded master key
+// so persisted purpose keys can record which root key produced them.
+func keyFingerprint(encodedKey string) string {
+	decoded, err := base64.StdEncoding.DecodeString(encodedKey)
+	if err != nil {
+		decoded = []byte(encodedKey)
+	}
+	sum := sha256.Sum256(decoded)
+	return hex.EncodeToString(sum[:8])
+}
+
+// keyConfigured reports whether envName or its _FILE companion is set, without
+// validating the value. It distinguishes a deliberately pinned key (for example
+// AGENT_CA_MASTER_KEY) from one derived from the shared credential master key.
+func keyConfigured(envName string) bool {
+	if strings.TrimSpace(os.Getenv(envName)) != "" {
+		return true
+	}
+	return strings.TrimSpace(os.Getenv(envName+"_FILE")) != ""
 }
 
 func readMasterKey(path string) (string, error) {
@@ -292,7 +504,7 @@ func readMasterKey(path string) (string, error) {
 		return "", fmt.Errorf("stat node credential master key: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", fmt.Errorf("node credential master key %s must be a regular file, not a symlink", path)
+		return "", fmt.Errorf("master key %s must be a regular file, not a symlink", path)
 	}
 	if info.Mode().Perm() != 0600 {
 		if err := os.Chmod(path, 0600); err != nil {
@@ -301,14 +513,14 @@ func readMasterKey(path string) (string, error) {
 	}
 	value, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read node credential master key: %w", err)
+		return "", fmt.Errorf("read master key: %w", err)
 	}
 	return validateMasterKey(strings.TrimSpace(string(value)), path)
 }
 
 func writeMasterKeyAtomically(path, value string, write func(*os.File, []byte) (int, error)) (err error) {
 	dir := filepath.Dir(path)
-	temporary, err := os.CreateTemp(dir, ".node-credential-master.key-*")
+	temporary, err := os.CreateTemp(dir, ".master-key-*")
 	if err != nil {
 		return err
 	}
@@ -346,7 +558,7 @@ func writeMasterKeyAtomically(path, value string, write func(*os.File, []byte) (
 func validateMasterKey(value, path string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(value)
 	if err != nil || len(raw) != 32 {
-		return "", fmt.Errorf("node credential master key in %s must be base64-encoded 32 bytes", path)
+		return "", fmt.Errorf("master key in %s must be base64-encoded 32 bytes", path)
 	}
 	return value, nil
 }

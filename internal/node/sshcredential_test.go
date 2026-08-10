@@ -66,6 +66,41 @@ func TestSSHCredentialSecretRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRewrapSSHCredentialSecretUsesCredentialScope(t *testing.T) {
+	oldKey := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	newKey := base64.StdEncoding.EncodeToString([]byte("abcdef0123456789abcdef0123456789"))
+	oldCipher, err := NewCredentialCipher(oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secret := SSHCredentialSecret{Password: "secret"}
+	encrypted, err := EncryptSSHCredentialSecret(oldCipher, "cluster-1", "credential-1", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	credential := &model.SSHCredential{
+		Id: "credential-1", ClusterId: "cluster-1", AuthType: model.SSHAuthTypePASSWORD,
+		SecretEncrypted: encrypted,
+	}
+	rotated, err := NewCredentialCipherKeyring(newKey, oldKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rewrapped, changed, err := RewrapSSHCredentialSecret(rotated, credential)
+	if err != nil || !changed || !rotated.IsCurrent(rewrapped) {
+		t.Fatalf("RewrapSSHCredentialSecret() = %q, %v, %v", rewrapped, changed, err)
+	}
+	credential.SecretEncrypted = rewrapped
+	newCipher, err := NewCredentialCipher(newKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := DecryptSSHCredentialSecret(newCipher, credential)
+	if err != nil || got != secret {
+		t.Fatalf("DecryptSSHCredentialSecret() = %#v, %v", got, err)
+	}
+}
+
 func TestSSHCredentialSecretValidation(t *testing.T) {
 	if err := (SSHCredentialSecret{Password: "secret"}).Validate(model.SSHAuthTypePASSWORD); err != nil {
 		t.Fatal(err)

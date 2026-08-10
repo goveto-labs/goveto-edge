@@ -8,14 +8,14 @@ import (
 	"goveto-edge/internal/storage/gen/model"
 )
 
-const privateKeyEnvelope = "enc:v1:"
+const legacyPrivateKeyEnvelope = "enc:v1:"
 
 func EncryptPrivateKey(cipher *node.CredentialCipher, clusterID, certificateID, privateKey string) (string, error) {
 	value, err := cipher.EncryptScoped(privateKeyScope(clusterID, certificateID), privateKey)
 	if err != nil {
 		return "", err
 	}
-	return privateKeyEnvelope + value, nil
+	return value, nil
 }
 
 func DecryptPrivateKey(cipher *node.CredentialCipher, certificate *model.Certificate) (string, error) {
@@ -24,10 +24,10 @@ func DecryptPrivateKey(cipher *node.CredentialCipher, certificate *model.Certifi
 	}
 	if certificate.PrivateKeyEncrypted != "" {
 		value := certificate.PrivateKeyEncrypted
-		if len(value) < len(privateKeyEnvelope) || value[:len(privateKeyEnvelope)] != privateKeyEnvelope {
-			return "", errors.New("unsupported certificate private key envelope")
+		if len(value) >= len(legacyPrivateKeyEnvelope) && value[:len(legacyPrivateKeyEnvelope)] == legacyPrivateKeyEnvelope {
+			value = value[len(legacyPrivateKeyEnvelope):]
 		}
-		plain, err := cipher.DecryptScoped(privateKeyScope(certificate.ClusterId, certificate.Id), value[len(privateKeyEnvelope):])
+		plain, err := cipher.DecryptScoped(privateKeyScope(certificate.ClusterId, certificate.Id), value)
 		if err != nil {
 			return "", fmt.Errorf("decrypt certificate private key: %w", err)
 		}
@@ -38,4 +38,15 @@ func DecryptPrivateKey(cipher *node.CredentialCipher, certificate *model.Certifi
 
 func privateKeyScope(clusterID, certificateID string) string {
 	return "goveto-edge/certificate-private-key/v1\x00" + clusterID + "\x00" + certificateID
+}
+
+func RewrapPrivateKey(cipher *node.CredentialCipher, certificate *model.Certificate) (string, bool, error) {
+	if certificate == nil || certificate.PrivateKeyEncrypted == "" {
+		return "", false, errors.New("certificate private key is unavailable")
+	}
+	value := certificate.PrivateKeyEncrypted
+	if len(value) >= len(legacyPrivateKeyEnvelope) && value[:len(legacyPrivateKeyEnvelope)] == legacyPrivateKeyEnvelope {
+		value = value[len(legacyPrivateKeyEnvelope):]
+	}
+	return cipher.RewrapScoped(privateKeyScope(certificate.ClusterId, certificate.Id), value)
 }

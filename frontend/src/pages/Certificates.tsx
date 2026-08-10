@@ -9,6 +9,7 @@ import {
     Send,
     ShieldAlert,
     ShieldCheck,
+    ShieldOff,
     Trash2,
     Upload,
     Zap,
@@ -35,6 +36,14 @@ import { canManageCluster } from '@/utils/rbac.ts';
 const LETS_ENCRYPT_PROD = 'https://acme-v02.api.letsencrypt.org/directory';
 const LETS_ENCRYPT_STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory';
 const EXPIRY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+const REVOCATION_REASONS = [
+    { id: 'KEY_COMPROMISE', label: 'Private key compromised' },
+    { id: 'SUPERSEDED', label: 'Certificate superseded' },
+    { id: 'CESSATION_OF_OPERATION', label: 'Service discontinued' },
+    { id: 'AFFILIATION_CHANGED', label: 'Domain ownership changed' },
+    { id: 'PRIVILEGE_WITHDRAWN', label: 'Authorization withdrawn' },
+    { id: 'UNSPECIFIED', label: 'Other / unspecified' },
+];
 
 type ExpiryFilter = 'all' | 'attention' | '30d' | 'expired';
 
@@ -53,16 +62,19 @@ function expiryTime(certificate: Certificate) {
 }
 
 function isExpired(certificate: Certificate, now: number) {
+    if (certificate.status === 'REVOKED' || certificate.revoked_at) return false;
     return certificate.status === 'EXPIRED' || expiryTime(certificate) <= now;
 }
 
 function needsAttention(certificate: Certificate, now: number) {
+    if (certificate.status === 'REVOKED' || certificate.revoked_at) return false;
     return (
         isExpired(certificate, now) ||
         expiryTime(certificate) <= now + EXPIRY_WINDOW_MS ||
         certificate.status === 'EXPIRING' ||
         certificate.status === 'RENEWAL_FAILED' ||
-        certificate.status === 'DEPLOYMENT_FAILED'
+        certificate.status === 'DEPLOYMENT_FAILED' ||
+        certificate.status === 'REVOCATION_FAILED'
     );
 }
 
@@ -120,6 +132,8 @@ export default function Certificates() {
     const [busyId, setBusyId] = useState('');
     const [replaceTarget, setReplaceTarget] = useState<Certificate | null>(null);
     const [pendingDelete, setPendingDelete] = useState<Certificate | null>(null);
+    const [pendingRevoke, setPendingRevoke] = useState<Certificate | null>(null);
+    const [revocationReason, setRevocationReason] = useState('KEY_COMPROMISE');
     const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
     const uploadModal = useOverlayState();
@@ -324,6 +338,22 @@ export default function Certificates() {
         }
     };
 
+    const revoke = async () => {
+        const cert = pendingRevoke;
+        if (!cert) return;
+        setBusyId(cert.id);
+        setSubmitError('');
+        try {
+            await api.revoke(cert.id, revocationReason);
+            setPendingRevoke(null);
+            await load();
+        } catch (err) {
+            setSubmitError(message(err, 'Failed to enqueue certificate revocation'));
+        } finally {
+            setBusyId('');
+        }
+    };
+
     if (!clusterId) {
         return (
             <div className='space-y-6'>
@@ -433,7 +463,14 @@ export default function Certificates() {
                 <tbody>
                     {visibleCerts.map((cert) => {
                         const busy = busyId === cert.id;
-                        const lifecycleError = cert.last_renewal_error || cert.last_publish_error;
+                        const lifecycleLocked =
+                            cert.status === 'REVOKING' ||
+                            cert.status === 'REVOKED' ||
+                            Boolean(cert.revoked_at);
+                        const lifecycleError =
+                            cert.last_revocation_error ||
+                            cert.last_renewal_error ||
+                            cert.last_publish_error;
                         return (
                             <tr className='border-b border-border last:border-0' key={cert.id}>
                                 <td>
@@ -469,7 +506,9 @@ export default function Certificates() {
                                     )}
                                 </td>
                                 <td className='whitespace-nowrap text-sm text-muted'>
-                                    {formatDate(cert.expires_at)}
+                                    {cert.revoked_at
+                                        ? `Revoked ${formatDate(cert.revoked_at)}`
+                                        : formatDate(cert.expires_at)}
                                 </td>
                                 <td className='text-sm'>
                                     {cert.source === 'ACME'
@@ -479,10 +518,10 @@ export default function Certificates() {
                                 <td>
                                     {canManage && (
                                         <div className='flex flex-wrap justify-end gap-2'>
-                                            {cert.source === 'ACME' && (
+                                            {cert.source === 'ACME' && !cert.revoked_at && (
                                                 <>
                                                     <Button
-                                                        isDisabled={busy}
+                                                        isDisabled={busy || lifecycleLocked}
                                                         size='sm'
                                                         variant='secondary'
                                                         onPress={() => void action(cert, 'renew')}
@@ -491,7 +530,7 @@ export default function Certificates() {
                                                         Renew
                                                     </Button>
                                                     <Button
-                                                        isDisabled={busy}
+                                                        isDisabled={busy || lifecycleLocked}
                                                         size='sm'
                                                         variant='secondary'
                                                         onPress={() => void action(cert, 'reissue')}
@@ -513,7 +552,12 @@ export default function Certificates() {
                                                 </Button>
                                             )}
                                             <Button
-                                                isDisabled={busy || cert.status === 'PENDING'}
+                                                isDisabled={
+                                                    busy ||
+                                                    cert.status === 'PENDING' ||
+                                                    cert.status === 'REVOKING' ||
+                                                    cert.status === 'REVOKED'
+                                                }
                                                 size='sm'
                                                 variant='secondary'
                                                 onPress={() => void action(cert, 'publish')}
@@ -521,8 +565,33 @@ export default function Certificates() {
                                                 <Send className='mr-1.5 h-3.5 w-3.5' />
                                                 Publish
                                             </Button>
+                                            {cert.source === 'ACME' &&
+                                                cert.fingerprint &&
+                                                !cert.revoked_at && (
+                                                    <Button
+                                                        isDisabled={
+                                                            busy || cert.status === 'REVOKING'
+                                                        }
+                                                        size='sm'
+                                                        variant='danger'
+                                                        onPress={() => {
+                                                            setSubmitError('');
+                                                            setRevocationReason('KEY_COMPROMISE');
+                                                            setPendingRevoke(cert);
+                                                        }}
+                                                    >
+                                                        <ShieldOff className='mr-1.5 h-3.5 w-3.5' />
+                                                        Revoke
+                                                    </Button>
+                                                )}
                                             <Button
-                                                isDisabled={busy}
+                                                aria-label={`Delete ${cert.name}`}
+                                                isDisabled={
+                                                    busy ||
+                                                    (cert.source === 'ACME' &&
+                                                        Boolean(cert.fingerprint) &&
+                                                        !cert.revoked_at)
+                                                }
                                                 size='sm'
                                                 variant='danger'
                                                 onPress={() => setPendingDelete(cert)}
@@ -826,6 +895,56 @@ export default function Certificates() {
                     if (!open) setPendingDelete(null);
                 }}
             />
+
+            <DialogShell
+                icon={<ShieldOff className='h-5 w-5 text-danger' />}
+                isDismissable={!busyId}
+                isOpen={pendingRevoke !== null}
+                size='sm'
+                subtitle='The CA revocation is permanent. Attached sites will be republished without this certificate.'
+                title='Revoke certificate'
+                onOpenChange={(open) => {
+                    if (!open && !busyId) {
+                        setPendingRevoke(null);
+                        setSubmitError('');
+                    }
+                }}
+            >
+                <div className='space-y-4 p-6'>
+                    {submitError && <FormError message={submitError} />}
+                    <div className='rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm'>
+                        <div className='font-semibold'>{pendingRevoke?.name}</div>
+                        <div className='mt-1 break-all font-mono text-xs text-muted'>
+                            {pendingRevoke?.serial_number || pendingRevoke?.id}
+                        </div>
+                    </div>
+                    <SelectField
+                        label='Revocation reason'
+                        options={REVOCATION_REASONS}
+                        value={revocationReason}
+                        variant='secondary'
+                        onChange={setRevocationReason}
+                    />
+                </div>
+                <DialogFooter>
+                    <Button
+                        isDisabled={Boolean(busyId)}
+                        type='button'
+                        variant='ghost'
+                        onPress={() => setPendingRevoke(null)}
+                    >
+                        Cancel
+                    </Button>
+                    <Button
+                        isDisabled={Boolean(busyId)}
+                        type='button'
+                        variant='danger'
+                        onPress={() => void revoke()}
+                    >
+                        {busyId ? 'Revoking…' : 'Revoke permanently'}
+                    </Button>
+                </DialogFooter>
+            </DialogShell>
         </div>
     );
 }

@@ -16,14 +16,14 @@ volumes:
   goveto-data:
 ```
 
-The generated key is stored at
-`/var/lib/goveto-edge/secrets/node-credential-master.key` with mode `0600`.
-Losing this file makes encrypted bootstrap identities and other stored node
-secrets unreadable.
+Generated purpose keys are stored under `/var/lib/goveto-edge/secrets/` with
+mode `0600`. Losing these files makes the corresponding node, certificate,
+DNS, notification, or Agent CA secrets unavailable.
 
-For multiple replicas, set the same `NODE_CREDENTIAL_MASTER_KEY` value on every
-replica instead of relying on local files. It must be a base64-encoded 32-byte
-key. The replicas then derive the same mTLS CA and gateway certificate and use
+For multiple replicas, provide the same keys to every replica instead of
+relying on local files. `NODE_CREDENTIAL_MASTER_KEY` remains the required root;
+purpose-specific keys may be supplied separately as documented below. Every key
+is a base64-encoded 32-byte value. The replicas then use the same mTLS CA and use
 PostgreSQL leases for shared agent task delivery. The control planes also use
 PostgreSQL `LISTEN`/`NOTIFY` to wake or disconnect agent sessions across
 replicas. A one-second database-backed authorization and claim check remains as
@@ -33,6 +33,3 @@ Bootstrap identities contain an agent private key. They are available only to
 the cluster owner during installation and are removed from PostgreSQL when the
 agent first establishes its authenticated management channel. Viewing or
 downloading an identity creates an audit log entry.
-
-Control API cookie, CSRF, authentication, request-limit, and proxy requirements
-are documented in [Control API security](../../docs/control-api-security.md).

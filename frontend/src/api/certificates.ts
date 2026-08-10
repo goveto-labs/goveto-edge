@@ -33,6 +33,10 @@ export const certificatesApi = (clusterId: string) => ({
         post<CertificateJob>(clusterPath(clusterId, `/certificates/${certificateId}/reissue`)),
     publish: (certificateId: string) =>
         post<CertificateJob>(clusterPath(clusterId, `/certificates/${certificateId}/publish`)),
+    revoke: (certificateId: string, reason: string) =>
+        post<CertificateJob>(clusterPath(clusterId, `/certificates/${certificateId}/revoke`), {
+            reason,
+        }),
     remove: (certificateId: string) =>
         del(clusterPath(clusterId, `/certificates/${certificateId}`)),
 });

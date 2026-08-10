@@ -2,6 +2,7 @@
 package certificates
 
 import (
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
@@ -43,6 +44,10 @@ type updateRequest struct {
 	RenewBeforeDays *int    `json:"renew_before_days"`
 }
 
+type revokeRequest struct {
+	Reason string `json:"reason"`
+}
+
 func Register(e *echo.Echo, db *client.Client, service *certmanager.Service) {
 	group := e.Group("/api/v1/clusters/:cluster_id/certificates", auth.RequireAuth)
 	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
@@ -57,6 +62,7 @@ func Register(e *echo.Echo, db *client.Client, service *certmanager.Service) {
 	group.POST("/:certificate_id/renew", enqueueOperation(db, service, model.CertificateOperationRENEW), manage)
 	group.POST("/:certificate_id/reissue", enqueueOperation(db, service, model.CertificateOperationREISSUE), manage)
 	group.POST("/:certificate_id/publish", enqueueOperation(db, service, model.CertificateOperationREPUBLISH), manage)
+	group.POST("/:certificate_id/revoke", revoke(db, service), manage)
 	group.GET("/:certificate_id/jobs", listJobs(db), read)
 	e.GET("/.well-known/acme-challenge/:token", serveChallenge(service))
 }
@@ -200,6 +206,9 @@ func issueACME(db *client.Client, service *certmanager.Service) echo.HandlerFunc
 		}
 		job, err := service.Enqueue(c.Request().Context(), item.Id, model.CertificateOperationISSUE)
 		if err != nil {
+			if errors.Is(err, certmanager.ErrCertificateLifecycleBusy) {
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			}
 			return err
 		}
 		response := map[string]any{"certificate": types.NewCertificate(item), "job": types.NewCertificateJob(job)}
@@ -259,6 +268,12 @@ func replaceMaterial(db *client.Client, service *certmanager.Service) echo.Handl
 		if err != nil {
 			return err
 		}
+		if item.Source != model.CertificateSourceMANUAL {
+			return echo.NewHTTPError(http.StatusBadRequest, "ACME certificate material must be renewed or reissued")
+		}
+		if item.RevokedAt != nil {
+			return echo.NewHTTPError(http.StatusConflict, "revoked certificate material cannot be replaced")
+		}
 		before := types.NewCertificate(item)
 		var input uploadRequest
 		if err = c.Bind(&input); err != nil {
@@ -288,10 +303,60 @@ func remove(db *client.Client, service *certmanager.Service) echo.HandlerFunc {
 			return err
 		}
 		if err = service.Delete(c.Request().Context(), item.Id); err != nil {
+			if errors.Is(err, certmanager.ErrCertificateMustBeRevoked) {
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			}
 			return err
 		}
 		audit.SetChange(c, types.NewCertificate(item), nil)
 		return c.NoContent(http.StatusNoContent)
+	}
+}
+
+// @summary Revoke ACME certificate
+// @description Enqueue an RFC 5280 ACME revocation and remove the revoked certificate from every attached site.
+// @Tags certificates
+func revoke(db *client.Client, service *certmanager.Service) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		item, err := ownedCertificate(c, db)
+		if err != nil {
+			return err
+		}
+		if item.Source != model.CertificateSourceACME || item.CertPem == nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "only issued ACME certificates can be revoked")
+		}
+		var input revokeRequest
+		if err = c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		if strings.TrimSpace(input.Reason) == "" {
+			input.Reason = "UNSPECIFIED"
+		}
+		reason, err := certmanager.ParseRevocationReason(input.Reason)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		before := types.NewCertificate(item)
+		job, err := service.EnqueueRevocation(c.Request().Context(), item.Id, reason)
+		if err != nil {
+			switch {
+			case errors.Is(err, certmanager.ErrCertificateNotFound):
+				return echo.NewHTTPError(http.StatusNotFound, err.Error())
+			case errors.Is(err, certmanager.ErrCertificateNotRevocable):
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			case errors.Is(err, certmanager.ErrCertificateAlreadyRevoked), errors.Is(err, certmanager.ErrCertificateLifecycleBusy):
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			default:
+				return err
+			}
+		}
+		item, err = db.Certificate.FindUnique(c.Request().Context(), query.Certificate.Id.Equals(item.Id))
+		if err != nil {
+			return err
+		}
+		response := types.NewCertificateJob(job)
+		audit.SetChange(c, before, map[string]any{"certificate": types.NewCertificate(item), "job": response, "reason": input.Reason})
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 
@@ -301,11 +366,17 @@ func enqueueOperation(db *client.Client, service *certmanager.Service, operation
 		if err != nil {
 			return err
 		}
+		if item.RevokedAt != nil || item.Status == model.CertificateStatusREVOKED {
+			return echo.NewHTTPError(http.StatusConflict, "revoked certificate cannot run lifecycle operations")
+		}
 		if !operationAllowed(item.Source, operation) {
 			return echo.NewHTTPError(http.StatusBadRequest, "operation requires an ACME certificate")
 		}
 		job, err := service.Enqueue(c.Request().Context(), item.Id, operation)
 		if err != nil {
+			if errors.Is(err, certmanager.ErrCertificateLifecycleBusy) {
+				return echo.NewHTTPError(http.StatusConflict, err.Error())
+			}
 			return err
 		}
 		response := types.NewCertificateJob(job)
@@ -350,7 +421,7 @@ func serveChallenge(service *certmanager.Service) echo.HandlerFunc {
 // ACME certificates, while re-publishing existing material (REPUBLISH) works
 // for any source. Returning this as a pure rule keeps the gate auditable.
 func operationAllowed(source model.CertificateSource, operation model.CertificateOperation) bool {
-	acmeOnly := operation == model.CertificateOperationRENEW || operation == model.CertificateOperationREISSUE
+	acmeOnly := operation == model.CertificateOperationRENEW || operation == model.CertificateOperationREISSUE || operation == model.CertificateOperationREVOKE
 	return !acmeOnly || source == model.CertificateSourceACME
 }
 

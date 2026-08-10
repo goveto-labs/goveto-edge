@@ -29,6 +29,31 @@ func TestLoadUsesSharedMasterKeyWithoutLocalSecretFile(t *testing.T) {
 	}
 }
 
+func TestLoadSeparatesPurposeKeysAndAcceptsFileProvider(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
+	t.Setenv("GOVETO_DATA_DIR", dir)
+	root := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	fileKey := base64.StdEncoding.EncodeToString([]byte("abcdef0123456789abcdef0123456789"))
+	keyFile := filepath.Join(dir, "certificate.key")
+	if err := os.WriteFile(keyFile, []byte(fileKey+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", root)
+	t.Setenv("CERTIFICATE_MASTER_KEY_FILE", keyFile)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CertificateMasterKey != fileKey {
+		t.Fatal("certificate key file was not used")
+	}
+	if cfg.DNSCredentialMasterKey == root || cfg.NotificationMasterKey == root || cfg.AgentCAMasterKey == root {
+		t.Fatal("purpose keys were not domain separated")
+	}
+}
+
 func TestLoadFromEnvironment(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
@@ -331,5 +356,72 @@ func TestLoadValidationDoesNotCreateDataDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("configuration validation created data directory: %v", err)
+	}
+}
+
+func TestPurposeMasterKeyMigratesAfterRootKeyRotation(t *testing.T) {
+	dir := t.TempDir()
+	rootA := base64.StdEncoding.EncodeToString([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
+	rootB := base64.StdEncoding.EncodeToString([]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"))
+	derivedA := deriveEncodedMasterKey(rootA, "test/purpose/v1")
+	derivedB := deriveEncodedMasterKey(rootB, "test/purpose/v1")
+
+	first, err := loadOrMigrateNamedMasterKey(dir, "purpose.key", derivedA, keyFingerprint(rootA))
+	if err != nil {
+		t.Fatalf("first boot: %v", err)
+	}
+	if first != derivedA {
+		t.Fatalf("first boot did not persist the derived value")
+	}
+
+	// Same root on reboot: stable, no rewrite.
+	again, err := loadOrMigrateNamedMasterKey(dir, "purpose.key", derivedA, keyFingerprint(rootA))
+	if err != nil {
+		t.Fatalf("reboot: %v", err)
+	}
+	if again != derivedA {
+		t.Fatal("purpose key changed without a root key rotation")
+	}
+
+	// Root key rotates: persisted purpose key must be re-derived and overwritten.
+	rotated, err := loadOrMigrateNamedMasterKey(dir, "purpose.key", derivedB, keyFingerprint(rootB))
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if rotated != derivedB {
+		t.Fatalf("rotated key was not migrated: got %s want %s", rotated, derivedB)
+	}
+
+	// Companion now records the new root; reboot stays on the new value.
+	stable, err := loadOrMigrateNamedMasterKey(dir, "purpose.key", derivedB, keyFingerprint(rootB))
+	if err != nil {
+		t.Fatalf("stable after rotate: %v", err)
+	}
+	if stable != derivedB {
+		t.Fatal("migrated purpose key was not stable after rotation")
+	}
+}
+
+func TestPurposeMasterKeyBackfillsLegacyCompanionFile(t *testing.T) {
+	dir := t.TempDir()
+	secretsDir := filepath.Join(dir, "secrets")
+	if err := os.MkdirAll(secretsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	root := base64.StdEncoding.EncodeToString([]byte("cccccccccccccccccccccccccccccccc"))
+	derived := deriveEncodedMasterKey(root, "test/purpose/v1")
+	// Simulate a legacy install: purpose key file written by older code, no companion.
+	if err := os.WriteFile(filepath.Join(secretsDir, "purpose.key"), []byte(derived+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadOrMigrateNamedMasterKey(dir, "purpose.key", derived, keyFingerprint(root))
+	if err != nil {
+		t.Fatalf("legacy backfill: %v", err)
+	}
+	if got != derived {
+		t.Fatal("legacy purpose key should be preserved when it matches the current root")
+	}
+	if _, err := os.Stat(filepath.Join(secretsDir, "purpose.key.source")); err != nil {
+		t.Fatalf("companion source file was not backfilled: %v", err)
 	}
 }

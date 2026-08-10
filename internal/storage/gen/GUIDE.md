@@ -248,6 +248,10 @@ query.PostAuthorIdColumn
   - `Lastrenewalerror` (String, optional)
   - `Lastpublishedat` (DateTime, optional)
   - `Lastpublisherror` (String, optional)
+  - `Revokedat` (DateTime, optional)
+  - `Revocationreason` (Int, optional)
+  - `Lastrevocationattemptat` (DateTime, optional)
+  - `Lastrevocationerror` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

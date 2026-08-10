@@ -27,11 +27,12 @@ import (
 )
 
 type Service struct {
-	db          *client.Client
-	cipher      *node.CredentialCipher
-	gateway     *edgecontrol.Gateway
-	jobs        *jobqueue.Manager
-	concurrency int
+	db                *client.Client
+	certificateCipher *node.CredentialCipher
+	derivationCipher  *node.CredentialCipher
+	gateway           *edgecontrol.Gateway
+	jobs              *jobqueue.Manager
+	concurrency       int
 }
 
 type EnqueueMode string
@@ -50,7 +51,11 @@ type EnqueueResult struct {
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
-	return &Service{db: db, cipher: cipher, gateway: gateway, jobs: jobqueue.New(db), concurrency: 8}
+	return NewWithCiphers(db, cipher, cipher, gateway)
+}
+
+func NewWithCiphers(db *client.Client, certificateCipher, derivationCipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
+	return &Service{db: db, certificateCipher: certificateCipher, derivationCipher: derivationCipher, gateway: gateway, jobs: jobqueue.New(db), concurrency: 8}
 }
 
 // EnqueueCluster republishes every site after the cluster's available node set
@@ -760,10 +765,15 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 	if err != nil {
 		return config, nil, err
 	}
+	revokedAttached := false
 	for _, link := range links {
 		certificate, err := db.Certificate.FindUnique(ctx, query.Certificate.Id.Equals(link.CertificateId))
 		if err != nil {
 			return config, nil, err
+		}
+		if certificate.RevokedAt != nil || certificate.Status == model.CertificateStatusREVOKED {
+			revokedAttached = true
+			continue
 		}
 		if certificate.CertPem == nil || certificate.ExpiresAt == nil || !time.Now().UTC().Before(*certificate.ExpiresAt) {
 			return config, nil, fmt.Errorf("certificate %s is unavailable or expired", certificate.Id)
@@ -775,7 +785,7 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if err = certmanager.CoversDomains(certificateDomains, config.Domains); err != nil {
 			return config, nil, fmt.Errorf("certificate %s: %w", certificate.Id, err)
 		}
-		privateKey, err := certmanager.DecryptPrivateKey(s.cipher, certificate)
+		privateKey, err := certmanager.DecryptPrivateKey(s.certificateCipher, certificate)
 		if err != nil {
 			return config, nil, err
 		}
@@ -803,6 +813,13 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 			}
 		}
 	}
+	if config.Listener.HTTPSEnabled && len(config.Certificates) == 0 {
+		message := "site configured for HTTPS has no usable certificates; serving over HTTP only"
+		if revokedAttached {
+			message = "site configured for HTTPS has no usable certificates after certificate revocation; serving over HTTP only"
+		}
+		slog.Warn(message, "site_id", site.Id, "cluster_id", site.ClusterId)
+	}
 	normalizeListenerForCertificates(&config)
 
 	if site.PolicyId != nil {
@@ -825,7 +842,7 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if config.WAF == nil {
 			config.WAF = map[string]any{}
 		}
-		config.WAF["challenge_secret"] = wafChallengeSecret(s.cipher, site.Id)
+		config.WAF["challenge_secret"] = wafChallengeSecret(s.derivationCipher, site.Id)
 		if err = json.Unmarshal(policy.AccessJson, &config.Access); err != nil {
 			return config, nil, fmt.Errorf("decode access policy: %w", err)
 		}

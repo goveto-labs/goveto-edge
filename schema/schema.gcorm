@@ -27,6 +27,7 @@ enum CertificateOperation {
   RENEW
   REISSUE
   REPUBLISH
+  REVOKE
 }
 
 enum CertificateSource {
@@ -42,6 +43,9 @@ enum CertificateStatus {
   EXPIRED
   RENEWAL_FAILED
   DEPLOYMENT_FAILED
+  REVOKING
+  REVOKED
+  REVOCATION_FAILED
 }
 
 enum ClusterPermission {
@@ -238,36 +242,40 @@ model AuditLog {
 }
 
 model Certificate {
-  id                   String             @id @default(uuid())
-  clusterId            String             @map("cluster_id")
-  name                 String
-  source               CertificateSource  @default(MANUAL)
-  status               CertificateStatus  @default(PENDING)
-  certPem              String?            @db.Text @map("cert_pem")
-  privateKeyEncrypted  String             @db.Text @map("private_key_encrypted")
-  fingerprint          String?
-  serialNumber         String?            @map("serial_number")
-  domainsJson          Json               @default("[]") @map("domains_json")
-  notBefore            DateTime?          @map("not_before")
-  expiresAt            DateTime?          @map("expires_at")
-  issuer               String?
-  keyAlgorithm         String?            @map("key_algorithm")
-  acmeDirectoryUrl     String?            @map("acme_directory_url")
-  acmeEmail            String?            @map("acme_email")
-  acmeChallengeType    ACMEChallengeType? @map("acme_challenge_type")
-  autoRenew            Boolean            @default(false) @map("auto_renew")
-  renewBeforeDays      Int                @default(30) @map("renew_before_days")
-  lastIssuedAt         DateTime?          @map("last_issued_at")
-  lastRenewalAttemptAt DateTime?          @map("last_renewal_attempt_at")
-  lastRenewalError     String?            @db.Text @map("last_renewal_error")
-  lastPublishedAt      DateTime?          @map("last_published_at")
-  lastPublishError     String?            @db.Text @map("last_publish_error")
-  createdAt            DateTime           @default(now()) @map("created_at")
-  updatedAt            DateTime           @default(now()) @updatedAt @map("updated_at")
-  cluster              Cluster            @relation(fields: [clusterId], references: [id])
-  sites                SiteCertificate[]
-  jobs                 CertificateJob[]
-  challenges           ACMEChallenge[]
+  id                      String             @id @default(uuid())
+  clusterId               String             @map("cluster_id")
+  name                    String
+  source                  CertificateSource  @default(MANUAL)
+  status                  CertificateStatus  @default(PENDING)
+  certPem                 String?            @db.Text @map("cert_pem")
+  privateKeyEncrypted     String             @db.Text @map("private_key_encrypted")
+  fingerprint             String?
+  serialNumber            String?            @map("serial_number")
+  domainsJson             Json               @default("[]") @map("domains_json")
+  notBefore               DateTime?          @map("not_before")
+  expiresAt               DateTime?          @map("expires_at")
+  issuer                  String?
+  keyAlgorithm            String?            @map("key_algorithm")
+  acmeDirectoryUrl        String?            @map("acme_directory_url")
+  acmeEmail               String?            @map("acme_email")
+  acmeChallengeType       ACMEChallengeType? @map("acme_challenge_type")
+  autoRenew               Boolean            @default(false) @map("auto_renew")
+  renewBeforeDays         Int                @default(30) @map("renew_before_days")
+  lastIssuedAt            DateTime?          @map("last_issued_at")
+  lastRenewalAttemptAt    DateTime?          @map("last_renewal_attempt_at")
+  lastRenewalError        String?            @db.Text @map("last_renewal_error")
+  lastPublishedAt         DateTime?          @map("last_published_at")
+  lastPublishError        String?            @db.Text @map("last_publish_error")
+  revokedAt               DateTime?          @map("revoked_at")
+  revocationReason        Int?               @map("revocation_reason")
+  lastRevocationAttemptAt DateTime?          @map("last_revocation_attempt_at")
+  lastRevocationError     String?            @db.Text @map("last_revocation_error")
+  createdAt               DateTime           @default(now()) @map("created_at")
+  updatedAt               DateTime           @default(now()) @updatedAt @map("updated_at")
+  cluster                 Cluster            @relation(fields: [clusterId], references: [id])
+  sites                   SiteCertificate[]
+  jobs                    CertificateJob[]
+  challenges              ACMEChallenge[]
 
   @@unique([clusterId, name])
   @@index([clusterId, expiresAt])
