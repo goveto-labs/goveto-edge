@@ -142,16 +142,16 @@ export function GeoTrafficPanel({
         >
             <div
                 aria-busy={loading || undefined}
-                className='grid min-h-[330px] lg:grid-cols-[minmax(0,1fr)_310px]'
+                className='grid md:grid-cols-[minmax(0,1fr)_280px]'
             >
-                <div className='relative flex min-h-[260px] items-center justify-center overflow-hidden border-b border-border bg-surface-secondary/15 px-3 py-4 lg:min-h-[390px] lg:border-b-0 lg:border-r lg:px-6'>
+                <div className='relative flex min-h-[190px] items-center justify-center overflow-hidden border-b border-border bg-surface-secondary/15 px-4 py-3 md:min-h-[250px] md:border-b-0 md:border-r'>
                     {loading && countries.length === 0 ? (
-                        <div className='h-full min-h-[240px] w-full animate-pulse rounded-lg bg-surface-secondary/60 lg:min-h-[340px]' />
+                        <div className='h-full min-h-[170px] w-full animate-pulse rounded-lg bg-surface-secondary/60 md:min-h-[220px]' />
                     ) : (
                         <>
                             <svg
                                 aria-label={`${period} traffic by country map`}
-                                className='h-auto max-h-[390px] w-full text-muted'
+                                className='h-auto max-h-[220px] w-full text-muted'
                                 preserveAspectRatio='xMidYMid meet'
                                 role='img'
                                 viewBox='0 0 360 180'
@@ -205,7 +205,7 @@ export function GeoTrafficPanel({
                                 })}
                             </svg>
                             {highlightedCountry && (
-                                <div className='pointer-events-none absolute bottom-3 left-3 rounded-lg border border-border/70 bg-surface/95 px-3 py-2 shadow-sm backdrop-blur-sm sm:bottom-4 sm:left-4'>
+                                <div className='pointer-events-none absolute bottom-2 left-2 rounded-lg border border-border/70 bg-surface/95 px-2.5 py-1.5 shadow-sm backdrop-blur-sm sm:bottom-3 sm:left-3'>
                                     <div className='flex items-baseline gap-2'>
                                         <span className='text-sm font-semibold'>
                                             {highlightedCountry.name}
@@ -214,7 +214,7 @@ export function GeoTrafficPanel({
                                             {highlightedCountry.code}
                                         </span>
                                     </div>
-                                    <div className='mt-1 flex gap-3 text-xs text-muted'>
+                                    <div className='mt-0.5 flex gap-3 text-[11px] text-muted'>
                                         <span>{formatBytes(highlightedCountry.traffic)}</span>
                                         <span>
                                             {highlightedCountry.requests.toLocaleString()} requests
@@ -225,9 +225,11 @@ export function GeoTrafficPanel({
                             {!loading && countries.length === 0 && (
                                 <div className='absolute inset-0 flex items-center justify-center bg-surface/35'>
                                     <div className='flex flex-col items-center px-6 text-center'>
-                                        <Globe2 className='h-6 w-6 text-muted' />
-                                        <p className='mt-2 text-sm font-medium'>No country data</p>
-                                        <p className='mt-1 text-xs text-muted'>
+                                        <Globe2 className='h-5 w-5 text-muted' />
+                                        <p className='mt-1.5 text-sm font-medium'>
+                                            No country data
+                                        </p>
+                                        <p className='mt-0.5 text-xs text-muted'>
                                             No visits were geolocated in this period.
                                         </p>
                                     </div>
@@ -237,18 +239,18 @@ export function GeoTrafficPanel({
                     )}
                 </div>
 
-                <div className='flex min-w-0 flex-col px-4 py-4'>
+                <div className='flex min-w-0 flex-col px-4 py-3'>
                     <div className='flex items-center justify-between gap-3'>
                         <span className='text-xs font-semibold uppercase tracking-wide text-muted'>
                             Top countries
                         </span>
                         <span className='text-xs text-muted'>{countries.length} regions</span>
                     </div>
-                    <div className='mt-2 flex-1 divide-y divide-border/70'>
+                    <div className='mt-1 flex-1 divide-y divide-border/70'>
                         {loading && countries.length === 0
                             ? loadingRows.map((row) => (
                                   <div
-                                      className='flex animate-pulse items-center gap-3 py-3'
+                                      className='flex animate-pulse items-center gap-3 py-2'
                                       key={row}
                                   >
                                       <div className='h-7 w-7 rounded-md bg-surface-secondary' />
@@ -262,7 +264,7 @@ export function GeoTrafficPanel({
                                   const isActive = activeCode?.toUpperCase() === country.code;
                                   return (
                                       <button
-                                          className={`grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2.5 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${isActive ? 'text-primary' : ''}`}
+                                          className={`grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${isActive ? 'text-primary' : ''}`}
                                           key={country.code}
                                           type='button'
                                           onBlur={() => setActiveCode(null)}
@@ -275,24 +277,19 @@ export function GeoTrafficPanel({
                                           <span className='text-xs font-semibold tabular-nums text-muted'>
                                               {String(index + 1).padStart(2, '0')}
                                           </span>
-                                          <span className='min-w-0'>
-                                              <span className='flex min-w-0 items-baseline gap-1.5'>
-                                                  <span className='truncate text-sm font-medium'>
-                                                      {country.name}
-                                                  </span>
-                                                  <span className='shrink-0 text-[10px] font-medium text-muted'>
-                                                      {country.code}
-                                                  </span>
+                                          <span className='flex min-w-0 items-baseline gap-1.5'>
+                                              <span className='truncate text-sm font-medium'>
+                                                  {country.name}
                                               </span>
-                                              <span className='mt-0.5 block text-[11px] text-muted'>
-                                                  {country.requests.toLocaleString()} requests
+                                              <span className='shrink-0 text-[10px] font-medium text-muted'>
+                                                  {country.code}
                                               </span>
                                           </span>
-                                          <span className='text-right'>
-                                              <span className='block text-sm font-semibold tabular-nums'>
+                                          <span className='flex items-baseline justify-end gap-1.5 text-right'>
+                                              <span className='text-sm font-semibold tabular-nums'>
                                                   {formatBytes(country.traffic)}
                                               </span>
-                                              <span className='mt-0.5 block text-[11px] tabular-nums text-muted'>
+                                              <span className='text-[10px] tabular-nums text-muted'>
                                                   {(share * 100).toFixed(share >= 0.1 ? 0 : 1)}%
                                               </span>
                                           </span>
@@ -301,12 +298,12 @@ export function GeoTrafficPanel({
                               })}
                     </div>
                     {!loading && countries.length === 0 && (
-                        <div className='flex flex-1 items-center justify-center py-8 text-sm text-muted'>
+                        <div className='flex flex-1 items-center justify-center py-6 text-sm text-muted'>
                             No ranked countries
                         </div>
                     )}
                     {countries.length > 0 && (
-                        <div className='mt-3 flex items-center justify-between border-t border-border pt-3 text-xs text-muted'>
+                        <div className='mt-2 flex items-center justify-between border-t border-border pt-2 text-xs text-muted'>
                             <span>Reported traffic</span>
                             <span className='font-medium tabular-nums text-foreground'>
                                 {formatBytes(totalTraffic)}
