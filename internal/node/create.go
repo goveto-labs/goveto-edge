@@ -69,9 +69,11 @@ func (i *CreateInput) Validate() error {
 	seen := make(map[string]struct{}, len(i.Addresses))
 	for index, address := range i.Addresses {
 		address = strings.TrimSpace(address)
-		if net.ParseIP(address) == nil {
+		parsed := net.ParseIP(address)
+		if parsed == nil {
 			return fmt.Errorf("invalid node address %q", address)
 		}
+		address = parsed.String()
 		if _, exists := seen[address]; exists {
 			return fmt.Errorf("duplicate node address %q", address)
 		}

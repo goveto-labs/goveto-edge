@@ -149,6 +149,7 @@ func (a *aliyun) ListLines(ctx context.Context) ([]Line, error) {
 }
 
 func (a *aliyun) Upsert(ctx context.Context, record Record) (string, error) {
+	record.Value = CanonicalValue(record.Type, record.Value)
 	rr, err := RelativeName(record.Hostname, a.zone)
 	if err != nil {
 		return "", err
@@ -172,6 +173,16 @@ func (a *aliyun) Upsert(ctx context.Context, record Record) (string, error) {
 		RecordID string `json:"RecordId"`
 	}
 	if err := a.call(ctx, action, params, &response); err != nil {
+		if action != "AddDomainRecord" || !IsRecordAlreadyExists(err) {
+			return "", err
+		}
+		id, findErr := a.find(ctx, rr, record)
+		if findErr != nil {
+			return "", findErr
+		}
+		if id != "" {
+			return id, nil
+		}
 		return "", err
 	}
 	return response.RecordID, nil
@@ -192,27 +203,45 @@ func (a *aliyun) Delete(ctx context.Context, record Record) error {
 	if id == "" {
 		return nil
 	}
-	return a.call(ctx, "DeleteDomainRecord", url.Values{"RecordId": {id}}, nil)
+	err := a.call(ctx, "DeleteDomainRecord", url.Values{"RecordId": {id}}, nil)
+	if IsRecordNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 func (a *aliyun) find(ctx context.Context, rr string, record Record) (string, error) {
-	params := url.Values{
-		"DomainName":  {a.zone},
-		"PageSize":    {"500"},
-		"RRKeyWord":   {rr},
-		"TypeKeyWord": {string(record.Type)},
-	}
-	var response struct {
-		DomainRecords struct {
-			Record []struct{ RecordID, RR, Value, Line string } `json:"Record"`
-		} `json:"DomainRecords"`
-	}
-	if err := a.call(ctx, "DescribeDomainRecords", params, &response); err != nil {
-		return "", err
-	}
-	for _, item := range response.DomainRecords.Record {
-		if item.RR == rr && item.Value == record.Value && item.Line == lineOrDefault(record.Line) {
-			return item.RecordID, nil
+	wantedValue := CanonicalValue(record.Type, record.Value)
+	for page := 1; ; page++ {
+		params := url.Values{
+			"DomainName":  {a.zone},
+			"PageNumber":  {fmt.Sprint(page)},
+			"PageSize":    {"500"},
+			"RRKeyWord":   {rr},
+			"TypeKeyWord": {string(record.Type)},
+		}
+		var response struct {
+			TotalCount    int `json:"TotalCount"`
+			DomainRecords struct {
+				Record []struct {
+					RecordID string `json:"RecordId"`
+					RR       string `json:"RR"`
+					Value    string `json:"Value"`
+					Line     string `json:"Line"`
+				} `json:"Record"`
+			} `json:"DomainRecords"`
+		}
+		if err := a.call(ctx, "DescribeDomainRecords", params, &response); err != nil {
+			return "", err
+		}
+		for _, item := range response.DomainRecords.Record {
+			if item.RR == rr && CanonicalValue(record.Type, item.Value) == wantedValue &&
+				normalizeLine(item.Line) == normalizeLine(record.Line) {
+				return item.RecordID, nil
+			}
+		}
+		if len(response.DomainRecords.Record) == 0 || page*500 >= response.TotalCount {
+			break
 		}
 	}
 	return "", nil
@@ -245,13 +274,13 @@ func (a *aliyun) call(ctx context.Context, action string, params url.Values, out
 	if err != nil {
 		return err
 	}
-	if res.StatusCode >= 300 {
-		return fmt.Errorf("Aliyun DNS API %s: %s", res.Status, string(data))
-	}
 	var apiError struct{ Code, Message string }
 	_ = json.Unmarshal(data, &apiError)
-	if apiError.Code != "" {
-		return fmt.Errorf("Aliyun DNS API %s: %s", apiError.Code, apiError.Message)
+	if res.StatusCode >= 300 || apiError.Code != "" {
+		if apiError.Message == "" {
+			apiError.Message = string(data)
+		}
+		return &APIError{Provider: "Aliyun", Status: res.Status, Code: apiError.Code, Message: apiError.Message}
 	}
 	if output != nil {
 		return json.Unmarshal(data, output)
@@ -281,4 +310,8 @@ func lineOrDefault(line string) string {
 		return "default"
 	}
 	return line
+}
+
+func normalizeLine(line string) string {
+	return strings.ToLower(lineOrDefault(strings.TrimSpace(line)))
 }

@@ -24,6 +24,43 @@ func TestRelativeName(t *testing.T) {
 	}
 }
 
+func TestCanonicalValueNormalizesIPAddresses(t *testing.T) {
+	if got := CanonicalValue(model.DNSRecordTypeAAAA, " 2001:0db8:0:0::1 "); got != "2001:db8::1" {
+		t.Fatalf("canonical IPv6 value = %q", got)
+	}
+	if got := CanonicalValue(model.DNSRecordTypeTXT, " token value "); got != "token value" {
+		t.Fatalf("canonical TXT value = %q", got)
+	}
+}
+
+func TestCloudflareUpsertAdoptsDuplicateRecord(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		status := http.StatusOK
+		body := `{"success":true,"result":[],"result_info":{"total_pages":1}}`
+		switch requests {
+		case 2:
+			status = http.StatusBadRequest
+			body = `{"success":false,"errors":[{"code":81057,"message":"The record already exists."}]}`
+		case 3:
+			body = `{"success":true,"result":[{"id":"record-existing","content":"2001:db8::1"}],"result_info":{"total_pages":1}}`
+		}
+		return &http.Response{StatusCode: status, Status: http.StatusText(status), Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	provider, err := New(model.DNSProviderTypeCLOUDFLARE, "example.com", "zone-1", []byte(`{"api_token":"secret"}`), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := provider.Upsert(context.Background(), Record{
+		Hostname: "edge.example.com", Type: model.DNSRecordTypeAAAA,
+		Value: "2001:0db8:0:0::1", TTL: 300,
+	})
+	if err != nil || id != "record-existing" || requests != 3 {
+		t.Fatalf("id=%q requests=%d err=%v", id, requests, err)
+	}
+}
+
 func TestCloudflareUpsertCreatesRecord(t *testing.T) {
 	var got *http.Request
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
@@ -124,6 +161,32 @@ func TestAliyunRequestIsSigned(t *testing.T) {
 	}
 	if !provider.SupportsLines() {
 		t.Fatal("Aliyun should support regional lines")
+	}
+}
+
+func TestAliyunUpsertAdoptsDuplicateRecord(t *testing.T) {
+	requests := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requests++
+		body := `{"TotalCount":0,"DomainRecords":{"Record":[]}}`
+		switch requests {
+		case 2:
+			body = `{"Code":"DomainRecordDuplicate","Message":"The DNS record already exists."}`
+		case 3:
+			body = `{"TotalCount":1,"DomainRecords":{"Record":[{"RecordId":"record-existing","RR":"edge","Value":"2001:db8::1","Line":"default"}]}}`
+		}
+		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+	})}
+	provider, err := New(model.DNSProviderTypeALIYUN, "example.com", "", []byte(`{"access_key_id":"key","access_key_secret":"secret"}`), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := provider.Upsert(context.Background(), Record{
+		Hostname: "edge.example.com", Type: model.DNSRecordTypeAAAA,
+		Value: "2001:0db8:0:0::1", Line: "default", TTL: 300,
+	})
+	if err != nil || id != "record-existing" || requests != 3 {
+		t.Fatalf("id=%q requests=%d err=%v", id, requests, err)
 	}
 }
 

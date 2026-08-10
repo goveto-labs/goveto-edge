@@ -254,6 +254,9 @@ func create(db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomai
 		if err := validateReferences(ctx, db, input); err != nil {
 			return err
 		}
+		if err := ensureAddressesAvailable(ctx, db, input.Addresses, ""); err != nil {
+			return err
+		}
 		sshCredential, sshInput, err := nodedomain.ResolveSSHInstallInput(
 			ctx, db, cipher, input.ClusterID, input.SSH,
 		)

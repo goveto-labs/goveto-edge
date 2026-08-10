@@ -4,7 +4,9 @@ package dnsprovider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 
@@ -26,6 +28,54 @@ type Provider interface {
 	Delete(context.Context, Record) error
 	ListRecords(context.Context, string) ([]Record, error)
 	SupportsLines() bool
+}
+
+type APIError struct {
+	Provider string
+	Status   string
+	Code     string
+	Message  string
+}
+
+func (e *APIError) Error() string {
+	label := e.Provider + " DNS API"
+	if e.Code != "" {
+		label += " " + e.Code
+	} else if e.Status != "" {
+		label += " " + e.Status
+	}
+	if e.Message == "" {
+		return label
+	}
+	return label + ": " + e.Message
+}
+
+func IsRecordAlreadyExists(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return (apiErr.Provider == "Aliyun" && apiErr.Code == "DomainRecordDuplicate") ||
+		(apiErr.Provider == "Cloudflare" && (apiErr.Code == "81057" || apiErr.Code == "81058"))
+}
+
+func IsRecordNotFound(err error) bool {
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		return false
+	}
+	return (apiErr.Provider == "Aliyun" && apiErr.Code == "InvalidRecordId.NotFound") ||
+		(apiErr.Provider == "Cloudflare" && apiErr.Code == "81044")
+}
+
+func CanonicalValue(kind model.DNSRecordType, value string) string {
+	value = strings.TrimSpace(value)
+	if kind == model.DNSRecordTypeA || kind == model.DNSRecordTypeAAAA {
+		if ip := net.ParseIP(value); ip != nil {
+			return ip.String()
+		}
+	}
+	return value
 }
 
 type Credentials struct {

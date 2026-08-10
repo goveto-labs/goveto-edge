@@ -708,7 +708,7 @@ func (s *Service) deleteAll(ctx context.Context, clusterID string) error {
 				query.DNSManagedRecord.LastError.Set(deleteErr.Error()),
 				query.DNSManagedRecord.UpdatedAt.Set(time.Now()),
 			}
-			if item.ProviderRecordId != nil {
+			if item.ProviderRecordId != nil && dnsprovider.IsRecordNotFound(deleteErr) {
 				updateSets = append(updateSets, query.DNSManagedRecord.ProviderRecordId.SetNull())
 			}
 			if _, updateErr := s.db.DNSManagedRecord.Update().
@@ -794,7 +794,7 @@ func (s *Service) desired(
 					Record: dnsprovider.Record{
 						Hostname: *cluster.PrimaryHostname,
 						Type:     recordType,
-						Value:    address.Address,
+						Value:    dnsprovider.CanonicalValue(recordType, address.Address),
 						Line:     lineCode,
 						TTL:      config.DefaultTtl,
 						Proxied:  config.Proxied,
@@ -882,7 +882,7 @@ func (s *Service) apply(
 				query.DNSManagedRecord.LastError.Set(syncErr.Error()),
 				query.DNSManagedRecord.UpdatedAt.Set(time.Now()),
 			}
-			if current.ProviderRecordId != nil {
+			if current.ProviderRecordId != nil && dnsprovider.IsRecordNotFound(syncErr) {
 				updateSets = append(updateSets, query.DNSManagedRecord.ProviderRecordId.SetNull())
 			}
 			if _, updateErr := s.db.DNSManagedRecord.Update().
@@ -954,7 +954,7 @@ func (s *Service) apply(
 				query.DNSManagedRecord.LastError.Set(deleteErr.Error()),
 				query.DNSManagedRecord.UpdatedAt.Set(time.Now()),
 			}
-			if item.ProviderRecordId != nil {
+			if item.ProviderRecordId != nil && dnsprovider.IsRecordNotFound(deleteErr) {
 				updateSets = append(updateSets, query.DNSManagedRecord.ProviderRecordId.SetNull())
 			}
 			if _, updateErr := s.db.DNSManagedRecord.Update().
@@ -985,7 +985,7 @@ func normalizeLineKey(line string) string {
 
 func key(host string, kind model.DNSRecordType, target, line string) string {
 	return strings.ToLower(host) + "|" + string(kind) + "|" +
-		strings.ToLower(target) + "|" + normalizeLineKey(line)
+		strings.ToLower(dnsprovider.CanonicalValue(kind, target)) + "|" + normalizeLineKey(line)
 }
 
 func value(input *string) string {

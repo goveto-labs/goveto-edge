@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+	"strconv"
 
 	"goveto-edge/internal/storage/gen/model"
 )
@@ -98,6 +99,7 @@ func (c *cloudflare) Upsert(ctx context.Context, record Record) (string, error) 
 	if record.Proxied {
 		record.TTL = 1
 	}
+	record.Value = CanonicalValue(record.Type, record.Value)
 	id := record.ID
 	if id == "" {
 		found, err := c.find(ctx, record)
@@ -117,6 +119,16 @@ func (c *cloudflare) Upsert(ctx context.Context, record Record) (string, error) 
 		} `json:"result"`
 	}
 	if err := c.do(ctx, method, path, payload, &response); err != nil {
+		if method != http.MethodPost || !IsRecordAlreadyExists(err) {
+			return "", err
+		}
+		id, findErr := c.find(ctx, record)
+		if findErr != nil {
+			return "", findErr
+		}
+		if id != "" {
+			return id, nil
+		}
 		return "", err
 	}
 	return response.Result.ID, nil
@@ -137,21 +149,34 @@ func (c *cloudflare) Delete(ctx context.Context, record Record) error {
 	if id == "" {
 		return nil
 	}
-	return c.do(ctx, http.MethodDelete, "/zones/"+c.zoneID+"/dns_records/"+id, nil, nil)
+	err := c.do(ctx, http.MethodDelete, "/zones/"+c.zoneID+"/dns_records/"+id, nil, nil)
+	if IsRecordNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 func (c *cloudflare) find(ctx context.Context, record Record) (string, error) {
-	path := "/zones/" + c.zoneID + "/dns_records?per_page=100&type=" +
-		url.QueryEscape(string(record.Type)) + "&name=" + url.QueryEscape(record.Hostname)
-	var response struct {
-		Result []struct{ ID, Content string } `json:"result"`
-	}
-	if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
-		return "", err
-	}
-	for _, item := range response.Result {
-		if item.Content == record.Value {
-			return item.ID, nil
+	wantedValue := CanonicalValue(record.Type, record.Value)
+	for page := 1; ; page++ {
+		path := "/zones/" + c.zoneID + "/dns_records?per_page=100&page=" + strconv.Itoa(page) +
+			"&type=" + url.QueryEscape(string(record.Type)) + "&name=" + url.QueryEscape(record.Hostname)
+		var response struct {
+			Result     []struct{ ID, Content string } `json:"result"`
+			ResultInfo struct {
+				TotalPages int `json:"total_pages"`
+			} `json:"result_info"`
+		}
+		if err := c.do(ctx, http.MethodGet, path, nil, &response); err != nil {
+			return "", err
+		}
+		for _, item := range response.Result {
+			if CanonicalValue(record.Type, item.Content) == wantedValue {
+				return item.ID, nil
+			}
+		}
+		if len(response.Result) == 0 || response.ResultInfo.TotalPages == 0 || page >= response.ResultInfo.TotalPages {
+			break
 		}
 	}
 	return "", nil
@@ -184,12 +209,21 @@ func (c *cloudflare) do(ctx context.Context, method, path string, payload any, o
 	var envelope struct {
 		Success bool `json:"success"`
 		Errors  []struct {
+			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"errors"`
 	}
 	_ = json.Unmarshal(data, &envelope)
 	if res.StatusCode >= 300 || !envelope.Success {
-		return fmt.Errorf("Cloudflare DNS API %s: %s", res.Status, string(data))
+		apiError := &APIError{Provider: "Cloudflare", Status: res.Status}
+		if len(envelope.Errors) > 0 {
+			apiError.Code = strconv.Itoa(envelope.Errors[0].Code)
+			apiError.Message = envelope.Errors[0].Message
+		}
+		if apiError.Message == "" {
+			apiError.Message = string(data)
+		}
+		return apiError
 	}
 	if output != nil {
 		return json.Unmarshal(data, output)

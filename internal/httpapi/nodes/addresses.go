@@ -31,9 +31,11 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		}
 
 		input.Address = strings.TrimSpace(input.Address)
-		if net.ParseIP(input.Address) == nil {
+		parsed := net.ParseIP(input.Address)
+		if parsed == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "address must be a valid IP")
 		}
+		input.Address = parsed.String()
 
 		ctx := c.Request().Context()
 		node, err := db.Node.FindUnique(ctx, query.Node.Id.Equals(c.Param("node_id")))
@@ -42,6 +44,9 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		}
 		if node == nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
+		}
+		if err = ensureAddressesAvailable(ctx, db, []string{input.Address}, ""); err != nil {
+			return err
 		}
 
 		created, err := db.NodeAddress.Create().
@@ -73,9 +78,11 @@ func updateAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
 		input.Address = strings.TrimSpace(input.Address)
-		if net.ParseIP(input.Address) == nil {
+		parsed := net.ParseIP(input.Address)
+		if parsed == nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "address must be a valid IP")
 		}
+		input.Address = parsed.String()
 
 		ctx := c.Request().Context()
 		node, err := findAddressNode(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
@@ -88,6 +95,9 @@ func updateAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		}
 		if current == nil || current.NodeId != node.Id {
 			return echo.NewHTTPError(http.StatusNotFound, "address not found")
+		}
+		if err = ensureAddressesAvailable(ctx, db, []string{input.Address}, current.Id); err != nil {
+			return err
 		}
 		updated, err := db.NodeAddress.Update().
 			Where(
@@ -152,4 +162,30 @@ func findAddressNode(ctx context.Context, db *client.Client, clusterID, nodeID s
 		return nil, echo.NewHTTPError(http.StatusNotFound, "node not found")
 	}
 	return node, nil
+}
+
+func ensureAddressesAvailable(ctx context.Context, db *client.Client, addresses []string, excludeID string) error {
+	wanted := make(map[string]struct{}, len(addresses))
+	for _, address := range addresses {
+		if parsed := net.ParseIP(address); parsed != nil {
+			wanted[parsed.String()] = struct{}{}
+		}
+	}
+	existing, err := db.NodeAddress.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	for _, item := range existing {
+		if item.Id == excludeID {
+			continue
+		}
+		parsed := net.ParseIP(item.Address)
+		if parsed == nil {
+			continue
+		}
+		if _, conflict := wanted[parsed.String()]; conflict {
+			return echo.NewHTTPError(http.StatusConflict, "node address already exists")
+		}
+	}
+	return nil
 }

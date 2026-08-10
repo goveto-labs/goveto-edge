@@ -73,3 +73,11 @@ func TestRecordKeyNormalizesCase(t *testing.T) {
 		t.Fatalf("equivalent record keys differ: %q != %q", left, right)
 	}
 }
+
+func TestRecordKeyNormalizesEquivalentIPv6(t *testing.T) {
+	left := key("edge.example.com", model.DNSRecordTypeAAAA, "2001:0db8:0:0::1", "default")
+	right := key("edge.example.com", model.DNSRecordTypeAAAA, "2001:db8::1", "default")
+	if left != right {
+		t.Fatalf("equivalent IPv6 record keys differ: %q != %q", left, right)
+	}
+}

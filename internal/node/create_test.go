@@ -33,6 +33,28 @@ func TestCreateInputJSONContract(t *testing.T) {
 	}
 }
 
+func TestCreateInputCanonicalizesAndDeduplicatesAddresses(t *testing.T) {
+	input := CreateInput{
+		ClusterID: "cluster-1",
+		Name:      "edge-1",
+		Addresses: []string{"2001:0db8:0:0::1", "2001:db8::1"},
+		SSH: SSHInstallReference{
+			EntryIP: "192.0.2.1", Port: 22, CredentialID: "credential-1",
+		},
+	}
+	if err := input.Validate(); err == nil {
+		t.Fatal("equivalent IPv6 addresses were not rejected as duplicates")
+	}
+
+	input.Addresses = []string{"2001:0db8:0:0::1"}
+	if err := input.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	if input.Addresses[0] != "2001:db8::1" {
+		t.Fatalf("canonical address = %q", input.Addresses[0])
+	}
+}
+
 func TestInstallPayloadJSONContainsOnlyNodeID(t *testing.T) {
 	want := InstallPayload{NodeID: "node-1"}
 	raw, err := json.Marshal(want)
