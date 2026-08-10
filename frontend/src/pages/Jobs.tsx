@@ -396,9 +396,9 @@ function JobDetails({
 }) {
     return (
         <div className='max-h-[76vh] overflow-y-auto px-6 py-6'>
-            <Tabs className="w-full" aria-label='Job details' defaultSelectedKey='summary'>
+            <Tabs className='w-full' aria-label='Job details' defaultSelectedKey='summary'>
                 <Tabs.ListContainer>
-                    <Tabs.List aria-label="Options">
+                    <Tabs.List aria-label='Options'>
                         <Tabs.Tab id='summary'>
                             Summary
                             <Tabs.Indicator />

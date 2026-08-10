@@ -16,6 +16,7 @@ import { useNavigate } from 'react-router-dom';
 import { ApiError, analyticsApi, nodesApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
+import { GeoTrafficPanel } from '@/components/GeoTrafficPanel.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
@@ -138,6 +139,7 @@ export default function Dashboard() {
     const [hostnames, setHostnames] = useState<DistributionItem[]>([]);
     const [statuses, setStatuses] = useState<DistributionItem[]>([]);
     const [methods, setMethods] = useState<DistributionItem[]>([]);
+    const [countries, setCountries] = useState<DistributionItem[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -156,6 +158,7 @@ export default function Dashboard() {
                 hostnameData,
                 statusData,
                 methodData,
+                countryData,
             ] = await Promise.all([
                 nodeApi.list(),
                 siteApi.list(),
@@ -187,6 +190,11 @@ export default function Dashboard() {
                     sort: 'requests',
                     limit: 10,
                 }),
+                analytics.rankings('country', {
+                    period,
+                    sort: 'traffic',
+                    limit: 100,
+                }),
             ]);
             setNodes(nodeData);
             setSites(siteData);
@@ -198,6 +206,7 @@ export default function Dashboard() {
             setHostnames(hostnameData);
             setStatuses(statusData);
             setMethods(methodData);
+            setCountries(countryData);
             setError('');
         } catch (loadError) {
             setError(
@@ -526,6 +535,8 @@ export default function Dashboard() {
                     />
                 </ContentCard>
             </div>
+
+            <GeoTrafficPanel items={countries} loading={loading} period={period} />
 
             <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                 <ContentCard className='h-full' title='Top domains · 24h'>

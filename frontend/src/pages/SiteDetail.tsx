@@ -50,6 +50,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
+import { GeoTrafficPanel } from '@/components/GeoTrafficPanel.tsx';
 import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
@@ -387,6 +388,7 @@ export default function SiteDetail() {
     const [paths, setPaths] = useState<DistributionItem[]>([]);
     const [ipsRequests, setIpsRequests] = useState<DistributionItem[]>([]);
     const [ipsTraffic, setIpsTraffic] = useState<DistributionItem[]>([]);
+    const [countries, setCountries] = useState<DistributionItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [monitoringLoading, setMonitoringLoading] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -500,6 +502,7 @@ export default function SiteDetail() {
                 pathData,
                 ipRequestData,
                 ipTrafficData,
+                countryData,
             ] = await Promise.all([
                 analytics.overview({ site_id: siteId }),
                 analytics.traffic({ site_id: siteId, period: '24h' }),
@@ -512,6 +515,12 @@ export default function SiteDetail() {
                 analytics.rankings('path', { ...params, sort: 'requests' }),
                 analytics.rankings('ip', { ...params, sort: 'requests' }),
                 analytics.rankings('ip', { ...params, sort: 'traffic' }),
+                analytics.rankings('country', {
+                    site_id: siteId,
+                    period,
+                    sort: 'traffic',
+                    limit: 100,
+                }),
             ]);
             setOverview(overviewData);
             setTraffic24h(h24.series);
@@ -524,6 +533,7 @@ export default function SiteDetail() {
             setPaths(pathData);
             setIpsRequests(ipRequestData);
             setIpsTraffic(ipTrafficData);
+            setCountries(countryData);
             setError('');
         } catch (loadError) {
             setError(
@@ -926,6 +936,11 @@ export default function SiteDetail() {
                                             />
                                         </ContentCard>
                                     </div>
+                                    <GeoTrafficPanel
+                                        items={countries}
+                                        loading={monitoringLoading}
+                                        period={period}
+                                    />
                                     <div className='grid gap-4 xl:grid-cols-[1.15fr_.85fr]'>
                                         <ContentCard title='Domain ranking'>
                                             <RankingBars items={domains} />
