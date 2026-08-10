@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { Route, Routes } from 'react-router-dom';
 
 import { Layout } from '@/components/Layout.tsx';
@@ -7,38 +7,22 @@ import { ApiLoadingProvider } from '@/hooks/useApiLoading.tsx';
 import { AuthProvider } from '@/hooks/useAuth.ts';
 import { ClusterProvider } from '@/hooks/useCluster.ts';
 import { InitializationGate, InitializationProvider } from '@/hooks/useInitialization.tsx';
+import { lazyRoutes } from '@/routes.tsx';
 
-const AdminSettings = lazy(() => import('@/pages/AdminSettings.tsx'));
-const Analytics = lazy(() => import('@/pages/Analytics.tsx'));
-const Certificates = lazy(() => import('@/pages/Certificates.tsx'));
-const ClusterMembers = lazy(() => import('@/pages/ClusterMembers.tsx'));
-const CreateNode = lazy(() => import('@/pages/CreateNode.tsx'));
-const CreateSite = lazy(() => import('@/pages/CreateSite.tsx'));
-const Dashboard = lazy(() => import('@/pages/Dashboard.tsx'));
-const DNS = lazy(() => import('@/pages/DNS.tsx'));
-const DNSZones = lazy(() => import('@/pages/DNSZones.tsx'));
-const Init = lazy(() => import('@/pages/Init.tsx'));
-const Jobs = lazy(() => import('@/pages/Jobs.tsx'));
-const Login = lazy(() => import('@/pages/Login.tsx'));
-const NodeDetail = lazy(() => import('@/pages/NodeDetail.tsx'));
-const Nodes = lazy(() => import('@/pages/Nodes.tsx'));
-const Notifications = lazy(() => import('@/pages/Notifications.tsx'));
-const PurgeJobs = lazy(() => import('@/pages/PurgeJobs.tsx'));
-const Register = lazy(() => import('@/pages/Register.tsx'));
-const Settings = lazy(() => import('@/pages/Settings.tsx'));
-const SiteDetail = lazy(() => import('@/pages/SiteDetail.tsx'));
-const Sites = lazy(() => import('@/pages/Sites.tsx'));
-const SitesAccessLogs = lazy(() => import('@/pages/SitesAccessLogs.tsx'));
-const SSHCredentials = lazy(() => import('@/pages/SSHCredentials.tsx'));
-
-function RouteFallback() {
+/**
+ * Top-level fallback for the pre-auth entry routes (init / login / register).
+ * These are hit on a cold load before any preloading can run, so a full-viewport
+ * spinner matches the existing {@link InitializationGate} boot experience. The
+ * primary authenticated routes live under {@link Layout}, which owns its own
+ * in-frame Suspense boundary so their fallback renders inside the app shell.
+ */
+function BootFallback() {
     return (
-        <div
-            aria-label='Loading page'
-            className='flex min-h-48 items-center justify-center text-sm text-muted'
-            role='status'
-        >
-            Loading page…
+        <div className='flex min-h-[100dvh] items-center justify-center bg-background'>
+            <div className='flex flex-col items-center gap-3 text-muted'>
+                <div className='h-7 w-7 animate-spin rounded-full border-2 border-current border-t-transparent' />
+                <span className='text-sm'>Loading…</span>
+            </div>
         </div>
     );
 }
@@ -50,11 +34,11 @@ export default function App() {
                 <InitializationGate>
                     <AuthProvider>
                         <ClusterProvider>
-                            <Suspense fallback={<RouteFallback />}>
+                            <Suspense fallback={<BootFallback />}>
                                 <Routes>
-                                    <Route element={<Init />} path='/init' />
-                                    <Route element={<Login />} path='/login' />
-                                    <Route element={<Register />} path='/register' />
+                                    <Route element={<lazyRoutes.Init />} path='/init' />
+                                    <Route element={<lazyRoutes.Login />} path='/login' />
+                                    <Route element={<lazyRoutes.Register />} path='/register' />
                                     <Route
                                         element={
                                             <ProtectedRoute>
@@ -62,40 +46,67 @@ export default function App() {
                                             </ProtectedRoute>
                                         }
                                     >
-                                        <Route element={<Dashboard />} path='/' />
-                                        <Route element={<Nodes />} path='/nodes' />
-                                        <Route element={<CreateNode />} path='/nodes/create' />
-                                        <Route element={<NodeDetail />} path='/nodes/:nodeId/*' />
+                                        <Route element={<lazyRoutes.Dashboard />} path='/' />
+                                        <Route element={<lazyRoutes.Nodes />} path='/nodes' />
                                         <Route
-                                            element={<SSHCredentials />}
+                                            element={<lazyRoutes.CreateNode />}
+                                            path='/nodes/create'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.NodeDetail />}
+                                            path='/nodes/:nodeId/*'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.SSHCredentials />}
                                             path='/nodes/ssh-credentials'
                                         />
-                                        <Route element={<Sites />} path='/sites' />
-                                        <Route element={<CreateSite />} path='/sites/create' />
-                                        <Route element={<SitesAccessLogs />} path='/sites/logs' />
+                                        <Route element={<lazyRoutes.Sites />} path='/sites' />
                                         <Route
-                                            element={<Certificates />}
+                                            element={<lazyRoutes.CreateSite />}
+                                            path='/sites/create'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.SitesAccessLogs />}
+                                            path='/sites/logs'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.Certificates />}
                                             path='/sites/certificates'
                                         />
-                                        <Route element={<PurgeJobs />} path='/sites/cache' />
-                                        <Route element={<SiteDetail />} path='/sites/:siteId/*' />
-                                        <Route element={<DNS />} path='/dns' />
-                                        <Route element={<DNSZones />} path='/dns/zones' />
-                                        <Route element={<Certificates />} path='/certificates' />
-                                        <Route element={<Jobs />} path='/jobs' />
-                                        <Route element={<PurgeJobs />} path='/purge' />
-                                        <Route element={<Analytics />} path='/analytics' />
-                                        <Route element={<Settings />} path='/settings' />
                                         <Route
-                                            element={<ClusterMembers />}
+                                            element={<lazyRoutes.PurgeJobs />}
+                                            path='/sites/cache'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.SiteDetail />}
+                                            path='/sites/:siteId/*'
+                                        />
+                                        <Route element={<lazyRoutes.DNS />} path='/dns' />
+                                        <Route
+                                            element={<lazyRoutes.DNSZones />}
+                                            path='/dns/zones'
+                                        />
+                                        <Route
+                                            element={<lazyRoutes.Certificates />}
+                                            path='/certificates'
+                                        />
+                                        <Route element={<lazyRoutes.Jobs />} path='/jobs' />
+                                        <Route element={<lazyRoutes.PurgeJobs />} path='/purge' />
+                                        <Route
+                                            element={<lazyRoutes.Analytics />}
+                                            path='/analytics'
+                                        />
+                                        <Route element={<lazyRoutes.Settings />} path='/settings' />
+                                        <Route
+                                            element={<lazyRoutes.ClusterMembers />}
                                             path='/settings/members'
                                         />
                                         <Route
-                                            element={<Notifications />}
+                                            element={<lazyRoutes.Notifications />}
                                             path='/settings/notifications'
                                         />
                                         <Route
-                                            element={<AdminSettings />}
+                                            element={<lazyRoutes.AdminSettings />}
                                             path='/settings/admin/*'
                                         />
                                     </Route>

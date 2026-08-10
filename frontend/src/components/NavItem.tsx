@@ -3,6 +3,8 @@ import type { LucideIcon } from 'lucide-react';
 import { Badge, Tooltip } from '@heroui/react';
 import { Link } from 'react-router-dom';
 
+import { preloadRoute } from '@/routes.tsx';
+
 interface NavItemProps {
     to: string;
     icon: LucideIcon;
@@ -33,6 +35,8 @@ export function NavItem({
             }`}
             to={to}
             onClick={onClick}
+            onFocus={() => preloadRoute(to)}
+            onMouseEnter={() => preloadRoute(to)}
         >
             <Icon className='h-[18px] w-[18px] shrink-0' />
             {!collapsed && <span className='flex-1 truncate'>{label}</span>}

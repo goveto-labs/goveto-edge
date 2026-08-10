@@ -1,6 +1,6 @@
 import { Alert, Avatar, Button, Drawer, Input, useOverlayState, useTheme } from '@heroui/react';
 import { Bell, ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
@@ -9,6 +9,7 @@ import { PageTransition } from '@/components/PageTransition.tsx';
 import { ClusterPicker, navigationFor, Sidebar } from '@/components/Sidebar.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { preloadAllRoutes, scheduleIdle } from '@/routes.tsx';
 
 function Greeting() {
     const { user } = useAuth();
@@ -43,6 +44,23 @@ function PageTitle({ pathname, isPlatformAdmin }: { pathname: string; isPlatform
     return <span className='text-lg font-semibold'>{title}</span>;
 }
 
+/**
+ * In-frame Suspense fallback. Renders inside the app shell so the sidebar and
+ * header stay mounted while a route chunk resolves. Normally unreachable
+ * because {@link Layout} warms every chunk on idle, but kept as a graceful
+ * boundary for slow connections or cache misses.
+ */
+function ContentFallback() {
+    return (
+        <div className='flex min-h-[60vh] items-center justify-center'>
+            <div className='flex flex-col items-center gap-3 text-muted'>
+                <div className='h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent' />
+                <span className='text-xs'>Loading page…</span>
+            </div>
+        </div>
+    );
+}
+
 export function Layout() {
     const navigate = useNavigate();
     const location = useLocation();
@@ -61,6 +79,10 @@ export function Layout() {
     const [creating, setCreating] = useState(false);
     const [createError, setCreateError] = useState<string | null>(null);
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+    // Once the user is inside the app shell, warm every route chunk during idle
+    // time so subsequent navigation mounts instantly without hitting Suspense.
+    useEffect(() => scheduleIdle(() => preloadAllRoutes()), []);
 
     const toggleTheme = () => {
         setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
@@ -210,7 +232,9 @@ export function Layout() {
                                     </Alert.Content>
                                 </Alert>
                             )}
-                        <PageTransition />
+                        <Suspense fallback={<ContentFallback />}>
+                            <PageTransition />
+                        </Suspense>
                     </div>
                 </main>
             </div>

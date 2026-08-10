@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation, useOutlet } from 'react-router-dom';
 
-import { ApiSpinner } from '@/components/ApiSpinner.tsx';
 import { LoadingSurface } from '@/components/LoadingSurface.tsx';
 import { useApiLoading } from '@/hooks/useApiLoading.tsx';
 
@@ -55,20 +54,17 @@ export function PageTransition() {
     );
 
     return (
-        <div className='relative min-h-full'>
-            <ApiSpinner isLoading={!isVisible} />
+        <LoadingSurface
+            className='min-h-full'
+            isLoading={!isVisible || (isVisible && pending > 0 && !usesLocalLoading)}
+            label={isVisible ? 'Updating page data' : 'Loading page'}
+        >
             <div
                 className={`min-h-full transition-opacity ease-out ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
                 style={{ transitionDuration: isVisible ? '200ms' : '0ms' }}
             >
-                <LoadingSurface
-                    className='min-h-full'
-                    isLoading={isVisible && pending > 0 && !usesLocalLoading}
-                    label='Updating page data'
-                >
-                    {element}
-                </LoadingSurface>
+                {element}
             </div>
-        </div>
+        </LoadingSurface>
     );
 }
