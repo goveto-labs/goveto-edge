@@ -13,6 +13,28 @@ function pageKey(pathname: string) {
     return pathname;
 }
 
+/**
+ * Full-content loading state shown while a route switch is in flight. Renders
+ * immediately (no fade-in) so there is never a blank gap between the previous
+ * page hiding and the destination's data arriving. Visually consistent with
+ * the in-frame {@link ContentFallback} Suspense boundary in Layout.
+ *
+ * This is distinct from {@link LoadingSurface}, whose translucent overlay +
+ * fade-in is meant for refreshing content that is already on screen. During a
+ * route switch the destination is opacity-0, so a fading 55% veil would be
+ * invisible against the empty background — hence the dedicated solid spinner.
+ */
+function PageSwitchOverlay() {
+    return (
+        <div className='pointer-events-none absolute inset-0 z-50 flex min-h-[60vh] items-center justify-center'>
+            <div className='flex flex-col items-center gap-3 text-muted'>
+                <div className='h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent' />
+                <span className='text-xs'>Loading page…</span>
+            </div>
+        </div>
+    );
+}
+
 export function PageTransition() {
     const location = useLocation();
     const element = useOutlet();
@@ -53,18 +75,24 @@ export function PageTransition() {
         []
     );
 
+    const isSwitching = !isVisible;
+    const isUpdating = isVisible && pending > 0 && !usesLocalLoading;
+
     return (
-        <LoadingSurface
-            className='min-h-full'
-            isLoading={!isVisible || (isVisible && pending > 0 && !usesLocalLoading)}
-            label={isVisible ? 'Updating page data' : 'Loading page'}
-        >
-            <div
-                className={`min-h-full transition-opacity ease-out ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
-                style={{ transitionDuration: isVisible ? '200ms' : '0ms' }}
+        <div className='relative min-h-full'>
+            <LoadingSurface
+                className='min-h-full'
+                isLoading={isUpdating}
+                label='Updating page data'
             >
-                {element}
-            </div>
-        </LoadingSurface>
+                <div
+                    className={`min-h-full transition-opacity ease-out ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
+                    style={{ transitionDuration: isVisible ? '200ms' : '0ms' }}
+                >
+                    {element}
+                </div>
+            </LoadingSurface>
+            {isSwitching && <PageSwitchOverlay />}
+        </div>
     );
 }
