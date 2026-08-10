@@ -94,15 +94,24 @@ func loadClusterStatus(ctx context.Context, db *client.Client, clusterID string)
 	}
 
 	active := count.Pending+count.Running > 0
-	state := "idle"
-	if count.Failed > 0 {
-		state = "failed"
-	}
-	if active {
-		state = "syncing"
-	}
+	state := classifyClusterState(active, count.Failed > 0)
 
 	return clusterPublishStatus{State: state, HasActiveTasks: active, HasFailedTasks: count.Failed > 0, PendingCount: count.Pending, RunningCount: count.Running, FailedCount: count.Failed, RecentTasks: recent}, nil
+}
+
+// classifyClusterState reduces the pending/running/failed counters into a
+// single aggregate state. A cluster that is still syncing wins over one that
+// merely has failed tasks so an operator can watch a rollback converge;
+// "failed" surfaces only once every active task has settled.
+func classifyClusterState(active, hasFailed bool) string {
+	switch {
+	case active:
+		return "syncing"
+	case hasFailed:
+		return "failed"
+	default:
+		return "idle"
+	}
 }
 
 // @summary Cluster publish events

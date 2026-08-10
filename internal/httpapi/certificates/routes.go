@@ -301,7 +301,7 @@ func enqueueOperation(db *client.Client, service *certmanager.Service, operation
 		if err != nil {
 			return err
 		}
-		if (operation == model.CertificateOperationRENEW || operation == model.CertificateOperationREISSUE) && item.Source != model.CertificateSourceACME {
+		if !operationAllowed(item.Source, operation) {
 			return echo.NewHTTPError(http.StatusBadRequest, "operation requires an ACME certificate")
 		}
 		job, err := service.Enqueue(c.Request().Context(), item.Id, operation)
@@ -343,6 +343,15 @@ func serveChallenge(service *certmanager.Service) echo.HandlerFunc {
 		}
 		return c.String(http.StatusOK, value)
 	}
+}
+
+// operationAllowed enforces the certificate lifecycle state machine:
+// issuing and renewing an ACME order (RENEW/REISSUE) is only meaningful for
+// ACME certificates, while re-publishing existing material (REPUBLISH) works
+// for any source. Returning this as a pure rule keeps the gate auditable.
+func operationAllowed(source model.CertificateSource, operation model.CertificateOperation) bool {
+	acmeOnly := operation == model.CertificateOperationRENEW || operation == model.CertificateOperationREISSUE
+	return !acmeOnly || source == model.CertificateSourceACME
 }
 
 func ownedCertificate(c *echo.Context, db *client.Client) (*model.Certificate, error) {
