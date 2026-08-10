@@ -46,17 +46,17 @@ function PageTitle({ pathname, isPlatformAdmin }: { pathname: string; isPlatform
 
 /**
  * In-frame Suspense fallback. Renders inside the app shell so the sidebar and
- * header stay mounted while a route chunk resolves. Normally unreachable
- * because {@link Layout} warms every chunk on idle, but kept as a graceful
- * boundary for slow connections or cache misses.
+ * header stay mounted while a route chunk resolves. Pinned to the top-left
+ * corner with no label so it is visually continuous with PageTransition's
+ * {@link PageSwitchOverlay} — as a route chunk resolves and the data-loading
+ * phase begins, the same compact spinner stays in place. Normally unreachable
+ * because Layout warms every chunk on idle, but kept as a graceful boundary
+ * for slow connections or cache misses.
  */
 function ContentFallback() {
     return (
-        <div className='flex min-h-[60vh] items-center justify-center'>
-            <div className='flex flex-col items-center gap-3 text-muted'>
-                <div className='h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent' />
-                <span className='text-xs'>Loading page…</span>
-            </div>
+        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-primary'>
+            <div className='h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent' />
         </div>
     );
 }

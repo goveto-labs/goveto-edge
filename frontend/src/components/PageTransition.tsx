@@ -14,23 +14,22 @@ function pageKey(pathname: string) {
 }
 
 /**
- * Full-content loading state shown while a route switch is in flight. Renders
+ * Compact route-switch indicator pinned to the top-left corner. Renders
  * immediately (no fade-in) so there is never a blank gap between the previous
- * page hiding and the destination's data arriving. Visually consistent with
- * the in-frame {@link ContentFallback} Suspense boundary in Layout.
+ * page hiding and the destination's data arriving. Because it is anchored to
+ * the corner it does not depend on the container height, which avoids the
+ * spinner shifting around as different pages' empty shells render at
+ * different heights.
  *
  * This is distinct from {@link LoadingSurface}, whose translucent overlay +
  * fade-in is meant for refreshing content that is already on screen. During a
  * route switch the destination is opacity-0, so a fading 55% veil would be
- * invisible against the empty background — hence the dedicated solid spinner.
+ * invisible against the empty background — hence this dedicated spinner.
  */
 function PageSwitchOverlay() {
     return (
-        <div className='pointer-events-none absolute inset-0 z-50 flex min-h-[60vh] items-center justify-center'>
-            <div className='flex flex-col items-center gap-3 text-muted'>
-                <div className='h-6 w-6 animate-spin rounded-full border-2 border-current border-t-transparent' />
-                <span className='text-xs'>Loading page…</span>
-            </div>
+        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-primary'>
+            <div className='h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent' />
         </div>
     );
 }

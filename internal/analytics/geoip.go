@@ -3,12 +3,34 @@ package analytics
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/oschwald/geoip2-golang"
 )
+
+const (
+	localNetworkISP       = "Private network"
+	localNetworkRegion    = "Local network"
+	reservedNetworkISP    = "Reserved network"
+	reservedNetworkRegion = "Reserved address space"
+)
+
+var reservedAddressPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.0.2.0/24"),
+	netip.MustParsePrefix("192.88.99.0/24"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("198.51.100.0/24"),
+	netip.MustParsePrefix("203.0.113.0/24"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("100::/64"),
+	netip.MustParsePrefix("2001:db8::/32"),
+}
 
 type geoIPEnricher struct {
 	cityPath   string
@@ -26,9 +48,6 @@ func newGeoIPEnricher(cityPath string, asnPaths ...string) *geoIPEnricher {
 	if len(asnPaths) > 0 {
 		asnPath = strings.TrimSpace(asnPaths[0])
 	}
-	if cityPath == "" && asnPath == "" {
-		return nil
-	}
 	return &geoIPEnricher{cityPath: cityPath, asnPath: asnPath}
 }
 
@@ -41,15 +60,17 @@ func (g *geoIPEnricher) enrich(events []WebRequestLog) {
 
 	cityReader := currentGeoIPReader(g.cityPath, &g.cityReader, &g.cityInfo)
 	asnReader := currentGeoIPReader(g.asnPath, &g.asnReader, &g.asnInfo)
-	if cityReader == nil && asnReader == nil {
-		return
-	}
 	for index := range events {
-		ip := events[index].ClientIP
-		if !ip.IsValid() || ip.IsUnspecified() {
+		ip := events[index].ClientIP.Unmap()
+		if !ip.IsValid() {
 			continue
 		}
-		netIP := net.IP(ip.Unmap().AsSlice())
+		if isp, region, internal := internalNetworkLabels(ip); internal {
+			events[index].ISP = isp
+			events[index].Region = region
+			continue
+		}
+		netIP := net.IP(ip.AsSlice())
 		if cityReader != nil {
 			record, err := cityReader.City(netIP)
 			if err == nil {
@@ -73,6 +94,29 @@ func (g *geoIPEnricher) enrich(events []WebRequestLog) {
 			}
 		}
 	}
+}
+
+func internalNetworkLabels(ip netip.Addr) (isp, region string, ok bool) {
+	ip = ip.Unmap()
+	if !ip.IsValid() {
+		return "", "", false
+	}
+	if ip.IsPrivate() || ip.IsLinkLocalUnicast() {
+		return localNetworkISP, localNetworkRegion, true
+	}
+	if !ip.IsGlobalUnicast() || prefixContains(reservedAddressPrefixes, ip) {
+		return reservedNetworkISP, reservedNetworkRegion, true
+	}
+	return "", "", false
+}
+
+func prefixContains(prefixes []netip.Prefix, ip netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func formatISP(asn uint, isp, organization string) string {

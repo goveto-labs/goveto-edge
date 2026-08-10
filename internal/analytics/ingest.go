@@ -33,7 +33,10 @@ func NewIngestWithConcurrency(db *client.Client, s *Store, concurrency int) *Ing
 	if concurrency < 1 {
 		concurrency = 1
 	}
-	return &Ingest{db: db, store: s, concurrent: make(chan struct{}, concurrency)}
+	return &Ingest{
+		db: db, store: s, concurrent: make(chan struct{}, concurrency),
+		geoIP: newGeoIPEnricher(""),
+	}
 }
 
 func (i *Ingest) Consume(ctx context.Context, nodeID string, records []edgeprotocol.LogRecord) error {
