@@ -8,7 +8,6 @@ import {
     FileClock,
     Flame,
     Globe,
-    HelpCircle,
     KeyRound,
     LayoutDashboard,
     ListTodo,
@@ -185,18 +184,6 @@ function SidebarFooter({ collapsed, onLogout }: { collapsed?: boolean; onLogout:
                             className='w-full justify-center px-2 text-muted'
                             isIconOnly
                             variant='ghost'
-                        >
-                            <HelpCircle className='h-[18px] w-[18px]' />
-                        </Button>
-                    </Tooltip.Trigger>
-                    <Tooltip.Content>Help & Information</Tooltip.Content>
-                </Tooltip>
-                <Tooltip>
-                    <Tooltip.Trigger>
-                        <Button
-                            className='w-full justify-center px-2 text-muted'
-                            isIconOnly
-                            variant='ghost'
                             onPress={onLogout}
                         >
                             <LogOut className='h-[18px] w-[18px]' />
@@ -210,13 +197,6 @@ function SidebarFooter({ collapsed, onLogout }: { collapsed?: boolean; onLogout:
 
     return (
         <div className='space-y-1 border-t border-border p-3'>
-            <Button
-                className='w-full justify-start gap-3 text-sm font-medium text-muted'
-                variant='ghost'
-            >
-                <HelpCircle className='h-[18px] w-[18px]' />
-                Help & Information
-            </Button>
             <Button
                 className='w-full justify-start gap-3 text-sm font-medium text-muted'
                 variant='ghost'

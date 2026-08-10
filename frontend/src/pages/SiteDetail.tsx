@@ -1177,13 +1177,21 @@ export default function SiteDetail() {
                                                             />
                                                         </FormField>
                                                         {cnameTarget && (
-                                                            <div className='rounded-lg bg-surface-secondary px-4 py-3'>
+                                                            <div className='space-y-2 rounded-lg bg-surface-secondary px-4 py-3'>
                                                                 <div className='text-xs font-medium text-muted'>
                                                                     CNAME target
                                                                 </div>
-                                                                <code className='mt-1 block overflow-x-auto text-sm'>
+                                                                <code className='block overflow-x-auto text-sm'>
                                                                     {cnameTarget}
                                                                 </code>
+                                                                <p className='text-xs text-muted'>
+                                                                    Create a CNAME for each
+                                                                    hostname. For an apex domain,
+                                                                    use provider CNAME flattening,
+                                                                    ALIAS, or ANAME. Goveto does not
+                                                                    check external DNS propagation
+                                                                    yet.
+                                                                </p>
                                                             </div>
                                                         )}
                                                     </div>

@@ -1,5 +1,7 @@
 import type {
+    ClusterRegion,
     DistributionItem,
+    DNSLine,
     MonitoringOverview,
     Node,
     NodeRuntimePoint,
@@ -7,10 +9,18 @@ import type {
 } from '@/api';
 
 import { Button, Input, Label } from '@heroui/react';
-import { Activity, CalendarDays, HardDrive, MousePointerClick, RefreshCw } from 'lucide-react';
+import {
+    Activity,
+    CalendarDays,
+    Download,
+    Gauge,
+    HardDrive,
+    MousePointerClick,
+    RefreshCw,
+} from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 
-import { ApiError, analyticsApi, nodesApi } from '@/api';
+import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -38,6 +48,69 @@ function totalTraffic(item?: { ingress_bytes: number; egress_bytes: number }) {
 
 function trafficOf(item: DistributionItem) {
     return item.ingress_bytes + item.egress_bytes;
+}
+
+function percentile(values: number[], fraction: number) {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((left, right) => left - right);
+    return sorted[Math.max(0, Math.ceil(sorted.length * fraction) - 1)];
+}
+
+function formatBandwidth(bytes: number, bucketSeconds: number) {
+    const bitsPerSecond = (bytes * 8) / bucketSeconds;
+    const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
+    const unit = Math.min(
+        Math.max(0, Math.floor(Math.log(Math.max(1, bitsPerSecond)) / Math.log(1000))),
+        units.length - 1
+    );
+    return `${(bitsPerSecond / 1000 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
+}
+
+function aggregateNodeMemberships(
+    usage: DistributionItem[],
+    nodes: Node[],
+    labels: Map<string, string>,
+    memberships: (node: Node) => string[]
+) {
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const totals = new Map<string, DistributionItem>();
+    for (const item of usage) {
+        const node = nodeById.get(item.value);
+        const groupIds = node ? memberships(node) : [];
+        const assignedGroups = groupIds.length > 0 ? groupIds : [''];
+        for (const groupId of assignedGroups) {
+            const value = groupId ? labels.get(groupId) || groupId : 'Unassigned';
+            const current = totals.get(value) ?? {
+                value,
+                requests: 0,
+                ingress_bytes: 0,
+                egress_bytes: 0,
+            };
+            current.requests += item.requests;
+            current.ingress_bytes += item.ingress_bytes;
+            current.egress_bytes += item.egress_bytes;
+            totals.set(value, current);
+        }
+    }
+    return [...totals.values()].sort((left, right) => trafficOf(right) - trafficOf(left));
+}
+
+function csvCell(value: string | number) {
+    let text = String(value);
+    if (/^\s*[=+\-@]/.test(text)) text = `'${text}`;
+    return `"${text.replace(/"/g, '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: Array<Array<string | number>>) {
+    const content = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
 function RankingTable({
@@ -115,6 +188,7 @@ function Breakdown({ title, items }: { title: string; items: DistributionItem[] 
 export default function Analytics() {
     const { clusterId } = useCluster();
     const api = useMemo(() => analyticsApi(clusterId), [clusterId]);
+    const cluster = useMemo(() => clusterApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
     const [period, setPeriod] = useState<Period>('24h');
     const [siteId, setSiteId] = useState('');
@@ -130,6 +204,11 @@ export default function Analytics() {
     const [paths, setPaths] = useState<DistributionItem[]>([]);
     const [ipsByRequests, setIpsByRequests] = useState<DistributionItem[]>([]);
     const [ipsByTraffic, setIpsByTraffic] = useState<DistributionItem[]>([]);
+    const [countries, setCountries] = useState<DistributionItem[]>([]);
+    const [clientRegions, setClientRegions] = useState<DistributionItem[]>([]);
+    const [nodeUsage, setNodeUsage] = useState<DistributionItem[]>([]);
+    const [clusterRegions, setClusterRegions] = useState<ClusterRegion[]>([]);
+    const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -149,6 +228,11 @@ export default function Analytics() {
                 pathData,
                 ipRequestData,
                 ipTrafficData,
+                countryData,
+                clientRegionData,
+                nodeUsageData,
+                clusterRegionData,
+                dnsLineData,
             ] = await Promise.all([
                 api.overview({ site_id: siteId }),
                 api.traffic({ site_id: siteId, period }),
@@ -160,6 +244,11 @@ export default function Analytics() {
                 api.rankings('path', { ...params, sort: 'requests' }),
                 api.rankings('ip', { ...params, sort: 'requests' }),
                 api.rankings('ip', { ...params, sort: 'traffic' }),
+                api.rankings('country', { ...params, sort: 'traffic', limit: 100 }),
+                api.rankings('region', { ...params, sort: 'traffic', limit: 100 }),
+                api.rankings('node', { ...params, sort: 'traffic', limit: 100 }),
+                cluster.regions(),
+                cluster.dnsLines(),
             ]);
             setOverview(overviewData);
             setTraffic(trafficData.series);
@@ -174,6 +263,11 @@ export default function Analytics() {
             setPaths(pathData);
             setIpsByRequests(ipRequestData);
             setIpsByTraffic(ipTrafficData);
+            setCountries(countryData);
+            setClientRegions(clientRegionData);
+            setNodeUsage(nodeUsageData);
+            setClusterRegions(clusterRegionData);
+            setDnsLines(dnsLineData);
             setError('');
         } catch (loadError) {
             setError(
@@ -182,7 +276,7 @@ export default function Analytics() {
         } finally {
             setLoading(false);
         }
-    }, [api, clusterId, nodeApi, period, siteId]);
+    }, [api, cluster, clusterId, nodeApi, period, siteId]);
 
     useAutoRefresh(load, Boolean(clusterId));
 
@@ -254,6 +348,79 @@ export default function Analytics() {
             })),
         [runtime]
     );
+    const bucketSeconds = period === '24h' ? 60 * 60 : 24 * 60 * 60;
+    const trafficBuckets = traffic.map(totalTraffic);
+    const p95Traffic = percentile(trafficBuckets, 0.95);
+    const peakTraffic = Math.max(0, ...trafficBuckets);
+    const periodTraffic = trafficBuckets.reduce((sum, current) => sum + current, 0);
+    const deliveryRegions = useMemo(
+        () =>
+            aggregateNodeMemberships(
+                nodeUsage,
+                nodes,
+                new Map(clusterRegions.map((region) => [region.id, region.name])),
+                (node) => node.regionMemberships?.map((item) => item.regionId) ?? []
+            ),
+        [clusterRegions, nodeUsage, nodes]
+    );
+    const deliveryLines = useMemo(
+        () =>
+            aggregateNodeMemberships(
+                nodeUsage,
+                nodes,
+                new Map(dnsLines.map((line) => [line.id, line.name])),
+                (node) => node.dnsLines?.map((item) => item.dnsLineId) ?? []
+            ),
+        [dnsLines, nodeUsage, nodes]
+    );
+
+    const exportUsage = () => {
+        const rows: Array<Array<string | number>> = [
+            [
+                'section',
+                'bucket',
+                'dimension',
+                'value',
+                'requests',
+                'ingress_bytes',
+                'egress_bytes',
+                'cache_egress_bytes',
+            ],
+        ];
+        for (const point of traffic) {
+            rows.push([
+                'timeseries',
+                point.bucket,
+                '',
+                '',
+                point.requests,
+                point.ingress_bytes,
+                point.egress_bytes,
+                point.cache_egress_bytes,
+            ]);
+        }
+        const appendRanking = (dimension: string, items: DistributionItem[]) => {
+            for (const item of items) {
+                rows.push([
+                    'breakdown',
+                    '',
+                    dimension,
+                    item.value,
+                    item.requests,
+                    item.ingress_bytes,
+                    item.egress_bytes,
+                    '',
+                ]);
+            }
+        };
+        appendRanking('client_country', countries);
+        appendRanking('client_region', clientRegions);
+        appendRanking('delivery_region', deliveryRegions);
+        appendRanking('dns_line', deliveryLines);
+        appendRanking('node', nodeUsage);
+        const date = new Date().toISOString().slice(0, 10);
+        downloadCsv(`goveto-usage-${clusterId}-${period}-${date}.csv`, rows);
+    };
 
     if (!clusterId) {
         return (
@@ -272,10 +439,20 @@ export default function Analytics() {
     return (
         <div className='space-y-6'>
             <PageHeader subtitle='Traffic, node runtime and cache monitoring.' title='Analytics'>
-                <Button isDisabled={loading} onPress={() => void load()}>
-                    <RefreshCw className='mr-2 h-4 w-4' />
-                    {loading ? 'Refreshing…' : 'Refresh'}
-                </Button>
+                <div className='flex flex-wrap gap-2'>
+                    <Button
+                        isDisabled={loading || traffic.length === 0}
+                        variant='secondary'
+                        onPress={exportUsage}
+                    >
+                        <Download className='mr-2 h-4 w-4' />
+                        Export CSV
+                    </Button>
+                    <Button isDisabled={loading} onPress={() => void load()}>
+                        <RefreshCw className='mr-2 h-4 w-4' />
+                        {loading ? 'Refreshing…' : 'Refresh'}
+                    </Button>
+                </div>
             </PageHeader>
 
             {error && (
@@ -341,6 +518,29 @@ export default function Analytics() {
                     />
                 </div>
             )}
+
+            <div className='grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3'>
+                <StatCard
+                    color='primary'
+                    footer={`${period === '24h' ? 'Hourly' : 'Daily'} buckets; not 5-minute billing P95`}
+                    icon={Gauge}
+                    label={`${period} P95 average bandwidth`}
+                    value={formatBandwidth(p95Traffic, bucketSeconds)}
+                />
+                <StatCard
+                    footer={`Largest ${period === '24h' ? 'hour' : 'day'} in the selected period`}
+                    icon={Activity}
+                    label='Peak bucket traffic'
+                    value={formatBytes(peakTraffic)}
+                />
+                <StatCard
+                    color='success'
+                    footer={`${traffic.reduce((sum, point) => sum + point.requests, 0).toLocaleString()} requests`}
+                    icon={CalendarDays}
+                    label={`${period} total traffic`}
+                    value={formatBytes(periodTraffic)}
+                />
+            </div>
 
             <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
                 <ContentCard allowOverflow title={`${period} traffic trend`}>
@@ -415,6 +615,33 @@ export default function Analytics() {
                     </div>
                 </div>
             </ContentCard>
+
+            <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
+                <RankingTable
+                    items={countries}
+                    title='Client traffic by country'
+                    valueLabel='Country'
+                />
+                <RankingTable
+                    items={clientRegions}
+                    title='Client traffic by region'
+                    valueLabel='Region'
+                />
+                <RankingTable
+                    items={deliveryRegions}
+                    title='Delivery traffic by node region membership'
+                    valueLabel='Node region'
+                />
+                <RankingTable
+                    items={deliveryLines}
+                    title='Delivery traffic by DNS line membership'
+                    valueLabel='DNS line'
+                />
+            </div>
+            <p className='text-xs text-muted'>
+                Delivery membership reports attribute a node's full usage to each region or DNS line
+                it belongs to, so overlapping memberships are not additive totals.
+            </p>
 
             <div className='grid grid-cols-1 gap-4 xl:grid-cols-2'>
                 <RankingTable items={domains} title='Domain request volume' valueLabel='Domain' />

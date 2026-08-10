@@ -1,7 +1,18 @@
 import type { Certificate, DNSZone } from '@/api';
 
 import { Button, Input, TextArea, useOverlayState } from '@heroui/react';
-import { Plus, RefreshCw, RotateCw, Send, ShieldCheck, Trash2, Upload, Zap } from 'lucide-react';
+import {
+    Clock3,
+    Plus,
+    RefreshCw,
+    RotateCw,
+    Send,
+    ShieldAlert,
+    ShieldCheck,
+    Trash2,
+    Upload,
+    Zap,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 
@@ -14,6 +25,7 @@ import { DomainAddField } from '@/components/DomainAddField.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
+import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
@@ -22,6 +34,9 @@ import { canManageCluster } from '@/utils/rbac.ts';
 
 const LETS_ENCRYPT_PROD = 'https://acme-v02.api.letsencrypt.org/directory';
 const LETS_ENCRYPT_STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory';
+const EXPIRY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
+type ExpiryFilter = 'all' | 'attention' | '30d' | 'expired';
 
 function message(error: unknown, fallback: string) {
     return error instanceof ApiError || error instanceof Error ? error.message : fallback;
@@ -29,6 +44,26 @@ function message(error: unknown, fallback: string) {
 
 function formatDate(value?: string) {
     return value ? new Date(value).toLocaleString() : '—';
+}
+
+function expiryTime(certificate: Certificate) {
+    if (!certificate.expires_at) return Number.POSITIVE_INFINITY;
+    const value = new Date(certificate.expires_at).getTime();
+    return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function isExpired(certificate: Certificate, now: number) {
+    return certificate.status === 'EXPIRED' || expiryTime(certificate) <= now;
+}
+
+function needsAttention(certificate: Certificate, now: number) {
+    return (
+        isExpired(certificate, now) ||
+        expiryTime(certificate) <= now + EXPIRY_WINDOW_MS ||
+        certificate.status === 'EXPIRING' ||
+        certificate.status === 'RENEWAL_FAILED' ||
+        certificate.status === 'DEPLOYMENT_FAILED'
+    );
 }
 
 function normalizeDomain(value: string) {
@@ -85,6 +120,7 @@ export default function Certificates() {
     const [busyId, setBusyId] = useState('');
     const [replaceTarget, setReplaceTarget] = useState<Certificate | null>(null);
     const [pendingDelete, setPendingDelete] = useState<Certificate | null>(null);
+    const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
     const uploadModal = useOverlayState();
     const acmeModal = useOverlayState();
@@ -117,6 +153,28 @@ export default function Certificates() {
     );
     const uncoveredDomains = domainCoverage.filter((item) => !item.zone).map((item) => item.domain);
     const enabledZones = zones.filter((zone) => zone.enabled);
+    const now = Date.now();
+    const expiredCount = certs.filter((cert) => isExpired(cert, now)).length;
+    const expiringCount = certs.filter(
+        (cert) => !isExpired(cert, now) && expiryTime(cert) <= now + EXPIRY_WINDOW_MS
+    ).length;
+    const attentionCount = certs.filter((cert) => needsAttention(cert, now)).length;
+    const visibleCerts = useMemo(() => {
+        const currentTime = Date.now();
+        return [...certs]
+            .filter((cert) => {
+                if (expiryFilter === 'expired') return isExpired(cert, currentTime);
+                if (expiryFilter === '30d') {
+                    return (
+                        !isExpired(cert, currentTime) &&
+                        expiryTime(cert) <= currentTime + EXPIRY_WINDOW_MS
+                    );
+                }
+                if (expiryFilter === 'attention') return needsAttention(cert, currentTime);
+                return true;
+            })
+            .sort((left, right) => expiryTime(left) - expiryTime(right));
+    }, [certs, expiryFilter]);
 
     const load = useCallback(async () => {
         if (!clusterId) return;
@@ -305,19 +363,62 @@ export default function Certificates() {
                 </div>
             )}
 
+            <div className='grid grid-cols-1 gap-4 sm:grid-cols-3'>
+                <StatCard
+                    color={expiredCount > 0 ? 'danger' : 'default'}
+                    footer='Already past the certificate expiry time'
+                    icon={ShieldAlert}
+                    label='Expired'
+                    value={expiredCount.toLocaleString()}
+                />
+                <StatCard
+                    color={expiringCount > 0 ? 'warning' : 'default'}
+                    footer='Expires within the next 30 days'
+                    icon={Clock3}
+                    label='Expiring soon'
+                    value={expiringCount.toLocaleString()}
+                />
+                <StatCard
+                    color={attentionCount > 0 ? 'warning' : 'success'}
+                    footer='Expiry, renewal, or deployment requires review'
+                    icon={ShieldCheck}
+                    label='Needs attention'
+                    value={attentionCount.toLocaleString()}
+                />
+            </div>
+
             <DataTable
                 aria-label='Certificates'
-                empty={certs.length === 0}
+                action={
+                    <SelectField
+                        ariaLabel='Certificate expiry filter'
+                        className='min-w-48'
+                        options={[
+                            { id: 'all', label: 'All certificates' },
+                            { id: 'attention', label: 'Needs attention' },
+                            { id: '30d', label: 'Expires within 30 days' },
+                            { id: 'expired', label: 'Expired' },
+                        ]}
+                        value={expiryFilter}
+                        onChange={(value) => setExpiryFilter(value as ExpiryFilter)}
+                    />
+                }
+                empty={visibleCerts.length === 0}
                 emptyAction={
-                    canManage ? (
+                    canManage && certs.length === 0 ? (
                         <Button onPress={openACME}>
                             <Plus className='mr-2 h-4 w-4' />
                             Issue certificate
                         </Button>
                     ) : undefined
                 }
-                emptyDescription='Issue with ACME or upload an existing PEM certificate.'
-                emptyTitle='No certificates yet'
+                emptyDescription={
+                    certs.length === 0
+                        ? 'Issue with ACME or upload an existing PEM certificate.'
+                        : 'No certificates match the selected expiry filter.'
+                }
+                emptyTitle={certs.length === 0 ? 'No certificates yet' : 'No matching certificates'}
+                title={`${visibleCerts.length} of ${certs.length} certificates`}
             >
                 <thead>
                     <tr className='border-b border-border'>
@@ -330,7 +431,7 @@ export default function Certificates() {
                     </tr>
                 </thead>
                 <tbody>
-                    {certs.map((cert) => {
+                    {visibleCerts.map((cert) => {
                         const busy = busyId === cert.id;
                         const lifecycleError = cert.last_renewal_error || cert.last_publish_error;
                         return (

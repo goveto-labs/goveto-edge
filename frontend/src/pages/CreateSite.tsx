@@ -3,9 +3,9 @@ import type { Certificate, SiteOrigin } from '@/api';
 import { Button, Input } from '@heroui/react';
 import { ArrowLeft, Globe2, Plus, Server, ShieldCheck, Trash2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
-import { ApiError, certificatesApi, sitesApi } from '@/api';
+import { ApiError, certificatesApi, dnsApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DomainAddField } from '@/components/DomainAddField.tsx';
 import { FormError } from '@/components/FormField.tsx';
@@ -64,6 +64,7 @@ export default function CreateSite() {
     const { clusterId } = useCluster();
     const api = useMemo(() => sitesApi(clusterId), [clusterId]);
     const certApi = useMemo(() => certificatesApi(clusterId), [clusterId]);
+    const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
     const [certificates, setCertificates] = useState<Certificate[]>([]);
     const [certificateIds, setCertificateIds] = useState<Set<string>>(new Set());
     const [name, setName] = useState('');
@@ -72,22 +73,28 @@ export default function CreateSite() {
     const [loadingOptions, setLoadingOptions] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState('');
+    const [cnameTarget, setCnameTarget] = useState('');
 
     useEffect(() => {
         if (!clusterId) return;
         setLoadingOptions(true);
-        certApi
-            .list()
-            .then(setCertificates)
-            .catch((loadError) =>
-                setError(
-                    loadError instanceof ApiError
-                        ? loadError.message
-                        : 'Failed to load certificates'
-                )
-            )
+        Promise.allSettled([certApi.list(), dns.config()])
+            .then(([certificateResult, dnsResult]) => {
+                if (certificateResult.status === 'fulfilled') {
+                    setCertificates(certificateResult.value);
+                } else {
+                    setError(
+                        certificateResult.reason instanceof ApiError
+                            ? certificateResult.reason.message
+                            : 'Failed to load certificates'
+                    );
+                }
+                if (dnsResult.status === 'fulfilled') {
+                    setCnameTarget(dnsResult.value.primary_hostname || '');
+                }
+            })
             .finally(() => setLoadingOptions(false));
-    }, [certApi, clusterId]);
+    }, [certApi, clusterId, dns]);
 
     const certificateOptions = useMemo(
         () =>
@@ -181,7 +188,41 @@ export default function CreateSite() {
                                         label='Domains'
                                         required
                                     >
-                                        <DomainAddField value={domains} onChange={setDomains} />
+                                        <div className='space-y-3'>
+                                            <DomainAddField value={domains} onChange={setDomains} />
+                                            {domains.length > 0 && (
+                                                <div className='rounded-lg border border-border bg-surface-secondary px-4 py-3 text-sm'>
+                                                    <div className='font-medium'>
+                                                        DNS connection
+                                                    </div>
+                                                    {cnameTarget ? (
+                                                        <div className='mt-1 space-y-1 text-xs text-muted'>
+                                                            <p>
+                                                                Point each hostname to this cluster
+                                                                with a CNAME record:
+                                                            </p>
+                                                            <code className='block overflow-x-auto text-foreground'>
+                                                                {cnameTarget}
+                                                            </code>
+                                                            <p>
+                                                                For an apex domain, use provider
+                                                                CNAME flattening, ALIAS, or ANAME.
+                                                                Automatic DNS verification is not
+                                                                available yet.
+                                                            </p>
+                                                        </div>
+                                                    ) : (
+                                                        <p className='mt-1 text-xs text-warning'>
+                                                            Configure a cluster hostname under{' '}
+                                                            <Link className='underline' to='/dns'>
+                                                                DNS
+                                                            </Link>{' '}
+                                                            before directing production traffic.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                     </FormRow>
                                     <FormRow
                                         hint='Optional. Select certificates when this site will serve HTTPS.'
