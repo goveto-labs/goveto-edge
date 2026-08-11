@@ -1,63 +1,116 @@
-import type { PrewarmResult, PurgeJob, PurgeType, SiteSummary } from '@/api';
+import type { PrewarmResult, PurgeJob, SiteSummary } from '@/api';
 
-import { Button, Input, TextArea } from '@heroui/react';
-import { Eraser, Flame, Globe2, Link2, RefreshCw, Tags } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Button, TextArea } from '@heroui/react';
+import { Flame, RefreshCw } from 'lucide-react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { ApiError, purgeApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
+import { FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
-import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { canOperateCluster } from '@/utils/rbac.ts';
 
-const purgeOptions: Array<{
-    id: PurgeType;
-    label: string;
-    description: string;
-    placeholder: string;
-    inputLabel: string;
-    icon: typeof Link2;
-}> = [
-    {
-        id: 'URL',
-        label: 'Exact URL',
-        description: 'Remove one cached URL without affecting related paths.',
-        placeholder: 'https://example.com/assets/app.css',
-        inputLabel: 'URL to refresh',
-        icon: Link2,
-    },
-    {
-        id: 'PREFIX',
-        label: 'Path prefix',
-        description: 'Remove every cached response below a path.',
-        placeholder: '/assets/',
-        inputLabel: 'Path prefix',
-        icon: Globe2,
-    },
-    {
-        id: 'TAG',
-        label: 'Cache tag',
-        description: 'Remove responses associated with one surrogate key.',
-        placeholder: 'product:1234',
-        inputLabel: 'Cache tag',
-        icon: Tags,
-    },
-    {
-        id: 'ALL',
-        label: 'Entire site',
-        description: 'Remove all cached responses for the selected site.',
-        placeholder: '',
-        inputLabel: '',
-        icon: Eraser,
-    },
+type OperationMode = 'refresh' | 'prewarm';
+type FixedSite = Pick<SiteSummary, 'id' | 'name' | 'domains'>;
+
+interface MatchedURL {
+    line: number;
+    site: FixedSite;
+    url: string;
+}
+
+interface URLIssue {
+    line: number;
+    input: string;
+    message: string;
+}
+
+const operationTabs = [
+    { id: 'refresh', label: 'Refresh' },
+    { id: 'prewarm', label: 'Prewarm' },
 ];
 
-type FixedSite = Pick<SiteSummary, 'id' | 'name' | 'domains'>;
+function normalizedHostname(value: string) {
+    return value.trim().toLowerCase().replace(/\.$/, '');
+}
+
+export function matchSiteURLs(input: string, sites: FixedSite[]) {
+    const matched: MatchedURL[] = [];
+    const issues: URLIssue[] = [];
+    const seen = new Set<string>();
+
+    for (const [index, rawLine] of input.split(/\r?\n/).entries()) {
+        const value = rawLine.trim();
+        if (!value) continue;
+
+        let parsed: URL;
+        try {
+            parsed = new URL(value);
+        } catch {
+            issues.push({ line: index + 1, input: value, message: 'Enter an absolute URL.' });
+            continue;
+        }
+
+        if (
+            !['http:', 'https:'].includes(parsed.protocol) ||
+            !parsed.hostname ||
+            parsed.username ||
+            parsed.password
+        ) {
+            issues.push({
+                line: index + 1,
+                input: value,
+                message: 'Use an HTTP or HTTPS URL without credentials.',
+            });
+            continue;
+        }
+
+        parsed.hash = '';
+        const normalizedURL = parsed.toString();
+        if (seen.has(normalizedURL)) continue;
+        seen.add(normalizedURL);
+
+        const hostname = normalizedHostname(parsed.hostname);
+        const candidates = sites.filter((site) =>
+            site.domains.some((domain) => normalizedHostname(domain) === hostname)
+        );
+        if (candidates.length === 0) {
+            issues.push({
+                line: index + 1,
+                input: value,
+                message: `No site in this cluster owns ${parsed.hostname}.`,
+            });
+            continue;
+        }
+        if (candidates.length > 1) {
+            issues.push({
+                line: index + 1,
+                input: value,
+                message: `More than one site owns ${parsed.hostname}.`,
+            });
+            continue;
+        }
+        matched.push({ line: index + 1, site: candidates[0], url: normalizedURL });
+    }
+
+    return { issues, matched };
+}
+
+function errorMessage(error: unknown, fallback: string) {
+    return error instanceof ApiError ? error.message : fallback;
+}
+
+function chunks<T>(items: T[], size: number) {
+    const result: T[][] = [];
+    for (let index = 0; index < items.length; index += size) {
+        result.push(items.slice(index, index + size));
+    }
+    return result;
+}
 
 export function CacheOperations({
     fixedSite,
@@ -72,134 +125,157 @@ export function CacheOperations({
     );
     const api = useMemo(() => purgeApi(clusterId), [clusterId]);
     const sites = useMemo(() => sitesApi(clusterId), [clusterId]);
-    const [searchParams, setSearchParams] = useSearchParams();
-    const siteId = fixedSite?.id ?? searchParams.get('siteId') ?? '';
-
+    const [mode, setMode] = useState<OperationMode>('refresh');
+    const [urls, setURLs] = useState('');
     const [jobs, setJobs] = useState<PurgeJob[]>([]);
     const [siteItems, setSiteItems] = useState<SiteSummary[]>([]);
-    const [type, setType] = useState<PurgeType>('URL');
-    const [value, setValue] = useState('');
+    const [loadedClusterID, setLoadedClusterID] = useState('');
+    const [prewarmResults, setPrewarmResults] = useState<PrewarmResult[]>([]);
     const [loading, setLoading] = useState(false);
     const [submitting, setSubmitting] = useState(false);
-    const [prewarmURLs, setPrewarmURLs] = useState('');
-    const [prewarming, setPrewarming] = useState(false);
-    const [prewarmResults, setPrewarmResults] = useState<PrewarmResult[]>([]);
     const [error, setError] = useState('');
     const [message, setMessage] = useState('');
+    const activeClusterID = useRef(clusterId);
+    const loadedClusterIDRef = useRef('');
+    activeClusterID.current = clusterId;
 
-    const selectedSite = fixedSite ?? siteItems.find((site) => site.id === siteId);
-    const selectedPurge = purgeOptions.find((option) => option.id === type) ?? purgeOptions[0];
-    const prewarmURLList = Array.from(
-        new Set(
-            prewarmURLs
-                .split(/\r?\n/)
-                .map((item) => item.trim())
-                .filter(Boolean)
-        )
+    const availableSites = useMemo<FixedSite[]>(
+        () => (fixedSite ? [fixedSite] : loadedClusterID === clusterId ? siteItems : []),
+        [clusterId, fixedSite, loadedClusterID, siteItems]
     );
-    const prewarmCount = prewarmURLList.length;
+    const sitesReady = Boolean(fixedSite || loadedClusterID === clusterId);
+    const parsedURLs = useMemo(
+        () => (sitesReady ? matchSiteURLs(urls, availableSites) : { issues: [], matched: [] }),
+        [availableSites, sitesReady, urls]
+    );
+    const lineCount = urls.split(/\r?\n/).filter((line) => line.trim()).length;
+    const matchedSiteCount = new Set(parsedURLs.matched.map((target) => target.site.id)).size;
 
-    const load = useCallback(async () => {
-        if (!clusterId || !siteId) {
+    const loadSites = useCallback(async () => {
+        if (!clusterId || fixedSite) return;
+        const requestedClusterID = clusterId;
+        if (loadedClusterIDRef.current !== requestedClusterID) setSiteItems([]);
+        try {
+            const items = await sites.list();
+            if (activeClusterID.current !== requestedClusterID) return;
+            setSiteItems(items);
+        } catch (loadError) {
+            if (activeClusterID.current !== requestedClusterID) return;
+            setError(errorMessage(loadError, 'Failed to load sites'));
+        } finally {
+            if (activeClusterID.current === requestedClusterID) {
+                loadedClusterIDRef.current = requestedClusterID;
+                setLoadedClusterID(requestedClusterID);
+            }
+        }
+    }, [clusterId, fixedSite, sites]);
+
+    useAutoRefresh(loadSites, Boolean(clusterId && !fixedSite));
+
+    const loadJobs = useCallback(async () => {
+        if (!clusterId || availableSites.length === 0) {
             setJobs([]);
             return;
         }
         setLoading(true);
         try {
-            setJobs(await api.list(siteId));
-            setError('');
-        } catch (loadError) {
+            const results = await Promise.allSettled(
+                availableSites.map((site) => api.list(site.id))
+            );
+            const loaded = results
+                .flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+                .sort(
+                    (left, right) =>
+                        new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
+                );
+            setJobs(loaded);
+            const failedCount = results.filter((result) => result.status === 'rejected').length;
             setError(
-                loadError instanceof ApiError ? loadError.message : 'Failed to load cache jobs'
+                failedCount > 0 ? `Refresh history is unavailable for ${failedCount} site(s).` : ''
             );
         } finally {
             setLoading(false);
         }
-    }, [api, clusterId, siteId]);
+    }, [api, availableSites, clusterId]);
 
-    const loadSites = useCallback(async () => {
-        if (!clusterId || fixedSite) return;
-        try {
-            const items = await sites.list();
-            setSiteItems(items);
-            if (!siteId && items[0]) setSearchParams({ siteId: items[0].id }, { replace: true });
-        } catch (loadError) {
-            setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
+    useAutoRefresh(loadJobs, Boolean(clusterId && availableSites.length > 0));
+
+    const submitRefresh = async (targets: MatchedURL[]) => {
+        const results = await Promise.allSettled(
+            targets.map((target) => api.enqueue(target.site.id, { type: 'URL', value: target.url }))
+        );
+        const queued = results.flatMap((result) =>
+            result.status === 'fulfilled' ? [result.value] : []
+        );
+        setJobs((current) => [...queued, ...current]);
+        const failed = results.length - queued.length;
+        if (failed > 0) {
+            setError(`${failed} URL refresh request(s) could not be queued.`);
         }
-    }, [clusterId, fixedSite, setSearchParams, siteId, sites]);
-
-    useAutoRefresh(loadSites, Boolean(clusterId && !fixedSite));
-
-    const handleSiteChange = (nextSiteId: string) => {
-        setMessage('');
-        setPrewarmResults([]);
-        setSearchParams(nextSiteId ? { siteId: nextSiteId } : {}, { replace: true });
+        setMessage(`${queued.length} of ${results.length} URL refresh request(s) queued.`);
     };
 
-    useAutoRefresh(load, Boolean(clusterId && siteId));
+    const submitPrewarm = async (targets: MatchedURL[]) => {
+        const bySite = new Map<string, string[]>();
+        for (const target of targets) {
+            const current = bySite.get(target.site.id) ?? [];
+            current.push(target.url);
+            bySite.set(target.site.id, current);
+        }
+        const batches = Array.from(bySite, ([siteId, siteURLs]) =>
+            chunks(siteURLs, 20).map((batch) => ({ siteId, urls: batch }))
+        ).flat();
+        const settled = await Promise.allSettled(
+            batches.map((batch) => api.prewarm(batch.siteId, batch.urls))
+        );
+        const results = settled.flatMap((result, index) => {
+            if (result.status === 'fulfilled') return result.value;
+            const failure = errorMessage(result.reason, 'Prewarm request failed');
+            return batches[index].urls.map((url) => ({ url, success: false, error: failure }));
+        });
+        setPrewarmResults(results);
+        const succeeded = results.filter((result) => result.success).length;
+        const failed = results.length - succeeded;
+        if (failed > 0) setError(`${failed} URL(s) could not be prewarmed.`);
+        setMessage(`${succeeded} of ${results.length} URL(s) prewarmed.`);
+    };
 
-    const handlePurge = async (event: React.FormEvent) => {
+    const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!canOperate || !siteId || (type !== 'ALL' && !value.trim())) return;
+        if (
+            !canOperate ||
+            parsedURLs.matched.length === 0 ||
+            parsedURLs.issues.length > 0 ||
+            submitting
+        )
+            return;
+
         setSubmitting(true);
         setError('');
         setMessage('');
+        setPrewarmResults([]);
         try {
-            const job = await api.enqueue(siteId, {
-                type,
-                value: type === 'ALL' ? undefined : value.trim(),
-            });
-            setJobs((current) => [job, ...current]);
-            setValue('');
-            setMessage(`${selectedPurge.label} refresh was queued.`);
+            if (mode === 'refresh') await submitRefresh(parsedURLs.matched);
+            else await submitPrewarm(parsedURLs.matched);
         } catch (submitError) {
             setError(
-                submitError instanceof ApiError
-                    ? submitError.message
-                    : 'Failed to enqueue cache refresh'
+                errorMessage(
+                    submitError,
+                    mode === 'refresh' ? 'Failed to queue URL refreshes' : 'Failed to prewarm URLs'
+                )
             );
         } finally {
             setSubmitting(false);
         }
     };
 
-    const handlePrewarm = async (event: React.FormEvent) => {
-        event.preventDefault();
-        const urls = prewarmURLList;
-        if (!canOperate || !siteId || urls.length === 0 || urls.length > 20) return;
-        setPrewarming(true);
-        setError('');
-        setMessage('');
-        try {
-            const results = await api.prewarm(siteId, urls);
-            setPrewarmResults(results);
-            setMessage(
-                `${results.filter((result) => result.success).length} of ${results.length} URLs were prewarmed.`
-            );
-        } catch (prewarmError) {
-            setError(
-                prewarmError instanceof ApiError ? prewarmError.message : 'Failed to prewarm URLs'
-            );
-        } finally {
-            setPrewarming(false);
-        }
-    };
-
-    const addHomepage = () => {
-        const domain = selectedSite?.domains?.[0];
-        if (!domain) return;
-        const homepage = `https://${domain}/`;
-        const current = prewarmURLs.trim();
-        setPrewarmURLs(current ? `${current}\n${homepage}` : homepage);
-    };
+    const siteName = (siteID: string) =>
+        availableSites.find((site) => site.id === siteID)?.name ?? siteID;
 
     if (!clusterId) {
         return (
             <div className='space-y-6'>
-                <PageHeader
-                    subtitle='Refresh cached content and prewarm site URLs.'
-                    title='Cache operations'
-                />
+                <PageHeader subtitle='Refresh or prewarm exact URLs.' title='Cache operations' />
                 <ContentCard className='p-8 text-center text-sm text-muted'>
                     Select a cluster in the header to manage site caches.
                 </ContentCard>
@@ -208,30 +284,37 @@ export function CacheOperations({
     }
 
     return (
-        <div className='space-y-6'>
+        <div className='space-y-4'>
             {!embedded && (
                 <PageHeader
-                    subtitle='Refresh cached responses and prepare frequently requested URLs.'
+                    activeTab={mode}
+                    subtitle='Sites are matched automatically from each URL hostname.'
+                    tabs={operationTabs}
                     title='Cache operations'
-                >
-                    {!fixedSite && (
-                        <SelectField
-                            ariaLabel='Site'
-                            className='w-full min-w-0 sm:min-w-64'
-                            options={
-                                siteItems.length === 0
-                                    ? [{ id: '', label: 'No sites available' }]
-                                    : siteItems.map((site) => ({
-                                          id: site.id,
-                                          label: `${site.name} (${site.domains?.[0] || site.id})`,
-                                      }))
-                            }
-                            placeholder='Select a site'
-                            value={siteId}
-                            onChange={handleSiteChange}
-                        />
-                    )}
-                </PageHeader>
+                    onTabChange={(tab) => {
+                        setMode(tab as OperationMode);
+                        setError('');
+                        setMessage('');
+                        setPrewarmResults([]);
+                    }}
+                />
+            )}
+
+            {embedded && (
+                <div className='flex w-fit gap-1 rounded-xl bg-surface p-1' role='tablist'>
+                    {operationTabs.map((tab) => (
+                        <button
+                            aria-selected={mode === tab.id}
+                            className={`rounded-lg px-4 py-1.5 text-sm font-medium ${mode === tab.id ? 'bg-surface-secondary shadow-sm' : 'text-muted'}`}
+                            key={tab.id}
+                            role='tab'
+                            type='button'
+                            onClick={() => setMode(tab.id as OperationMode)}
+                        >
+                            {tab.label}
+                        </button>
+                    ))}
+                </div>
             )}
 
             {error && (
@@ -245,217 +328,124 @@ export function CacheOperations({
                 </div>
             )}
 
-            {canOperate && (
-                <>
-                    <ContentCard noPadding>
-                        <div className='border-b border-border px-5 py-4'>
-                            <h2 className='text-sm font-semibold'>Refresh cached content</h2>
-                            <p className='mt-1 text-xs leading-5 text-muted'>
-                                Choose the smallest scope that contains the content you need to
-                                invalidate.
-                            </p>
-                        </div>
-                        <form onSubmit={handlePurge}>
-                            <div className='space-y-5 p-5'>
-                                <div className='grid gap-3 sm:grid-cols-2'>
-                                    {purgeOptions.map((option) => {
-                                        const Icon = option.icon;
-                                        const selected = type === option.id;
-                                        return (
-                                            <button
-                                                aria-pressed={selected}
-                                                className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-colors ${
-                                                    selected
-                                                        ? 'border-primary bg-primary/5'
-                                                        : 'border-border/70 hover:bg-surface-secondary/50'
-                                                }`}
-                                                key={option.id}
-                                                type='button'
-                                                onClick={() => {
-                                                    setType(option.id);
-                                                    setValue('');
-                                                }}
-                                            >
-                                                <span
-                                                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                                                        selected
-                                                            ? 'bg-primary text-primary-foreground'
-                                                            : 'bg-surface-secondary text-muted'
-                                                    }`}
-                                                >
-                                                    <Icon className='h-4 w-4' />
-                                                </span>
-                                                <span>
-                                                    <span className='block text-sm font-medium'>
-                                                        {option.label}
-                                                    </span>
-                                                    <span className='mt-0.5 block text-xs leading-5 text-muted'>
-                                                        {option.description}
-                                                    </span>
-                                                </span>
-                                            </button>
-                                        );
-                                    })}
-                                </div>
-
-                                {type === 'ALL' ? (
-                                    <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-xs leading-5 text-danger'>
-                                        This refreshes the entire site cache. New requests will
-                                        repopulate content from the origin.
-                                    </div>
-                                ) : (
-                                    <div className='flex flex-col gap-1.5'>
-                                        <label
-                                            className='text-sm font-medium'
-                                            htmlFor='purge-value'
-                                        >
-                                            {selectedPurge.inputLabel}
-                                        </label>
-                                        <Input
-                                            id='purge-value'
-                                            placeholder={selectedPurge.placeholder}
-                                            value={value}
-                                            variant='secondary'
-                                            onChange={(event) => setValue(event.target.value)}
-                                        />
-                                    </div>
-                                )}
-                            </div>
-                            <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                                <div className='text-xs text-muted'>
-                                    {selectedSite
-                                        ? `Target: ${selectedSite.name}`
-                                        : 'Select a site before refreshing cache.'}
-                                </div>
-                                <Button
-                                    isDisabled={
-                                        submitting || !siteId || (type !== 'ALL' && !value.trim())
-                                    }
-                                    type='submit'
-                                    variant={type === 'ALL' ? 'danger' : 'primary'}
-                                >
-                                    <Eraser className='mr-1.5 h-4 w-4' />
-                                    {submitting
-                                        ? 'Queuing...'
-                                        : type === 'ALL'
-                                          ? 'Refresh entire site'
-                                          : 'Queue refresh'}
-                                </Button>
-                            </div>
-                        </form>
-                    </ContentCard>
-
-                    <ContentCard noPadding>
-                        <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                            <div>
-                                <h2 className='text-sm font-semibold'>Prewarm URLs</h2>
-                                <p className='mt-1 text-xs leading-5 text-muted'>
-                                    Request important pages now so the first visitor receives cached
-                                    content.
-                                </p>
-                            </div>
-                            <Button
-                                isDisabled={!selectedSite?.domains?.[0]}
-                                size='sm'
-                                variant='secondary'
-                                onPress={addHomepage}
+            {canOperate ? (
+                <ContentCard noPadding>
+                    <form onSubmit={handleSubmit}>
+                        <div className='space-y-4 p-5'>
+                            <FormField
+                                htmlFor='cache-operation-urls'
+                                hint='One absolute HTTP or HTTPS URL per line. Query strings are preserved; fragments are ignored.'
+                                label={mode === 'refresh' ? 'URLs to refresh' : 'URLs to prewarm'}
+                                required
                             >
-                                Add homepage
-                            </Button>
-                        </div>
-                        <form onSubmit={handlePrewarm}>
-                            <div className='space-y-3 p-5'>
                                 <TextArea
-                                    aria-label='URLs to prewarm'
+                                    id='cache-operation-urls'
                                     placeholder={
-                                        'https://example.com/\nhttps://example.com/assets/app.css'
+                                        'https://www.example.com/assets/app.css\nhttps://shop.example.net/products/42'
                                     }
-                                    className={'w-full'}
-                                    rows={6}
-                                    value={prewarmURLs}
+                                    rows={8}
+                                    value={urls}
                                     variant='secondary'
-                                    onChange={(event) => setPrewarmURLs(event.target.value)}
+                                    onChange={(event) => {
+                                        setURLs(event.target.value);
+                                        setError('');
+                                        setMessage('');
+                                    }}
                                 />
-                                <div className='flex items-center justify-between gap-4 text-xs'>
-                                    <span
-                                        className={prewarmCount > 20 ? 'text-danger' : 'text-muted'}
-                                    >
-                                        {prewarmCount}/20 URLs
-                                    </span>
-                                    <span className='text-muted'>One absolute URL per line.</span>
-                                </div>
-                            </div>
-                            <div className='flex justify-end border-t border-border bg-surface-secondary/20 px-5 py-4'>
-                                <Button
-                                    isDisabled={
-                                        prewarming ||
-                                        !siteId ||
-                                        prewarmCount === 0 ||
-                                        prewarmCount > 20
-                                    }
-                                    type='submit'
-                                >
-                                    <Flame className='mr-1.5 h-4 w-4' />
-                                    {prewarming
-                                        ? 'Prewarming...'
-                                        : `Prewarm ${prewarmCount || ''}`.trim()}
-                                </Button>
-                            </div>
-                        </form>
-                        {prewarmResults.length > 0 && (
-                            <div className='border-t border-border px-5 py-4'>
-                                <div className='mb-3 text-xs font-medium text-muted'>
-                                    Latest result
-                                </div>
-                                <div className='space-y-2'>
-                                    {prewarmResults.map((result) => (
-                                        <div
-                                            className='flex flex-col gap-1 rounded-lg bg-surface-secondary/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-4'
-                                            key={result.url}
-                                        >
-                                            <span className='min-w-0 break-all font-mono'>
-                                                {result.url}
-                                            </span>
-                                            <span
-                                                className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
-                                            >
-                                                {result.success
-                                                    ? `HTTP ${result.status_code}`
-                                                    : result.error ||
-                                                      `HTTP ${result.status_code || 0}`}
-                                            </span>
+                            </FormField>
+
+                            {parsedURLs.issues.length > 0 && (
+                                <div aria-live='polite' className='space-y-1 text-xs text-danger'>
+                                    {parsedURLs.issues.map((issue) => (
+                                        <div key={`${issue.line}-${issue.input}`}>
+                                            Line {issue.line}: {issue.message}
                                         </div>
                                     ))}
                                 </div>
+                            )}
+                        </div>
+                        <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
+                            <div className='text-xs text-muted'>
+                                {!sitesReady
+                                    ? 'Loading site domains...'
+                                    : lineCount === 0
+                                      ? 'Enter at least one URL.'
+                                      : `${parsedURLs.matched.length} URL(s) matched across ${matchedSiteCount} site(s).`}
                             </div>
-                        )}
-                    </ContentCard>
-                </>
+                            <Button
+                                isDisabled={
+                                    submitting ||
+                                    !sitesReady ||
+                                    parsedURLs.matched.length === 0 ||
+                                    parsedURLs.issues.length > 0
+                                }
+                                type='submit'
+                            >
+                                {mode === 'refresh' ? (
+                                    <RefreshCw className='h-4 w-4' />
+                                ) : (
+                                    <Flame className='h-4 w-4' />
+                                )}
+                                {submitting
+                                    ? mode === 'refresh'
+                                        ? 'Queuing...'
+                                        : 'Prewarming...'
+                                    : mode === 'refresh'
+                                      ? `Refresh ${parsedURLs.matched.length || ''}`.trim()
+                                      : `Prewarm ${parsedURLs.matched.length || ''}`.trim()}
+                            </Button>
+                        </div>
+                    </form>
+
+                    {prewarmResults.length > 0 && (
+                        <div className='border-t border-border px-5 py-4'>
+                            <h2 className='mb-3 text-xs font-medium text-muted'>Latest result</h2>
+                            <div className='space-y-2'>
+                                {prewarmResults.map((result) => (
+                                    <div
+                                        className='flex flex-col gap-1 rounded-lg bg-surface-secondary/40 px-3 py-2 text-xs sm:flex-row sm:items-center sm:justify-between sm:gap-4'
+                                        key={result.url}
+                                    >
+                                        <span className='min-w-0 break-all font-mono'>
+                                            {result.url}
+                                        </span>
+                                        <span
+                                            className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
+                                        >
+                                            {result.success
+                                                ? `HTTP ${result.status_code}`
+                                                : result.error || `HTTP ${result.status_code || 0}`}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </ContentCard>
+            ) : (
+                <ContentCard className='p-8 text-center text-sm text-muted'>
+                    Your cluster role does not allow cache operations.
+                </ContentCard>
             )}
 
             <DataTable
                 aria-label='Cache refresh jobs'
                 action={
-                    <Button
-                        isDisabled={!siteId || loading}
-                        size='sm'
-                        variant='secondary'
-                        onPress={load}
-                    >
-                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                    <Button isDisabled={loading} size='sm' variant='secondary' onPress={loadJobs}>
+                        <RefreshCw className='h-3.5 w-3.5' />
                         Refresh
                     </Button>
                 }
                 empty={jobs.length === 0}
-                emptyDescription='Queued cache refresh operations will appear here.'
-                emptyTitle='No cache refresh jobs'
+                emptyDescription='Queued URL refresh operations will appear here.'
+                emptyTitle='No URL refresh jobs'
                 loading={loading && jobs.length === 0}
                 title='Recent refresh jobs'
             >
                 <thead>
                     <tr>
-                        <th>Scope</th>
-                        <th>Target</th>
+                        <th>Site</th>
+                        <th>URL</th>
                         <th>Status</th>
                         <th>Created</th>
                         <th>Job ID</th>
@@ -464,12 +454,9 @@ export function CacheOperations({
                 <tbody>
                     {jobs.map((job) => (
                         <tr key={job.id}>
-                            <td className='text-sm font-medium'>
-                                {purgeOptions.find((option) => option.id === job.type)?.label ||
-                                    job.type}
-                            </td>
-                            <td className='max-w-lg font-mono text-xs text-muted'>
-                                {job.value ?? 'All cached content'}
+                            <td className='text-sm font-medium'>{siteName(job.site_id)}</td>
+                            <td className='max-w-lg break-all font-mono text-xs text-muted'>
+                                {job.value ?? '-'}
                             </td>
                             <td>
                                 <StatusBadge status={job.status} />

@@ -64,11 +64,16 @@ export function PageHeader({
             </div>
 
             {tabs && tabs.length > 0 && (
-                <div className='flex items-center gap-1 rounded-xl bg-surface p-1 w-fit'>
+                <div
+                    aria-label={`${title} views`}
+                    className='flex w-fit items-center gap-1 rounded-xl bg-surface p-1'
+                    role='tablist'
+                >
                     {tabs.map((tab) => {
                         const active = activeTab === tab.id;
                         return (
                             <button
+                                aria-selected={active}
                                 key={tab.id}
                                 className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
                                     active
@@ -76,6 +81,7 @@ export function PageHeader({
                                         : 'text-muted hover:text-foreground'
                                 }`}
                                 onClick={() => onTabChange?.(tab.id)}
+                                role='tab'
                                 type='button'
                             >
                                 {tab.label}
