@@ -14,7 +14,7 @@ import type {
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
-import { Button, Input, TextArea } from '@heroui/react';
+import { Button, Input, TextArea, toast } from '@heroui/react';
 import {
     ArrowLeft,
     BarChart3,
@@ -71,6 +71,7 @@ import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { countryOptions } from '@/data/countries.ts';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
 import { SiteAccessLogsView } from '@/pages/SitesAccessLogs.tsx';
 import { defaultDeliveryPolicy, normalizeDeliveryPolicy } from '@/utils/delivery.ts';
 import { canManageCluster, canOperateCluster } from '@/utils/rbac.ts';
@@ -347,6 +348,7 @@ export default function SiteDetail() {
 
     const [site, setSite] = useState<SiteDetails | null>(null);
     const [deleteSiteOpen, setDeleteSiteOpen] = useState(false);
+    const [publishSiteOpen, setPublishSiteOpen] = useState(false);
     const [listener, setListener] = useState<SiteListenerConfig>({});
     const [cache, setCache] = useState<CachePolicy>({});
     const [compression, setCompression] = useState<CompressionPolicy>({});
@@ -621,7 +623,7 @@ export default function SiteDetail() {
     const navigateTo = (nextTab: DetailTab, subpage?: SettingsPage) => {
         const nextPath = `${nextTab}${subpage ? `/${subpage}` : ''}`;
         if (detailPath === nextPath) return;
-        navigate(`/sites/${siteId}/${nextPath}`);
+        requestAction(() => navigate(`/sites/${siteId}/${nextPath}`));
     };
     const runSave = async (action: () => Promise<void>, success: string) => {
         setSaving(true);
@@ -630,6 +632,7 @@ export default function SiteDetail() {
         try {
             await action();
             setMessage(success);
+            toast.success(success);
         } catch (saveError) {
             setError(saveError instanceof ApiError ? saveError.message : 'Failed to save settings');
         } finally {
@@ -723,7 +726,8 @@ export default function SiteDetail() {
         setError('');
         try {
             await publishing.enqueueSite(siteId);
-            setMessage('Publish queued.');
+            toast.success('Publish queued. Opening Jobs for progress.');
+            navigate('/jobs?kind=PUBLISH');
         } catch (publishError) {
             setError(publishError instanceof ApiError ? publishError.message : 'Failed to publish');
         } finally {
@@ -784,6 +788,42 @@ export default function SiteDetail() {
     const compressionDirty = !valuesEqual(compression, savedCompressionRef.current);
     const deliveryDirty = !valuesEqual(delivery, savedDeliveryRef.current);
     const securityDirty = !valuesEqual(security, savedSecurityRef.current);
+    const anyDirty =
+        basicDirty ||
+        domainsDirty ||
+        originsDirty ||
+        listenerDirty ||
+        certificateIdsDirty ||
+        cacheDirty ||
+        compressionDirty ||
+        deliveryDirty ||
+        securityDirty;
+    const discardAllChanges = () => {
+        if (site) {
+            setName(site.name);
+            setTargetCluster(site.cluster_id);
+            setDomainText(site.domains.join('\n'));
+            setCertificateIds(new Set(site.certificate_ids));
+            setOrigins(
+                site.origins.map((origin, index) => ({
+                    ...origin,
+                    draft_id: `${site.id}-${index}`,
+                }))
+            );
+        }
+        setListener(savedListenerRef.current);
+        setCache(savedCacheRef.current);
+        setCompression(savedCompressionRef.current);
+        setDelivery(savedDeliveryRef.current);
+        setSecurity(savedSecurityRef.current);
+    };
+    const { requestAction } = useUnsavedChanges(
+        anyDirty,
+        `site-policy-${siteId}`,
+        discardAllChanges
+    );
+    const currentClusterName =
+        availableClusters.find((cluster) => cluster.id === clusterId)?.name || clusterId;
     const enteringDataTab =
         previousDetailPathRef.current !== detailPath && (tab === 'overview' || tab === 'audience');
     const tabContentLoading =
@@ -804,7 +844,7 @@ export default function SiteDetail() {
                 <button
                     className='text-muted hover:text-foreground'
                     type='button'
-                    onClick={() => navigate('/sites')}
+                    onClick={() => requestAction(() => navigate('/sites'))}
                 >
                     Sites
                 </button>
@@ -829,7 +869,7 @@ export default function SiteDetail() {
             </nav>
             <PageHeader
                 actions={
-                    <Button variant='ghost' onPress={() => navigate('/sites')}>
+                    <Button variant='ghost' onPress={() => requestAction(() => navigate('/sites'))}>
                         <ArrowLeft className='mr-1.5 h-4 w-4' />
                         Back to sites
                     </Button>
@@ -838,7 +878,7 @@ export default function SiteDetail() {
                 title={site?.name || 'Site details'}
             >
                 {canOperate && (
-                    <Button isDisabled={publishingSite} onPress={() => void publish()}>
+                    <Button isDisabled={publishingSite} onPress={() => setPublishSiteOpen(true)}>
                         <Rocket className='mr-2 h-4 w-4' />
                         {publishingSite ? 'Publishing...' : 'Publish'}
                     </Button>
@@ -1977,15 +2017,35 @@ export default function SiteDetail() {
             )}
             <ConfirmDialog
                 danger
+                clusterName={currentClusterName}
                 confirmLabel='Delete site'
+                confirmationText={site?.domains[0] || site?.name}
                 description={`Delete site "${site?.name ?? ''}" and all of its configuration?`}
+                impact='Traffic configuration is removed from all assigned nodes.'
                 isOpen={deleteSiteOpen}
+                recoverability='Not recoverable. Recreating the site requires a new publish.'
                 title='Delete site?'
                 onConfirm={() => {
                     setDeleteSiteOpen(false);
                     void deleteSite();
                 }}
                 onOpenChange={setDeleteSiteOpen}
+            />
+            <ConfirmDialog
+                clusterName={currentClusterName}
+                confirmLabel='Publish site'
+                confirmationText={site?.domains[0] || site?.name}
+                description={`Publish the current configuration for "${site?.name ?? ''}"?`}
+                impact='All assigned nodes will receive a new configuration version.'
+                isOpen={publishSiteOpen}
+                loading={publishingSite}
+                recoverability='A later publish can replace this version.'
+                title='Publish site configuration?'
+                onConfirm={() => {
+                    setPublishSiteOpen(false);
+                    void publish();
+                }}
+                onOpenChange={setPublishSiteOpen}
             />
         </div>
     );

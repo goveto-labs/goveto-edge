@@ -14,12 +14,21 @@ export class ApiError extends Error {
     status: number;
     code: string;
     data: unknown;
+    requestId?: string;
 
-    constructor(message: string, status: number, data: unknown, code = 'error') {
+    constructor(
+        message: string,
+        status: number,
+        data: unknown,
+        code = 'error',
+        requestId?: string
+    ) {
         super(message);
+        this.name = 'ApiError';
         this.status = status;
         this.code = code;
         this.data = data;
+        this.requestId = requestId;
     }
 }
 
@@ -90,7 +99,8 @@ apiClient.interceptors.response.use(
                     extractMessage(error),
                     error.response.status,
                     error.response.data,
-                    extractCode(error)
+                    extractCode(error),
+                    error.response.headers['x-request-id'] || error.response.headers['request-id']
                 )
             );
         }

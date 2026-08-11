@@ -219,6 +219,7 @@ export default function ClusterMembers() {
             )}
 
             <DialogShell
+                clusterContext='target'
                 icon={<Users className='h-5 w-5' />}
                 isOpen={addOpen}
                 size='sm'

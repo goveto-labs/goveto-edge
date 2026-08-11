@@ -427,9 +427,12 @@ export default function Nodes() {
 
             <ConfirmDialog
                 confirmLabel='Delete'
+                confirmationText={pendingDelete?.name}
                 danger
                 description={pendingDelete ? `Delete node "${pendingDelete.name}"?` : undefined}
+                impact='One edge node will stop receiving configuration and serving managed traffic.'
                 isOpen={pendingDelete !== null}
+                recoverability='Not recoverable. The node must be added and installed again.'
                 title='Delete node?'
                 onConfirm={() => {
                     const node = pendingDelete;

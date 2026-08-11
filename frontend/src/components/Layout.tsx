@@ -240,6 +240,7 @@ export function Layout() {
             </div>
 
             <DialogShell
+                clusterContext='none'
                 isDismissable={!requiresCluster}
                 isOpen={requiresCluster || createModal.isOpen}
                 size='sm'

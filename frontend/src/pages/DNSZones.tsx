@@ -271,6 +271,7 @@ export default function DNSZones() {
             </DataTable>
 
             <DialogShell
+                clusterContext='target'
                 icon={<Shield className='h-5 w-5' />}
                 isDismissable={!busy}
                 isOpen={dialogOpen}
@@ -398,6 +399,7 @@ export default function DNSZones() {
 
             <ConfirmDialog
                 confirmLabel='Delete'
+                confirmationText={pendingDelete?.zone}
                 danger
                 description={
                     pendingDelete
@@ -405,6 +407,8 @@ export default function DNSZones() {
                         : undefined
                 }
                 isOpen={pendingDelete !== null}
+                impact='Automated DNS-01 updates will stop for this zone.'
+                recoverability='The zone can be added again, but provider access must still be valid.'
                 title='Delete DNS zone?'
                 onConfirm={() => {
                     const zone = pendingDelete;

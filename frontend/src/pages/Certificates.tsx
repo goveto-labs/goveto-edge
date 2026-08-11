@@ -134,6 +134,7 @@ export default function Certificates() {
     const [pendingDelete, setPendingDelete] = useState<Certificate | null>(null);
     const [pendingRevoke, setPendingRevoke] = useState<Certificate | null>(null);
     const [revocationReason, setRevocationReason] = useState('KEY_COMPROMISE');
+    const [revokeConfirmation, setRevokeConfirmation] = useState('');
     const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
 
     const uploadModal = useOverlayState();
@@ -608,6 +609,7 @@ export default function Certificates() {
             </DataTable>
 
             <DialogShell
+                clusterContext={replaceTarget ? 'current' : 'target'}
                 icon={<Upload className='h-5 w-5' />}
                 isOpen={uploadModal.isOpen}
                 size='md'
@@ -662,6 +664,7 @@ export default function Certificates() {
             </DialogShell>
 
             <DialogShell
+                clusterContext='target'
                 icon={<Zap className='h-5 w-5' />}
                 isOpen={acmeModal.isOpen}
                 size='lg'
@@ -878,6 +881,7 @@ export default function Certificates() {
 
             <ConfirmDialog
                 confirmLabel='Delete'
+                confirmationText={pendingDelete?.name}
                 danger
                 description={
                     pendingDelete
@@ -885,6 +889,8 @@ export default function Certificates() {
                         : undefined
                 }
                 isOpen={pendingDelete !== null}
+                impact='Attached sites will stop referencing this certificate.'
+                recoverability='Not recoverable. Certificate material must be issued or uploaded again.'
                 title='Delete certificate?'
                 onConfirm={() => {
                     const cert = pendingDelete;
@@ -906,6 +912,7 @@ export default function Certificates() {
                 onOpenChange={(open) => {
                     if (!open && !busyId) {
                         setPendingRevoke(null);
+                        setRevokeConfirmation('');
                         setSubmitError('');
                     }
                 }}
@@ -925,6 +932,17 @@ export default function Certificates() {
                         variant='secondary'
                         onChange={setRevocationReason}
                     />
+                    <FormField
+                        htmlFor='revoke-confirmation'
+                        label={`Type "${pendingRevoke?.name ?? ''}" to continue`}
+                    >
+                        <Input
+                            id='revoke-confirmation'
+                            value={revokeConfirmation}
+                            variant='secondary'
+                            onChange={(event) => setRevokeConfirmation(event.target.value)}
+                        />
+                    </FormField>
                 </div>
                 <DialogFooter>
                     <Button
@@ -936,7 +954,7 @@ export default function Certificates() {
                         Cancel
                     </Button>
                     <Button
-                        isDisabled={Boolean(busyId)}
+                        isDisabled={Boolean(busyId) || revokeConfirmation !== pendingRevoke?.name}
                         type='button'
                         variant='danger'
                         onPress={() => void revoke()}

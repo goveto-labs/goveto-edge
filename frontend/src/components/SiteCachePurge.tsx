@@ -185,9 +185,12 @@ export function SiteCachePurge({
             <ConfirmDialog
                 danger
                 confirmLabel='Purge everything'
+                confirmationText={site.domains[0] || site.name}
                 description={`All cached responses for ${site.name} will be removed. New requests will repopulate content from the origin.`}
+                impact='All cached objects for this site will be invalidated across assigned nodes.'
                 isOpen={purgeAllOpen}
                 loading={submitting}
+                recoverability='Not recoverable. Content repopulates from origin traffic.'
                 title='Purge entire cache?'
                 onConfirm={() => void purgeAll()}
                 onOpenChange={setPurgeAllOpen}

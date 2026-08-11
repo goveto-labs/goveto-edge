@@ -337,6 +337,7 @@ export default function Notifications() {
             </ContentCard>
 
             <DialogShell
+                clusterContext={editing ? 'current' : 'target'}
                 icon={<BellRing className='h-5 w-5' />}
                 isOpen={dialogOpen}
                 size='md'

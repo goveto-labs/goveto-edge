@@ -1,5 +1,9 @@
 import type { ReactNode } from 'react';
 
+import { Server } from 'lucide-react';
+
+import { useCluster } from '@/hooks/useCluster.ts';
+
 interface Tab {
     id: string;
     label: string;
@@ -29,6 +33,8 @@ export function PageHeader({
     actions,
     children,
 }: PageHeaderProps) {
+    const { clusterId, clusters } = useCluster();
+    const clusterName = clusters.find((cluster) => cluster.id === clusterId)?.name;
     const rightActions = actions ?? children;
     return (
         <div className='space-y-4'>
@@ -36,6 +42,12 @@ export function PageHeader({
                 className={`flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between ${embedded ? '' : 'pt-2'}`}
             >
                 <div>
+                    {clusterName && !embedded && (
+                        <div className='mb-1 flex items-center gap-1.5 text-xs font-medium text-muted'>
+                            <Server aria-hidden='true' className='h-3.5 w-3.5' />
+                            Cluster: {clusterName}
+                        </div>
+                    )}
                     {embedded ? (
                         <h2 className='text-lg font-semibold'>{title}</h2>
                     ) : (

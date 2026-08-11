@@ -221,6 +221,7 @@ function EditCacheKeyDialog({
 
     return (
         <DialogShell
+            clusterContext='target'
             icon={<Braces className='h-4 w-4' />}
             isOpen
             size='md'

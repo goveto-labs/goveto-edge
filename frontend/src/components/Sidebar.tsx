@@ -19,12 +19,13 @@ import {
     Users,
     Waypoints,
 } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 import { NavItem } from '@/components/NavItem.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
 
 interface NavItemConfig {
     path: string;
@@ -221,6 +222,9 @@ export function Sidebar({ collapsed, onNavigate, onLogout }: SidebarProps) {
 
 export function ClusterPicker() {
     const { clusterId, clusters, loading, setClusterId } = useCluster();
+    const { requestAction } = useUnsavedChanges();
+    const location = useLocation();
+    const navigate = useNavigate();
 
     return (
         <SelectField
@@ -231,7 +235,27 @@ export function ClusterPicker() {
             placeholder={loading ? 'Loading clusters…' : 'Select a cluster'}
             value={clusterId}
             onChange={(value) => {
-                if (value) void setClusterId(value);
+                if (!value || value === clusterId) return;
+                const target = clusters.find((cluster) => cluster.id === value);
+                requestAction(
+                    async () => {
+                        await setClusterId(value);
+                        if (
+                            /^\/sites\/(?!create(?:\/|$)|logs(?:\/|$)|certificates(?:\/|$)|cache(?:\/|$))[^/]+/.test(
+                                location.pathname
+                            )
+                        ) {
+                            navigate('/sites');
+                        } else if (
+                            /^\/nodes\/(?!create(?:\/|$)|ssh-credentials(?:\/|$))[^/]+/.test(
+                                location.pathname
+                            )
+                        ) {
+                            navigate('/nodes');
+                        }
+                    },
+                    `Unsaved changes will be discarded before switching to cluster "${target?.name ?? value}".`
+                );
             }}
         />
     );

@@ -77,6 +77,7 @@ export function SSHCredentialDialog({
 
     return (
         <DialogShell
+            clusterContext={editing ? 'current' : 'target'}
             icon={<KeyRound className='h-4 w-4' />}
             isDismissable={!saving}
             isOpen={isOpen}

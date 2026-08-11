@@ -14,7 +14,8 @@ import { RefreshCw, Server } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { ApiError, analyticsApi, nodesApi, sitesApi } from '@/api';
+import { analyticsApi, nodesApi, sitesApi } from '@/api';
+import { AsyncState } from '@/components/AsyncState.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { GeoTrafficPanel } from '@/components/GeoTrafficPanel.tsx';
@@ -144,7 +145,6 @@ export default function Dashboard() {
     const [countries, setCountries] = useState<DistributionItem[]>([]);
     const [waf, setWaf] = useState<WAFPoint[]>([]);
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
 
     const load = useCallback(async () => {
         if (!clusterId) return;
@@ -213,19 +213,12 @@ export default function Dashboard() {
             setMethods(methodData);
             setCountries(countryData);
             setWaf(wafData.series);
-            setError('');
-        } catch (loadError) {
-            setError(
-                loadError instanceof ApiError
-                    ? loadError.message
-                    : 'Failed to load cluster overview'
-            );
         } finally {
             setLoading(false);
         }
     }, [analytics, clusterId, nodeApi, period, siteApi]);
 
-    useAutoRefresh(load, Boolean(clusterId));
+    const refreshState = useAutoRefresh(load, Boolean(clusterId));
 
     const onlineNodes = nodes.filter((node) => node.status === 'ONLINE').length;
     const chartTraffic = fillTrafficSeries(traffic, period);
@@ -294,10 +287,14 @@ export default function Dashboard() {
 
     return (
         <div className='space-y-6'>
-            {error && (
-                <div className='rounded-lg border border-danger/20 bg-danger/10 px-4 py-3 text-sm text-danger'>
-                    {error}
-                </div>
+            {refreshState.error && (
+                <AsyncState
+                    error={refreshState.error.message || 'Failed to load cluster overview'}
+                    lastSuccessfulAt={refreshState.lastSuccessfulAt}
+                    retrying={refreshState.isRefreshing}
+                    status={overview || nodes.length > 0 || sites.length > 0 ? 'stale' : 'error'}
+                    onRetry={() => void refreshState.retry()}
+                />
             )}
 
             <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
@@ -317,7 +314,7 @@ export default function Dashboard() {
                         isDisabled={loading}
                         size='sm'
                         variant='secondary'
-                        onPress={() => void load()}
+                        onPress={() => void refreshState.retry()}
                     >
                         <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
                         Refresh

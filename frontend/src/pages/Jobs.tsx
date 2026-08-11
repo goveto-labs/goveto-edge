@@ -4,7 +4,7 @@ import type { JobExecution, ManagedJob, ManagedJobKind } from '@/api';
 import { Button, Input, Pagination, Tabs, Tooltip } from '@heroui/react';
 import { Copy, ExternalLink, Eye, FileJson, RefreshCw, RotateCcw, XCircle } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { ApiError, jobsApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -433,12 +433,18 @@ function JobDetails({
 
 export default function Jobs() {
     const navigate = useNavigate();
+    const [urlParams, setUrlParams] = useSearchParams();
     const { clusterId, clusters } = useCluster();
     const role = clusters.find((cluster) => cluster.id === clusterId)?.role;
     const canOperate = canOperateCluster(role);
     const canManage = canManageCluster(role);
     const api = useMemo(() => jobsApi(clusterId), [clusterId]);
-    const [kind, setKind] = useState<'' | ManagedJobKind>('');
+    const requestedKind = urlParams.get('kind') || '';
+    const [kind, setKind] = useState<'' | ManagedJobKind>(() =>
+        kinds.some((item) => item.value === requestedKind)
+            ? (requestedKind as '' | ManagedJobKind)
+            : ''
+    );
     const [status, setStatus] = useState('');
     const [query, setQuery] = useState('');
     const [search, setSearch] = useState('');
@@ -705,6 +711,11 @@ export default function Jobs() {
                             variant='secondary'
                             onChange={(value) => {
                                 setKind(value as '' | ManagedJobKind);
+                                setUrlParams((current) => {
+                                    if (value) current.set('kind', value);
+                                    else current.delete('kind');
+                                    return current;
+                                });
                                 setPage(1);
                             }}
                         />

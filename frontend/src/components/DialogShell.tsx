@@ -3,6 +3,8 @@ import type { ReactNode } from 'react';
 import { Button, Modal } from '@heroui/react';
 import { X } from 'lucide-react';
 
+import { useCluster } from '@/hooks/useCluster.ts';
+
 interface DialogShellProps {
     children: ReactNode;
     isOpen: boolean;
@@ -12,6 +14,7 @@ interface DialogShellProps {
     icon?: ReactNode;
     size?: 'sm' | 'md' | 'lg' | 'xl';
     isDismissable?: boolean;
+    clusterContext?: 'current' | 'target' | 'none';
 }
 
 export function DialogShell({
@@ -23,7 +26,11 @@ export function DialogShell({
     icon,
     size = 'md',
     isDismissable = true,
+    clusterContext = 'current',
 }: DialogShellProps) {
+    const { clusterId, clusters } = useCluster();
+    const clusterName = clusters.find((cluster) => cluster.id === clusterId)?.name;
+    const showCluster = clusterName && clusterContext !== 'none';
     return (
         <Modal isOpen={isOpen} onOpenChange={onOpenChange}>
             <Modal.Backdrop isDismissable={isDismissable}>
@@ -46,6 +53,14 @@ export function DialogShell({
                                         {title}
                                     </Modal.Heading>
                                     {subtitle && <p className='text-sm text-muted'>{subtitle}</p>}
+                                    {showCluster && (
+                                        <p className='mt-1 text-xs font-medium text-muted'>
+                                            {clusterContext === 'target'
+                                                ? 'Target cluster'
+                                                : 'Cluster'}
+                                            : {clusterName}
+                                        </p>
+                                    )}
                                 </div>
                             </div>
                             <Button

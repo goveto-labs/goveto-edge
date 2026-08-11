@@ -1,8 +1,9 @@
 import type { LucideIcon } from 'lucide-react';
 
 import { Badge, Tooltip } from '@heroui/react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
 import { preloadRoute } from '@/routes.tsx';
 
 interface NavItemProps {
@@ -24,6 +25,8 @@ export function NavItem({
     collapsed,
     onClick,
 }: NavItemProps) {
+    const navigate = useNavigate();
+    const { requestAction } = useUnsavedChanges();
     const link = (
         <Link
             className={`group relative flex items-center rounded-lg text-sm font-medium transition-colors cursor-pointer ${
@@ -34,7 +37,17 @@ export function NavItem({
                     : 'text-muted hover:bg-surface-secondary hover:text-foreground'
             }`}
             to={to}
-            onClick={onClick}
+            onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) {
+                    onClick?.();
+                    return;
+                }
+                event.preventDefault();
+                requestAction(() => {
+                    navigate(to);
+                    onClick?.();
+                });
+            }}
             onFocus={() => preloadRoute(to)}
             onMouseEnter={() => preloadRoute(to)}
         >

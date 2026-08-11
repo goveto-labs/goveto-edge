@@ -167,6 +167,7 @@ export function DomainAddField({
             </div>
 
             <DialogShell
+                clusterContext='target'
                 icon={<Globe2 className='h-5 w-5' />}
                 isOpen={open}
                 size='md'

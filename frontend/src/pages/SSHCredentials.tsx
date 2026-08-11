@@ -264,6 +264,7 @@ export default function SSHCredentials() {
 
             <ConfirmDialog
                 confirmLabel='Delete'
+                confirmationText={pendingDelete?.name}
                 danger
                 description={
                     pendingDelete
@@ -271,6 +272,8 @@ export default function SSHCredentials() {
                         : undefined
                 }
                 isOpen={pendingDelete !== null}
+                impact={`${pendingDelete?.node_count ?? 0} node(s) reference this credential.`}
+                recoverability='Not recoverable. Secret material is never retained after deletion.'
                 title='Delete SSH credential?'
                 onConfirm={() => {
                     const credential = pendingDelete;

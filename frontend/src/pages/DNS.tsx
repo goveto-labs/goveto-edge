@@ -460,6 +460,7 @@ export default function DNS() {
             </Card>
 
             <DialogShell
+                clusterContext={configured ? 'current' : 'target'}
                 icon={<Globe2 className='h-5 w-5' />}
                 isDismissable={!busy}
                 isOpen={domainDialogOpen}
@@ -691,9 +692,12 @@ export default function DNS() {
 
             <ConfirmDialog
                 confirmLabel='Delete'
+                confirmationText={zone}
                 danger
                 description={`Delete the CDN endpoint configuration for "${zone}" and all managed records?`}
                 isOpen={deleteConfirmOpen}
+                impact='The cluster CDN endpoint and all managed DNS records will be removed.'
+                recoverability='Not recoverable. DNS records must be recreated.'
                 title='Delete CDN endpoint?'
                 onConfirm={() => {
                     setDeleteConfirmOpen(false);
