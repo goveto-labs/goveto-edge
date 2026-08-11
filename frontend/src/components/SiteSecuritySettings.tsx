@@ -27,11 +27,13 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Button, Input } from '@heroui/react';
+import { Button, Input, TextArea } from '@heroui/react';
 import {
+    ArrowLeft,
     ChevronDown,
     ChevronRight,
     GripVertical,
+    Pencil,
     Plus,
     Save,
     ShieldCheck,
@@ -40,6 +42,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
@@ -110,7 +113,7 @@ function newRule(): WAFRule {
 }
 
 function newRuleSet(): WAFRuleSet {
-    return { id: crypto.randomUUID(), name: 'Custom rule set', enabled: true, rules: [newRule()] };
+    return { id: crypto.randomUUID(), name: 'Custom rule set', enabled: true, rules: [] };
 }
 
 function NumericInput({
@@ -285,17 +288,16 @@ function ActionEditor({ rule, onChange }: { rule: WAFRule; onChange: (rule: WAFR
 function ConditionEditor({
     condition,
     onChange,
-    onRemove,
 }: {
     condition: WAFCondition;
     onChange: (condition: WAFCondition) => void;
-    onRemove: () => void;
 }) {
     const namedField = ['QUERY', 'HEADER', 'COOKIE'].includes(condition.field);
     const listOperator = condition.operator === 'IN' || condition.operator === 'CIDR';
     return (
-        <div className='grid gap-3 border-t border-border px-3 py-3 first:border-t-0 sm:grid-cols-2 xl:grid-cols-[minmax(150px,0.8fr)_minmax(150px,0.8fr)_minmax(180px,1fr)_auto]'>
+        <div className='grid min-w-0 gap-4 sm:grid-cols-2'>
             <SelectField
+                className='min-w-0'
                 label='Request field'
                 options={fields.map(([id, label]) => ({ id, label }))}
                 value={condition.field}
@@ -311,6 +313,7 @@ function ConditionEditor({
                 }
             />
             <SelectField
+                className='min-w-0'
                 label='Operator'
                 options={operators
                     .filter(([id]) => id !== 'CIDR' || condition.field === 'CLIENT_IP')
@@ -319,64 +322,161 @@ function ConditionEditor({
                 variant='secondary'
                 onChange={(operator) => onChange({ ...condition, operator })}
             />
-            <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-1'>
-                {namedField && (
-                    <div className='flex flex-col gap-1.5 text-sm font-medium'>
-                        <span>Field name</span>
-                        <Input
-                            aria-label='Field name'
-                            value={condition.field_name ?? ''}
+            {namedField && (
+                <div className='flex min-w-0 flex-col gap-1.5 text-sm font-medium'>
+                    <span>Field name</span>
+                    <Input
+                        aria-label='Field name'
+                        value={condition.field_name ?? ''}
+                        variant='secondary'
+                        onChange={(event) =>
+                            onChange({ ...condition, field_name: event.target.value })
+                        }
+                    />
+                </div>
+            )}
+            {condition.operator !== 'EXISTS' && (
+                <div className='flex min-w-0 flex-col gap-1.5 text-sm font-medium sm:col-span-2'>
+                    <span>{listOperator ? 'Values' : 'Match value'}</span>
+                    {listOperator ? (
+                        <CSVEditor
+                            values={condition.values ?? []}
+                            onChange={(values) => onChange({ ...condition, values })}
+                        />
+                    ) : (
+                        <TextArea
+                            aria-label='Match value'
+                            className='w-full font-mono text-xs'
+                            rows={6}
+                            spellCheck={false}
+                            value={condition.value ?? ''}
                             variant='secondary'
                             onChange={(event) =>
-                                onChange({ ...condition, field_name: event.target.value })
+                                onChange({ ...condition, value: event.target.value })
                             }
                         />
+                    )}
+                </div>
+            )}
+            <div className='grid gap-3 sm:col-span-2 sm:grid-cols-2'>
+                <div className='flex min-w-0 items-center justify-between gap-4 rounded-lg border border-border px-3 py-3'>
+                    <div className='min-w-0'>
+                        <div className='text-sm font-medium'>Negate result</div>
+                        <div className='text-xs text-muted'>
+                            Match when this condition is false.
+                        </div>
                     </div>
-                )}
-                {condition.operator !== 'EXISTS' && (
-                    <div className='flex flex-col gap-1.5 text-sm font-medium'>
-                        <span>{listOperator ? 'Values' : 'Match value'}</span>
-                        {listOperator ? (
-                            <CSVEditor
-                                values={condition.values ?? []}
-                                onChange={(values) => onChange({ ...condition, values })}
-                            />
-                        ) : (
-                            <Input
-                                aria-label='Match value'
-                                value={condition.value ?? ''}
-                                variant='secondary'
-                                onChange={(event) =>
-                                    onChange({ ...condition, value: event.target.value })
-                                }
-                            />
-                        )}
-                    </div>
-                )}
-            </div>
-            <div className='flex items-end justify-between gap-2 pb-1 xl:justify-end'>
-                <div className='flex flex-wrap gap-3'>
                     <ToggleSwitch
-                        label='Negate'
+                        label='Negate condition result'
                         isSelected={Boolean(condition.negate)}
                         onChange={(negate) => onChange({ ...condition, negate })}
                     />
+                </div>
+                <div className='flex min-w-0 items-center justify-between gap-4 rounded-lg border border-border px-3 py-3'>
+                    <div className='min-w-0'>
+                        <div className='text-sm font-medium'>Case sensitive</div>
+                        <div className='text-xs text-muted'>
+                            Match uppercase and lowercase exactly.
+                        </div>
+                    </div>
                     <ToggleSwitch
-                        label='Case sensitive'
+                        label='Use case-sensitive matching'
                         isSelected={Boolean(condition.case_sensitive)}
                         onChange={(case_sensitive) => onChange({ ...condition, case_sensitive })}
                     />
                 </div>
-                <Button
-                    isIconOnly
-                    aria-label='Remove condition'
-                    size='sm'
-                    variant='ghost'
-                    onPress={onRemove}
-                >
-                    <Trash2 className='h-4 w-4 text-danger' />
-                </Button>
             </div>
+        </div>
+    );
+}
+
+function conditionSummary(condition: WAFCondition) {
+    const field = fields.find(([id]) => id === condition.field)?.[1] ?? condition.field;
+    const operator = operators.find(([id]) => id === condition.operator)?.[1] ?? condition.operator;
+    const target = condition.field_name ? `${field} "${condition.field_name}"` : field;
+    const value =
+        condition.operator === 'EXISTS'
+            ? ''
+            : condition.operator === 'IN' || condition.operator === 'CIDR'
+              ? (condition.values ?? []).join(', ')
+              : (condition.value ?? '');
+    return `${condition.negate ? 'NOT ' : ''}${target} ${operator}${value ? ` ${value}` : ''}`;
+}
+
+function groupSummary(group: WAFConditionGroup) {
+    if (group.conditions.length === 0) return 'No conditions';
+    return group.conditions.map(conditionSummary).join('  /  ');
+}
+
+function SortablePreviewRow({
+    id,
+    title,
+    meta,
+    detail,
+    badges = [],
+    onEdit,
+    onRemove,
+}: {
+    id: string;
+    title: string;
+    meta: string;
+    detail: string;
+    badges?: string[];
+    onEdit: () => void;
+    onRemove: () => void;
+}) {
+    const sortable = useSortable({ id });
+    return (
+        <div
+            ref={sortable.setNodeRef}
+            style={{
+                transform: CSS.Transform.toString(sortable.transform),
+                transition: sortable.transition,
+            }}
+            className='flex min-w-0 items-center gap-2 border-t border-border px-3 py-3 first:border-t-0'
+        >
+            <button
+                {...sortable.attributes}
+                {...sortable.listeners}
+                aria-label={`Reorder ${title}`}
+                className='shrink-0 cursor-grab rounded-md p-1.5 text-muted hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                type='button'
+            >
+                <GripVertical className='h-4 w-4' />
+            </button>
+            <button className='min-w-0 flex-1 text-left' type='button' onClick={onEdit}>
+                <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+                    <span className='truncate text-sm font-medium'>{title}</span>
+                    <span className='shrink-0 text-xs text-muted'>{meta}</span>
+                    {badges.map((badge) => (
+                        <span
+                            key={badge}
+                            className='shrink-0 rounded bg-surface-secondary px-1.5 py-0.5 text-[11px] font-medium text-muted'
+                        >
+                            {badge}
+                        </span>
+                    ))}
+                </span>
+                <span className='mt-1 block truncate text-xs text-muted'>{detail}</span>
+            </button>
+            <Button
+                isIconOnly
+                aria-label={`Edit ${title}`}
+                size='sm'
+                variant='ghost'
+                onPress={onEdit}
+            >
+                <Pencil className='h-4 w-4' />
+            </Button>
+            <Button
+                isIconOnly
+                aria-label={`Remove ${title}`}
+                size='sm'
+                variant='ghost'
+                onPress={onRemove}
+            >
+                <Trash2 className='h-4 w-4 text-danger' />
+            </Button>
         </div>
     );
 }
@@ -385,14 +485,30 @@ function ConditionsEditor({
     conditions,
     optional,
     onChange,
+    onAdd,
+    onEdit,
 }: {
     conditions: WAFConditions;
     optional: boolean;
     onChange: (conditions: WAFConditions) => void;
+    onAdd: () => void;
+    onEdit: (index: number) => void;
 }) {
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    );
+    const reorder = ({ active, over }: DragEndEvent) => {
+        if (!over || active.id === over.id) return;
+        const from = conditions.groups.findIndex((group) => group.id === active.id);
+        const to = conditions.groups.findIndex((group) => group.id === over.id);
+        if (from >= 0 && to >= 0)
+            onChange({ ...conditions, groups: arrayMove(conditions.groups, from, to) });
+    };
     return (
         <div className='space-y-3'>
-            <div className='flex flex-wrap items-end justify-between gap-3'>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
                 <SelectField
                     label={optional ? 'Optional condition groups' : 'Condition groups'}
                     options={[
@@ -405,132 +521,66 @@ function ConditionsEditor({
                         onChange({ ...conditions, operator: operator as WAFConditions['operator'] })
                     }
                 />
-                <Button
-                    size='sm'
-                    variant='secondary'
-                    onPress={() =>
-                        onChange({
-                            ...conditions,
-                            groups: [...conditions.groups, newConditionGroup()],
-                        })
-                    }
-                >
+                <Button size='sm' variant='secondary' onPress={onAdd}>
                     <Plus className='h-4 w-4' />
                     Add group
                 </Button>
             </div>
-            {conditions.groups.map((group, groupIndex) => (
-                <div key={group.id} className='overflow-hidden rounded-lg border border-border'>
-                    <div className='flex flex-wrap items-end gap-3 bg-surface-secondary/35 px-3 py-2'>
-                        <div className='min-w-48 flex-1'>
-                            <SelectField
-                                label={`Group ${groupIndex + 1}`}
-                                options={[
-                                    { id: 'AND', label: 'Match every condition (AND)' },
-                                    { id: 'OR', label: 'Match any condition (OR)' },
-                                ]}
-                                value={group.operator}
-                                variant='secondary'
-                                onChange={(operator) =>
-                                    onChange({
-                                        ...conditions,
-                                        groups: conditions.groups.map((item, index) =>
-                                            index === groupIndex
-                                                ? {
-                                                      ...item,
-                                                      operator:
-                                                          operator as WAFConditionGroup['operator'],
-                                                  }
-                                                : item
-                                        ),
-                                    })
-                                }
-                            />
-                        </div>
-                        <Button
-                            size='sm'
-                            variant='secondary'
-                            onPress={() =>
-                                onChange({
-                                    ...conditions,
-                                    groups: conditions.groups.map((item, index) =>
-                                        index === groupIndex
-                                            ? {
-                                                  ...item,
-                                                  conditions: [...item.conditions, newCondition()],
-                                              }
-                                            : item
-                                    ),
-                                })
-                            }
-                        >
-                            <Plus className='h-4 w-4' />
-                            Add condition
-                        </Button>
-                        <Button
-                            isIconOnly
-                            aria-label={`Remove group ${groupIndex + 1}`}
-                            size='sm'
-                            variant='ghost'
-                            onPress={() =>
-                                onChange({
-                                    ...conditions,
-                                    groups: conditions.groups.filter(
-                                        (_, index) => index !== groupIndex
-                                    ),
-                                })
-                            }
-                        >
-                            <Trash2 className='h-4 w-4 text-danger' />
-                        </Button>
+            <div className='overflow-hidden rounded-lg border border-border'>
+                {conditions.groups.length === 0 ? (
+                    <div className='px-4 py-8 text-center text-sm text-muted'>
+                        No condition groups. Add one to define when this rule matches.
                     </div>
-                    {group.conditions.map((condition, conditionIndex) => (
-                        <ConditionEditor
-                            key={condition.id}
-                            condition={condition}
-                            onChange={(next) =>
-                                onChange({
-                                    ...conditions,
-                                    groups: conditions.groups.map((item, index) =>
-                                        index === groupIndex
-                                            ? {
-                                                  ...item,
-                                                  conditions: item.conditions.map(
-                                                      (value, current) =>
-                                                          current === conditionIndex ? next : value
-                                                  ),
-                                              }
-                                            : item
-                                    ),
-                                })
-                            }
-                            onRemove={() =>
-                                onChange({
-                                    ...conditions,
-                                    groups: conditions.groups.map((item, index) =>
-                                        index === groupIndex
-                                            ? {
-                                                  ...item,
-                                                  conditions: item.conditions.filter(
-                                                      (_, current) => current !== conditionIndex
-                                                  ),
-                                              }
-                                            : item
-                                    ),
-                                })
-                            }
-                        />
-                    ))}
-                </div>
-            ))}
+                ) : (
+                    <DndContext
+                        collisionDetection={closestCenter}
+                        sensors={sensors}
+                        onDragEnd={reorder}
+                    >
+                        <SortableContext
+                            items={conditions.groups.map((group) => group.id)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            {conditions.groups.map((group, index) => (
+                                <SortablePreviewRow
+                                    key={group.id}
+                                    detail={groupSummary(group)}
+                                    id={group.id}
+                                    meta={`${group.conditions.length} condition${group.conditions.length === 1 ? '' : 's'}`}
+                                    title={`Group ${index + 1} · ${group.operator}`}
+                                    onEdit={() => onEdit(index)}
+                                    onRemove={() =>
+                                        onChange({
+                                            ...conditions,
+                                            groups: conditions.groups.filter(
+                                                (_, current) => current !== index
+                                            ),
+                                        })
+                                    }
+                                />
+                            ))}
+                        </SortableContext>
+                    </DndContext>
+                )}
+            </div>
         </div>
     );
 }
 
-function RuleEditor({ rule, onChange }: { rule: WAFRule; onChange: (rule: WAFRule) => void }) {
+function RuleEditor({
+    rule,
+    onChange,
+    onAddGroup,
+    onEditGroup,
+}: {
+    rule: WAFRule;
+    onChange: (rule: WAFRule) => void;
+    onAddGroup: () => void;
+    onEditGroup: (index: number) => void;
+}) {
     return (
-        <div className='grid gap-5 p-4 lg:grid-cols-[minmax(0,1.65fr)_minmax(280px,0.85fr)]'>
-            <div className='space-y-5'>
+        <div className='space-y-6'>
+            <section className='space-y-4'>
                 <div className='grid gap-3 sm:grid-cols-2'>
                     <div className='flex flex-col gap-1.5 text-sm font-medium'>
                         <span>Rule name</span>
@@ -664,11 +714,19 @@ function RuleEditor({ rule, onChange }: { rule: WAFRule; onChange: (rule: WAFRul
                     conditions={rule.conditions}
                     optional={rule.type === 'RATE_LIMIT'}
                     onChange={(conditions) => onChange({ ...rule, conditions })}
+                    onAdd={onAddGroup}
+                    onEdit={onEditGroup}
                 />
-            </div>
-            <div className='border-t border-border pt-4 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0'>
+            </section>
+            <section className='space-y-3 border-t border-border pt-5'>
+                <div>
+                    <h3 className='text-sm font-semibold'>Action</h3>
+                    <p className='mt-1 text-xs text-muted'>
+                        Run this action when the rule matches.
+                    </p>
+                </div>
                 <ActionEditor rule={rule} onChange={onChange} />
-            </div>
+            </section>
         </div>
     );
 }
@@ -676,13 +734,14 @@ function RuleEditor({ rule, onChange }: { rule: WAFRule; onChange: (rule: WAFRul
 function SortableRule({
     rule,
     onChange,
+    onEdit,
     onRemove,
 }: {
     rule: WAFRule;
     onChange: (rule: WAFRule) => void;
+    onEdit: () => void;
     onRemove: () => void;
 }) {
-    const [expanded, setExpanded] = useState(false);
     const sortable = useSortable({ id: rule.id });
     const style = {
         transform: CSS.Transform.toString(sortable.transform),
@@ -694,7 +753,7 @@ function SortableRule({
             style={style}
             className='border-t border-border bg-surface first:border-t-0'
         >
-            <div className='flex min-h-12 items-center gap-2 px-3 py-2'>
+            <div className='flex min-h-14 items-center gap-2 px-3 py-2.5'>
                 <button
                     {...sortable.attributes}
                     {...sortable.listeners}
@@ -704,25 +763,22 @@ function SortableRule({
                 >
                     <GripVertical className='h-4 w-4' />
                 </button>
-                <button
-                    aria-expanded={expanded}
-                    className='flex min-w-0 flex-1 items-center gap-2 text-left'
-                    type='button'
-                    onClick={() => setExpanded((value) => !value)}
-                >
-                    {expanded ? (
-                        <ChevronDown className='h-4 w-4 shrink-0' />
-                    ) : (
-                        <ChevronRight className='h-4 w-4 shrink-0' />
-                    )}
-                    <span className='truncate text-sm font-medium'>{rule.name}</span>
-                    <span className='shrink-0 text-xs text-muted'>
-                        {rule.type === 'RATE_LIMIT'
-                            ? 'Frequency'
-                            : `${rule.conditions.groups.length} groups · ${rule.conditions.operator}`}
+                <button className='min-w-0 flex-1 text-left' type='button' onClick={onEdit}>
+                    <span className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1'>
+                        <span className='truncate text-sm font-medium'>{rule.name}</span>
+                        <span className='shrink-0 text-xs text-muted'>
+                            {rule.type === 'RATE_LIMIT' ? 'Frequency' : 'Request match'}
+                        </span>
+                        <span className='shrink-0 text-xs font-medium text-primary'>
+                            {actions.find((action) => action.id === rule.action.type)?.label}
+                        </span>
                     </span>
-                    <span className='shrink-0 text-xs font-medium text-primary'>
-                        {actions.find((action) => action.id === rule.action.type)?.label}
+                    <span className='mt-1 block truncate text-xs text-muted'>
+                        {rule.conditions.groups.length === 0
+                            ? rule.type === 'RATE_LIMIT'
+                                ? 'Applies to every request'
+                                : 'No condition groups'
+                            : `${rule.conditions.groups.length} group${rule.conditions.groups.length === 1 ? '' : 's'} · ${rule.conditions.operator} · ${rule.conditions.groups.map(groupSummary).join(' / ')}`}
                     </span>
                 </button>
                 <ToggleSwitch
@@ -730,6 +786,15 @@ function SortableRule({
                     isSelected={rule.enabled}
                     onChange={(enabled) => onChange({ ...rule, enabled })}
                 />
+                <Button
+                    isIconOnly
+                    aria-label={`Edit ${rule.name}`}
+                    size='sm'
+                    variant='ghost'
+                    onPress={onEdit}
+                >
+                    <Pencil className='h-4 w-4' />
+                </Button>
                 <Button
                     isIconOnly
                     aria-label={`Remove ${rule.name}`}
@@ -740,8 +805,294 @@ function SortableRule({
                     <Trash2 className='h-4 w-4 text-danger' />
                 </Button>
             </div>
-            {expanded && <RuleEditor rule={rule} onChange={onChange} />}
         </div>
+    );
+}
+
+function GroupEditor({
+    group,
+    onChange,
+    onAddCondition,
+    onEditCondition,
+}: {
+    group: WAFConditionGroup;
+    onChange: (group: WAFConditionGroup) => void;
+    onAddCondition: () => void;
+    onEditCondition: (index: number) => void;
+}) {
+    const sensors = useSensors(
+        useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+        useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 5 } }),
+        useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+    );
+    const reorder = ({ active, over }: DragEndEvent) => {
+        if (!over || active.id === over.id) return;
+        const from = group.conditions.findIndex((condition) => condition.id === active.id);
+        const to = group.conditions.findIndex((condition) => condition.id === over.id);
+        if (from >= 0 && to >= 0)
+            onChange({ ...group, conditions: arrayMove(group.conditions, from, to) });
+    };
+    return (
+        <div className='space-y-4'>
+            <div className='flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between'>
+                <SelectField
+                    label='Conditions in this group'
+                    options={[
+                        { id: 'AND', label: 'Match every condition (AND)' },
+                        { id: 'OR', label: 'Match any condition (OR)' },
+                    ]}
+                    value={group.operator}
+                    variant='secondary'
+                    onChange={(operator) =>
+                        onChange({ ...group, operator: operator as WAFConditionGroup['operator'] })
+                    }
+                />
+                <Button size='sm' variant='secondary' onPress={onAddCondition}>
+                    <Plus className='h-4 w-4' />
+                    Add condition
+                </Button>
+            </div>
+            <div className='overflow-hidden rounded-lg border border-border'>
+                {group.conditions.length === 0 ? (
+                    <div className='px-4 py-8 text-center text-sm text-muted'>
+                        No conditions in this group.
+                    </div>
+                ) : (
+                    <DndContext
+                        collisionDetection={closestCenter}
+                        sensors={sensors}
+                        onDragEnd={reorder}
+                    >
+                        <SortableContext
+                            items={group.conditions.map((condition) => condition.id)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            {group.conditions.map((condition, index) => (
+                                <SortablePreviewRow
+                                    key={condition.id}
+                                    badges={[
+                                        ...(condition.negate ? ['Negated'] : []),
+                                        ...(condition.case_sensitive ? ['Case sensitive'] : []),
+                                    ]}
+                                    detail={conditionSummary(condition)}
+                                    id={condition.id}
+                                    meta={
+                                        operators.find(([id]) => id === condition.operator)?.[1] ??
+                                        condition.operator
+                                    }
+                                    title={
+                                        fields.find(([id]) => id === condition.field)?.[1] ??
+                                        condition.field
+                                    }
+                                    onEdit={() => onEditCondition(index)}
+                                    onRemove={() =>
+                                        onChange({
+                                            ...group,
+                                            conditions: group.conditions.filter(
+                                                (_, current) => current !== index
+                                            ),
+                                        })
+                                    }
+                                />
+                            ))}
+                        </SortableContext>
+                    </DndContext>
+                )}
+            </div>
+        </div>
+    );
+}
+
+function RuleEditorDialog({
+    rule,
+    ruleIndex,
+    onChange,
+    onClose,
+    onSave,
+}: {
+    rule: WAFRule | null;
+    ruleIndex: number | null;
+    onChange: (rule: WAFRule) => void;
+    onClose: () => void;
+    onSave: () => void;
+}) {
+    const [groupDraft, setGroupDraft] = useState<WAFConditionGroup | null>(null);
+    const [groupIndex, setGroupIndex] = useState<number | null>(null);
+    const [conditionDraft, setConditionDraft] = useState<WAFCondition | null>(null);
+    const [conditionIndex, setConditionIndex] = useState<number | null>(null);
+
+    useEffect(() => {
+        if (!rule) {
+            setGroupDraft(null);
+            setGroupIndex(null);
+            setConditionDraft(null);
+            setConditionIndex(null);
+        }
+    }, [rule]);
+
+    const openGroup = (index: number | null) => {
+        if (!rule) return;
+        const next =
+            index === null
+                ? { ...newConditionGroup(), conditions: [] }
+                : structuredClone(rule.conditions.groups[index]);
+        setGroupDraft(next);
+        setGroupIndex(index);
+    };
+    const openCondition = (index: number | null) => {
+        if (!groupDraft) return;
+        setConditionDraft(
+            index === null ? newCondition() : structuredClone(groupDraft.conditions[index])
+        );
+        setConditionIndex(index);
+    };
+    const closeGroup = () => {
+        setGroupDraft(null);
+        setGroupIndex(null);
+    };
+    const closeCondition = () => {
+        setConditionDraft(null);
+        setConditionIndex(null);
+    };
+    const saveCondition = () => {
+        if (!groupDraft || !conditionDraft) return;
+        setGroupDraft({
+            ...groupDraft,
+            conditions:
+                conditionIndex === null
+                    ? [...groupDraft.conditions, conditionDraft]
+                    : groupDraft.conditions.map((condition, index) =>
+                          index === conditionIndex ? conditionDraft : condition
+                      ),
+        });
+        closeCondition();
+    };
+    const saveGroup = () => {
+        if (!rule || !groupDraft) return;
+        onChange({
+            ...rule,
+            conditions: {
+                ...rule.conditions,
+                groups:
+                    groupIndex === null
+                        ? [...rule.conditions.groups, groupDraft]
+                        : rule.conditions.groups.map((group, index) =>
+                              index === groupIndex ? groupDraft : group
+                          ),
+            },
+        });
+        closeGroup();
+    };
+
+    const level = conditionDraft ? 'condition' : groupDraft ? 'group' : 'rule';
+    const groupIsValid = Boolean(
+        groupDraft?.conditions.length && groupDraft.conditions.every(conditionValid)
+    );
+    return (
+        <DialogShell
+            clusterContext='none'
+            isOpen={Boolean(rule)}
+            size='xl'
+            subtitle={
+                level === 'condition'
+                    ? conditionIndex === null
+                        ? `New condition in group ${(groupIndex ?? 0) + 1}`
+                        : `Condition ${conditionIndex + 1} in group ${(groupIndex ?? 0) + 1}`
+                    : level === 'group'
+                      ? `${groupDraft?.conditions.length ?? 0} condition${groupDraft?.conditions.length === 1 ? '' : 's'} · ${groupDraft?.operator ?? 'AND'}`
+                      : 'Configure matching logic and the action to execute.'
+            }
+            title={
+                level === 'condition'
+                    ? conditionIndex === null
+                        ? 'Add condition'
+                        : 'Edit condition'
+                    : level === 'group'
+                      ? groupIndex === null
+                          ? 'Add condition group'
+                          : `Edit condition group ${groupIndex + 1}`
+                      : ruleIndex === null
+                        ? 'Add rule'
+                        : 'Edit rule'
+            }
+            onOpenChange={(open) => {
+                if (!open) onClose();
+            }}
+        >
+            <div className='max-h-[calc(100dvh-12rem)] overflow-y-auto px-4 py-5 sm:px-6'>
+                {level !== 'rule' && (
+                    <Button
+                        className='mb-4'
+                        size='sm'
+                        variant='ghost'
+                        onPress={level === 'condition' ? closeCondition : closeGroup}
+                    >
+                        <ArrowLeft className='h-4 w-4' />
+                        {level === 'condition' ? 'Back to condition group' : 'Back to rule'}
+                    </Button>
+                )}
+                {conditionDraft ? (
+                    <ConditionEditor condition={conditionDraft} onChange={setConditionDraft} />
+                ) : groupDraft ? (
+                    <GroupEditor
+                        group={groupDraft}
+                        onAddCondition={() => openCondition(null)}
+                        onChange={setGroupDraft}
+                        onEditCondition={openCondition}
+                    />
+                ) : rule ? (
+                    <RuleEditor
+                        rule={rule}
+                        onAddGroup={() => openGroup(null)}
+                        onChange={onChange}
+                        onEditGroup={openGroup}
+                    />
+                ) : null}
+            </div>
+            <DialogFooter>
+                <Button
+                    variant='ghost'
+                    onPress={
+                        level === 'condition'
+                            ? closeCondition
+                            : level === 'group'
+                              ? closeGroup
+                              : onClose
+                    }
+                >
+                    {level === 'rule' ? 'Cancel' : 'Back'}
+                </Button>
+                <Button
+                    isDisabled={
+                        level === 'condition'
+                            ? !conditionDraft || !conditionValid(conditionDraft)
+                            : level === 'group'
+                              ? !groupIsValid
+                              : !rule || !ruleValid(rule)
+                    }
+                    variant='primary'
+                    onPress={
+                        level === 'condition'
+                            ? saveCondition
+                            : level === 'group'
+                              ? saveGroup
+                              : onSave
+                    }
+                >
+                    {level === 'condition'
+                        ? conditionIndex === null
+                            ? 'Add condition'
+                            : 'Save condition'
+                        : level === 'group'
+                          ? groupIndex === null
+                              ? 'Add group'
+                              : 'Save group'
+                          : ruleIndex === null
+                            ? 'Add rule'
+                            : 'Save rule'}
+                </Button>
+            </DialogFooter>
+        </DialogShell>
     );
 }
 
@@ -755,6 +1106,8 @@ function SortableRuleSet({
     onRemove: () => void;
 }) {
     const [expanded, setExpanded] = useState(true);
+    const [ruleDraft, setRuleDraft] = useState<WAFRule | null>(null);
+    const [ruleIndex, setRuleIndex] = useState<number | null>(null);
     const sortable = useSortable({ id: ruleSet.id });
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -772,101 +1125,126 @@ function SortableRuleSet({
         if (from >= 0 && to >= 0)
             onChange({ ...ruleSet, rules: arrayMove(ruleSet.rules, from, to) });
     };
+    const openRule = (index: number | null) => {
+        setRuleDraft(index === null ? newRule() : structuredClone(ruleSet.rules[index]));
+        setRuleIndex(index);
+    };
+    const closeRule = () => {
+        setRuleDraft(null);
+        setRuleIndex(null);
+    };
+    const saveRule = () => {
+        if (!ruleDraft) return;
+        onChange({
+            ...ruleSet,
+            rules:
+                ruleIndex === null
+                    ? [...ruleSet.rules, ruleDraft]
+                    : ruleSet.rules.map((rule, index) => (index === ruleIndex ? ruleDraft : rule)),
+        });
+        closeRule();
+    };
     return (
-        <section
-            ref={sortable.setNodeRef}
-            style={style}
-            className='overflow-hidden rounded-lg border border-border bg-surface'
-        >
-            <div className='flex flex-wrap items-center gap-2 bg-surface-secondary/35 px-3 py-3'>
-                <button
-                    {...sortable.attributes}
-                    {...sortable.listeners}
-                    aria-label={`Reorder ${ruleSet.name}`}
-                    className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
-                    type='button'
-                >
-                    <GripVertical className='h-4 w-4' />
-                </button>
-                <button
-                    aria-expanded={expanded}
-                    className='flex min-w-0 flex-1 items-center gap-2 text-left'
-                    type='button'
-                    onClick={() => setExpanded((value) => !value)}
-                >
-                    {expanded ? (
-                        <ChevronDown className='h-4 w-4' />
-                    ) : (
-                        <ChevronRight className='h-4 w-4' />
-                    )}
-                    <span className='truncate text-sm font-semibold'>{ruleSet.name}</span>
-                    <span className='text-xs text-muted'>{ruleSet.rules.length} rules</span>
-                </button>
-                <ToggleSwitch
-                    label={`Enable ${ruleSet.name}`}
-                    isSelected={ruleSet.enabled}
-                    onChange={(enabled) => onChange({ ...ruleSet, enabled })}
-                />
-                <Button
-                    size='sm'
-                    variant='secondary'
-                    onPress={() => onChange({ ...ruleSet, rules: [...ruleSet.rules, newRule()] })}
-                >
-                    <Plus className='h-4 w-4' />
-                    Add rule
-                </Button>
-                <Button
-                    isIconOnly
-                    aria-label={`Remove ${ruleSet.name}`}
-                    size='sm'
-                    variant='ghost'
-                    onPress={onRemove}
-                >
-                    <Trash2 className='h-4 w-4 text-danger' />
-                </Button>
-            </div>
-            {expanded && (
-                <DndContext
-                    collisionDetection={closestCenter}
-                    sensors={sensors}
-                    onDragEnd={reorderRules}
-                >
-                    <SortableContext
-                        items={ruleSet.rules.map((rule) => rule.id)}
-                        strategy={verticalListSortingStrategy}
+        <>
+            <section
+                ref={sortable.setNodeRef}
+                style={style}
+                className='overflow-hidden rounded-lg border border-border bg-surface'
+            >
+                <div className='flex flex-wrap items-center gap-2 bg-surface-secondary/35 px-3 py-3'>
+                    <button
+                        {...sortable.attributes}
+                        {...sortable.listeners}
+                        aria-label={`Reorder ${ruleSet.name}`}
+                        className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                        type='button'
                     >
-                        {ruleSet.rules.length === 0 ? (
-                            <div className='px-4 py-8 text-center text-sm text-muted'>
-                                No rules in this rule set.
-                            </div>
+                        <GripVertical className='h-4 w-4' />
+                    </button>
+                    <button
+                        aria-expanded={expanded}
+                        className='flex min-w-0 flex-1 items-center gap-2 text-left'
+                        type='button'
+                        onClick={() => setExpanded((value) => !value)}
+                    >
+                        {expanded ? (
+                            <ChevronDown className='h-4 w-4' />
                         ) : (
-                            ruleSet.rules.map((rule, index) => (
-                                <SortableRule
-                                    key={rule.id}
-                                    rule={rule}
-                                    onChange={(next) =>
-                                        onChange({
-                                            ...ruleSet,
-                                            rules: ruleSet.rules.map((item, current) =>
-                                                current === index ? next : item
-                                            ),
-                                        })
-                                    }
-                                    onRemove={() =>
-                                        onChange({
-                                            ...ruleSet,
-                                            rules: ruleSet.rules.filter(
-                                                (_, current) => current !== index
-                                            ),
-                                        })
-                                    }
-                                />
-                            ))
+                            <ChevronRight className='h-4 w-4' />
                         )}
-                    </SortableContext>
-                </DndContext>
-            )}
-        </section>
+                        <span className='truncate text-sm font-semibold'>{ruleSet.name}</span>
+                        <span className='text-xs text-muted'>{ruleSet.rules.length} rules</span>
+                    </button>
+                    <ToggleSwitch
+                        label={`Enable ${ruleSet.name}`}
+                        isSelected={ruleSet.enabled}
+                        onChange={(enabled) => onChange({ ...ruleSet, enabled })}
+                    />
+                    <Button size='sm' variant='secondary' onPress={() => openRule(null)}>
+                        <Plus className='h-4 w-4' />
+                        Add rule
+                    </Button>
+                    <Button
+                        isIconOnly
+                        aria-label={`Remove ${ruleSet.name}`}
+                        size='sm'
+                        variant='ghost'
+                        onPress={onRemove}
+                    >
+                        <Trash2 className='h-4 w-4 text-danger' />
+                    </Button>
+                </div>
+                {expanded && (
+                    <DndContext
+                        collisionDetection={closestCenter}
+                        sensors={sensors}
+                        onDragEnd={reorderRules}
+                    >
+                        <SortableContext
+                            items={ruleSet.rules.map((rule) => rule.id)}
+                            strategy={verticalListSortingStrategy}
+                        >
+                            {ruleSet.rules.length === 0 ? (
+                                <div className='px-4 py-8 text-center text-sm text-muted'>
+                                    No rules in this rule set.
+                                </div>
+                            ) : (
+                                ruleSet.rules.map((rule, index) => (
+                                    <SortableRule
+                                        key={rule.id}
+                                        rule={rule}
+                                        onChange={(next) =>
+                                            onChange({
+                                                ...ruleSet,
+                                                rules: ruleSet.rules.map((item, current) =>
+                                                    current === index ? next : item
+                                                ),
+                                            })
+                                        }
+                                        onEdit={() => openRule(index)}
+                                        onRemove={() =>
+                                            onChange({
+                                                ...ruleSet,
+                                                rules: ruleSet.rules.filter(
+                                                    (_, current) => current !== index
+                                                ),
+                                            })
+                                        }
+                                    />
+                                ))
+                            )}
+                        </SortableContext>
+                    </DndContext>
+                )}
+            </section>
+            <RuleEditorDialog
+                rule={ruleDraft}
+                ruleIndex={ruleIndex}
+                onChange={setRuleDraft}
+                onClose={closeRule}
+                onSave={saveRule}
+            />
+        </>
     );
 }
 
@@ -949,24 +1327,24 @@ export function SiteSecuritySettings({
                         <ShieldCheck className='h-4 w-4 text-primary' />
                         <h2 className='text-sm font-semibold'>Web application firewall</h2>
                     </div>
-                    <ToggleSwitch
-                        label='Enable WAF'
-                        isSelected={policy.waf.enabled}
-                        onChange={(enabled) =>
-                            onChange({ ...policy, waf: { ...policy.waf, enabled } })
-                        }
-                    />
-                </div>
-                <div className='space-y-4 p-5'>
-                    <div className='flex justify-end'>
+                    <div className='flex flex-wrap items-center gap-3'>
+                        <ToggleSwitch
+                            label='Enable WAF'
+                            isSelected={policy.waf.enabled}
+                            onChange={(enabled) =>
+                                onChange({ ...policy, waf: { ...policy.waf, enabled } })
+                            }
+                        />
                         <Button
                             variant='secondary'
-                            onPress={() => updateSets([...policy.waf.rule_sets, newRuleSet()])}
+                            onPress={() => updateSets([newRuleSet(), ...policy.waf.rule_sets])}
                         >
                             <Plus className='h-4 w-4' />
                             Add rule set
                         </Button>
                     </div>
+                </div>
+                <div className='space-y-4 p-5'>
                     <DndContext
                         collisionDetection={closestCenter}
                         sensors={sensors}

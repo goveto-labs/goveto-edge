@@ -1,4 +1,4 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
     title: Goveto Edge Control API
     version: 0.1.0
@@ -873,7 +873,9 @@ paths:
                                         type: object
                                         properties:
                                             captcha:
-                                                $ref: '#/components/schemas/auth_captchaPublicResponse'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/auth_captchaPublicResponse'
+                                                    - type: "null"
                                             enabled:
                                                 type: boolean
     /api/v1/auth/security-policy:
@@ -2372,11 +2374,17 @@ paths:
                                         type: object
                                         properties:
                                             acme_challenge_type:
-                                                $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                    - type: "null"
                                             acme_directory_url:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             acme_email:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             auto_renew:
                                                 type: boolean
                                             created_at:
@@ -2388,57 +2396,87 @@ paths:
                                                 items:
                                                     type: string
                                             expires_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             fingerprint:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             issuer:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             key_algorithm:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_issued_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_publish_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_published_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_revocation_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_revocation_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             name:
                                                 type: string
                                             not_before:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
                                             revocation_reason:
-                                                type: integer
+                                                type:
+                                                    - integer
+                                                    - "null"
                                                 format: int32
                                             revoked_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             serial_number:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             source:
                                                 $ref: '#/components/schemas/model_CertificateSource'
                                             status:
@@ -2499,11 +2537,17 @@ paths:
                                         type: object
                                         properties:
                                             acme_challenge_type:
-                                                $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                    - type: "null"
                                             acme_directory_url:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             acme_email:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             auto_renew:
                                                 type: boolean
                                             created_at:
@@ -2515,57 +2559,87 @@ paths:
                                                 items:
                                                     type: string
                                             expires_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             fingerprint:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             issuer:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             key_algorithm:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_issued_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_publish_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_published_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_revocation_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_revocation_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             name:
                                                 type: string
                                             not_before:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
                                             revocation_reason:
-                                                type: integer
+                                                type:
+                                                    - integer
+                                                    - "null"
                                                 format: int32
                                             revoked_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             serial_number:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             source:
                                                 $ref: '#/components/schemas/model_CertificateSource'
                                             status:
@@ -2608,11 +2682,17 @@ paths:
                             type: object
                             properties:
                                 auto_renew:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 name:
-                                    type: string
+                                    type:
+                                        - string
+                                        - "null"
                                 renew_before_days:
-                                    type: integer
+                                    type:
+                                        - integer
+                                        - "null"
                                     format: int32
             responses:
                 "200":
@@ -2628,11 +2708,17 @@ paths:
                                         type: object
                                         properties:
                                             acme_challenge_type:
-                                                $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                    - type: "null"
                                             acme_directory_url:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             acme_email:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             auto_renew:
                                                 type: boolean
                                             created_at:
@@ -2644,57 +2730,87 @@ paths:
                                                 items:
                                                     type: string
                                             expires_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             fingerprint:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             issuer:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             key_algorithm:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_issued_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_publish_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_published_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_revocation_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_revocation_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             name:
                                                 type: string
                                             not_before:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
                                             revocation_reason:
-                                                type: integer
+                                                type:
+                                                    - integer
+                                                    - "null"
                                                 format: int32
                                             revoked_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             serial_number:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             source:
                                                 $ref: '#/components/schemas/model_CertificateSource'
                                             status:
@@ -2849,11 +2965,17 @@ paths:
                                         type: object
                                         properties:
                                             acme_challenge_type:
-                                                $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                    - type: "null"
                                             acme_directory_url:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             acme_email:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             auto_renew:
                                                 type: boolean
                                             created_at:
@@ -2865,57 +2987,87 @@ paths:
                                                 items:
                                                     type: string
                                             expires_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             fingerprint:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             issuer:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             key_algorithm:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_issued_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_publish_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_published_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_renewal_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             last_revocation_attempt_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             last_revocation_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             name:
                                                 type: string
                                             not_before:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             renew_before_days:
                                                 type: integer
                                                 format: int32
                                             revocation_reason:
-                                                type: integer
+                                                type:
+                                                    - integer
+                                                    - "null"
                                                 format: int32
                                             revoked_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             serial_number:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             source:
                                                 $ref: '#/components/schemas/model_CertificateSource'
                                             status:
@@ -2996,7 +3148,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             max_attempts:
@@ -3086,7 +3240,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             max_attempts:
@@ -3176,7 +3332,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             max_attempts:
@@ -3276,7 +3434,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             id:
                                                 type: string
                                             max_attempts:
@@ -3357,7 +3517,9 @@ paths:
                             type: object
                             properties:
                                 auto_renew:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 challenge_type:
                                     $ref: '#/components/schemas/model_ACMEChallengeType'
                                 directory_url:
@@ -3393,11 +3555,17 @@ paths:
                                                 type: object
                                                 properties:
                                                     acme_challenge_type:
-                                                        $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                        anyOf:
+                                                            - $ref: '#/components/schemas/model_ACMEChallengeType'
+                                                            - type: "null"
                                                     acme_directory_url:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     acme_email:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     auto_renew:
                                                         type: boolean
                                                     created_at:
@@ -3409,57 +3577,87 @@ paths:
                                                         items:
                                                             type: string
                                                     expires_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     fingerprint:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     id:
                                                         type: string
                                                     issuer:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     key_algorithm:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     last_issued_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     last_publish_error:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     last_published_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     last_renewal_attempt_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     last_renewal_error:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     last_revocation_attempt_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     last_revocation_error:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     name:
                                                         type: string
                                                     not_before:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     renew_before_days:
                                                         type: integer
                                                         format: int32
                                                     revocation_reason:
-                                                        type: integer
+                                                        type:
+                                                            - integer
+                                                            - "null"
                                                         format: int32
                                                     revoked_at:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     serial_number:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     source:
                                                         $ref: '#/components/schemas/model_CertificateSource'
                                                     status:
@@ -3481,7 +3679,9 @@ paths:
                                                         format: date-time
                                                         example: "2026-01-02T15:04:05Z"
                                                     error:
-                                                        type: string
+                                                        type:
+                                                            - string
+                                                            - "null"
                                                     id:
                                                         type: string
                                                     max_attempts:
@@ -3596,7 +3796,9 @@ paths:
                                     type: integer
                                     format: int32
                                 enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 primary_hostname:
                                     type: string
                                 provider:
@@ -3743,9 +3945,7 @@ paths:
                   in: path
                   required: true
                   schema:
-                    type: array
-                    items:
-                        type: object
+                    type: string
             requestBody:
                 required: true
                 content:
@@ -4154,7 +4354,9 @@ paths:
                                     additionalProperties:
                                         type: string
                                 enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 provider:
                                     $ref: '#/components/schemas/model_DNSProviderType'
                                 zone:
@@ -4200,7 +4402,9 @@ paths:
                                             zone:
                                                 type: string
                                             zone_id:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                 "400":
                     description: Client Error
                     content:
@@ -4252,7 +4456,9 @@ paths:
                                     additionalProperties:
                                         type: string
                                 enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 provider:
                                     $ref: '#/components/schemas/model_DNSProviderType'
                                 zone:
@@ -4298,7 +4504,9 @@ paths:
                                             zone:
                                                 type: string
                                             zone_id:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                 "400":
                     description: Client Error
                     content:
@@ -4581,7 +4789,9 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        $ref: '#/components/schemas/jobs_Job'
+                                        anyOf:
+                                            - $ref: '#/components/schemas/jobs_Job'
+                                            - type: "null"
                 "400":
                     description: Client Error
                     content:
@@ -5969,7 +6179,9 @@ paths:
                                             identity_json:
                                                 type: string
                                             install_error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             node_id:
                                                 type: string
                                             service_unit:
@@ -6523,7 +6735,9 @@ paths:
                             type: object
                             properties:
                                 enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 name:
                                     type: string
                                 url:
@@ -6609,7 +6823,9 @@ paths:
                             type: object
                             properties:
                                 enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 name:
                                     type: string
                                 url:
@@ -7071,7 +7287,9 @@ paths:
                             type: object
                             properties:
                                 config:
-                                    $ref: '#/components/schemas/sites_siteBundle'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/sites_siteBundle'
+                                        - type: "null"
                                 name:
                                     type: string
                                 site_id:
@@ -7162,7 +7380,9 @@ paths:
                                         type: object
                                         properties:
                                             config:
-                                                $ref: '#/components/schemas/sites_siteBundle'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/sites_siteBundle'
+                                                    - type: "null"
                                             id:
                                                 type: string
                                             name:
@@ -7299,7 +7519,9 @@ paths:
                                 name:
                                     type: string
                                 origin_policy:
-                                    $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                                        - type: "null"
                                 origins:
                                     type: array
                                     items:
@@ -7328,7 +7550,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                                             status:
                                                 type: string
                                                 enum:
@@ -7454,21 +7678,33 @@ paths:
                             type: object
                             properties:
                                 certificate_ids:
-                                    type: array
+                                    type:
+                                        - array
+                                        - "null"
                                     items:
                                         type: string
                                 cluster_id:
-                                    type: string
+                                    type:
+                                        - string
+                                        - "null"
                                 domains:
-                                    type: array
+                                    type:
+                                        - array
+                                        - "null"
                                     items:
                                         type: string
                                 name:
-                                    type: string
+                                    type:
+                                        - string
+                                        - "null"
                                 origin_policy:
-                                    $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
+                                        - type: "null"
                                 origins:
-                                    type: array
+                                    type:
+                                        - array
+                                        - "null"
                                     items:
                                         $ref: '#/components/schemas/sites_originInput'
             responses:
@@ -7703,7 +7939,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                 "400":
                     description: Client Error
                     content:
@@ -7786,7 +8024,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                                             status:
                                                 $ref: '#/components/schemas/model_SiteStatus'
                 "400":
@@ -7943,7 +8183,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                 "400":
                     description: Client Error
                     content:
@@ -8156,7 +8398,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                 "400":
                     description: Client Error
                     content:
@@ -8344,34 +8588,60 @@ paths:
                             type: object
                             properties:
                                 hsts_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 hsts_include_subdomains:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 hsts_max_age:
-                                    type: integer
+                                    type:
+                                        - integer
+                                        - "null"
                                     format: int32
                                 hsts_preload:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 http_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 http_port:
-                                    type: integer
+                                    type:
+                                        - integer
+                                        - "null"
                                     format: int32
                                 http2_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 http3_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 https_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 https_port:
-                                    type: integer
+                                    type:
+                                        - integer
+                                        - "null"
                                     format: int32
                                 ocsp_stapling_enabled:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 redirect_http_to_https:
-                                    type: boolean
+                                    type:
+                                        - boolean
+                                        - "null"
                                 tls_min_version:
-                                    $ref: '#/components/schemas/model_TLSMinVersion'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/model_TLSMinVersion'
+                                        - type: "null"
             responses:
                 "200":
                     description: OK
@@ -8420,7 +8690,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                 "400":
                     description: Client Error
                     content:
@@ -8765,7 +9037,9 @@ paths:
                                 type:
                                     $ref: '#/components/schemas/model_PurgeType'
                                 value:
-                                    type: string
+                                    type:
+                                        - string
+                                        - "null"
             responses:
                 "202":
                     description: OK
@@ -8783,7 +9057,9 @@ paths:
                                                 type: integer
                                                 format: int32
                                             cancel_requested_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             created_at:
@@ -8791,17 +9067,25 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             heartbeat_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             id:
                                                 type: string
                                             lease_owner:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             lease_until:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             max_attempts:
@@ -8822,7 +9106,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             value:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                 "400":
                     description: Client Error
                     content:
@@ -8895,7 +9181,9 @@ paths:
                                                 type: integer
                                                 format: int32
                                             cancel_requested_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             created_at:
@@ -8903,17 +9191,25 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             error:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             heartbeat_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             id:
                                                 type: string
                                             lease_owner:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                             lease_until:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             max_attempts:
@@ -8934,7 +9230,9 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             value:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                 "404":
                     description: Client Error
                     content:
@@ -9039,7 +9337,9 @@ paths:
                                 publish_error:
                                     type: string
                                 publish_job:
-                                    $ref: '#/components/schemas/types_PublishJob'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/types_PublishJob'
+                                        - type: "null"
                                 waf:
                                     $ref: '#/components/schemas/policy_WAFPolicy'
             responses:
@@ -9058,7 +9358,9 @@ paths:
                                             publish_error:
                                                 type: string
                                             publish_job:
-                                                $ref: '#/components/schemas/types_PublishJob'
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/types_PublishJob'
+                                                    - type: "null"
                                             waf:
                                                 $ref: '#/components/schemas/policy_WAFPolicy'
                 "400":
@@ -9104,7 +9406,9 @@ paths:
                                 action:
                                     type: string
                                 delivery:
-                                    $ref: '#/components/schemas/policy_DeliveryPolicy'
+                                    anyOf:
+                                        - $ref: '#/components/schemas/policy_DeliveryPolicy'
+                                        - type: "null"
                                 site_ids:
                                     type: array
                                     items:
@@ -9785,7 +10089,9 @@ paths:
                                             id:
                                                 type: string
                                             last_login_at:
-                                                type: string
+                                                type:
+                                                    - string
+                                                    - "null"
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             name:
@@ -10394,7 +10700,9 @@ components:
                 source_ip:
                     type: string
                 user:
-                    $ref: '#/components/schemas/auditapi_userSummary'
+                    anyOf:
+                        - $ref: '#/components/schemas/auditapi_userSummary'
+                        - type: "null"
                 user_agent:
                     type: string
         auditapi_userSummary:
@@ -10447,13 +10755,17 @@ components:
                 id:
                     type: string
                 ip_address:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 last_seen_at:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 user_agent:
-                    type: string
+                    type:
+                        - string
+                        - "null"
         clusters_clusterChoice:
             type: object
             properties:
@@ -10631,9 +10943,13 @@ components:
                     type: integer
                     format: int32
                 error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 finished_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 heartbeat_at:
@@ -10643,7 +10959,9 @@ components:
                 id:
                     type: string
                 result_json:
-                    type: object
+                    type:
+                        - object
+                        - "null"
                 started_at:
                     type: string
                     format: date-time
@@ -10659,31 +10977,45 @@ components:
                     type: integer
                     format: int32
                 cancel_requested_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 compensation_json:
-                    type: object
+                    type:
+                        - object
+                        - "null"
                 created_at:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 heartbeat_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 id:
                     type: string
                 input_json:
-                    type: object
+                    type:
+                        - object
+                        - "null"
                 kind:
                     type: string
                 lease_owner:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 lease_until:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 max_attempts:
@@ -10696,7 +11028,9 @@ components:
                 operation:
                     type: string
                 publish_context:
-                    $ref: '#/components/schemas/jobs_PublishContext'
+                    anyOf:
+                        - $ref: '#/components/schemas/jobs_PublishContext'
+                        - type: "null"
                 resource_hint:
                     type: string
                 resource_id:
@@ -10706,11 +11040,15 @@ components:
                 resource_type:
                     type: string
                 result_json:
-                    type: object
+                    type:
+                        - object
+                        - "null"
                 status:
                     type: string
                 timeout_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 updated_at:
@@ -10721,9 +11059,13 @@ components:
             type: object
             properties:
                 baseline_config:
-                    type: object
+                    type:
+                        - object
+                        - "null"
                 baseline_version:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int64
                 created_at:
                     type: string
@@ -11211,7 +11553,9 @@ components:
                     items:
                         type: string
                 normalize:
-                    type: boolean
+                    type:
+                        - boolean
+                        - "null"
         policy_RedirectRule:
             type: object
             properties:
@@ -11514,7 +11858,9 @@ components:
             type: object
             properties:
                 config:
-                    $ref: '#/components/schemas/sites_siteBundle'
+                    anyOf:
+                        - $ref: '#/components/schemas/sites_siteBundle'
+                        - type: "null"
                 id:
                     type: string
                 name:
@@ -11527,11 +11873,17 @@ components:
             type: object
             properties:
                 acme_challenge_type:
-                    $ref: '#/components/schemas/model_ACMEChallengeType'
+                    anyOf:
+                        - $ref: '#/components/schemas/model_ACMEChallengeType'
+                        - type: "null"
                 acme_directory_url:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 acme_email:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 auto_renew:
                     type: boolean
                 created_at:
@@ -11543,57 +11895,87 @@ components:
                     items:
                         type: string
                 expires_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 fingerprint:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 id:
                     type: string
                 issuer:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 key_algorithm:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 last_issued_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 last_publish_error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 last_published_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 last_renewal_attempt_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 last_renewal_error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 last_revocation_attempt_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 last_revocation_error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 name:
                     type: string
                 not_before:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 renew_before_days:
                     type: integer
                     format: int32
                 revocation_reason:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int32
                 revoked_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 serial_number:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 source:
                     $ref: '#/components/schemas/model_CertificateSource'
                 status:
@@ -11615,7 +11997,9 @@ components:
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 id:
                     type: string
                 max_attempts:
@@ -11670,9 +12054,13 @@ components:
             type: object
             properties:
                 primary_hostname:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 provider:
-                    $ref: '#/components/schemas/types_DNSProviderConfig'
+                    anyOf:
+                        - $ref: '#/components/schemas/types_DNSProviderConfig'
+                        - type: "null"
                 zones:
                     type: array
                     items:
@@ -11695,7 +12083,9 @@ components:
                     type: integer
                     format: int32
                 resultJson:
-                    $ref: '#/components/schemas/types_DNSJobResult'
+                    anyOf:
+                        - $ref: '#/components/schemas/types_DNSJobResult'
+                        - type: "null"
                 status:
                     $ref: '#/components/schemas/model_JobStatus'
         types_DNSJobResult:
@@ -11733,12 +12123,16 @@ components:
                 zone:
                     type: string
                 zone_id:
-                    type: string
+                    type:
+                        - string
+                        - "null"
         types_DNSRecord:
             type: object
             properties:
                 dnsLineId:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 dnsLineKey:
                     type: string
                 hostname:
@@ -11746,13 +12140,19 @@ components:
                 id:
                     type: string
                 lastError:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 lastSyncedAt:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 providerRecordId:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 status:
                     $ref: '#/components/schemas/model_DNSRecordStatus'
                 type:
@@ -11788,7 +12188,9 @@ components:
                 zone:
                     type: string
                 zone_id:
-                    type: string
+                    type:
+                        - string
+                        - "null"
         types_Node:
             type: object
             properties:
@@ -11797,7 +12199,9 @@ components:
                     items:
                         $ref: '#/components/schemas/types_NodeAddress'
                 cacheConfig:
-                    $ref: '#/components/schemas/types_NodeCacheConfig'
+                    anyOf:
+                        - $ref: '#/components/schemas/types_NodeCacheConfig'
+                        - type: "null"
                 createdAt:
                     type: string
                     format: date-time
@@ -11811,21 +12215,31 @@ components:
                     items:
                         $ref: '#/components/schemas/types_NodeGroupMembership'
                 hardwareProfile:
-                    $ref: '#/components/schemas/types_NodeHardwareProfile'
+                    anyOf:
+                        - $ref: '#/components/schemas/types_NodeHardwareProfile'
+                        - type: "null"
                 heartbeatAt:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 id:
                     type: string
                 installError:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 name:
                     type: string
                 redisAvailable:
-                    type: boolean
+                    type:
+                        - boolean
+                        - "null"
                 redisStatusError:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 regionMemberships:
                     type: array
                     items:
@@ -11835,13 +12249,21 @@ components:
                     items:
                         $ref: '#/components/schemas/types_SiteConfigVersion'
                 sshCredentialId:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 sshHost:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 sshHostKey:
-                    $ref: '#/components/schemas/types_NodeSSHHostKey'
+                    anyOf:
+                        - $ref: '#/components/schemas/types_NodeSSHHostKey'
+                        - type: "null"
                 sshPort:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int32
                 status:
                     $ref: '#/components/schemas/model_NodeStatus'
@@ -11850,7 +12272,9 @@ components:
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 version:
-                    type: string
+                    type:
+                        - string
+                        - "null"
         types_NodeAddress:
             type: object
             properties:
@@ -11893,13 +12317,19 @@ components:
                 architecture:
                     type: string
                 benchmark_bytes:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int64
                 benchmark_duration_ms:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int32
                 cache_disk_write_bytes_per_second:
-                    type: integer
+                    type:
+                        - integer
+                        - "null"
                     format: int64
                 cpu_model:
                     type: string
@@ -11938,7 +12368,9 @@ components:
                     type: integer
                     format: int32
                 cancel_requested_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 created_at:
@@ -11948,17 +12380,25 @@ components:
                 enqueue_mode:
                     type: string
                 error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 heartbeat_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 id:
                     type: string
                 lease_owner:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 lease_until:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 max_attempts:
@@ -11986,7 +12426,9 @@ components:
                     type: integer
                     format: int32
                 cancel_requested_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 created_at:
@@ -11994,17 +12436,25 @@ components:
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 error:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 heartbeat_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 id:
                     type: string
                 lease_owner:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                 lease_until:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 max_attempts:
@@ -12025,7 +12475,9 @@ components:
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 value:
-                    type: string
+                    type:
+                        - string
+                        - "null"
         types_SiteConfigVersion:
             type: object
             properties:
@@ -12048,7 +12500,9 @@ components:
                 id:
                     type: string
                 last_login_at:
-                    type: string
+                    type:
+                        - string
+                        - "null"
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
                 name:
