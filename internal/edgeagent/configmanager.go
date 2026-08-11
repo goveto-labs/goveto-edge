@@ -396,20 +396,15 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			logAppender("upstream_address", "{goveto.origin.address}"),
 			logAppender("upstream_status", "{http.reverse_proxy.status_code}"),
 		}
-		wafPolicy, wafConfigured, err := decodeWAFPolicy(site.WAF)
+		wafPolicy, wafConfigured, err := decodeWAFPolicy(site.WAF, geoIPPath, validateGeoIP)
 		if err != nil {
 			return nil, fmt.Errorf("site %s WAF policy: %w", id, err)
 		}
-		accessPolicy, accessConfigured, err := decodeAccessPolicy(site.Access, geoIPPath, validateGeoIP)
-		if err != nil {
-			return nil, fmt.Errorf("site %s access policy: %w", id, err)
-		}
-		if (wafConfigured && wafPolicy.Enabled) || (accessConfigured && accessPolicy.Enabled) {
+		if wafConfigured && wafPolicy.Enabled {
 			securityHandler := map[string]any{
 				"handler": "goveto_waf",
 				"site_id": id,
 				"waf":     wafPolicy,
-				"access":  accessPolicy,
 			}
 			if secret := stringMapValue(site.WAF, "challenge_secret"); secret != "" {
 				securityHandler["challenge_secret"] = secret
@@ -764,7 +759,7 @@ func decodeCompressionPolicy(raw map[string]any) (cachepolicy.CompressionPolicy,
 	return policy, true, nil
 }
 
-func decodeWAFPolicy(raw map[string]any) (cachepolicy.WAFPolicy, bool, error) {
+func decodeWAFPolicy(raw map[string]any, geoIPPath string, validateGeoIP func() error) (cachepolicy.WAFPolicy, bool, error) {
 	if raw == nil {
 		return cachepolicy.WAFPolicy{}, false, nil
 	}
@@ -779,27 +774,7 @@ func decodeWAFPolicy(raw map[string]any) (cachepolicy.WAFPolicy, bool, error) {
 	if err = policy.NormalizeAndValidate(); err != nil {
 		return policy, false, err
 	}
-	return policy, true, nil
-}
-
-func decodeAccessPolicy(raw map[string]any, geoIPPath string, validateGeoIP func() error) (cachepolicy.AccessPolicy, bool, error) {
-	if raw == nil {
-		return cachepolicy.AccessPolicy{}, false, nil
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return cachepolicy.AccessPolicy{}, false, err
-	}
-	policy := cachepolicy.DefaultAccessPolicy()
-	if err = json.Unmarshal(data, &policy); err != nil {
-		return policy, false, err
-	}
-	policy.GeoIPDatabase = ""
-	if err = policy.NormalizeAndValidate(); err != nil {
-		return policy, false, err
-	}
-	needsGeoIP := len(policy.AllowedCountries)+len(policy.BlockedCountries)+len(policy.AllowedRegions)+len(policy.BlockedRegions) > 0
-	if needsGeoIP {
+	if policy.NeedsGeoIP() {
 		if err = validateGeoIP(); err != nil {
 			return policy, false, err
 		}

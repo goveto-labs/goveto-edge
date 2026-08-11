@@ -707,25 +707,9 @@ export interface WAFRuleSet {
 export interface SecurityPolicy {
     waf: {
         enabled: boolean;
-        rule_sets: WAFRuleSet[];
-    };
-    access: {
-        enabled: boolean;
-        mode: string;
-        status_code: number;
+        trusted_proxy_chain: boolean;
         trusted_proxies: string[];
-        ip_allowlist: string[];
-        ip_blocklist: string[];
-        allowed_countries: string[];
-        blocked_countries: string[];
-        allowed_regions: string[];
-        blocked_regions: string[];
-        allowed_methods: string[];
-        blocked_methods: string[];
-        allowed_referer_hosts: string[];
-        allow_empty_referer: boolean;
-        temporary_blocks: boolean;
-        temporary_block_failure: string;
+        rule_sets: WAFRuleSet[];
     };
 }
 

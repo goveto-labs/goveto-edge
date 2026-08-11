@@ -30,15 +30,12 @@ func (h *nextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
 }
 
 type fakeDistributedStore struct {
-	mu           sync.Mutex
-	counts       map[string]int
-	challenges   map[string]bool
-	allowCalls   int
-	blockedCalls int
-	blocked      bool
-	err          error
-	allowErr     error
-	blockedErr   error
+	mu         sync.Mutex
+	counts     map[string]int
+	challenges map[string]bool
+	allowCalls int
+	err        error
+	allowErr   error
 }
 
 func (s *fakeDistributedStore) Allow(_ context.Context, siteID, ruleID, value string, rule policy.WAFRule) (bool, time.Duration, error) {
@@ -57,16 +54,6 @@ func (s *fakeDistributedStore) Allow(_ context.Context, siteID, ruleID, value st
 	key := siteID + "\x00" + ruleID + "\x00" + value
 	s.counts[key]++
 	return s.counts[key] <= rule.Requests+rule.Burst, time.Minute, nil
-}
-
-func (s *fakeDistributedStore) Blocked(context.Context, string, string) (bool, time.Duration, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.blockedCalls++
-	if s.blockedErr != nil {
-		return false, 0, s.blockedErr
-	}
-	return s.blocked, time.Minute, s.err
 }
 
 func (s *fakeDistributedStore) PutChallenge(_ context.Context, token string, _ time.Duration) error {
@@ -165,6 +152,55 @@ func TestAllowIsTerminal(t *testing.T) {
 	}
 	if next.calls != 1 || response.Header().Get("X-Goveto-WAF") != policy.WAFActionAllow {
 		t.Fatalf("next=%d action=%q", next.calls, response.Header().Get("X-Goveto-WAF"))
+	}
+}
+
+func TestTrustedProxyChainClientIP(t *testing.T) {
+	matchingPolicy := func(enabled bool) policy.WAFPolicy {
+		waf := singleRulePolicy(policy.WAFRule{
+			ID: "client-ip", Enabled: true, Type: policy.WAFRuleTypeMatch,
+			Conditions: testConditions(policy.WAFCondition{Field: "CLIENT_IP", Operator: "EQUALS", Value: "198.51.100.8"}),
+			Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+		})
+		waf.TrustedProxyChain = enabled
+		waf.TrustedProxies = []string{"10.0.0.0/8", "192.0.2.0/24"}
+		return waf
+	}
+	request := func(remote string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.RemoteAddr = remote
+		r.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.8, 10.1.2.3")
+		return r
+	}
+
+	response := httptest.NewRecorder()
+	if err := provisionHandler(t, "proxy-disabled", matchingPolicy(false)).ServeHTTP(response, request("10.0.0.2:1234"), &nextHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("disabled proxy chain trusted XFF: status=%d", response.Code)
+	}
+
+	response = httptest.NewRecorder()
+	if err := provisionHandler(t, "proxy-enabled", matchingPolicy(true)).ServeHTTP(response, request("10.0.0.2:1234"), &nextHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Rule") != "client-ip" {
+		t.Fatalf("trusted proxy chain status=%d headers=%v", response.Code, response.Header())
+	}
+
+	response = httptest.NewRecorder()
+	if err := provisionHandler(t, "proxy-untrusted", matchingPolicy(true)).ServeHTTP(response, request("203.0.113.2:1234"), &nextHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("untrusted direct peer spoofed XFF: status=%d", response.Code)
+	}
+
+	allSources := matchingPolicy(true)
+	allSources.TrustedProxies = []string{"0.0.0.0/0", "::/0"}
+	if got := provisionHandler(t, "proxy-all-sources", allSources).clientIP(request("203.0.113.2:1234")); got != "203.0.113.9" {
+		t.Fatalf("all-source proxy chain client IP=%q, want leftmost forwarded address", got)
 	}
 }
 
@@ -292,89 +328,6 @@ func TestRateBackendBackoffAndSingleProbe(t *testing.T) {
 	}
 }
 
-func TestRateLimitFailureDoesNotContaminateTemporaryBlocks(t *testing.T) {
-	rule := policy.WAFRule{ID: "rate", Enabled: true, Type: policy.WAFRuleTypeRateLimit, Key: "GLOBAL", Requests: 1, WindowSeconds: 60,
-		Backend: "REDIS", FailureMode: "OPEN", Action: policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusTooManyRequests}}
-	access := policy.DefaultAccessPolicy()
-	access.Enabled, access.TemporaryBlocks = true, true
-	access.TemporaryBlockFailure = "CLOSED"
-	h := &Handler{SiteID: "isolated-backends", WAF: singleRulePolicy(rule), Access: access}
-	if err := h.Provision(caddy.Context{}); err != nil {
-		t.Fatal(err)
-	}
-	store := &fakeDistributedStore{allowErr: errors.New("rate Redis unavailable")}
-	h.distributed, h.distributedErr = store, nil
-	h.rateBackend = &rateBackendState{store: store}
-
-	response := httptest.NewRecorder()
-	if err := h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil), &nextHandler{}); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusOK {
-		t.Fatalf("rate failure contaminated temporary blocks: status=%d", response.Code)
-	}
-	if store.blockedCalls != 1 || store.allowCalls != 1 {
-		t.Fatalf("blocked calls=%d allow calls=%d", store.blockedCalls, store.allowCalls)
-	}
-}
-
-func TestTemporaryBlockBackendDecision(t *testing.T) {
-	access := policy.DefaultAccessPolicy()
-	access.Enabled, access.TemporaryBlocks = true, true
-	h := &Handler{SiteID: "blocks", WAF: policy.WAFPolicy{}, Access: access}
-	if err := h.Provision(caddy.Context{}); err != nil {
-		t.Fatal(err)
-	}
-	h.distributed, h.distributedErr = &fakeDistributedStore{blocked: true}, nil
-	response := httptest.NewRecorder()
-	if err := h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil), &nextHandler{}); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Match") != "temporary_block" {
-		t.Fatalf("temporary block status=%d headers=%v", response.Code, response.Header())
-	}
-	h.distributed = &fakeDistributedStore{err: errors.New("redis unavailable")}
-	h.Access.TemporaryBlockFailure = "OPEN"
-	response = httptest.NewRecorder()
-	if err := h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil), &nextHandler{}); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusOK {
-		t.Fatalf("fail-open temporary block status=%d", response.Code)
-	}
-}
-
-func TestAccessPolicyUsesOnlyTrustedProxyChain(t *testing.T) {
-	access := policy.DefaultAccessPolicy()
-	access.Enabled = true
-	access.TrustedProxies = []string{"10.0.0.0/8"}
-	access.IPBlocklist = []string{"198.51.100.0/24"}
-	h := &Handler{SiteID: "access", WAF: policy.WAFPolicy{}, Access: access}
-	if err := h.Provision(caddy.Context{}); err != nil {
-		t.Fatal(err)
-	}
-	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "10.0.0.2:1234"
-	request.Header.Set("X-Forwarded-For", "203.0.113.9, 198.51.100.8")
-	response := httptest.NewRecorder()
-	if err := h.ServeHTTP(response, request, &nextHandler{}); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Rule") != "access:ip-blocklist" {
-		t.Fatalf("trusted proxy decision status=%d headers=%v", response.Code, response.Header())
-	}
-	request = httptest.NewRequest(http.MethodGet, "/", nil)
-	request.RemoteAddr = "192.0.2.2:1234"
-	request.Header.Set("X-Forwarded-For", "198.51.100.8")
-	response = httptest.NewRecorder()
-	if err := h.ServeHTTP(response, request, &nextHandler{}); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusOK {
-		t.Fatalf("untrusted client spoofed XFF: status=%d", response.Code)
-	}
-}
-
 func TestHandlerResponseRedirectAndTagActions(t *testing.T) {
 	makeRule := func(id, path string, action policy.WAFAction) policy.WAFRule {
 		return policy.WAFRule{ID: id, Enabled: true, Type: policy.WAFRuleTypeMatch,
@@ -424,7 +377,7 @@ func TestLocalCounterIsBounded(t *testing.T) {
 
 func provisionHandler(t *testing.T, siteID string, waf policy.WAFPolicy) *Handler {
 	t.Helper()
-	h := &Handler{SiteID: siteID, WAF: waf, Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: siteID, WAF: waf}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +451,7 @@ func captchaPolicy() policy.WAFPolicy {
 }
 
 func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
-	h := &Handler{SiteID: "captcha-site", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: "captcha-site", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
@@ -533,7 +486,7 @@ func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
 }
 
 func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
-	h := &Handler{SiteID: "captcha-replay", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: "captcha-replay", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
@@ -581,7 +534,7 @@ func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
 }
 
 func TestCaptchaPageEmbedsVersionedWorkerSolver(t *testing.T) {
-	h := &Handler{SiteID: "captcha-page", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: "captcha-page", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
@@ -600,7 +553,7 @@ func TestCaptchaPageEmbedsVersionedWorkerSolver(t *testing.T) {
 }
 
 func TestProofOfWorkRejectsTamperingBindingAndOutOfRangeProof(t *testing.T) {
-	h := &Handler{SiteID: "captcha-security", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: "captcha-security", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
 	}
@@ -642,7 +595,7 @@ func TestProofOfWorkRejectsTamperingBindingAndOutOfRangeProof(t *testing.T) {
 
 func TestCaptchaClearanceWorksAcrossHandlersWithSharedSecret(t *testing.T) {
 	newHandler := func() *Handler {
-		h := &Handler{SiteID: "shared-site", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+		h := &Handler{SiteID: "shared-site", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 		if err := h.Provision(caddy.Context{}); err != nil {
 			t.Fatal(err)
 		}
@@ -662,7 +615,7 @@ func TestCaptchaClearanceWorksAcrossHandlersWithSharedSecret(t *testing.T) {
 }
 
 func TestCaptchaRequiresPublishedChallengeSecret(t *testing.T) {
-	h := &Handler{SiteID: "missing-secret", WAF: captchaPolicy(), Access: policy.DefaultAccessPolicy()}
+	h := &Handler{SiteID: "missing-secret", WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err == nil {
 		t.Fatal("CAPTCHA provision should fail without a shared challenge secret")
 	}

@@ -15,7 +15,6 @@ import (
 
 type distributedStore interface {
 	Allow(context.Context, string, string, string, policy.WAFRule) (bool, time.Duration, error)
-	Blocked(context.Context, string, string) (bool, time.Duration, error)
 }
 
 type challengeStateStore interface {
@@ -58,25 +57,6 @@ func (s *redisStore) Allow(ctx context.Context, siteID, ruleID, value string, ru
 		return false, 0, errors.New("unexpected Redis rate-limit response")
 	}
 	return result[0] == 1, time.Duration(max(result[1], 0)) * time.Millisecond, nil
-}
-
-func (s *redisStore) Blocked(ctx context.Context, siteID, address string) (bool, time.Duration, error) {
-	ip, err := parseAddress(address)
-	if err != nil {
-		return false, 0, nil
-	}
-	pipe := s.client.Pipeline()
-	global := pipe.PTTL(ctx, securitystate.GlobalBlockKey(ip))
-	site := pipe.PTTL(ctx, securitystate.SiteBlockKey(siteID, ip))
-	if _, err = pipe.Exec(ctx); err != nil && !errors.Is(err, redis.Nil) {
-		return false, 0, err
-	}
-	// go-redis PTTL returns a DurationCmd already scaled to time.Duration.
-	retry := global.Val()
-	if site.Val() > retry {
-		retry = site.Val()
-	}
-	return retry > 0, retry, nil
 }
 
 func (s *redisStore) PutChallenge(ctx context.Context, token string, ttl time.Duration) error {

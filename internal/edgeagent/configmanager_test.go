@@ -907,6 +907,8 @@ func TestSecurityConfigRendersWAF(t *testing.T) {
 	config := validHTTPConfig(t)
 	waf := cachepolicy.DefaultWAFPolicy()
 	waf.Enabled = true
+	waf.TrustedProxyChain = true
+	waf.TrustedProxies = []string{"203.0.113.0/24"}
 	waf.RuleSets = []cachepolicy.WAFRuleSet{{
 		ID: "custom", Name: "Custom", Enabled: true,
 		Rules: []cachepolicy.WAFRule{{
@@ -920,17 +922,13 @@ func TestSecurityConfigRendersWAF(t *testing.T) {
 		}},
 	}}
 	config.WAF = toMap(t, waf)
-	access := cachepolicy.DefaultAccessPolicy()
-	access.Enabled = true
-	access.IPBlocklist = []string{"192.0.2.0/24"}
-	config.Access = toMap(t, access)
 
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"rule_sets"`, `"window_seconds":10`, `"ip_blocklist":["192.0.2.0/24"]`} {
+	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"trusted_proxy_chain":true`, `"trusted_proxies":["203.0.113.0/24"]`, `"rule_sets"`, `"window_seconds":10`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing security policy %s: %s", expected, text)
 		}
@@ -939,11 +937,14 @@ func TestSecurityConfigRendersWAF(t *testing.T) {
 
 func TestManagedGeoIPPathIsRequiredAndInjected(t *testing.T) {
 	config := validHTTPConfig(t)
-	access := cachepolicy.DefaultAccessPolicy()
-	access.Enabled = true
-	access.AllowedCountries = []string{"US"}
-	access.GeoIPDatabase = "/client/controlled.mmdb"
-	config.Access = toMap(t, access)
+	waf := cachepolicy.WAFPolicy{Enabled: true, GeoIPDatabase: "/client/controlled.mmdb", RuleSets: []cachepolicy.WAFRuleSet{{
+		ID: "geo", Name: "Geo", Enabled: true, Rules: []cachepolicy.WAFRule{{
+			ID: "country", Name: "Country", Enabled: true, Type: cachepolicy.WAFRuleTypeMatch,
+			Conditions: cachepolicy.WAFConditions{Operator: "AND", Groups: []cachepolicy.WAFConditionGroup{{Operator: "AND", Conditions: []cachepolicy.WAFCondition{{Field: "COUNTRY", Operator: "EQUALS", Value: "US"}}}}},
+			Action:     cachepolicy.WAFAction{Type: cachepolicy.WAFActionBlock, StatusCode: http.StatusForbidden},
+		}},
+	}}}
+	config.WAF = toMap(t, waf)
 	if _, err := renderManagedCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", ""); !errors.Is(err, ErrGeoIPUnavailable) {
 		t.Fatalf("expected missing managed database error, got %v", err)
 	}

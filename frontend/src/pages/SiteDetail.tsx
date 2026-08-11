@@ -62,6 +62,7 @@ import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { SiteCachePurge } from '@/components/SiteCachePurge.tsx';
 import { SiteCacheRules } from '@/components/SiteCacheRules.tsx';
 import { SiteCacheSettings } from '@/components/SiteCacheSettings.tsx';
+import { SiteClientIPSettings } from '@/components/SiteClientIPSettings.tsx';
 import { SiteCompressionSettings } from '@/components/SiteCompressionSettings.tsx';
 import { SiteDeliverySettings } from '@/components/SiteDeliverySettings.tsx';
 import { SiteDevelopmentMode } from '@/components/SiteDevelopmentMode.tsx';
@@ -97,6 +98,8 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
     return {
         waf: {
             ...policy.waf,
+            trusted_proxy_chain: policy.waf.trusted_proxy_chain ?? false,
+            trusted_proxies: policy.waf.trusted_proxies ?? [],
             rule_sets: (policy.waf.rule_sets ?? []).map((ruleSet) => ({
                 ...ruleSet,
                 rules: (ruleSet.rules ?? []).map((rule) => ({
@@ -120,7 +123,6 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
                 })),
             })),
         },
-        access: policy.access,
     };
 }
 
@@ -333,25 +335,9 @@ export default function SiteDetail() {
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
             enabled: true,
-            rule_sets: [],
-        },
-        access: {
-            enabled: false,
-            mode: 'BLOCK',
-            status_code: 403,
+            trusted_proxy_chain: false,
             trusted_proxies: [],
-            ip_allowlist: [],
-            ip_blocklist: [],
-            allowed_countries: [],
-            blocked_countries: [],
-            allowed_regions: [],
-            blocked_regions: [],
-            allowed_methods: [],
-            blocked_methods: [],
-            allowed_referer_hosts: [],
-            allow_empty_referer: true,
-            temporary_blocks: false,
-            temporary_block_failure: 'OPEN',
+            rule_sets: [],
         },
     });
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
@@ -679,13 +665,25 @@ export default function SiteDetail() {
     const saveSecurity = () =>
         runSave(async () => {
             const result = await api.updateSecurity(siteId, security);
-            const savedSecurity = withSecurityEditorIDs({
-                waf: result.waf,
-                access: result.access,
-            });
+            const savedSecurity = withSecurityEditorIDs({ waf: result.waf });
             savedSecurityRef.current = savedSecurity;
             setSecurity(savedSecurity);
         }, 'Security settings saved and publishing queued.');
+    const saveBasic = () =>
+        runSave(async () => {
+            if (clientIPDirty) {
+                const result = await api.updateSecurity(siteId, security);
+                const savedSecurity = withSecurityEditorIDs({ waf: result.waf });
+                savedSecurityRef.current = savedSecurity;
+                setSecurity(savedSecurity);
+            }
+            if (basicDirty) {
+                await updateSite({
+                    name: name.trim(),
+                    cluster_id: targetCluster,
+                });
+            }
+        }, 'Basic settings saved.');
     const publish = async () => {
         setPublishingSite(true);
         setError('');
@@ -752,7 +750,26 @@ export default function SiteDetail() {
     const cacheDirty = !valuesEqual(cache, savedCacheRef.current);
     const compressionDirty = !valuesEqual(compression, savedCompressionRef.current);
     const deliveryDirty = !valuesEqual(delivery, savedDeliveryRef.current);
-    const securityDirty = !valuesEqual(security, savedSecurityRef.current);
+    const clientIPDirty = !valuesEqual(
+        {
+            trusted_proxy_chain: security.waf.trusted_proxy_chain,
+            trusted_proxies: security.waf.trusted_proxies,
+        },
+        {
+            trusted_proxy_chain: savedSecurityRef.current.waf.trusted_proxy_chain,
+            trusted_proxies: savedSecurityRef.current.waf.trusted_proxies,
+        }
+    );
+    const securityRulesDirty = !valuesEqual(
+        { enabled: security.waf.enabled, rule_sets: security.waf.rule_sets },
+        {
+            enabled: savedSecurityRef.current.waf.enabled,
+            rule_sets: savedSecurityRef.current.waf.rule_sets,
+        }
+    );
+    const clientIPValid =
+        !security.waf.trusted_proxy_chain ||
+        security.waf.trusted_proxies.some((network) => network.trim());
     const anyDirty =
         basicDirty ||
         domainsDirty ||
@@ -762,7 +779,8 @@ export default function SiteDetail() {
         cacheDirty ||
         compressionDirty ||
         deliveryDirty ||
-        securityDirty;
+        clientIPDirty ||
+        securityRulesDirty;
     const discardAllChanges = () => {
         if (site) {
             setName(site.name);
@@ -1288,6 +1306,12 @@ export default function SiteDetail() {
                                                         </FormField>
                                                     </div>
                                                 </ContentCard>
+                                                <SiteClientIPSettings
+                                                    waf={security.waf}
+                                                    onChange={(waf) =>
+                                                        setSecurity({ ...security, waf })
+                                                    }
+                                                />
                                                 {canManage && (
                                                     <ContentCard noPadding>
                                                         <div className='border-b border-danger/20 px-5 py-4'>
@@ -1313,25 +1337,34 @@ export default function SiteDetail() {
                                                     </ContentCard>
                                                 )}
                                                 <SettingsActionBar
-                                                    isDirty={basicDirty}
+                                                    error={
+                                                        !clientIPValid
+                                                            ? 'Add at least one trusted proxy network before saving.'
+                                                            : undefined
+                                                    }
+                                                    isDirty={basicDirty || clientIPDirty}
                                                     isDiscardDisabled={saving}
                                                     onDiscard={() => {
                                                         setName(site.name);
                                                         setTargetCluster(site.cluster_id);
+                                                        setSecurity((current) => ({
+                                                            waf: {
+                                                                ...current.waf,
+                                                                trusted_proxy_chain:
+                                                                    savedSecurityRef.current.waf
+                                                                        .trusted_proxy_chain,
+                                                                trusted_proxies:
+                                                                    savedSecurityRef.current.waf
+                                                                        .trusted_proxies,
+                                                            },
+                                                        }));
                                                     }}
                                                 >
                                                     <Button
-                                                        isDisabled={saving || !name.trim()}
-                                                        onPress={() =>
-                                                            void runSave(
-                                                                () =>
-                                                                    updateSite({
-                                                                        name: name.trim(),
-                                                                        cluster_id: targetCluster,
-                                                                    }),
-                                                                'Basic settings saved.'
-                                                            )
+                                                        isDisabled={
+                                                            saving || !name.trim() || !clientIPValid
                                                         }
+                                                        onPress={() => void saveBasic()}
                                                     >
                                                         <Save className='mr-1.5 h-4 w-4' />
                                                         Save basic settings
@@ -1963,12 +1996,22 @@ export default function SiteDetail() {
                                         )}
                                         {settingsPage === 'security' && (
                                             <SiteSecuritySettings
-                                                isDirty={securityDirty}
+                                                isDirty={securityRulesDirty}
                                                 policy={security}
                                                 saving={saving}
                                                 onChange={setSecurity}
                                                 onDiscard={() =>
-                                                    setSecurity(savedSecurityRef.current)
+                                                    setSecurity((current) => ({
+                                                        waf: {
+                                                            ...current.waf,
+                                                            enabled:
+                                                                savedSecurityRef.current.waf
+                                                                    .enabled,
+                                                            rule_sets:
+                                                                savedSecurityRef.current.waf
+                                                                    .rule_sets,
+                                                        },
+                                                    }))
                                                 }
                                                 onSave={() => void saveSecurity()}
                                             />

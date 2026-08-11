@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"net"
 	"net/http"
 	"net/netip"
 	"regexp"
@@ -20,6 +21,7 @@ import (
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
 	"github.com/google/uuid"
+	"github.com/oschwald/geoip2-golang"
 	"go.uber.org/zap"
 
 	"goveto-edge/internal/policy"
@@ -33,15 +35,15 @@ const (
 )
 
 type Handler struct {
-	SiteID          string              `json:"site_id"`
-	ChallengeSecret string              `json:"challenge_secret,omitempty"`
-	WAF             policy.WAFPolicy    `json:"waf"`
-	Access          policy.AccessPolicy `json:"access"`
+	SiteID          string           `json:"site_id"`
+	ChallengeSecret string           `json:"challenge_secret,omitempty"`
+	WAF             policy.WAFPolicy `json:"waf"`
 
 	ruleSets       []compiledRuleSet
 	inspectBody    bool
 	challengeKey   []byte
-	access         compiledAccess
+	trustedProxies []netip.Prefix
+	geo            *geoip2.Reader
 	distributed    distributedStore
 	distributedErr error
 	rateBackend    *rateBackendState
@@ -90,6 +92,8 @@ type requestData struct {
 	request *http.Request
 	body    string
 	ip      string
+	country string
+	region  string
 }
 
 type wafDecision struct {
@@ -129,20 +133,33 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.distributed = nil
 	h.distributedErr = nil
 	h.rateBackend = nil
+	h.trustedProxies = nil
 	if h.SiteID == "" {
 		return fmt.Errorf("site_id is required")
 	}
 	if err := h.WAF.NormalizeAndValidate(); err != nil {
 		return fmt.Errorf("invalid WAF policy: %w", err)
 	}
-	if err := h.Access.NormalizeAndValidate(); err != nil {
-		return fmt.Errorf("invalid access policy: %w", err)
+	if h.WAF.TrustedProxyChain {
+		h.trustedProxies = make([]netip.Prefix, 0, len(h.WAF.TrustedProxies))
+		for _, value := range h.WAF.TrustedProxies {
+			prefix, err := netip.ParsePrefix(value)
+			if err != nil {
+				return fmt.Errorf("compile trusted proxy %q: %w", value, err)
+			}
+			h.trustedProxies = append(h.trustedProxies, prefix)
+		}
 	}
-	compiledAccessPolicy, err := compileAccess(h.Access)
-	if err != nil {
-		return fmt.Errorf("compile access policy: %w", err)
+	if h.WAF.NeedsGeoIP() {
+		if h.WAF.GeoIPDatabase == "" {
+			return errors.New("GeoIP database is required for COUNTRY or REGION rules")
+		}
+		geo, err := geoip2.Open(h.WAF.GeoIPDatabase)
+		if err != nil {
+			return fmt.Errorf("open WAF GeoIP database: %w", err)
+		}
+		h.geo = geo
 	}
-	h.access = compiledAccessPolicy
 	if h.hasCaptchaRule() {
 		key, err := decodeChallengeSecret(h.ChallengeSecret)
 		if err != nil {
@@ -151,7 +168,6 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		h.challengeKey = key
 	}
 	h.ruleSets = make([]compiledRuleSet, 0, len(h.WAF.RuleSets))
-	needsDistributed := h.Access.Enabled && h.Access.TemporaryBlocks
 	needsRedisRate := false
 	for _, set := range h.WAF.RuleSets {
 		if !set.Enabled {
@@ -169,7 +185,6 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 			if rule.Type == policy.WAFRuleTypeRateLimit {
 				compiled.limiter = limiterFor(h.SiteID, rule.ID)
 				if rule.Backend == "REDIS" {
-					needsDistributed = true
 					needsRedisRate = true
 				}
 			}
@@ -182,7 +197,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 		}
 		h.ruleSets = append(h.ruleSets, compiledSet)
 	}
-	if needsDistributed || h.hasCaptchaRule() {
+	if needsRedisRate || h.hasCaptchaRule() {
 		h.distributed, h.distributedErr = configuredRedisStore()
 	}
 	if needsRedisRate {
@@ -201,8 +216,8 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 }
 
 func (h *Handler) Cleanup() error {
-	if h.access.geo != nil {
-		return h.access.geo.Close()
+	if h.geo != nil {
+		return h.geo.Close()
 	}
 	return nil
 }
@@ -211,7 +226,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 	requestID := normalizedRequestID(r.Header.Get("X-Request-ID"))
 	r.Header.Set("X-Request-ID", requestID)
 	w.Header().Set("X-Request-ID", requestID)
-	data := requestData{request: r, ip: h.access.clientIP(r)}
+	data := requestData{request: r, ip: h.clientIP(r)}
+	if h.geo != nil {
+		if ip, err := parseAddress(data.ip); err == nil {
+			if record, lookupErr := h.geo.City(net.IP(ip.AsSlice())); lookupErr == nil {
+				data.country = strings.ToUpper(record.Country.IsoCode)
+				if len(record.Subdivisions) > 0 {
+					data.region = strings.ToUpper(record.Subdivisions[0].IsoCode)
+					if data.country != "" && data.region != "" {
+						data.region = data.country + "-" + data.region
+					}
+				}
+			}
+		}
+	}
 	if h.inspectBody && r.Body != nil {
 		body, err := io.ReadAll(io.LimitReader(r.Body, wafRequestBodyLimit))
 		if err != nil {
@@ -219,34 +247,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
 		data.body = string(body)
-	}
-
-	if h.Access.Enabled {
-		if h.Access.TemporaryBlocks {
-			blocked, retryAfter, err := h.temporaryBlocked(r, data.ip)
-			if err != nil && h.Access.TemporaryBlockFailure == "CLOSED" {
-				setSecurityEvent(w.Header(), "ERROR", "access:temporary-block-backend", "access", "backend_unavailable")
-				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
-				return nil
-			}
-			if blocked {
-				setSecurityEvent(w.Header(), "BLOCK", "access:temporary-block", "access", "temporary_block")
-				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()+0.5))))
-				http.Error(w, http.StatusText(h.Access.StatusCode), h.Access.StatusCode)
-				return nil
-			}
-		}
-		if decision := h.access.match(r, data.ip); decision != nil {
-			action := "BLOCK"
-			if h.Access.Mode == "MONITOR" {
-				action = "MONITOR"
-			}
-			setSecurityEvent(w.Header(), action, decision.ruleID, "access", decision.reason)
-			if action == "BLOCK" {
-				http.Error(w, http.StatusText(h.Access.StatusCode), h.Access.StatusCode)
-				return nil
-			}
-		}
 	}
 
 	if h.WAF.Enabled {
@@ -500,14 +500,52 @@ func normalizedRequestID(value string) string {
 	return uuid.NewString()
 }
 
-func (h *Handler) temporaryBlocked(r *http.Request, ip string) (bool, time.Duration, error) {
-	if h.distributedErr != nil {
-		return false, 0, h.distributedErr
+func remoteHost(address string) string {
+	host, _, err := net.SplitHostPort(address)
+	if err == nil {
+		return host
 	}
-	if h.distributed == nil {
-		return false, 0, fmt.Errorf("temporary block backend is unavailable")
+	return strings.Trim(strings.TrimSpace(address), "[]")
+}
+
+func parseAddress(value string) (netip.Addr, error) {
+	address, err := netip.ParseAddr(strings.TrimSpace(remoteHost(value)))
+	if err != nil {
+		return netip.Addr{}, err
 	}
-	return h.distributed.Blocked(r.Context(), h.SiteID, ip)
+	return address.Unmap(), nil
+}
+
+func (h *Handler) clientIP(request *http.Request) string {
+	direct, err := parseAddress(request.RemoteAddr)
+	if err != nil {
+		return remoteHost(request.RemoteAddr)
+	}
+	if !h.WAF.TrustedProxyChain || !containsPrefix(h.trustedProxies, direct) {
+		return direct.String()
+	}
+	chain := strings.Split(strings.Join(request.Header.Values("X-Forwarded-For"), ","), ",")
+	current := direct
+	for index := len(chain) - 1; index >= 0; index-- {
+		candidate, parseErr := parseAddress(chain[index])
+		if parseErr != nil {
+			return direct.String()
+		}
+		current = candidate
+		if !containsPrefix(h.trustedProxies, candidate) {
+			return candidate.String()
+		}
+	}
+	return current.String()
+}
+
+func containsPrefix(prefixes []netip.Prefix, address netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 func writeWAFResponse(w http.ResponseWriter, status int, ruleID string, response policy.WAFResponse) {
@@ -741,6 +779,10 @@ func requestValues(condition policy.WAFCondition, data requestData) []requestCan
 		return single("CLIENT_IP", data.ip)
 	case "USER_AGENT":
 		return single("USER_AGENT", r.UserAgent())
+	case "COUNTRY":
+		return single("COUNTRY", data.country)
+	case "REGION":
+		return single("REGION", data.region)
 	}
 	return nil
 }

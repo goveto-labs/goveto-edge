@@ -37,7 +37,6 @@ type SiteConfig struct {
 	Compression    map[string]any        `json:"compression,omitempty"`
 	Delivery       map[string]any        `json:"delivery,omitempty"`
 	WAF            map[string]any        `json:"waf,omitempty"`
-	Access         map[string]any        `json:"access,omitempty"`
 }
 type ListenerConfig struct {
 	HTTPEnabled           bool   `json:"http_enabled"`

@@ -11,8 +11,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
-	"github.com/redis/go-redis/v9"
-
 	"golang.org/x/net/idna"
 
 	"goveto-edge/internal/analytics"
@@ -62,7 +60,7 @@ type siteSummary struct {
 	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
-func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store, redisClient *redis.Client) {
+func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store) {
 	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
 	write := clusteraccess.RequirePermission(db, rbac.PermissionSiteWrite)
 	e.GET("/api/v1/clusters/:cluster_id/sites", list(db, analyticsStore), auth.RequireAuth, read)
@@ -88,9 +86,6 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/delivery", updateDelivery(db, publishService), auth.RequireAuth, write)
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security", getSecurity(db), auth.RequireAuth, read)
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/security", updateSecurity(db, publishService), auth.RequireAuth, write)
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security/blocks", listTemporaryBlocks(db, redisClient), auth.RequireAuth, read)
-	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/security/blocks", createTemporaryBlock(db, redisClient), auth.RequireAuth, write)
-	e.DELETE("/api/v1/clusters/:cluster_id/sites/:site_id/security/blocks", deleteTemporaryBlock(db, redisClient), auth.RequireAuth, write)
 }
 
 // @summary List sites

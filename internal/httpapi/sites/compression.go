@@ -104,7 +104,6 @@ func updateCompression(db *client.Client, publishService *publisher.Service) ech
 					query.Policy.CompressionJson.Set(encoded),
 					query.Policy.DeliveryJson.Set(empty),
 					query.Policy.WafJson.Set(empty),
-					query.Policy.AccessJson.Set(empty),
 				).
 				Do(ctx); createErr != nil {
 				return createErr

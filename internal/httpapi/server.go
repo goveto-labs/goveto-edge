@@ -96,7 +96,7 @@ func New(
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	jobsapi.Register(e, orm, publishService)
-	sites.Register(e, orm, publishService, analyticsData, redisClient)
+	sites.Register(e, orm, publishService, analyticsData)
 	auditapi.Register(e, orm)
 	users.Register(e, orm, sessions)
 

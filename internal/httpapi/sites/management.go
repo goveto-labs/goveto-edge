@@ -38,7 +38,6 @@ type siteBundle struct {
 	Compression    json.RawMessage                 `json:"compression,omitempty"`
 	Delivery       json.RawMessage                 `json:"delivery,omitempty"`
 	WAF            json.RawMessage                 `json:"waf,omitempty"`
-	Access         json.RawMessage                 `json:"access,omitempty"`
 }
 
 type cloneRequest struct {
@@ -294,7 +293,6 @@ func applyBulkSite(ctx context.Context, db *client.Client, publishService *publi
 			if _, err = db.Policy.Create().Set(
 				query.Policy.Id.Set(policyID), query.Policy.Name.Set("site:"+siteID), query.Policy.CacheJson.Set(empty),
 				query.Policy.CompressionJson.Set(empty), query.Policy.DeliveryJson.Set(encoded), query.Policy.WafJson.Set(empty),
-				query.Policy.AccessJson.Set(empty),
 			).Do(ctx); err != nil {
 				return err
 			}
@@ -360,7 +358,7 @@ func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (site
 			return bundle, findErr
 		}
 		bundle.Cache, bundle.Compression, bundle.Delivery = stored.CacheJson, stored.CompressionJson, stored.DeliveryJson
-		bundle.WAF, bundle.Access = stored.WafJson, stored.AccessJson
+		bundle.WAF = stored.WafJson
 	}
 	return bundle, nil
 }
@@ -429,7 +427,6 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 			query.Policy.Id.Set(policyID), query.Policy.Name.Set("site:"+siteID),
 			query.Policy.CacheJson.Set(rawOrEmpty(bundle.Cache)), query.Policy.CompressionJson.Set(rawOrEmpty(bundle.Compression)),
 			query.Policy.DeliveryJson.Set(rawOrEmpty(bundle.Delivery)), query.Policy.WafJson.Set(rawOrEmpty(bundle.WAF)),
-			query.Policy.AccessJson.Set(rawOrEmpty(bundle.Access)),
 		).Do(ctx); createErr != nil {
 			return createErr
 		}
@@ -522,11 +519,7 @@ func normalizeSiteBundlePolicies(bundle *siteBundle) error {
 	if err != nil {
 		return err
 	}
-	bundle.WAF, err = normalizeBundlePolicy("WAF", bundle.WAF, deliverypolicy.WAFPolicy{}, (*deliverypolicy.WAFPolicy).NormalizeAndValidate)
-	if err != nil {
-		return err
-	}
-	bundle.Access, err = normalizeBundlePolicy("access", bundle.Access, deliverypolicy.DefaultAccessPolicy(), (*deliverypolicy.AccessPolicy).NormalizeAndValidatePublic)
+	bundle.WAF, err = normalizeBundlePolicy("WAF", bundle.WAF, deliverypolicy.WAFPolicy{}, (*deliverypolicy.WAFPolicy).NormalizeAndValidatePublic)
 	if err != nil {
 		return err
 	}

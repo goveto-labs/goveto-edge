@@ -68,7 +68,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	publishapi.Register(e, nil, nil)
 	purgeapi.Register(e, nil, nil)
 	jobsapi.Register(e, nil, nil)
-	sites.Register(e, nil, nil, nil, nil)
+	sites.Register(e, nil, nil, nil)
 	auditapi.Register(e, nil)
 	users.Register(e, nil, nil)
 	analyticsapi.Register(e, nil, analytics.NewStore(nil, 0))

@@ -55,6 +55,34 @@ func TestWAFPolicyPreservesRuleSetAndRuleOrder(t *testing.T) {
 	}
 }
 
+func TestWAFPolicyTrustedProxyChainValidation(t *testing.T) {
+	policy := DefaultWAFPolicy()
+	if policy.TrustedProxyChain || len(policy.TrustedProxies) != 0 {
+		t.Fatalf("trusted proxy chain must default off: %#v", policy)
+	}
+	policy.TrustedProxyChain = true
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("trusted proxy chain without trusted proxies was accepted")
+	}
+	policy.TrustedProxies = []string{" 10.0.0.9 ", "10.0.0.0/8", "::ffff:192.0.2.4", "::ffff:198.51.100.0/120", "10.0.0.0/8"}
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"10.0.0.9/32", "10.0.0.0/8", "192.0.2.4/32", "198.51.100.0/24"}
+	if len(policy.TrustedProxies) != len(want) {
+		t.Fatalf("trusted proxies = %#v, want %#v", policy.TrustedProxies, want)
+	}
+	for index := range want {
+		if policy.TrustedProxies[index] != want[index] {
+			t.Fatalf("trusted proxy %d = %q, want %q", index, policy.TrustedProxies[index], want[index])
+		}
+	}
+	policy.TrustedProxies = []string{"not-an-address"}
+	if err := policy.NormalizeAndValidate(); err == nil {
+		t.Fatal("invalid trusted proxy was accepted")
+	}
+}
+
 func TestWAFPolicyValidatesRulesAndActions(t *testing.T) {
 	tests := []WAFRule{
 		{ID: "regex", Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "REGEX", Value: "["}), Action: WAFAction{Type: WAFActionBlock}},
@@ -91,5 +119,21 @@ func TestWAFPolicyNormalizesCompoundConditions(t *testing.T) {
 	conditions := policy.RuleSets[0].Rules[0].Conditions
 	if conditions.Operator != "AND" || conditions.Groups[1].Operator != "OR" || conditions.Groups[1].Conditions[0].Field != "PATH" {
 		t.Fatalf("conditions were not normalized: %#v", conditions)
+	}
+}
+
+func TestWAFPolicySupportsGeoConditionsAndRejectsPublicDatabasePath(t *testing.T) {
+	policy := WAFPolicy{Enabled: true, GeoIPDatabase: "/client/controlled.mmdb", RuleSets: []WAFRuleSet{{
+		ID: "geo", Enabled: true, Rules: []WAFRule{{
+			ID: "country", Enabled: true, Type: WAFRuleTypeMatch,
+			Conditions: singleWAFCondition(WAFCondition{Field: "country", Operator: "IN", Values: []string{"GB", "US"}}),
+			Action:     WAFAction{Type: WAFActionBlock},
+		}},
+	}}}
+	if err := policy.NormalizeAndValidatePublic(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.GeoIPDatabase != "" || !policy.NeedsGeoIP() || policy.RuleSets[0].Rules[0].Conditions.Groups[0].Conditions[0].Field != "COUNTRY" {
+		t.Fatalf("unexpected normalized GeoIP policy: %#v", policy)
 	}
 }

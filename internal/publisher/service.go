@@ -843,9 +843,6 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 			config.WAF = map[string]any{}
 		}
 		config.WAF["challenge_secret"] = wafChallengeSecret(s.derivationCipher, site.Id)
-		if err = json.Unmarshal(policy.AccessJson, &config.Access); err != nil {
-			return config, nil, fmt.Errorf("decode access policy: %w", err)
-		}
 	}
 
 	nodes, err := db.Node.Query().

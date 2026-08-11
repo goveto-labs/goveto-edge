@@ -8208,8 +8208,6 @@ paths:
                                     data:
                                         type: object
                                         properties:
-                                            access:
-                                                type: object
                                             cache:
                                                 type: object
                                             certificate_ids:
@@ -8952,7 +8950,7 @@ paths:
         get:
             operationId: getSecurity
             summary: Get site security policy
-            description: Get WAF, access-control, and rate-limit policy for a site.
+            description: Get the ordered WAF rule sets for a site.
             tags:
                 - sites
             security:
@@ -8989,62 +8987,6 @@ paths:
                                     data:
                                         type: object
                                         properties:
-                                            access:
-                                                type: object
-                                                properties:
-                                                    allow_empty_referer:
-                                                        type: boolean
-                                                    allowed_countries:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    allowed_methods:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    allowed_referer_hosts:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    allowed_regions:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    blocked_countries:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    blocked_methods:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    blocked_regions:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    enabled:
-                                                        type: boolean
-                                                    ip_allowlist:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    ip_blocklist:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    mode:
-                                                        type: string
-                                                    status_code:
-                                                        type: integer
-                                                        format: int32
-                                                    temporary_block_failure:
-                                                        type: string
-                                                    temporary_blocks:
-                                                        type: boolean
-                                                    trusted_proxies:
-                                                        type: array
-                                                        items:
-                                                            type: string
                                             waf:
                                                 type: object
                                                 properties:
@@ -9054,10 +8996,16 @@ paths:
                                                         type: array
                                                         items:
                                                             $ref: '#/components/schemas/policy_WAFRuleSet'
+                                                    trusted_proxies:
+                                                        type: array
+                                                        items:
+                                                            type: string
+                                                    trusted_proxy_chain:
+                                                        type: boolean
         put:
             operationId: updateSecurity
             summary: Update site security policy
-            description: Update WAF and access-control rules and enqueue a site publish.
+            description: Update ordered WAF rule sets and enqueue a site publish.
             tags:
                 - sites
             security:
@@ -9088,8 +9036,6 @@ paths:
                         schema:
                             type: object
                             properties:
-                                access:
-                                    $ref: '#/components/schemas/policy_AccessPolicy'
                                 publish_error:
                                     type: string
                                 publish_job:
@@ -9109,8 +9055,6 @@ paths:
                                     data:
                                         type: object
                                         properties:
-                                            access:
-                                                $ref: '#/components/schemas/policy_AccessPolicy'
                                             publish_error:
                                                 type: string
                                             publish_job:
@@ -9119,212 +9063,6 @@ paths:
                                                 $ref: '#/components/schemas/policy_WAFPolicy'
                 "400":
                     description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-    /api/v1/clusters/{cluster_id}/sites/{site_id}/security/blocks:
-        get:
-            operationId: listTemporaryBlocks
-            summary: List temporary blocks
-            tags:
-                - clusters-sites
-            security:
-                - cookie_goveto_session: []
-            x-middlewares:
-                - httpsecurity.Middleware
-                - sessions.Session
-                - sessions.RequireActiveUser
-                - authapi.RequireTOTPEnrollment
-                - audit.Middleware
-                - auth.RequireAuth
-                - read
-            parameters:
-                - name: cluster_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-                - name: site_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    data:
-                                        type: array
-                                        items:
-                                            $ref: '#/components/schemas/sites_temporaryBlock'
-                "503":
-                    description: Server Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-        post:
-            operationId: createTemporaryBlock
-            summary: Create temporary block
-            tags:
-                - clusters-sites
-            security:
-                - cookie_goveto_session: []
-            x-middlewares:
-                - httpsecurity.Middleware
-                - sessions.Session
-                - sessions.RequireActiveUser
-                - authapi.RequireTOTPEnrollment
-                - audit.Middleware
-                - auth.RequireAuth
-                - write
-            parameters:
-                - name: cluster_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-                - name: site_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            properties:
-                                address:
-                                    type: string
-                                duration_seconds:
-                                    type: integer
-                                    format: int32
-                                reason:
-                                    type: string
-                                scope:
-                                    type: string
-            responses:
-                "201":
-                    description: OK
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    data:
-                                        $ref: '#/components/schemas/sites_temporaryBlock'
-                "400":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "503":
-                    description: Server Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-        delete:
-            operationId: deleteTemporaryBlock
-            summary: Delete temporary block
-            tags:
-                - clusters-sites
-            security:
-                - cookie_goveto_session: []
-            x-middlewares:
-                - httpsecurity.Middleware
-                - sessions.Session
-                - sessions.RequireActiveUser
-                - authapi.RequireTOTPEnrollment
-                - audit.Middleware
-                - auth.RequireAuth
-                - write
-            parameters:
-                - name: cluster_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-                - name: site_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            properties:
-                                address:
-                                    type: string
-                                duration_seconds:
-                                    type: integer
-                                    format: int32
-                                reason:
-                                    type: string
-                                scope:
-                                    type: string
-            responses:
-                "204":
-                    description: OK
-                "400":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "503":
-                    description: Server Error
                     content:
                         application/json:
                             schema:
@@ -11171,64 +10909,6 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 username:
                     type: string
-        policy_AccessPolicy:
-            type: object
-            properties:
-                allow_empty_referer:
-                    type: boolean
-                allowed_countries:
-                    type: array
-                    items:
-                        type: string
-                allowed_methods:
-                    type: array
-                    items:
-                        type: string
-                allowed_referer_hosts:
-                    type: array
-                    items:
-                        type: string
-                allowed_regions:
-                    type: array
-                    items:
-                        type: string
-                blocked_countries:
-                    type: array
-                    items:
-                        type: string
-                blocked_methods:
-                    type: array
-                    items:
-                        type: string
-                blocked_regions:
-                    type: array
-                    items:
-                        type: string
-                enabled:
-                    type: boolean
-                geoip_database:
-                    type: string
-                ip_allowlist:
-                    type: array
-                    items:
-                        type: string
-                ip_blocklist:
-                    type: array
-                    items:
-                        type: string
-                mode:
-                    type: string
-                status_code:
-                    type: integer
-                    format: int32
-                temporary_block_failure:
-                    type: string
-                temporary_blocks:
-                    type: boolean
-                trusted_proxies:
-                    type: array
-                    items:
-                        type: string
         policy_CORSConfig:
             type: object
             properties:
@@ -11632,16 +11312,29 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/policy_WAFRuleSet'
+                trusted_proxies:
+                    type: array
+                    items:
+                        type: string
+                trusted_proxy_chain:
+                    type: boolean
+        policy_WAFResponse:
+            type: object
+            properties:
+                body:
+                    type: string
+                type:
+                    type: string
         policy_WAFRule:
             type: object
             properties:
                 action:
                     $ref: '#/components/schemas/policy_WAFAction'
+                backend:
+                    type: string
                 burst:
                     type: integer
                     format: int32
-                backend:
-                    type: string
                 conditions:
                     $ref: '#/components/schemas/policy_WAFConditions'
                 enabled:
@@ -11664,13 +11357,6 @@ components:
                 window_seconds:
                     type: integer
                     format: int32
-        policy_WAFResponse:
-            type: object
-            properties:
-                body:
-                    type: string
-                type:
-                    type: string
         policy_WAFRuleSet:
             type: object
             properties:
@@ -11714,27 +11400,6 @@ components:
                     type: string
                 value:
                     type: object
-        securitystate_TemporaryBlock:
-            type: object
-            properties:
-                address:
-                    type: string
-                created_at:
-                    type: string
-                    format: date-time
-                    example: "2026-01-02T15:04:05Z"
-                created_by:
-                    type: string
-                expires_at:
-                    type: string
-                    format: date-time
-                    example: "2026-01-02T15:04:05Z"
-                reason:
-                    type: string
-                scope:
-                    type: string
-                site_id:
-                    type: string
         settings_AuthProviderType:
             type: string
             enum:
@@ -11785,8 +11450,6 @@ components:
         sites_siteBundle:
             type: object
             properties:
-                access:
-                    type: object
                 cache:
                     type: object
                 certificate_ids:
@@ -11860,8 +11523,6 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
-        sites_temporaryBlock:
-            $ref: '#/components/schemas/securitystate_TemporaryBlock'
         types_Certificate:
             type: object
             properties:

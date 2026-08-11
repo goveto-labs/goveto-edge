@@ -38,8 +38,11 @@ const (
 )
 
 type WAFPolicy struct {
-	Enabled  bool         `json:"enabled"`
-	RuleSets []WAFRuleSet `json:"rule_sets"`
+	Enabled           bool         `json:"enabled"`
+	TrustedProxyChain bool         `json:"trusted_proxy_chain"`
+	TrustedProxies    []string     `json:"trusted_proxies"`
+	RuleSets          []WAFRuleSet `json:"rule_sets"`
+	GeoIPDatabase     string       `json:"geoip_database,omitempty" openapi:"-"`
 }
 
 type WAFRuleSet struct {
@@ -116,7 +119,8 @@ func DefaultWAFPolicy() WAFPolicy {
 		}
 	}
 	return WAFPolicy{
-		Enabled: true,
+		Enabled:        true,
+		TrustedProxies: []string{},
 		RuleSets: []WAFRuleSet{
 			{
 				ID: "builtin-xss", Name: "Cross-site scripting", Enabled: true,
@@ -163,6 +167,15 @@ func singleWAFCondition(condition WAFCondition) WAFConditions {
 }
 
 func (p *WAFPolicy) NormalizeAndValidate() error {
+	p.GeoIPDatabase = strings.TrimSpace(p.GeoIPDatabase)
+	trustedProxies, err := normalizeWAFPrefixes(p.TrustedProxies)
+	if err != nil {
+		return fmt.Errorf("trusted_proxies: %w", err)
+	}
+	p.TrustedProxies = trustedProxies
+	if p.TrustedProxyChain && len(p.TrustedProxies) == 0 {
+		return errors.New("trusted_proxies must contain at least one IP or CIDR when trusted_proxy_chain is enabled")
+	}
 	if p.RuleSets == nil {
 		p.RuleSets = DefaultWAFPolicy().RuleSets
 	}
@@ -237,6 +250,64 @@ func (p *WAFPolicy) NormalizeAndValidate() error {
 		}
 	}
 	return nil
+}
+
+func normalizeWAFPrefixes(values []string) ([]string, error) {
+	result := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if address, err := netip.ParseAddr(value); err == nil {
+			address = address.Unmap()
+			bits := 128
+			if address.Is4() {
+				bits = 32
+			}
+			value = netip.PrefixFrom(address, bits).String()
+		} else {
+			prefix, prefixErr := netip.ParsePrefix(value)
+			if prefixErr != nil {
+				return nil, fmt.Errorf("invalid IP or CIDR %q", value)
+			}
+			prefix = prefix.Masked()
+			if prefix.Addr().Is4In6() && prefix.Bits() >= 96 {
+				prefix = netip.PrefixFrom(prefix.Addr().Unmap(), prefix.Bits()-96).Masked()
+			}
+			value = prefix.String()
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	if result == nil {
+		return []string{}, nil
+	}
+	return result, nil
+}
+
+func (p *WAFPolicy) NormalizeAndValidatePublic() error {
+	p.GeoIPDatabase = ""
+	return p.NormalizeAndValidate()
+}
+
+func (p WAFPolicy) NeedsGeoIP() bool {
+	for _, set := range p.RuleSets {
+		for _, rule := range set.Rules {
+			for _, group := range rule.Conditions.Groups {
+				for _, condition := range group.Conditions {
+					if condition.Field == "COUNTRY" || condition.Field == "REGION" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
 
 func uniqueWAFID(seen map[string]struct{}, id string) error {
@@ -320,7 +391,7 @@ func normalizeWAFCondition(condition *WAFCondition, location string) error {
 		condition.Values[index] = strings.TrimSpace(condition.Values[index])
 	}
 	switch condition.Field {
-	case "METHOD", "HOST", "PATH", "RAW_QUERY", "QUERY_VALUES", "REQUEST_TARGET", "BODY", "CLIENT_IP", "USER_AGENT":
+	case "METHOD", "HOST", "PATH", "RAW_QUERY", "QUERY_VALUES", "REQUEST_TARGET", "BODY", "CLIENT_IP", "USER_AGENT", "COUNTRY", "REGION":
 		condition.FieldName = ""
 	case "QUERY", "COOKIE":
 		if condition.FieldName == "" {

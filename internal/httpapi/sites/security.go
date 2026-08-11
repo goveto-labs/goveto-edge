@@ -16,14 +16,13 @@ import (
 )
 
 type securityPolicyResponse struct {
-	WAF          securitypolicy.WAFPolicy    `json:"waf"`
-	Access       securitypolicy.AccessPolicy `json:"access"`
-	PublishJob   *types.PublishJob           `json:"publish_job,omitempty"`
-	PublishError string                      `json:"publish_error,omitempty"`
+	WAF          securitypolicy.WAFPolicy `json:"waf"`
+	PublishJob   *types.PublishJob        `json:"publish_job,omitempty"`
+	PublishError string                   `json:"publish_error,omitempty"`
 }
 
 // @summary Get site security policy
-// @description Get WAF and access-control policy for a site.
+// @description Get the ordered WAF rule sets for a site.
 // @Tags sites
 func getSecurity(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -35,7 +34,7 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
-		result := securityPolicyResponse{WAF: securitypolicy.DefaultWAFPolicy(), Access: securitypolicy.DefaultAccessPolicy()}
+		result := securityPolicyResponse{WAF: securitypolicy.DefaultWAFPolicy()}
 		if site.PolicyId != nil {
 			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
 			if findErr != nil {
@@ -45,14 +44,8 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 			if err = json.Unmarshal(stored.WafJson, &result.WAF); err != nil {
 				return err
 			}
-			if err = json.Unmarshal(stored.AccessJson, &result.Access); err != nil {
-				return err
-			}
 		}
-		if err = result.WAF.NormalizeAndValidate(); err != nil {
-			return err
-		}
-		if err = result.Access.NormalizeAndValidatePublic(); err != nil {
+		if err = result.WAF.NormalizeAndValidatePublic(); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, result)
@@ -60,7 +53,7 @@ func getSecurity(db *client.Client) echo.HandlerFunc {
 }
 
 // @summary Update site security policy
-// @description Update WAF and access-control rules and enqueue a site publish.
+// @description Update ordered WAF rule sets and enqueue a site publish.
 // @Tags sites
 func updateSecurity(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
 	return func(c *echo.Context) error {
@@ -71,27 +64,19 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
-		if err := input.WAF.NormalizeAndValidate(); err != nil {
+		if err := input.WAF.NormalizeAndValidatePublic(); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid WAF policy: "+err.Error())
-		}
-		if err := input.Access.NormalizeAndValidatePublic(); err != nil {
-			return echo.NewHTTPError(http.StatusBadRequest, "invalid access policy: "+err.Error())
 		}
 		wafJSON, err := json.Marshal(input.WAF)
 		if err != nil {
 			return err
 		}
-		accessJSON, err := json.Marshal(input.Access)
-		if err != nil {
-			return err
-		}
-
 		ctx := c.Request().Context()
 		site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(c.Param("site_id")))
 		if err != nil {
 			return err
 		}
-		before := securityPolicyResponse{WAF: securitypolicy.DefaultWAFPolicy(), Access: securitypolicy.DefaultAccessPolicy()}
+		before := securityPolicyResponse{WAF: securitypolicy.DefaultWAFPolicy()}
 		if site.PolicyId != nil {
 			stored, findErr := db.Policy.FindUnique(ctx, query.Policy.Id.Equals(*site.PolicyId))
 			if findErr != nil {
@@ -101,14 +86,11 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 			if err = json.Unmarshal(stored.WafJson, &before.WAF); err != nil {
 				return err
 			}
-			if err = json.Unmarshal(stored.AccessJson, &before.Access); err != nil {
-				return err
-			}
 		}
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			if site.PolicyId != nil {
 				_, updateErr := tx.Policy.Update().Where(query.Policy.Id.Equals(*site.PolicyId)).Set(
-					query.Policy.WafJson.Set(wafJSON), query.Policy.AccessJson.Set(accessJSON),
+					query.Policy.WafJson.Set(wafJSON),
 				).Do(ctx)
 				return updateErr
 			}
@@ -118,7 +100,6 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 				query.Policy.Id.Set(policyID), query.Policy.Name.Set("site:"+site.Id),
 				query.Policy.CacheJson.Set(empty), query.Policy.CompressionJson.Set(empty),
 				query.Policy.DeliveryJson.Set(empty), query.Policy.WafJson.Set(wafJSON),
-				query.Policy.AccessJson.Set(accessJSON),
 			).Do(ctx); createErr != nil {
 				return createErr
 			}
@@ -129,7 +110,7 @@ func updateSecurity(db *client.Client, publishService *publisher.Service) echo.H
 			return err
 		}
 
-		response := securityPolicyResponse{WAF: input.WAF, Access: input.Access}
+		response := securityPolicyResponse{WAF: input.WAF}
 		if job, publishErr := publishService.Enqueue(ctx, site.Id); publishErr == nil {
 			value := types.NewPublishJob(job)
 			response.PublishJob = &value

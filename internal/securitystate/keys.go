@@ -3,7 +3,6 @@ package securitystate
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"net/netip"
 )
 
 func RateCounterKey(siteID, ruleID, value string) string {
@@ -12,14 +11,6 @@ func RateCounterKey(siteID, ruleID, value string) string {
 
 func ChallengeKey(token string) string {
 	return "challenge:" + digest(token)
-}
-
-func GlobalBlockKey(address netip.Addr) string {
-	return "block:global:" + digest(address.String())
-}
-
-func SiteBlockKey(siteID string, address netip.Addr) string {
-	return "block:site:" + siteID + ":" + digest(address.String())
 }
 
 func digest(value string) string {

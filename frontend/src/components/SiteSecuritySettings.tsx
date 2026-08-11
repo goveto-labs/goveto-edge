@@ -40,12 +40,9 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
-import { SearchableMultiAddField } from '@/components/SearchableMultiAddField.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
-import { ValueListAddField } from '@/components/ValueListAddField.tsx';
-import { countryOptions } from '@/data/countries.ts';
 
 const fields = [
     ['METHOD', 'Method'],
@@ -59,6 +56,8 @@ const fields = [
     ['COOKIE', 'Cookie'],
     ['BODY', 'Request body'],
     ['CLIENT_IP', 'Client IP'],
+    ['COUNTRY', 'Country'],
+    ['REGION', 'Region'],
     ['USER_AGENT', 'User agent'],
 ] as const;
 
@@ -82,18 +81,6 @@ const actions: { id: WAFAction['type']; label: string }[] = [
     { id: 'ALLOW', label: 'Allow' },
     { id: 'TAG', label: 'Tag' },
 ];
-
-const methodOptions = [
-    'GET',
-    'HEAD',
-    'POST',
-    'PUT',
-    'PATCH',
-    'DELETE',
-    'OPTIONS',
-    'TRACE',
-    'CONNECT',
-].map((id) => ({ id, name: id }));
 
 function newAction(status = 403): WAFAction {
     return { type: 'SHOW_PAGE', status_code: status, response: { type: 'DEFAULT' } };
@@ -883,153 +870,6 @@ function SortableRuleSet({
     );
 }
 
-function AccessEditor({
-    policy,
-    onChange,
-}: {
-    policy: SecurityPolicy;
-    onChange: (policy: SecurityPolicy) => void;
-}) {
-    const update = (next: Partial<SecurityPolicy['access']>) =>
-        onChange({ ...policy, access: { ...policy.access, ...next } });
-    const list = (label: string, key: keyof SecurityPolicy['access'], placeholder: string) => (
-        <ValueListAddField
-            label={label}
-            values={policy.access[key] as string[]}
-            addLabel='Add'
-            dialogTitle={`Add ${label}`}
-            emptyLabel='None configured'
-            placeholder={placeholder}
-            onChange={(values) => update({ [key]: values })}
-        />
-    );
-    return (
-        <ContentCard noPadding>
-            <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
-                <h2 className='text-sm font-semibold'>Access control</h2>
-                <ToggleSwitch
-                    label='Enable access control'
-                    isSelected={policy.access.enabled}
-                    onChange={(enabled) => update({ enabled })}
-                />
-            </div>
-            <div className='space-y-5 p-5'>
-                <div className='grid gap-4 md:grid-cols-3'>
-                    <SelectField
-                        label='Operating mode'
-                        options={[
-                            { id: 'BLOCK', label: 'Block violations' },
-                            { id: 'MONITOR', label: 'Monitor only' },
-                        ]}
-                        value={policy.access.mode}
-                        variant='secondary'
-                        onChange={(mode) => update({ mode })}
-                    />
-                    <NumericInput
-                        label='Denied status'
-                        min={400}
-                        max={599}
-                        value={policy.access.status_code}
-                        onChange={(status_code) => update({ status_code })}
-                    />
-                    {list('Trusted proxy CIDRs', 'trusted_proxies', '10.0.0.0/8')}
-                </div>
-                <div className='grid gap-4 md:grid-cols-2'>
-                    {list('IP/CIDR allowlist', 'ip_allowlist', '192.0.2.0/24')}
-                    {list('IP/CIDR blocklist', 'ip_blocklist', '198.51.100.0/24')}
-                </div>
-                <div className='grid gap-4 md:grid-cols-2'>
-                    <div>
-                        <div className='mb-1.5 text-sm font-medium'>Allowed countries</div>
-                        <SearchableMultiAddField
-                            options={countryOptions}
-                            selected={new Set(policy.access.allowed_countries)}
-                            addLabel='Add countries'
-                            dialogTitle='Allowed countries'
-                            itemLabel='country'
-                            searchPlaceholder='Search countries'
-                            emptyLabel='All countries'
-                            onChange={(value) => update({ allowed_countries: Array.from(value) })}
-                        />
-                    </div>
-                    <div>
-                        <div className='mb-1.5 text-sm font-medium'>Blocked countries</div>
-                        <SearchableMultiAddField
-                            options={countryOptions}
-                            selected={new Set(policy.access.blocked_countries)}
-                            addLabel='Add countries'
-                            dialogTitle='Blocked countries'
-                            itemLabel='country'
-                            searchPlaceholder='Search countries'
-                            emptyLabel='No blocked countries'
-                            onChange={(value) => update({ blocked_countries: Array.from(value) })}
-                        />
-                    </div>
-                </div>
-                <div className='grid gap-4 md:grid-cols-2'>
-                    {list('Allowed regions', 'allowed_regions', 'US-NY')}
-                    {list('Blocked regions', 'blocked_regions', 'US-NY')}
-                </div>
-                <div className='grid gap-4 md:grid-cols-2'>
-                    <div>
-                        <div className='mb-1.5 text-sm font-medium'>Allowed methods</div>
-                        <SearchableMultiAddField
-                            options={methodOptions}
-                            selected={new Set(policy.access.allowed_methods)}
-                            addLabel='Add methods'
-                            dialogTitle='Allowed methods'
-                            itemLabel='method'
-                            searchPlaceholder='Search methods'
-                            emptyLabel='All methods'
-                            onChange={(value) => update({ allowed_methods: Array.from(value) })}
-                        />
-                    </div>
-                    <div>
-                        <div className='mb-1.5 text-sm font-medium'>Blocked methods</div>
-                        <SearchableMultiAddField
-                            options={methodOptions}
-                            selected={new Set(policy.access.blocked_methods)}
-                            addLabel='Add methods'
-                            dialogTitle='Blocked methods'
-                            itemLabel='method'
-                            searchPlaceholder='Search methods'
-                            emptyLabel='No blocked methods'
-                            onChange={(value) => update({ blocked_methods: Array.from(value) })}
-                        />
-                    </div>
-                </div>
-                <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]'>
-                    {list('Allowed Referer hosts', 'allowed_referer_hosts', 'example.com')}
-                    <div className='flex items-end pb-1'>
-                        <ToggleSwitch
-                            label='Allow empty Referer'
-                            isSelected={policy.access.allow_empty_referer}
-                            onChange={(allow_empty_referer) => update({ allow_empty_referer })}
-                        />
-                    </div>
-                </div>
-                <div className='grid gap-4 border-t border-border pt-5 md:grid-cols-[auto_minmax(220px,1fr)]'>
-                    <ToggleSwitch
-                        label='Enforce temporary blocks'
-                        isSelected={policy.access.temporary_blocks}
-                        onChange={(temporary_blocks) => update({ temporary_blocks })}
-                    />
-                    <SelectField
-                        label='Redis failure policy'
-                        options={[
-                            { id: 'OPEN', label: 'Fail open' },
-                            { id: 'CLOSED', label: 'Fail closed' },
-                        ]}
-                        value={policy.access.temporary_block_failure}
-                        variant='secondary'
-                        onChange={(temporary_block_failure) => update({ temporary_block_failure })}
-                    />
-                </div>
-            </div>
-        </ContentCard>
-    );
-}
-
 function conditionValid(condition: WAFCondition) {
     if (!condition.field || !condition.operator) return false;
     if (['QUERY', 'HEADER', 'COOKIE'].includes(condition.field) && !condition.field_name?.trim())
@@ -1086,9 +926,7 @@ export function SiteSecuritySettings({
         () =>
             policy.waf.rule_sets.every(
                 (set) => set.id.trim() && set.name.trim() && set.rules.every(ruleValid)
-            ) &&
-            policy.access.status_code >= 400 &&
-            policy.access.status_code <= 599,
+            ),
         [policy]
     );
     const reorderSets = ({ active, over }: DragEndEvent) => {
@@ -1104,7 +942,7 @@ export function SiteSecuritySettings({
     const updateSets = (rule_sets: WAFRuleSet[]) =>
         onChange({ ...policy, waf: { ...policy.waf, rule_sets } });
     return (
-        <div className='space-y-8'>
+        <div className='space-y-4'>
             <ContentCard noPadding>
                 <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
                     <div className='flex items-center gap-2'>
@@ -1170,7 +1008,6 @@ export function SiteSecuritySettings({
                     </DndContext>
                 </div>
             </ContentCard>
-            <AccessEditor policy={policy} onChange={onChange} />
             <SettingsActionBar
                 error={!valid ? 'Complete every rule and action before saving.' : undefined}
                 isDirty={isDirty}
