@@ -30,6 +30,18 @@ type InstallWorker struct {
 
 const installExecutionTimeout = 8 * time.Minute
 
+const agentSystemdUnit = `[Unit]
+Description=Goveto Edge Agent
+After=network-online.target redis-server.service redis.service
+[Service]
+Environment=EDGE_AGENT_REDIS_URL=redis://127.0.0.1:6379/0
+ExecStart=/usr/local/bin/goveto-edge-agent
+Restart=always
+RestartSec=3
+[Install]
+WantedBy=multi-user.target
+	`
+
 const reconcileTerminalInstallJobsSQL = `WITH latest AS (
 	SELECT DISTINCT ON (node_id) node_id, status, error FROM install_jobs
 	ORDER BY node_id, updated_at DESC, id DESC
@@ -236,17 +248,6 @@ func (w *InstallWorker) install(ctx context.Context, payload InstallPayload) err
 	}
 
 	identity := []byte(payload.IdentityJSON)
-	unit := `[Unit]
-Description=Goveto Edge Agent
-After=network-online.target
-[Service]
-ExecStart=/usr/local/bin/goveto-edge-agent
-Restart=always
-RestartSec=3
-[Install]
-WantedBy=multi-user.target
-	`
-
 	logger.Info("uploading agent with SCP", "path", "/tmp/goveto-edge-agent", "bytes", len(binary))
 	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-agent", binary, 0755, 5*time.Minute); err != nil {
 		return fmt.Errorf("upload agent binary: %w", err)
@@ -257,8 +258,8 @@ WantedBy=multi-user.target
 		return fmt.Errorf("upload node identity: %w", err)
 	}
 	logger.Info("node identity upload completed", "path", "/tmp/goveto-edge-identity.json")
-	logger.Info("uploading systemd unit with SCP", "path", "/tmp/goveto-edge-agent.service", "bytes", len(unit))
-	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-agent.service", []byte(unit), 0644, 30*time.Second); err != nil {
+	logger.Info("uploading systemd unit with SCP", "path", "/tmp/goveto-edge-agent.service", "bytes", len(agentSystemdUnit))
+	if err := uploadSCP(installCtx, connection, "/tmp/goveto-edge-agent.service", []byte(agentSystemdUnit), 0644, 30*time.Second); err != nil {
 		return fmt.Errorf("upload systemd service: %w", err)
 	}
 	logger.Info("systemd unit upload completed", "path", "/tmp/goveto-edge-agent.service")
@@ -270,7 +271,7 @@ WantedBy=multi-user.target
 	output, err := runRemoteCommand(
 		installCtx,
 		connection,
-		2*time.Minute,
+		5*time.Minute,
 		"sh -c "+shellQuote(script),
 	)
 	if err != nil {
@@ -288,6 +289,38 @@ WantedBy=multi-user.target
 
 func agentInstallScript(privileged string) string {
 	return fmt.Sprintf(`set -eu
+if ! command -v redis-server >/dev/null 2>&1; then
+	if command -v apt-get >/dev/null 2>&1; then
+		%[1]sapt-get update
+		%[1]senv DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server
+	elif command -v dnf >/dev/null 2>&1; then
+		%[1]sdnf install -y redis
+	elif command -v yum >/dev/null 2>&1; then
+		%[1]syum install -y redis
+	elif command -v zypper >/dev/null 2>&1; then
+		%[1]szypper --non-interactive install redis
+	elif command -v pacman >/dev/null 2>&1; then
+		%[1]spacman -Sy --noconfirm redis
+	else
+		echo 'unable to install Redis: no supported package manager found' >&2
+		exit 1
+	fi
+fi
+redis_service=''
+if %[1]ssystemctl cat redis-server.service >/dev/null 2>&1; then
+	redis_service='redis-server.service'
+elif %[1]ssystemctl cat redis.service >/dev/null 2>&1; then
+	redis_service='redis.service'
+else
+	echo 'Redis was installed but no systemd service was found' >&2
+	exit 1
+fi
+%[1]ssystemctl enable --now "$redis_service"
+%[1]ssystemctl is-active --quiet "$redis_service"
+if ! redis-cli -h 127.0.0.1 ping | grep -qx PONG; then
+	echo 'Redis service is active but the local health check failed' >&2
+	exit 1
+fi
 %[1]sinstall -d -m 0700 /opt/goveto-edge/agent
 %[1]sinstall -m 0600 /tmp/goveto-edge-identity.json /opt/goveto-edge/agent/identity.json
 %[1]sinstall -m 0755 /tmp/goveto-edge-agent /usr/local/bin/goveto-edge-agent

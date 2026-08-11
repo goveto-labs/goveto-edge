@@ -76,6 +76,27 @@ func TestPrivilegedCommandPrefix(t *testing.T) {
 
 func TestAgentInstallScriptRestartsExistingService(t *testing.T) {
 	script := agentInstallScript("sudo ")
+	for _, command := range []string{
+		"command -v redis-server",
+		"sudo apt-get update",
+		"sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y redis-server",
+		"sudo dnf install -y redis",
+		"sudo yum install -y redis",
+		"sudo zypper --non-interactive install redis",
+		"sudo pacman -Sy --noconfirm redis",
+		"sudo systemctl cat redis-server.service",
+		"sudo systemctl cat redis.service",
+		`sudo systemctl enable --now "$redis_service"`,
+		`sudo systemctl is-active --quiet "$redis_service"`,
+		"redis-cli -h 127.0.0.1 ping | grep -qx PONG",
+	} {
+		if !strings.Contains(script, command) {
+			t.Fatalf("install script missing Redis command %q: %s", command, script)
+		}
+	}
+	if strings.Index(script, "command -v redis-server") > strings.Index(script, "sudo systemctl restart goveto-edge-agent") {
+		t.Fatalf("install script configures Redis after restarting the agent: %s", script)
+	}
 	capabilityCheck := "if [ -e /proc/sys/net/core/rmem_max ] && [ -e /proc/sys/net/core/wmem_max ]; then"
 	applyRmem := "sudo sysctl -w net.core.rmem_max=7500000"
 	applyWmem := "sudo sysctl -w net.core.wmem_max=7500000"
@@ -110,11 +131,22 @@ func TestAgentInstallScriptRestartsExistingService(t *testing.T) {
 	if !strings.Contains(script, "sudo systemctl is-active --quiet goveto-edge-agent") {
 		t.Fatalf("install script does not verify active service: %s", script)
 	}
-	if strings.Contains(script, "enable --now") {
+	if strings.Contains(script, "systemctl enable --now goveto-edge-agent") {
 		t.Fatalf("install script still relies on enable --now: %s", script)
 	}
 	if strings.Index(script, applyWmem) > strings.Index(script, "sudo systemctl restart goveto-edge-agent") {
 		t.Fatalf("install script applies UDP buffers after restarting the service: %s", script)
+	}
+}
+
+func TestAgentSystemdUnitUsesLocalRedis(t *testing.T) {
+	for _, fragment := range []string{
+		"After=network-online.target redis-server.service redis.service",
+		"Environment=EDGE_AGENT_REDIS_URL=redis://127.0.0.1:6379/0",
+	} {
+		if !strings.Contains(agentSystemdUnit, fragment) {
+			t.Fatalf("agent systemd unit missing %q: %s", fragment, agentSystemdUnit)
+		}
 	}
 }
 
