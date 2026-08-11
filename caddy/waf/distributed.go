@@ -14,7 +14,7 @@ import (
 )
 
 type distributedStore interface {
-	Allow(context.Context, string, string, string, policy.RateLimitRule) (bool, time.Duration, error)
+	Allow(context.Context, string, string, string, policy.WAFRule) (bool, time.Duration, error)
 	Blocked(context.Context, string, string) (bool, time.Duration, error)
 }
 
@@ -26,20 +26,12 @@ type challengeStateStore interface {
 type redisStore struct{ client *redis.Client }
 
 var redisRateScript = redis.NewScript(`
-local ban_ttl = redis.call('PTTL', KEYS[1])
-if ban_ttl > 0 then
-  return {0, ban_ttl}
-end
-local count = redis.call('INCR', KEYS[2])
+local count = redis.call('INCR', KEYS[1])
 if count == 1 then
-  redis.call('PEXPIRE', KEYS[2], ARGV[2])
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
 end
 if count > tonumber(ARGV[1]) then
-  local retry = redis.call('PTTL', KEYS[2])
-  if tonumber(ARGV[3]) > 0 then
-    redis.call('SET', KEYS[1], 'rate_limit', 'PX', ARGV[3])
-    retry = tonumber(ARGV[3])
-  end
+  local retry = redis.call('PTTL', KEYS[1])
   return {0, retry}
 end
 return {1, 0}
@@ -53,11 +45,11 @@ end
 return 0
 `)
 
-func (s *redisStore) Allow(ctx context.Context, siteID, ruleID, value string, rule policy.RateLimitRule) (bool, time.Duration, error) {
+func (s *redisStore) Allow(ctx context.Context, siteID, ruleID, value string, rule policy.WAFRule) (bool, time.Duration, error) {
 	window := time.Duration(rule.WindowSeconds) * time.Second
 	result, err := redisRateScript.Run(ctx, s.client,
-		[]string{securitystate.RateBlockKey(siteID, ruleID, value), securitystate.RateCounterKey(siteID, ruleID, value)},
-		rule.Requests+rule.Burst, window.Milliseconds(), (time.Duration(rule.BanSeconds) * time.Second).Milliseconds(),
+		[]string{securitystate.RateCounterKey(siteID, ruleID, value)},
+		rule.Requests+rule.Burst, window.Milliseconds(),
 	).Int64Slice()
 	if err != nil {
 		return false, 0, err

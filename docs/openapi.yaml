@@ -8234,8 +8234,6 @@ paths:
                                                 type: array
                                                 items:
                                                     $ref: '#/components/schemas/sites_originInput'
-                                            rate_limit:
-                                                type: object
                                             schema_version:
                                                 type: integer
                                                 format: int32
@@ -9047,62 +9045,19 @@ paths:
                                                         type: array
                                                         items:
                                                             type: string
-                                            rate_limit:
-                                                type: object
-                                                properties:
-                                                    backend:
-                                                        type: string
-                                                    enabled:
-                                                        type: boolean
-                                                    failure_mode:
-                                                        type: string
-                                                    rules:
-                                                        type: array
-                                                        items:
-                                                            $ref: '#/components/schemas/policy_RateLimitRule'
                                             waf:
                                                 type: object
                                                 properties:
-                                                    auto_update:
-                                                        type: boolean
-                                                    block_response:
-                                                        type: object
-                                                        properties:
-                                                            type:
-                                                                type: string
-                                                    block_status:
-                                                        type: integer
-                                                        format: int32
                                                     enabled:
                                                         type: boolean
-                                                    engine:
-                                                        type: string
-                                                    exceptions:
+                                                    rule_sets:
                                                         type: array
                                                         items:
-                                                            $ref: '#/components/schemas/policy_WAFException'
-                                                    groups:
-                                                        type: array
-                                                        items:
-                                                            $ref: '#/components/schemas/policy_WAFRuleGroup'
-                                                    max_body_bytes:
-                                                        type: integer
-                                                        format: int64
-                                                    mode:
-                                                        type: string
-                                                    presets:
-                                                        type: array
-                                                        items:
-                                                            type: string
-                                                    rollout_percentage:
-                                                        type: integer
-                                                        format: int32
-                                                    rule_set_version:
-                                                        type: string
+                                                            $ref: '#/components/schemas/policy_WAFRuleSet'
         put:
             operationId: updateSecurity
             summary: Update site security policy
-            description: Update WAF, access-control, and rate-limit rules and enqueue a site publish.
+            description: Update WAF and access-control rules and enqueue a site publish.
             tags:
                 - sites
             security:
@@ -9139,8 +9094,6 @@ paths:
                                     type: string
                                 publish_job:
                                     $ref: '#/components/schemas/types_PublishJob'
-                                rate_limit:
-                                    $ref: '#/components/schemas/policy_RateLimitPolicy'
                                 waf:
                                     $ref: '#/components/schemas/policy_WAFPolicy'
             responses:
@@ -9162,8 +9115,6 @@ paths:
                                                 type: string
                                             publish_job:
                                                 $ref: '#/components/schemas/types_PublishJob'
-                                            rate_limit:
-                                                $ref: '#/components/schemas/policy_RateLimitPolicy'
                                             waf:
                                                 $ref: '#/components/schemas/policy_WAFPolicy'
                 "400":
@@ -11581,49 +11532,6 @@ components:
                         type: string
                 normalize:
                     type: boolean
-        policy_RateLimitPolicy:
-            type: object
-            properties:
-                backend:
-                    type: string
-                enabled:
-                    type: boolean
-                failure_mode:
-                    type: string
-                rules:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/policy_RateLimitRule'
-        policy_RateLimitRule:
-            type: object
-            properties:
-                ban_seconds:
-                    type: integer
-                    format: int32
-                burst:
-                    type: integer
-                    format: int32
-                conditions:
-                    $ref: '#/components/schemas/policy_RequestConditions'
-                enabled:
-                    type: boolean
-                id:
-                    type: string
-                key:
-                    type: string
-                key_name:
-                    type: string
-                name:
-                    type: string
-                requests:
-                    type: integer
-                    format: int32
-                status_code:
-                    type: integer
-                    format: int32
-                window_seconds:
-                    type: integer
-                    format: int32
         policy_RedirectRule:
             type: object
             properties:
@@ -11634,24 +11542,6 @@ components:
                 status:
                     type: integer
                     format: int32
-        policy_RequestConditionGroup:
-            type: object
-            properties:
-                operator:
-                    type: string
-                rules:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/policy_WAFRequestRule'
-        policy_RequestConditions:
-            type: object
-            properties:
-                group_operator:
-                    type: string
-                groups:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/policy_RequestConditionGroup'
         policy_RewriteRule:
             type: object
             properties:
@@ -11675,79 +11565,33 @@ components:
                     type: string
                 value:
                     type: string
-        policy_WAFAutoBan:
+        policy_WAFAction:
             type: object
             properties:
-                ban_seconds:
+                redirect_status:
                     type: integer
                     format: int32
-                enabled:
-                    type: boolean
-                hits:
-                    type: integer
-                    format: int32
-                scope:
+                redirect_url:
                     type: string
-                window_seconds:
-                    type: integer
-                    format: int32
-        policy_WAFException:
-            type: object
-            properties:
-                conditions:
-                    $ref: '#/components/schemas/policy_RequestConditions'
-                enabled:
-                    type: boolean
-                id:
-                    type: string
-                rule_ids:
-                    type: array
-                    items:
-                        type: string
-        policy_WAFPolicy:
-            type: object
-            properties:
-                auto_update:
-                    type: boolean
-                block_response:
+                response:
                     $ref: '#/components/schemas/policy_WAFResponse'
-                block_status:
+                status_code:
                     type: integer
                     format: int32
-                enabled:
-                    type: boolean
-                engine:
+                tag:
                     type: string
-                exceptions:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/policy_WAFException'
-                groups:
-                    type: array
-                    items:
-                        $ref: '#/components/schemas/policy_WAFRuleGroup'
-                max_body_bytes:
-                    type: integer
-                    format: int64
-                mode:
+                type:
                     type: string
-                presets:
-                    type: array
-                    items:
-                        type: string
-                rollout_percentage:
-                    type: integer
-                    format: int32
-                rule_set_version:
-                    type: string
-        policy_WAFRequestRule:
+        policy_WAFCondition:
             type: object
             properties:
                 case_sensitive:
                     type: boolean
                 field:
                     type: string
-                name:
+                field_name:
+                    type: string
+                id:
                     type: string
                 negate:
                     type: boolean
@@ -11759,6 +11603,67 @@ components:
                     type: array
                     items:
                         type: string
+        policy_WAFConditionGroup:
+            type: object
+            properties:
+                conditions:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFCondition'
+                id:
+                    type: string
+                operator:
+                    type: string
+        policy_WAFConditions:
+            type: object
+            properties:
+                groups:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFConditionGroup'
+                operator:
+                    type: string
+        policy_WAFPolicy:
+            type: object
+            properties:
+                enabled:
+                    type: boolean
+                rule_sets:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/policy_WAFRuleSet'
+        policy_WAFRule:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/policy_WAFAction'
+                burst:
+                    type: integer
+                    format: int32
+                backend:
+                    type: string
+                conditions:
+                    $ref: '#/components/schemas/policy_WAFConditions'
+                enabled:
+                    type: boolean
+                failure_mode:
+                    type: string
+                id:
+                    type: string
+                key:
+                    type: string
+                key_name:
+                    type: string
+                name:
+                    type: string
+                requests:
+                    type: integer
+                    format: int32
+                type:
+                    type: string
+                window_seconds:
+                    type: integer
+                    format: int32
         policy_WAFResponse:
             type: object
             properties:
@@ -11766,40 +11671,19 @@ components:
                     type: string
                 type:
                     type: string
-        policy_WAFRuleGroup:
+        policy_WAFRuleSet:
             type: object
             properties:
-                action:
-                    type: string
-                auto_ban:
-                    $ref: '#/components/schemas/policy_WAFAutoBan'
                 enabled:
                     type: boolean
                 id:
                     type: string
                 name:
                     type: string
-                operator:
-                    type: string
-                redirect_status:
-                    type: integer
-                    format: int32
-                redirect_url:
-                    type: string
-                response:
-                    $ref: '#/components/schemas/policy_WAFResponse'
-                rollout_percentage:
-                    type: integer
-                    format: int32
                 rules:
                     type: array
                     items:
-                        $ref: '#/components/schemas/policy_WAFRequestRule'
-                status_code:
-                    type: integer
-                    format: int32
-                tag:
-                    type: string
+                        $ref: '#/components/schemas/policy_WAFRule'
         purge_prewarmResult:
             type: object
             properties:
@@ -11927,8 +11811,6 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/sites_originInput'
-                rate_limit:
-                    type: object
                 schema_version:
                     type: integer
                     format: int32

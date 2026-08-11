@@ -37,7 +37,6 @@ type PolicyQuery struct {
 	CompressionJson policyCompressionJsonField
 	DeliveryJson    policyDeliveryJsonField
 	WafJson         policyWafJsonField
-	CcJson          policyCcJsonField
 	AccessJson      policyAccessJsonField
 	CreatedAt       policyCreatedAtField
 	UpdatedAt       policyUpdatedAtField
@@ -51,7 +50,6 @@ const PolicyCacheJsonColumn = "cache_json"
 const PolicyCompressionJsonColumn = "compression_json"
 const PolicyDeliveryJsonColumn = "delivery_json"
 const PolicyWafJsonColumn = "waf_json"
-const PolicyCcJsonColumn = "cc_json"
 const PolicyAccessJsonColumn = "access_json"
 const PolicyCreatedAtColumn = "created_at"
 const PolicyUpdatedAtColumn = "updated_at"
@@ -64,7 +62,6 @@ var Policy = PolicyQuery{
 	CompressionJson: policyCompressionJsonField{},
 	DeliveryJson:    policyDeliveryJsonField{},
 	WafJson:         policyWafJsonField{},
-	CcJson:          policyCcJsonField{},
 	AccessJson:      policyAccessJsonField{},
 	CreatedAt:       policyCreatedAtField{},
 	UpdatedAt:       policyUpdatedAtField{},
@@ -466,52 +463,6 @@ func (policyWafJsonField) Desc() PolicyOrderByClause {
 	return PolicyOrderByClause{Field: "waf_json", Direction: "DESC"}
 }
 
-// CcJsonField provides query operations for the ccJson field.
-type policyCcJsonField struct{}
-
-// Equals creates an equality condition.
-func (policyCcJsonField) Equals(v json.RawMessage) PolicyWhereClause {
-	return PolicyWhereClause{Field: "cc_json", Operator: "=", Value: v}
-}
-
-// Not creates a not-equal condition.
-func (policyCcJsonField) Not(v json.RawMessage) PolicyWhereClause {
-	return PolicyWhereClause{Field: "cc_json", Operator: "!=", Value: v}
-}
-
-// In creates an IN condition.
-func (policyCcJsonField) In(vals ...json.RawMessage) PolicyWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return PolicyWhereClause{Field: "cc_json", Operator: "IN", Value: iVals}
-}
-
-// NotIn creates a NOT IN condition.
-func (policyCcJsonField) NotIn(vals ...json.RawMessage) PolicyWhereClause {
-	iVals := make([]any, len(vals))
-	for i, v := range vals {
-		iVals[i] = v
-	}
-	return PolicyWhereClause{Field: "cc_json", Operator: "NOT IN", Value: iVals}
-}
-
-// Set creates a set operation for create/update.
-func (policyCcJsonField) Set(v json.RawMessage) PolicySetClause {
-	return PolicySetClause{Field: "cc_json", Value: v}
-}
-
-// Asc returns an ascending order clause for this field.
-func (policyCcJsonField) Asc() PolicyOrderByClause {
-	return PolicyOrderByClause{Field: "cc_json", Direction: "ASC"}
-}
-
-// Desc returns a descending order clause for this field.
-func (policyCcJsonField) Desc() PolicyOrderByClause {
-	return PolicyOrderByClause{Field: "cc_json", Direction: "DESC"}
-}
-
 // AccessJsonField provides query operations for the accessJson field.
 type policyAccessJsonField struct{}
 
@@ -737,7 +688,6 @@ type PolicyCreateInput struct {
 	CompressionJson json.RawMessage
 	DeliveryJson    json.RawMessage
 	WafJson         json.RawMessage
-	CcJson          json.RawMessage
 	AccessJson      json.RawMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -746,7 +696,7 @@ type PolicyCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d PolicyCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Name, d.CacheJson, d.CompressionJson, d.DeliveryJson, d.WafJson, d.CcJson, d.AccessJson, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.Name, d.CacheJson, d.CompressionJson, d.DeliveryJson, d.WafJson, d.AccessJson, d.CreatedAt, d.UpdatedAt}
 }
 
 // PolicyCreateNestedInput supports nested creates and connects.

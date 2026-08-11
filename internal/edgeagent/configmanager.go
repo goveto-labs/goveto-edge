@@ -400,21 +400,16 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		if err != nil {
 			return nil, fmt.Errorf("site %s WAF policy: %w", id, err)
 		}
-		rateLimitPolicy, rateLimitConfigured, err := decodeRateLimitPolicy(site.RateLimit)
-		if err != nil {
-			return nil, fmt.Errorf("site %s rate-limit policy: %w", id, err)
-		}
 		accessPolicy, accessConfigured, err := decodeAccessPolicy(site.Access, geoIPPath, validateGeoIP)
 		if err != nil {
 			return nil, fmt.Errorf("site %s access policy: %w", id, err)
 		}
-		if (wafConfigured && wafPolicy.Enabled) || (rateLimitConfigured && rateLimitPolicy.Enabled) || (accessConfigured && accessPolicy.Enabled) {
+		if (wafConfigured && wafPolicy.Enabled) || (accessConfigured && accessPolicy.Enabled) {
 			securityHandler := map[string]any{
-				"handler":    "goveto_waf",
-				"site_id":    id,
-				"waf":        wafPolicy,
-				"access":     accessPolicy,
-				"rate_limit": rateLimitPolicy,
+				"handler": "goveto_waf",
+				"site_id": id,
+				"waf":     wafPolicy,
+				"access":  accessPolicy,
 			}
 			if secret := stringMapValue(site.WAF, "challenge_secret"); secret != "" {
 				securityHandler["challenge_secret"] = secret
@@ -777,25 +772,7 @@ func decodeWAFPolicy(raw map[string]any) (cachepolicy.WAFPolicy, bool, error) {
 	if err != nil {
 		return cachepolicy.WAFPolicy{}, false, err
 	}
-	policy := cachepolicy.DefaultWAFPolicy()
-	if err = json.Unmarshal(data, &policy); err != nil {
-		return policy, false, err
-	}
-	if err = policy.NormalizeAndValidate(); err != nil {
-		return policy, false, err
-	}
-	return policy, true, nil
-}
-
-func decodeRateLimitPolicy(raw map[string]any) (cachepolicy.RateLimitPolicy, bool, error) {
-	if raw == nil {
-		return cachepolicy.RateLimitPolicy{}, false, nil
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return cachepolicy.RateLimitPolicy{}, false, err
-	}
-	policy := cachepolicy.DefaultRateLimitPolicy()
+	policy := cachepolicy.WAFPolicy{}
 	if err = json.Unmarshal(data, &policy); err != nil {
 		return policy, false, err
 	}

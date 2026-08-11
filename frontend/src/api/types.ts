@@ -645,10 +645,51 @@ export interface BulkSiteResult {
     error?: string;
 }
 
-export interface WAFRequestRule {
-    id?: string;
+export interface WAFResponse {
+    type: 'DEFAULT' | 'HTML' | 'TEXT' | 'JSON';
+    body?: string;
+}
+
+export interface WAFAction {
+    type: 'MONITOR' | 'SHOW_PAGE' | 'BLOCK' | 'CAPTCHA' | 'REDIRECT' | 'ALLOW' | 'TAG';
+    status_code?: number;
+    response?: WAFResponse;
+    redirect_url?: string;
+    redirect_status?: number;
+    tag?: string;
+}
+
+export interface WAFRule {
+    id: string;
+    name: string;
+    enabled: boolean;
+    type: 'MATCH' | 'RATE_LIMIT';
+    conditions: WAFConditions;
+    key?: string;
+    key_name?: string;
+    requests?: number;
+    window_seconds?: number;
+    burst?: number;
+    backend?: 'LOCAL' | 'REDIS';
+    failure_mode?: 'OPEN' | 'CLOSED' | 'LOCAL';
+    action: WAFAction;
+}
+
+export interface WAFConditions {
+    operator: 'AND' | 'OR';
+    groups: WAFConditionGroup[];
+}
+
+export interface WAFConditionGroup {
+    id: string;
+    operator: 'AND' | 'OR';
+    conditions: WAFCondition[];
+}
+
+export interface WAFCondition {
+    id: string;
     field: string;
-    name?: string;
+    field_name?: string;
     operator: string;
     value?: string;
     values?: string[];
@@ -656,72 +697,17 @@ export interface WAFRequestRule {
     case_sensitive?: boolean;
 }
 
-export interface WAFRuleGroup {
+export interface WAFRuleSet {
     id: string;
     name: string;
     enabled: boolean;
-    rollout_percentage: number;
-    operator: string;
-    action: string;
-    status_code?: number;
-    response?: WAFResponse;
-    redirect_url?: string;
-    redirect_status?: number;
-    tag?: string;
-    rules: WAFRequestRule[];
-}
-
-export interface WAFException {
-    id: string;
-    enabled: boolean;
-    rule_ids: string[];
-    conditions: RequestConditions;
-}
-
-export interface WAFResponse {
-    type: 'DEFAULT' | 'HTML' | 'TEXT' | 'JSON';
-    body?: string;
-}
-
-export interface RequestConditionGroup {
-    id?: string;
-    operator: string;
-    rules: WAFRequestRule[];
-}
-
-export interface RequestConditions {
-    group_operator: string;
-    groups: RequestConditionGroup[];
-}
-
-export interface RateLimitRule {
-    id: string;
-    name: string;
-    enabled: boolean;
-    key: string;
-    key_name?: string;
-    requests: number;
-    window_seconds: number;
-    burst: number;
-    ban_seconds: number;
-    status_code: number;
-    conditions: RequestConditions;
+    rules: WAFRule[];
 }
 
 export interface SecurityPolicy {
     waf: {
         enabled: boolean;
-        engine: string;
-        rule_set_version: string;
-        auto_update: boolean;
-        rollout_percentage: number;
-        mode: string;
-        block_status: number;
-        block_response: WAFResponse;
-        max_body_bytes: number;
-        presets: string[];
-        groups: WAFRuleGroup[];
-        exceptions: WAFException[];
+        rule_sets: WAFRuleSet[];
     };
     access: {
         enabled: boolean;
@@ -740,12 +726,6 @@ export interface SecurityPolicy {
         allow_empty_referer: boolean;
         temporary_blocks: boolean;
         temporary_block_failure: string;
-    };
-    rate_limit: {
-        enabled: boolean;
-        backend: string;
-        failure_mode: string;
-        rules: RateLimitRule[];
     };
 }
 

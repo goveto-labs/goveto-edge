@@ -10,11 +10,9 @@ func TestSecurityStateKeySpacesAreStableAndSeparated(t *testing.T) {
 	address := netip.MustParseAddr("192.0.2.10")
 	keys := []string{
 		RateCounterKey("site", "rule", "value"),
-		RateBlockKey("site", "rule", "value"),
 		ChallengeKey("token"),
 		GlobalBlockKey(address),
 		SiteBlockKey("site", address),
-		WAFAutoBanCounterKey("site", "group", address),
 	}
 	seen := map[string]bool{}
 	for _, key := range keys {

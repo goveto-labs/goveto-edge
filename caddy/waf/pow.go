@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/crypto/scrypt"
 
 	"goveto-edge/internal/policy"
@@ -50,7 +51,7 @@ type challengeClaim struct {
 	Version      int    `json:"v"`
 	Kind         string `json:"kind"`
 	SiteID       string `json:"site_id"`
-	GroupID      string `json:"group_id"`
+	RuleID       string `json:"rule_id"`
 	Binding      string `json:"binding"`
 	IssuedAt     int64  `json:"issued_at"`
 	ExpiresAt    int64  `json:"expires_at"`
@@ -94,29 +95,25 @@ func decodeChallengeSecret(encoded string) ([]byte, error) {
 	return append([]byte(nil), secret...), nil
 }
 
-func (h Handler) hasCaptchaGroup() bool {
+func (h Handler) hasCaptchaRule() bool {
 	if !h.WAF.Enabled {
 		return false
 	}
-	for _, group := range h.WAF.Groups {
-		if group.Enabled && group.Action == policy.WAFActionCaptcha {
-			return true
+	for _, set := range h.WAF.RuleSets {
+		if !set.Enabled {
+			continue
+		}
+		for _, rule := range set.Rules {
+			if rule.Enabled && rule.Action.Type == policy.WAFActionCaptcha {
+				return true
+			}
 		}
 	}
 	return false
 }
 
-func (h Handler) hasAutoBanGroup() bool {
-	for _, group := range h.WAF.Groups {
-		if group.Enabled && group.AutoBan.Enabled {
-			return true
-		}
-	}
-	return false
-}
-
-func (h Handler) challengeToken(groupID string, r *http.Request, ip string) (string, error) {
-	cacheKey := h.challengeCacheKey(groupID, r, ip)
+func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (string, error) {
+	cacheKey := h.challengeCacheKey(ruleID, r, ip)
 	now := time.Now()
 	if value, ok := powChallengeCache.Load(cacheKey); ok {
 		cached := value.(cachedChallenge)
@@ -154,7 +151,7 @@ func (h Handler) challengeToken(groupID string, r *http.Request, ip string) (str
 	issuedAt := now.Unix()
 	expiresAt := now.Add(challengeTTL).Unix()
 	claim := challengeClaim{
-		Version: powVersion, Kind: "challenge", SiteID: h.SiteID, GroupID: groupID,
+		Version: powVersion, Kind: "challenge", SiteID: h.SiteID, RuleID: ruleID,
 		Binding: requestBinding(h.challengeKey, r, ip), IssuedAt: issuedAt, ExpiresAt: expiresAt,
 		Algorithm: powAlgorithm, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
 		Salt:   base64.RawURLEncoding.EncodeToString(salt),
@@ -179,12 +176,12 @@ func (h Handler) challengeToken(groupID string, r *http.Request, ip string) (str
 	return token, nil
 }
 
-func (h Handler) challengeCacheKey(groupID string, r *http.Request, ip string) string {
+func (h Handler) challengeCacheKey(ruleID string, r *http.Request, ip string) string {
 	mac := hmac.New(sha256.New, h.challengeKey)
 	_, _ = io.WriteString(mac, "challenge-cache\x00")
 	_, _ = io.WriteString(mac, h.SiteID)
 	_, _ = io.WriteString(mac, "\x00")
-	_, _ = io.WriteString(mac, groupID)
+	_, _ = io.WriteString(mac, ruleID)
 	_, _ = io.WriteString(mac, "\x00")
 	_, _ = io.WriteString(mac, requestBinding(h.challengeKey, r, ip))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
@@ -220,35 +217,48 @@ func keySignature(secret []byte, counter uint32, key []byte) string {
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, groupID, ip string) bool {
+func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, ruleID, ip string) bool {
 	token := r.URL.Query().Get("__goveto_challenge")
 	proof := r.URL.Query().Get("__goveto_proof")
 	if token == "" || proof == "" || len(token) > 4096 || len(proof) > 8192 {
 		return false
 	}
 	claim, ok := h.verifyClaim(token)
-	assessment, valid := h.validChallengeClaim(claim, r, groupID, ip, proof)
+	assessment, valid := h.validChallengeClaim(claim, r, ruleID, ip, proof)
 	if !ok || !valid || !assessment.Accepted {
 		w.Header().Set("X-Goveto-WAF-Challenge", "rejected")
 		return false
 	}
 	if claim.Stateful {
-		if store, ok := h.distributed.(challengeStateStore); ok {
-			consumed, err := store.ConsumeChallenge(r.Context(), token)
-			if err == nil {
-				powChallengeCache.Delete(h.challengeCacheKey(groupID, r, ip))
+		store, ok := h.distributed.(challengeStateStore)
+		if !ok {
+			w.Header().Set("X-Goveto-WAF-Challenge", "backend_unavailable")
+			if h.logger != nil {
+				h.logger.Warn("stateful CAPTCHA challenge backend unavailable",
+					zap.String("site_id", h.SiteID), zap.String("rule_id", ruleID))
 			}
-			if err == nil && !consumed {
-				w.Header().Set("X-Goveto-WAF-Challenge", "replayed")
-				return false
+			return false
+		}
+		consumed, err := store.ConsumeChallenge(r.Context(), token)
+		if err != nil {
+			w.Header().Set("X-Goveto-WAF-Challenge", "backend_unavailable")
+			if h.logger != nil {
+				h.logger.Warn("stateful CAPTCHA challenge consumption failed",
+					zap.String("site_id", h.SiteID), zap.String("rule_id", ruleID), zap.Error(err))
 			}
+			return false
+		}
+		powChallengeCache.Delete(h.challengeCacheKey(ruleID, r, ip))
+		if !consumed {
+			w.Header().Set("X-Goveto-WAF-Challenge", "replayed")
+			return false
 		}
 	}
 	now := time.Now()
 	environment, _ := json.Marshal(assessment)
 	environmentHash := sha256.Sum256(environment)
 	clearance, err := h.signClaim(challengeClaim{
-		Version: powVersion, Kind: "clearance", SiteID: h.SiteID, GroupID: groupID,
+		Version: powVersion, Kind: "clearance", SiteID: h.SiteID, RuleID: ruleID,
 		Binding: requestBinding(h.challengeKey, r, ip), IssuedAt: now.Unix(),
 		ExpiresAt:   now.Add(clearanceTTL).Unix(),
 		Environment: base64.RawURLEncoding.EncodeToString(environmentHash[:16]),
@@ -257,7 +267,7 @@ func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, group
 		return false
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name: captchaCookieName(h.SiteID, groupID), Value: clearance, Path: "/",
+		Name: captchaCookieName(h.SiteID, ruleID), Value: clearance, Path: "/",
 		MaxAge: int(clearanceTTL.Seconds()), HttpOnly: true, Secure: r.TLS != nil, SameSite: http.SameSiteLaxMode,
 	})
 	clean := *r.URL
@@ -269,10 +279,10 @@ func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, group
 	return true
 }
 
-func (h Handler) validChallengeClaim(claim challengeClaim, r *http.Request, groupID, ip, encodedProof string) (environmentAssessment, bool) {
+func (h Handler) validChallengeClaim(claim challengeClaim, r *http.Request, ruleID, ip, encodedProof string) (environmentAssessment, bool) {
 	rejected := environmentAssessment{Accepted: false}
 	if claim.Version != powVersion || claim.Kind != "challenge" || claim.Algorithm != powAlgorithm ||
-		claim.SiteID != h.SiteID || claim.GroupID != groupID ||
+		claim.SiteID != h.SiteID || claim.RuleID != ruleID ||
 		claim.Binding != requestBinding(h.challengeKey, r, ip) || claim.MaxCounter != powCounterMaximum ||
 		claim.ScryptN != powScryptN || claim.ScryptR != powScryptR || claim.ScryptP != powScryptP {
 		return rejected, false
@@ -316,19 +326,19 @@ func encodeChallengeSolution(solution challengeSolution) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(payload), nil
 }
 
-func (h Handler) hasClearance(r *http.Request, groupID, ip string) bool {
-	cookie, err := r.Cookie(captchaCookieName(h.SiteID, groupID))
+func (h Handler) hasClearance(r *http.Request, ruleID, ip string) bool {
+	cookie, err := r.Cookie(captchaCookieName(h.SiteID, ruleID))
 	if err != nil || len(cookie.Value) > 4096 {
 		return false
 	}
 	claim, ok := h.verifyClaim(cookie.Value)
 	return ok && claim.Version == powVersion && claim.Kind == "clearance" &&
-		claim.SiteID == h.SiteID && claim.GroupID == groupID &&
+		claim.SiteID == h.SiteID && claim.RuleID == ruleID &&
 		claim.Binding == requestBinding(h.challengeKey, r, ip)
 }
 
-func captchaCookieName(siteID, groupID string) string {
-	sum := sha256.Sum256([]byte(siteID + "\x00" + groupID))
+func captchaCookieName(siteID, ruleID string) string {
+	sum := sha256.Sum256([]byte(siteID + "\x00" + ruleID))
 	return "__goveto_waf_" + base64.RawURLEncoding.EncodeToString(sum[:9])
 }
 

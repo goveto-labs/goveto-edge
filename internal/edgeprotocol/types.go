@@ -38,7 +38,6 @@ type SiteConfig struct {
 	Delivery       map[string]any        `json:"delivery,omitempty"`
 	WAF            map[string]any        `json:"waf,omitempty"`
 	Access         map[string]any        `json:"access,omitempty"`
-	RateLimit      map[string]any        `json:"rate_limit,omitempty"`
 }
 type ListenerConfig struct {
 	HTTPEnabled           bool   `json:"http_enabled"`

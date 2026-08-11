@@ -903,24 +903,23 @@ func TestCompressionConfigRejectsInvalidPolicy(t *testing.T) {
 	}
 }
 
-func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
+func TestSecurityConfigRendersWAF(t *testing.T) {
 	config := validHTTPConfig(t)
 	waf := cachepolicy.DefaultWAFPolicy()
 	waf.Enabled = true
-	waf.Groups = []cachepolicy.WAFRuleGroup{{
-		ID:       "admin",
-		Enabled:  true,
-		Operator: "AND",
-		Action:   "BLOCK",
-		Rules: []cachepolicy.WAFRequestRule{
-			{Field: "PATH", Operator: "PREFIX", Value: "/admin"},
-		},
+	waf.RuleSets = []cachepolicy.WAFRuleSet{{
+		ID: "custom", Name: "Custom", Enabled: true,
+		Rules: []cachepolicy.WAFRule{{
+			ID: "admin", Name: "Admin", Enabled: true, Type: cachepolicy.WAFRuleTypeMatch,
+			Conditions: cachepolicy.WAFConditions{Operator: "AND", Groups: []cachepolicy.WAFConditionGroup{{Operator: "AND", Conditions: []cachepolicy.WAFCondition{{Field: "PATH", Operator: "PREFIX", Value: "/admin"}}}}},
+			Action:     cachepolicy.WAFAction{Type: cachepolicy.WAFActionBlock, StatusCode: http.StatusForbidden},
+		}, {
+			ID: "cc", Name: "CC", Enabled: true, Type: cachepolicy.WAFRuleTypeRateLimit,
+			Key: "CLIENT_IP", Requests: 20, WindowSeconds: 10,
+			Action: cachepolicy.WAFAction{Type: cachepolicy.WAFActionShowPage, StatusCode: http.StatusTooManyRequests, Response: cachepolicy.WAFResponse{Type: cachepolicy.WAFResponseDefault}},
+		}},
 	}}
-	rateLimit := cachepolicy.RateLimitPolicy{Enabled: true, Rules: []cachepolicy.RateLimitRule{{
-		ID: "cc", Enabled: true, Key: "CLIENT_IP", Requests: 20, WindowSeconds: 10,
-	}}}
 	config.WAF = toMap(t, waf)
-	config.RateLimit = toMap(t, rateLimit)
 	access := cachepolicy.DefaultAccessPolicy()
 	access.Enabled = true
 	access.IPBlocklist = []string{"192.0.2.0/24"}
@@ -931,7 +930,7 @@ func TestSecurityConfigRendersWAFAndRateLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(encoded)
-	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"SQL_INJECTION"`, `"window_seconds":10`, `"ip_blocklist":["192.0.2.0/24"]`} {
+	for _, expected := range []string{`"handler":"goveto_waf"`, `"site_id":"site-1"`, `"rule_sets"`, `"window_seconds":10`, `"ip_blocklist":["192.0.2.0/24"]`} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing security policy %s: %s", expected, text)
 		}
@@ -975,10 +974,13 @@ func TestCaptchaConfigPassesPublishedChallengeSecret(t *testing.T) {
 	config := validHTTPConfig(t)
 	waf := cachepolicy.DefaultWAFPolicy()
 	waf.Enabled = true
-	waf.Presets = nil
-	waf.Groups = []cachepolicy.WAFRuleGroup{{
-		ID: "shield", Enabled: true, Operator: "AND", Action: cachepolicy.WAFActionCaptcha,
-		Rules: []cachepolicy.WAFRequestRule{{Field: "PATH", Operator: "PREFIX", Value: "/"}},
+	waf.RuleSets = []cachepolicy.WAFRuleSet{{
+		ID: "shield", Name: "Shield", Enabled: true,
+		Rules: []cachepolicy.WAFRule{{
+			ID: "captcha", Name: "Captcha", Enabled: true, Type: cachepolicy.WAFRuleTypeMatch,
+			Conditions: cachepolicy.WAFConditions{Operator: "AND", Groups: []cachepolicy.WAFConditionGroup{{Operator: "AND", Conditions: []cachepolicy.WAFCondition{{Field: "PATH", Operator: "PREFIX", Value: "/"}}}}},
+			Action:     cachepolicy.WAFAction{Type: cachepolicy.WAFActionCaptcha},
+		}},
 	}}
 	config.WAF = toMap(t, waf)
 	config.WAF["challenge_secret"] = "published-secret"

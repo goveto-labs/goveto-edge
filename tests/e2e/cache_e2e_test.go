@@ -306,11 +306,13 @@ func TestWAFBlocksMaliciousRequestE2E(t *testing.T) {
 
 	waf := securitypolicy.DefaultWAFPolicy()
 	waf.Enabled = true
-	waf.Groups = []securitypolicy.WAFRuleGroup{{
-		ID: "block-suspicious-header", Enabled: true, Operator: "AND", Action: "BLOCK",
-		Rules: []securitypolicy.WAFRequestRule{
-			{Field: "HEADER", Name: "X-Malicious", Operator: "EQUALS", Value: "yes"},
-		},
+	waf.RuleSets = []securitypolicy.WAFRuleSet{{
+		ID: "custom", Name: "Custom", Enabled: true,
+		Rules: []securitypolicy.WAFRule{{
+			ID: "block-suspicious-header", Name: "Suspicious header", Enabled: true, Type: securitypolicy.WAFRuleTypeMatch,
+			Conditions: securitypolicy.WAFConditions{Operator: "AND", Groups: []securitypolicy.WAFConditionGroup{{Operator: "AND", Conditions: []securitypolicy.WAFCondition{{Field: "HEADER", FieldName: "X-Malicious", Operator: "EQUALS", Value: "yes"}}}}},
+			Action:     securitypolicy.WAFAction{Type: securitypolicy.WAFActionBlock, StatusCode: http.StatusForbidden},
+		}},
 	}}
 	config := edgeprotocol.SiteConfig{
 		SiteID: "waf-site", Version: 1, Domains: []string{"waf.example.test"},

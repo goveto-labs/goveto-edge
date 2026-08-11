@@ -650,7 +650,6 @@ query.PostAuthorIdColumn
   - `Compressionjson` (Json)
   - `Deliveryjson` (Json)
   - `Wafjson` (Json)
-  - `Ccjson` (Json)
   - `Accessjson` (Json)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)

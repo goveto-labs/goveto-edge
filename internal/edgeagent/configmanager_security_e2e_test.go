@@ -24,115 +24,42 @@ func TestAgentSecurityEndToEnd(t *testing.T) {
 	port := freePort(t)
 	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":"+strconv.Itoa(port))
 	config := SiteConfig{
-		SiteID:   "secure-site",
-		Version:  1,
-		Domains:  []string{"secure.example.test"},
+		SiteID: "secure-site", Version: 1, Domains: []string{"secure.example.test"},
 		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: port},
 		Origins:  []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
 	}
-	waf := securitypolicy.DefaultWAFPolicy()
-	waf.Enabled = true
-	waf.Groups = []securitypolicy.WAFRuleGroup{{
-		ID:       "blocked-header",
-		Enabled:  true,
-		Operator: "AND",
-		Action:   "BLOCK",
-		Rules: []securitypolicy.WAFRequestRule{
-			{Field: "HEADER", Name: "X-Blocked", Operator: "EQUALS", Value: "yes"},
+	waf := securitypolicy.WAFPolicy{Enabled: true, RuleSets: []securitypolicy.WAFRuleSet{{
+		ID: "custom", Name: "Custom", Enabled: true,
+		Rules: []securitypolicy.WAFRule{
+			{ID: "monitor", Name: "Monitor", Enabled: true, Type: securitypolicy.WAFRuleTypeMatch, Conditions: securitypolicy.WAFConditions{Operator: "AND", Groups: []securitypolicy.WAFConditionGroup{{Operator: "AND", Conditions: []securitypolicy.WAFCondition{{Field: "HEADER", FieldName: "X-Monitor", Operator: "EQUALS", Value: "yes"}}}}}, Action: securitypolicy.WAFAction{Type: securitypolicy.WAFActionMonitor}},
+			{ID: "blocked-header", Name: "Blocked header", Enabled: true, Type: securitypolicy.WAFRuleTypeMatch, Conditions: securitypolicy.WAFConditions{Operator: "AND", Groups: []securitypolicy.WAFConditionGroup{{Operator: "AND", Conditions: []securitypolicy.WAFCondition{{Field: "HEADER", FieldName: "X-Blocked", Operator: "EQUALS", Value: "yes"}}}}}, Action: securitypolicy.WAFAction{Type: securitypolicy.WAFActionBlock, StatusCode: http.StatusForbidden}},
+			{ID: "login-cc", Name: "Login CC", Enabled: true, Type: securitypolicy.WAFRuleTypeRateLimit, Key: "CLIENT_IP_PATH", Requests: 2, WindowSeconds: 60, Action: securitypolicy.WAFAction{Type: securitypolicy.WAFActionShowPage, StatusCode: http.StatusTooManyRequests, Response: securitypolicy.WAFResponse{Type: securitypolicy.WAFResponseDefault}}},
 		},
-	}}
+	}}}
 	config.WAF = toMap(t, waf)
 	if err := manager.ApplySite(config); err != nil {
 		t.Fatal(err)
 	}
 	defer manager.Stop()
 
-	t.Run("managed presets and custom groups block before origin", func(t *testing.T) {
-		sqli := requestEdge(t, port, config.Domains[0], http.MethodGet, "/?id=1%20UNION%20SELECT%20password%20FROM%20users", nil)
-		if sqli.status != http.StatusForbidden || sqli.header.Get("X-Goveto-WAF-Rule") != "preset:SQL_INJECTION" {
-			t.Fatalf("SQL injection was not blocked: status=%d headers=%v", sqli.status, sqli.header)
+	blocked := requestEdge(t, port, config.Domains[0], http.MethodGet, "/custom", http.Header{"X-Blocked": {"yes"}})
+	if blocked.status != http.StatusForbidden || blocked.header.Get("X-Goveto-WAF-Rule") != "blocked-header" {
+		t.Fatalf("blocked response: status=%d headers=%v", blocked.status, blocked.header)
+	}
+	monitored := requestEdge(t, port, config.Domains[0], http.MethodGet, "/observed", http.Header{"X-Monitor": {"yes"}})
+	if monitored.status != http.StatusOK || monitored.header.Get("X-Goveto-WAF") != securitypolicy.WAFActionMonitor {
+		t.Fatalf("monitor response: status=%d headers=%v", monitored.status, monitored.header)
+	}
+	for index := 1; index <= 3; index++ {
+		response := requestEdge(t, port, config.Domains[0], http.MethodGet, "/login", nil)
+		if index <= 2 && response.status != http.StatusOK {
+			t.Fatalf("CC request %d status=%d", index, response.status)
 		}
-		custom := requestEdge(t, port, config.Domains[0], http.MethodGet, "/custom", http.Header{"X-Blocked": {"yes"}})
-		if custom.status != http.StatusForbidden || custom.header.Get("X-Goveto-WAF-Rule") != "blocked-header" {
-			t.Fatalf("custom WAF group was not blocked: status=%d headers=%v", custom.status, custom.header)
+		if index == 3 && (response.status != http.StatusTooManyRequests || response.header.Get("X-Goveto-WAF-Rule") != "login-cc") {
+			t.Fatalf("third CC request: status=%d headers=%v", response.status, response.header)
 		}
-		if originRequests.Load() != 0 {
-			t.Fatalf("blocked requests reached origin: %d", originRequests.Load())
-		}
-	})
-
-	t.Run("Coraza CRS blocks with a concrete rule id", func(t *testing.T) {
-		config.Version++
-		waf.Engine = securitypolicy.WAFEngineCorazaCRS
-		config.WAF = toMap(t, waf)
-		if err := manager.ApplySite(config); err != nil {
-			t.Fatal(err)
-		}
-		response := requestEdge(t, port, config.Domains[0], http.MethodGet, "/?id=1%20UNION%20SELECT%20password%20FROM%20users", nil)
-		if response.status != http.StatusForbidden || !strings.HasPrefix(response.header.Get("X-Goveto-WAF-Rule"), "crs:") {
-			t.Fatalf("Coraza SQL injection response: status=%d headers=%v", response.status, response.header)
-		}
-		if source := response.header.Get("X-Goveto-WAF-Source"); source != securitypolicy.WAFEngineCorazaCRS+":"+securitypolicy.LatestCorazaCRSVersion {
-			t.Fatalf("Coraza source=%q", source)
-		}
-		if originRequests.Load() != 0 {
-			t.Fatalf("Coraza-blocked request reached origin: %d", originRequests.Load())
-		}
-	})
-
-	t.Run("monitor mode records match and allows request", func(t *testing.T) {
-		config.Version++
-		waf.Mode = "MONITOR"
-		config.WAF = toMap(t, waf)
-		if err := manager.ApplySite(config); err != nil {
-			t.Fatal(err)
-		}
-		response := requestEdge(t, port, config.Domains[0], http.MethodGet, "/custom", http.Header{"X-Blocked": {"yes"}})
-		if response.status != http.StatusOK || response.header.Get("X-Goveto-WAF") != "MONITOR" {
-			t.Fatalf("monitor mode response: status=%d headers=%v", response.status, response.header)
-		}
-		if originRequests.Load() != 1 {
-			t.Fatalf("monitor request did not reach origin: %d", originRequests.Load())
-		}
-	})
-
-	t.Run("CC group limits matching traffic", func(t *testing.T) {
-		config.Version++
-		waf.Enabled = false
-		config.WAF = toMap(t, waf)
-		config.RateLimit = toMap(t, securitypolicy.RateLimitPolicy{
-			Enabled: true,
-			Rules: []securitypolicy.RateLimitRule{
-				{
-					ID: "login-cc", Enabled: true, Key: "CLIENT_IP_PATH", Requests: 2, WindowSeconds: 60,
-					Conditions: securitypolicy.RequestConditions{
-						Groups: []securitypolicy.RequestConditionGroup{
-							{
-								Operator: "AND",
-								Rules: []securitypolicy.WAFRequestRule{
-									{Field: "PATH", Operator: "EQUALS", Value: "/login"},
-								},
-							},
-						},
-					},
-				},
-			},
-		})
-		if err := manager.ApplySite(config); err != nil {
-			t.Fatal(err)
-		}
-
-		for index := 0; index < 3; index++ {
-			response := requestEdge(t, port, config.Domains[0], http.MethodGet, "/login", nil)
-			if index < 2 && response.status != http.StatusOK {
-				t.Fatalf("request %d status=%d", index+1, response.status)
-			}
-			if index == 2 && (response.status != http.StatusTooManyRequests || response.header.Get("X-Goveto-WAF-Rule") != "login-cc") {
-				t.Fatalf("third CC request was not limited: status=%d headers=%v", response.status, response.header)
-			}
-		}
-		if originRequests.Load() != 3 {
-			t.Fatalf("rate-limited request reached origin: total=%d", originRequests.Load())
-		}
-	})
+	}
+	if originRequests.Load() != 3 {
+		t.Fatalf("origin requests=%d, want monitor plus two allowed CC requests", originRequests.Load())
+	}
 }

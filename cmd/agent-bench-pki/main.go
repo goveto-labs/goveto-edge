@@ -56,9 +56,14 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	rateLimit := cachepolicy.DefaultRateLimitPolicy()
-	rateLimit.Enabled = true
-	rateLimit.Rules = []cachepolicy.RateLimitRule{{ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true, Key: "GLOBAL", Requests: 100, WindowSeconds: 60, Burst: 0, BanSeconds: 300, StatusCode: 429}}
+	waf := cachepolicy.WAFPolicy{Enabled: true, RuleSets: []cachepolicy.WAFRuleSet{{
+		ID: "benchmark-cc", Name: "benchmark limiter", Enabled: true,
+		Rules: []cachepolicy.WAFRule{{
+			ID: "benchmark-global", Name: "benchmark global limiter", Enabled: true,
+			Type: cachepolicy.WAFRuleTypeRateLimit, Key: "GLOBAL", Requests: 100, WindowSeconds: 60,
+			Action: cachepolicy.WAFAction{Type: cachepolicy.WAFActionShowPage, StatusCode: 429, Response: cachepolicy.WAFResponse{Type: cachepolicy.WAFResponseDefault}},
+		}},
+	}}}
 	resilientPolicy := edgeprotocol.DefaultOriginPolicy()
 	resilientPolicy.Transport.KeepAliveIdleTimeoutMS = 15000
 
@@ -68,7 +73,7 @@ func main() {
 		{SiteID: "benchmark-cache-rules", Version: 1, Domains: []string{domains[3]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(complexCache)},
 		{SiteID: "benchmark-multi", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "round_robin", OriginPolicy: originPolicy},
 		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
-		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[6]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, RateLimit: asMap(rateLimit)},
+		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[6]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, WAF: asMap(waf)},
 	}
 	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 24 << 20, MaxDiskUsagePercent: 90})}
 	for _, site := range sites {

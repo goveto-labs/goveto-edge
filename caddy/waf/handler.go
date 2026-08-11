@@ -2,61 +2,72 @@ package waf
 
 import (
 	"bytes"
-	"context"
 	"embed"
+	"errors"
 	"fmt"
-	"hash/fnv"
 	"html/template"
 	"io"
 	"net/http"
 	"net/netip"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/modules/caddyhttp"
-	"github.com/corazawaf/coraza/v3"
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 
 	"goveto-edge/internal/policy"
 )
 
-type Handler struct {
-	SiteID          string                 `json:"site_id"`
-	ChallengeSecret string                 `json:"challenge_secret,omitempty"`
-	WAF             policy.WAFPolicy       `json:"waf"`
-	Access          policy.AccessPolicy    `json:"access"`
-	RateLimit       policy.RateLimitPolicy `json:"rate_limit"`
+const wafRequestBodyLimit = 64 << 10
 
-	groups         []compiledGroup
-	exceptions     []compiledException
-	rateRules      []compiledRateRule
+const (
+	rateBackendInitialBackoff = time.Second
+	rateBackendMaxBackoff     = 30 * time.Second
+)
+
+type Handler struct {
+	SiteID          string              `json:"site_id"`
+	ChallengeSecret string              `json:"challenge_secret,omitempty"`
+	WAF             policy.WAFPolicy    `json:"waf"`
+	Access          policy.AccessPolicy `json:"access"`
+
+	ruleSets       []compiledRuleSet
 	inspectBody    bool
 	challengeKey   []byte
 	access         compiledAccess
 	distributed    distributedStore
 	distributedErr error
-	autoBan        autoBanStore
-	crs            coraza.WAF
+	rateBackend    *rateBackendState
+	logger         *zap.Logger
 }
 
-type compiledGroup struct {
-	policy.WAFRuleGroup
+type rateBackendState struct {
+	mu         sync.Mutex
+	store      distributedStore
+	err        error
+	retryAt    time.Time
+	failures   int
+	probing    bool
+	generation uint64
+}
+
+type compiledRuleSet struct {
+	ID    string
+	Name  string
 	rules []compiledRule
 }
 
-type compiledRateRule struct {
-	policy.RateLimitRule
+type compiledRule struct {
+	policy.WAFRule
 	conditions compiledConditions
 	limiter    *counterStore
-}
-
-type compiledException struct {
-	ids        map[string]bool
-	conditions compiledConditions
 }
 
 type compiledConditions struct {
@@ -65,12 +76,12 @@ type compiledConditions struct {
 }
 
 type compiledConditionGroup struct {
-	operator string
-	rules    []compiledRule
+	operator   string
+	conditions []compiledCondition
 }
 
-type compiledRule struct {
-	policy.WAFRequestRule
+type compiledCondition struct {
+	policy.WAFCondition
 	regex *regexp.Regexp
 	cidrs []netip.Prefix
 }
@@ -91,30 +102,38 @@ type wafDecision struct {
 	tag            string
 	source         string
 	match          string
+	retry          time.Duration
 }
+
+type rateBackendError struct {
+	ruleID string
+	err    error
+}
+
+func (e *rateBackendError) Error() string { return e.err.Error() }
+func (e *rateBackendError) Unwrap() error { return e.err }
 
 //go:embed templates/*.html templates/*.js
 var pageFiles embed.FS
 
 var pageTemplates = template.Must(template.ParseFS(pageFiles, "templates/*.html"))
 
-func init() {
-	caddy.RegisterModule(Handler{})
-}
+func init() { caddy.RegisterModule(Handler{}) }
 
 func (Handler) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{ID: "http.handlers.goveto_waf", New: func() caddy.Module { return new(Handler) }}
 }
 
-func (h *Handler) Provision(_ caddy.Context) error {
+func (h *Handler) Provision(ctx caddy.Context) error {
+	h.logger = ctx.Logger(h)
+	h.distributed = nil
+	h.distributedErr = nil
+	h.rateBackend = nil
 	if h.SiteID == "" {
 		return fmt.Errorf("site_id is required")
 	}
 	if err := h.WAF.NormalizeAndValidate(); err != nil {
 		return fmt.Errorf("invalid WAF policy: %w", err)
-	}
-	if err := h.RateLimit.NormalizeAndValidate(); err != nil {
-		return fmt.Errorf("invalid rate-limit policy: %w", err)
 	}
 	if err := h.Access.NormalizeAndValidate(); err != nil {
 		return fmt.Errorf("invalid access policy: %w", err)
@@ -124,72 +143,57 @@ func (h *Handler) Provision(_ caddy.Context) error {
 		return fmt.Errorf("compile access policy: %w", err)
 	}
 	h.access = compiledAccessPolicy
-	if h.hasCaptchaGroup() {
+	if h.hasCaptchaRule() {
 		key, err := decodeChallengeSecret(h.ChallengeSecret)
 		if err != nil {
 			return err
 		}
 		h.challengeKey = key
 	}
-
-	h.groups = make([]compiledGroup, 0, len(h.WAF.Groups))
-	for _, group := range h.WAF.Groups {
-		if !group.Enabled {
+	h.ruleSets = make([]compiledRuleSet, 0, len(h.WAF.RuleSets))
+	needsDistributed := h.Access.Enabled && h.Access.TemporaryBlocks
+	needsRedisRate := false
+	for _, set := range h.WAF.RuleSets {
+		if !set.Enabled {
 			continue
 		}
-		rules, inspectBody, err := compileRules(group.Rules)
-		if err != nil {
-			return err
+		compiledSet := compiledRuleSet{ID: set.ID, Name: set.Name}
+		for _, rule := range set.Rules {
+			if !rule.Enabled {
+				continue
+			}
+			compiled, err := compileRule(rule)
+			if err != nil {
+				return fmt.Errorf("compile rule %s: %w", rule.ID, err)
+			}
+			if rule.Type == policy.WAFRuleTypeRateLimit {
+				compiled.limiter = limiterFor(h.SiteID, rule.ID)
+				if rule.Backend == "REDIS" {
+					needsDistributed = true
+					needsRedisRate = true
+				}
+			}
+			for _, group := range rule.Conditions.Groups {
+				for _, condition := range group.Conditions {
+					h.inspectBody = h.inspectBody || condition.Field == "BODY"
+				}
+			}
+			compiledSet.rules = append(compiledSet.rules, compiled)
 		}
-		h.inspectBody = h.inspectBody || inspectBody
-		h.groups = append(h.groups, compiledGroup{WAFRuleGroup: group, rules: rules})
+		h.ruleSets = append(h.ruleSets, compiledSet)
 	}
-	h.exceptions = make([]compiledException, 0, len(h.WAF.Exceptions))
-	for _, exception := range h.WAF.Exceptions {
-		if !exception.Enabled {
-			continue
-		}
-		conditions, body, err := compileConditions(exception.Conditions)
-		if err != nil {
-			return err
-		}
-		h.inspectBody = h.inspectBody || body
-		h.exceptions = append(h.exceptions, compiledException{ids: stringSet(exception.RuleIDs), conditions: conditions})
-	}
-	if h.WAF.Enabled && len(h.WAF.Presets) > 0 {
-		h.inspectBody = true
-	}
-	if h.WAF.Enabled && h.WAF.Engine == policy.WAFEngineCorazaCRS && len(h.WAF.Presets) > 0 {
-		h.crs, err = acquireCRSEngine(h.WAF.MaxBodyBytes)
-		if err != nil {
-			return fmt.Errorf("initialize Coraza CRS %s: %w", h.WAF.RuleSetVersion, err)
-		}
-	}
-
-	h.rateRules = make([]compiledRateRule, 0, len(h.RateLimit.Rules))
-	for _, rule := range h.RateLimit.Rules {
-		if !rule.Enabled {
-			continue
-		}
-		conditions, inspectBody, err := compileConditions(rule.Conditions)
-		if err != nil {
-			return err
-		}
-		h.inspectBody = h.inspectBody || inspectBody
-		h.rateRules = append(h.rateRules, compiledRateRule{
-			RateLimitRule: rule,
-			conditions:    conditions,
-			limiter:       limiterFor(h.SiteID, rule.ID),
-		})
-	}
-	if h.RateLimit.Backend == "REDIS" || (h.Access.Enabled && h.Access.TemporaryBlocks) || h.hasCaptchaGroup() {
+	if needsDistributed || h.hasCaptchaRule() {
 		h.distributed, h.distributedErr = configuredRedisStore()
 	}
-	if h.WAF.Enabled && h.hasAutoBanGroup() {
-		h.autoBan = processLocalAutoBanStore
-		if store, err := configuredRedisStore(); err == nil {
-			if backend, ok := store.(*redisStore); ok {
-				h.autoBan = &redisAutoBanStore{client: backend.client}
+	if needsRedisRate {
+		h.rateBackend = &rateBackendState{store: h.distributed}
+		if h.distributedErr != nil {
+			h.rateBackend.err = h.distributedErr
+			h.rateBackend.failures = 1
+			h.rateBackend.retryAt = time.Now().Add(rateBackendInitialBackoff)
+			if h.logger != nil {
+				h.logger.Warn("Redis WAF rate-limit backend unavailable",
+					zap.String("site_id", h.SiteID), zap.Error(h.distributedErr))
 			}
 		}
 	}
@@ -203,13 +207,13 @@ func (h *Handler) Cleanup() error {
 	return nil
 }
 
-func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
 	requestID := normalizedRequestID(r.Header.Get("X-Request-ID"))
 	r.Header.Set("X-Request-ID", requestID)
 	w.Header().Set("X-Request-ID", requestID)
 	data := requestData{request: r, ip: h.access.clientIP(r)}
-	if h.inspectBody && r.Body != nil && h.WAF.MaxBodyBytes > 0 {
-		body, err := io.ReadAll(io.LimitReader(r.Body, h.WAF.MaxBodyBytes))
+	if h.inspectBody && r.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, wafRequestBodyLimit))
 		if err != nil {
 			return err
 		}
@@ -245,130 +249,201 @@ func (h Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhtt
 		}
 	}
 
-	// Auto-ban enforcement is skipped entirely in WAF monitor mode so an
-	// observation-only deployment cannot hard-block clients.
-	if h.autoBan != nil && h.WAF.Mode != policy.WAFModeMonitor {
-		if blocked, retry, err := h.autoBan.Blocked(r.Context(), h.SiteID, data.ip); err == nil && blocked {
-			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()+0.5))))
-			setSecurityEvent(w.Header(), "BLOCK", "waf:auto-ban", "waf", "auto_ban")
-			http.Error(w, http.StatusText(h.WAF.BlockStatus), h.WAF.BlockStatus)
-			return nil
-		}
-	}
-
-	if h.WAF.Enabled && inRollout(h.WAF.RolloutPercentage, h.SiteID+":waf", data) {
-		decision, err := h.matchWAF(data)
+	if h.WAF.Enabled {
+		soft, terminal, err := h.evaluateWAF(data)
 		if err != nil {
-			return err
-		}
-		if decision != nil {
-			if decision.action == policy.WAFActionAllow {
-				return next.ServeHTTP(w, r)
-			}
-			if decision.action == policy.WAFActionMonitor || h.WAF.Mode == policy.WAFModeMonitor {
-				setSecurityEvent(w.Header(), "MONITOR", decision.id, decision.source, decision.match)
-			} else if decision.action == policy.WAFActionTag {
-				appendTag(r.Header, "X-Goveto-WAF-Tags", decision.tag)
-				setSecurityEvent(w.Header(), "TAG", decision.id, decision.source, decision.match)
-				w.Header().Set("X-Goveto-WAF-Tag", decision.tag)
-			} else if decision.action == policy.WAFActionCaptcha && h.hasClearance(r, decision.id, data.ip) {
-				setSecurityEvent(w.Header(), "CAPTCHA-PASS", decision.id, decision.source, decision.match)
-			} else {
-				if autoBanCountsHit(decision.action, h.WAF.Mode) {
-					h.recordAutoBan(r.Context(), decision.id, data.ip)
-				}
-				return h.executeDecision(w, r, data.ip, *decision)
-			}
-		}
-	}
-
-	if h.RateLimit.Enabled {
-		now := time.Now()
-		for index := range h.rateRules {
-			rule := &h.rateRules[index]
-			if !rule.conditions.match(data) {
-				continue
-			}
-			key := rateKey(rule.RateLimitRule, data)
-			allowed, retryAfter, limiterErr := h.allowRate(r, rule, key, now)
-			if limiterErr != nil {
-				setSecurityEvent(w.Header(), "ERROR", rule.ID, "rate_limit", "backend_unavailable")
+			var backendErr *rateBackendError
+			if errors.As(err, &backendErr) {
+				setSecurityEvent(w.Header(), "ERROR", backendErr.ruleID, "rate_limit", "backend_unavailable")
 				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
 				return nil
 			}
-			if allowed {
-				continue
+			return err
+		}
+		for _, decision := range soft {
+			if decision.action == policy.WAFActionTag {
+				appendTag(r.Header, "X-Goveto-WAF-Tags", decision.tag)
+				appendTag(w.Header(), "X-Goveto-WAF-Tags", decision.tag)
 			}
-			w.Header().Set("Retry-After", strconv.Itoa(max(1, int(retryAfter.Seconds()+0.5))))
-			setSecurityEvent(w.Header(), "RATE_LIMIT", rule.ID, "rate_limit", rule.Key)
-			http.Error(w, http.StatusText(rule.StatusCode), rule.StatusCode)
-			return nil
+		}
+		if terminal != nil {
+			if terminal.retry > 0 {
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(terminal.retry.Seconds()+0.5))))
+			}
+			if terminal.action == policy.WAFActionAllow {
+				setSecurityEvent(w.Header(), "ALLOW", terminal.id, terminal.source, terminal.match)
+				return next.ServeHTTP(w, r)
+			}
+			if terminal.action == policy.WAFActionCaptcha && h.hasClearance(r, terminal.id, data.ip) {
+				setSecurityEvent(w.Header(), "CAPTCHA-PASS", terminal.id, terminal.source, terminal.match)
+				return next.ServeHTTP(w, r)
+			}
+			return h.executeDecision(w, r, data.ip, *terminal)
+		}
+		if len(soft) > 0 {
+			decision := soft[0]
+			setSecurityEvent(w.Header(), decision.action, decision.id, decision.source, decision.match)
 		}
 	}
-
 	return next.ServeHTTP(w, r)
 }
 
-func (h Handler) matchWAF(data requestData) (*wafDecision, error) {
-	for _, group := range h.groups {
-		if group.Action != policy.WAFActionAllow {
-			continue
-		}
-		if !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) {
-			continue
-		}
-		if matched, detail := group.match(data); matched {
-			return decisionForGroup(group, detail), nil
-		}
-	}
-	if h.crs != nil {
-		decision, err := h.matchCoraza(data)
-		if err != nil || decision != nil {
-			return decision, err
-		}
-	}
-	for _, preset := range h.WAF.Presets {
-		ruleID := "preset:" + preset
-		if matched, detail := matchPreset(preset, data); !h.excepted(ruleID, data) && matched {
-			source := h.WAF.Engine + ":" + h.WAF.RuleSetVersion
-			if h.crs != nil {
-				source = policy.WAFEngineGovetoCompat + ":fallback"
+func (h *Handler) evaluateWAF(data requestData) ([]wafDecision, *wafDecision, error) {
+	soft := make([]wafDecision, 0, 2)
+	for setIndex := range h.ruleSets {
+		set := &h.ruleSets[setIndex]
+		for ruleIndex := range set.rules {
+			rule := &set.rules[ruleIndex]
+			matched, detail, retry, err := h.matchRule(data, rule)
+			if err != nil {
+				return nil, nil, err
 			}
-			return &wafDecision{
-				id:       ruleID,
-				action:   policy.WAFActionShowPage,
-				status:   h.WAF.BlockStatus,
-				response: h.WAF.BlockResponse,
-				source:   source,
-				match:    detail,
-			}, nil
+			if !matched {
+				continue
+			}
+			decision := decisionForRule(*set, *rule, detail, retry)
+			if decision.action == policy.WAFActionMonitor || decision.action == policy.WAFActionTag {
+				soft = append(soft, decision)
+				continue
+			}
+			return soft, &decision, nil
 		}
 	}
-	for _, group := range h.groups {
-		if group.Action == policy.WAFActionAllow {
-			continue
-		}
-		if !inRollout(group.RolloutPercentage, h.SiteID+":"+group.ID, data) || h.excepted(group.ID, data) {
-			continue
-		}
-		if matched, detail := group.match(data); matched {
-			return decisionForGroup(group, detail), nil
-		}
-	}
-	return nil, nil
+	return soft, nil, nil
 }
 
-func decisionForGroup(group compiledGroup, match string) *wafDecision {
-	return &wafDecision{
-		id:             group.ID,
-		action:         group.Action,
-		status:         group.StatusCode,
-		response:       group.Response,
-		redirectURL:    group.RedirectURL,
-		redirectStatus: group.RedirectStatus,
-		tag:            group.Tag,
-		source:         "custom",
-		match:          match,
+func (h *Handler) matchRule(data requestData, rule *compiledRule) (bool, string, time.Duration, error) {
+	if rule.Type == policy.WAFRuleTypeRateLimit {
+		if len(rule.conditions.groups) > 0 {
+			matched, detail := rule.conditions.match(data)
+			if !matched {
+				return false, "", 0, nil
+			}
+			_ = detail
+		}
+		key := rateKey(rule.WAFRule, data)
+		allowed, retry, err := h.allowRate(data.request, rule, key, time.Now())
+		if err != nil {
+			return false, "", 0, &rateBackendError{ruleID: rule.ID, err: err}
+		}
+		return !allowed, "rate=" + rule.Key, retry, nil
+	}
+	matched, detail := rule.conditions.match(data)
+	return matched, detail, 0, nil
+}
+
+func (h *Handler) allowRate(r *http.Request, rule *compiledRule, key string, now time.Time) (bool, time.Duration, error) {
+	if rule.Backend != "REDIS" {
+		allowed, retry := rule.limiter.allow(key, now, rule.WAFRule)
+		return allowed, retry, nil
+	}
+
+	store, backendErr, probe, generation := h.acquireRateBackend(now)
+	if backendErr == nil || probe {
+		if probe {
+			backendErr = nil
+		}
+		if store == nil {
+			store, backendErr = configuredRedisStore()
+		}
+		if backendErr == nil {
+			allowed, retry, err := store.Allow(r.Context(), h.SiteID, rule.ID, key, rule.WAFRule)
+			if err == nil {
+				if probe {
+					h.recoverRateBackend(store, generation, rule.ID)
+				}
+				return allowed, retry, nil
+			}
+			backendErr = err
+		}
+		h.failRateBackend(backendErr, now, generation, probe, rule.ID)
+	}
+	if backendErr == nil {
+		backendErr = errors.New("Redis rate-limit backend is unavailable")
+	}
+	switch rule.FailureMode {
+	case "OPEN":
+		return true, 0, nil
+	case "LOCAL":
+		allowed, retry := rule.limiter.allow(key, now, rule.WAFRule)
+		return allowed, retry, nil
+	default:
+		return false, 0, fmt.Errorf("Redis rate-limit backend is unavailable: %w", backendErr)
+	}
+}
+
+func (h *Handler) acquireRateBackend(now time.Time) (distributedStore, error, bool, uint64) {
+	if h.rateBackend == nil {
+		return nil, errors.New("Redis rate-limit backend is not initialized"), false, 0
+	}
+	state := h.rateBackend
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.err == nil {
+		return state.store, nil, false, state.generation
+	}
+	if state.probing || now.Before(state.retryAt) {
+		return nil, state.err, false, state.generation
+	}
+	state.probing = true
+	return state.store, state.err, true, state.generation
+}
+
+func (h *Handler) failRateBackend(err error, now time.Time, generation uint64, probe bool, ruleID string) {
+	state := h.rateBackend
+	state.mu.Lock()
+	if state.generation != generation || (!probe && state.err != nil) {
+		state.mu.Unlock()
+		return
+	}
+	state.failures++
+	state.err = err
+	state.retryAt = now.Add(rateBackendBackoff(state.failures))
+	state.probing = false
+	state.generation++
+	delay := state.retryAt.Sub(now)
+	state.mu.Unlock()
+	if h.logger != nil {
+		h.logger.Warn("Redis WAF rate-limit request failed; circuit opened",
+			zap.String("site_id", h.SiteID), zap.String("rule_id", ruleID),
+			zap.Duration("retry_after", delay), zap.Error(err))
+	}
+}
+
+func (h *Handler) recoverRateBackend(store distributedStore, generation uint64, ruleID string) {
+	state := h.rateBackend
+	state.mu.Lock()
+	if state.generation != generation || !state.probing {
+		state.mu.Unlock()
+		return
+	}
+	state.store = store
+	state.err = nil
+	state.retryAt = time.Time{}
+	state.failures = 0
+	state.probing = false
+	state.generation++
+	state.mu.Unlock()
+	if h.logger != nil {
+		h.logger.Info("Redis WAF rate-limit backend recovered",
+			zap.String("site_id", h.SiteID), zap.String("rule_id", ruleID))
+	}
+}
+
+func rateBackendBackoff(failures int) time.Duration {
+	delay := rateBackendInitialBackoff
+	for attempt := 1; attempt < failures && delay < rateBackendMaxBackoff; attempt++ {
+		delay *= 2
+	}
+	return min(delay, rateBackendMaxBackoff)
+}
+
+func decisionForRule(set compiledRuleSet, rule compiledRule, detail string, retry time.Duration) wafDecision {
+	action := rule.Action
+	return wafDecision{
+		id: rule.ID, action: action.Type, status: action.StatusCode, response: action.Response,
+		redirectURL: action.RedirectURL, redirectStatus: action.RedirectStatus, tag: action.Tag,
+		source: "ruleset:" + set.ID, match: detail, retry: retry,
 	}
 }
 
@@ -410,62 +485,6 @@ func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip stri
 	return nil
 }
 
-// autoBanCountsHit reports whether a matched WAF action should accrue toward
-// an auto-ban threshold. Monitor mode (engine or group) and soft actions such
-// as TAG never write bans; only enforcement actions do.
-func autoBanCountsHit(action, wafMode string) bool {
-	if wafMode == policy.WAFModeMonitor {
-		return false
-	}
-	switch action {
-	case policy.WAFActionBlock, policy.WAFActionShowPage, policy.WAFActionRedirect, policy.WAFActionCaptcha:
-		return true
-	default:
-		return false
-	}
-}
-
-// recordAutoBan accrues a hit for the matched group's auto-ban policy. When
-// the configured threshold is reached within the window the store writes a
-// temporary block; subsequent requests are rejected before re-evaluating the
-// WAF (unless the engine is in monitor mode).
-func (h Handler) recordAutoBan(ctx context.Context, groupID, ip string) {
-	if h.autoBan == nil {
-		return
-	}
-	for _, group := range h.WAF.Groups {
-		if group.ID != groupID || !group.AutoBan.Enabled {
-			continue
-		}
-		if _, _, err := h.autoBan.RecordHit(ctx, h.SiteID, groupID, ip, group.AutoBan); err != nil {
-			// A Redis hiccup must not suppress the WAF verdict itself; the hit
-			// is simply lost and the next request tries again.
-			break
-		}
-		break
-	}
-}
-
-func (h Handler) excepted(ruleID string, data requestData) bool {
-	for _, exception := range h.exceptions {
-		if (exception.ids[ruleID] || exception.ids["*"]) && exception.conditions.match(data) {
-			return true
-		}
-	}
-	return false
-}
-
-func inRollout(percentage int, salt string, data requestData) bool {
-	if percentage >= 100 {
-		return true
-	}
-	hash := fnv.New32a()
-	_, _ = hash.Write([]byte(salt))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write([]byte(data.ip))
-	return int(hash.Sum32()%100) < percentage
-}
-
 func setSecurityEvent(header http.Header, action, ruleID, source, match string) {
 	header.Set("X-Goveto-WAF", action)
 	header.Set("X-Goveto-WAF-Rule", ruleID)
@@ -475,19 +494,13 @@ func setSecurityEvent(header http.Header, action, ruleID, source, match string) 
 
 func normalizedRequestID(value string) string {
 	value = strings.TrimSpace(value)
-	if value == "" || len(value) > 128 {
-		return uuid.NewString()
+	if parsed, err := uuid.Parse(value); err == nil {
+		return parsed.String()
 	}
-	for _, character := range value {
-		if !(character >= 'a' && character <= 'z') && !(character >= 'A' && character <= 'Z') &&
-			!(character >= '0' && character <= '9') && !strings.ContainsRune("._:-", character) {
-			return uuid.NewString()
-		}
-	}
-	return value
+	return uuid.NewString()
 }
 
-func (h Handler) temporaryBlocked(r *http.Request, ip string) (bool, time.Duration, error) {
+func (h *Handler) temporaryBlocked(r *http.Request, ip string) (bool, time.Duration, error) {
 	if h.distributedErr != nil {
 		return false, 0, h.distributedErr
 	}
@@ -495,29 +508,6 @@ func (h Handler) temporaryBlocked(r *http.Request, ip string) (bool, time.Durati
 		return false, 0, fmt.Errorf("temporary block backend is unavailable")
 	}
 	return h.distributed.Blocked(r.Context(), h.SiteID, ip)
-}
-
-func (h Handler) allowRate(r *http.Request, rule *compiledRateRule, key string, now time.Time) (bool, time.Duration, error) {
-	if h.RateLimit.Backend != "REDIS" {
-		allowed, retry := rule.limiter.allow(key, now, rule.RateLimitRule)
-		return allowed, retry, nil
-	}
-	if h.distributedErr == nil && h.distributed != nil {
-		allowed, retry, err := h.distributed.Allow(r.Context(), h.SiteID, rule.ID, key, rule.RateLimitRule)
-		if err == nil {
-			return allowed, retry, nil
-		}
-		h.distributedErr = err
-	}
-	switch h.RateLimit.FailureMode {
-	case "OPEN":
-		return true, 0, nil
-	case "LOCAL":
-		allowed, retry := rule.limiter.allow(key, now, rule.RateLimitRule)
-		return allowed, retry, nil
-	default:
-		return false, 0, fmt.Errorf("Redis rate-limit backend is unavailable: %w", h.distributedErr)
-	}
 }
 
 func writeWAFResponse(w http.ResponseWriter, status int, ruleID string, response policy.WAFResponse) {
@@ -542,8 +532,7 @@ func writeWAFResponse(w http.ResponseWriter, status int, ruleID string, response
 }
 
 func appendTag(header http.Header, name, tag string) {
-	values := header.Values(name)
-	for _, value := range values {
+	for _, value := range header.Values(name) {
 		for _, existing := range strings.Split(value, ",") {
 			if strings.TrimSpace(existing) == tag {
 				return
@@ -561,122 +550,137 @@ func renderPage(name string, data any) (string, error) {
 	return output.String(), nil
 }
 
-// match evaluates the group's rules against the request and reports whether
-// the group matched plus a human-readable summary of every rule that fired,
-// e.g. "rule[2]:PATH:EQUALS,rule[3]:QUERY:REGEX". OR and AND groups both
-// list all matched rule indices so operators can see which sub-rules tripped.
-// This replaces the opaque "conditions" match string.
-func (g compiledGroup) match(data requestData) (bool, string) {
-	matches := make([]bool, len(g.rules))
-	for index := range g.rules {
-		matches[index] = g.rules[index].match(data)
+func compileRule(rule policy.WAFRule) (compiledRule, error) {
+	result := compiledRule{WAFRule: rule}
+	conditions, err := compileConditions(rule.Conditions)
+	if err != nil {
+		return result, err
 	}
-	if !combine(g.Operator, matches) {
-		return false, ""
-	}
-	var detail strings.Builder
-	for index, matched := range matches {
-		if !matched {
-			continue
-		}
-		if detail.Len() > 0 {
-			detail.WriteByte(',')
-		}
-		rule := g.rules[index].WAFRequestRule
-		fmt.Fprintf(&detail, "rule[%d]:%s:%s", index+1, rule.Field, rule.Operator)
-	}
-	return true, detail.String()
+	result.conditions = conditions
+	return result, nil
 }
 
-func compileConditions(conditions policy.RequestConditions) (compiledConditions, bool, error) {
-	result := compiledConditions{operator: conditions.GroupOperator}
-	inspectBody := false
+func compileConditions(conditions policy.WAFConditions) (compiledConditions, error) {
+	result := compiledConditions{operator: conditions.Operator, groups: make([]compiledConditionGroup, 0, len(conditions.Groups))}
 	for _, group := range conditions.Groups {
-		rules, body, err := compileRules(group.Rules)
-		if err != nil {
-			return result, false, err
+		compiledGroup := compiledConditionGroup{operator: group.Operator, conditions: make([]compiledCondition, 0, len(group.Conditions))}
+		for _, condition := range group.Conditions {
+			compiled, err := compileCondition(condition)
+			if err != nil {
+				return result, err
+			}
+			compiledGroup.conditions = append(compiledGroup.conditions, compiled)
 		}
-		inspectBody = inspectBody || body
-		result.groups = append(result.groups, compiledConditionGroup{operator: group.Operator, rules: rules})
+		result.groups = append(result.groups, compiledGroup)
 	}
-	return result, inspectBody, nil
+	return result, nil
 }
 
-func compileRules(rules []policy.WAFRequestRule) ([]compiledRule, bool, error) {
-	result := make([]compiledRule, len(rules))
-	inspectBody := false
-	for index, rule := range rules {
-		result[index].WAFRequestRule = rule
-		inspectBody = inspectBody || rule.Field == "BODY"
-		if rule.Operator == "REGEX" {
-			pattern := rule.Value
-			if !rule.CaseSensitive {
-				pattern = "(?i)" + pattern
-			}
-			compiled, err := regexp.Compile(pattern)
-			if err != nil {
-				return nil, false, err
-			}
-			result[index].regex = compiled
+func compileCondition(condition policy.WAFCondition) (compiledCondition, error) {
+	result := compiledCondition{WAFCondition: condition}
+	if condition.Operator == "REGEX" {
+		pattern := condition.Value
+		if !condition.CaseSensitive {
+			pattern = "(?i)" + pattern
 		}
-		for _, value := range rule.Values {
-			if rule.Operator != "CIDR" {
-				break
-			}
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return result, err
+		}
+		result.regex = compiled
+	}
+	if condition.Operator == "CIDR" {
+		for _, value := range condition.Values {
 			prefix, err := netip.ParsePrefix(value)
 			if err != nil {
-				return nil, false, err
+				return result, err
 			}
-			result[index].cidrs = append(result[index].cidrs, prefix)
+			result.cidrs = append(result.cidrs, prefix)
 		}
 	}
-	return result, inspectBody, nil
+	return result, nil
 }
 
-func (c compiledConditions) match(data requestData) bool {
-	if len(c.groups) == 0 {
-		return true
-	}
-	groupMatches := make([]bool, len(c.groups))
-	for groupIndex, group := range c.groups {
-		ruleMatches := make([]bool, len(group.rules))
-		for ruleIndex := range group.rules {
-			ruleMatches[ruleIndex] = group.rules[ruleIndex].match(data)
+type requestCandidate struct {
+	name      string
+	value     string
+	sensitive bool
+}
+
+func (c compiledConditions) match(data requestData) (bool, string) {
+	return evaluateExpression(c.operator, len(c.groups), func(index int) (bool, string) {
+		return c.groups[index].match(data)
+	})
+}
+
+func (g compiledConditionGroup) match(data requestData) (bool, string) {
+	return evaluateExpression(g.operator, len(g.conditions), func(index int) (bool, string) {
+		return g.conditions[index].match(data)
+	})
+}
+
+func evaluateExpression(operator string, length int, evaluate func(int) (bool, string)) (bool, string) {
+	var firstDetail string
+	for index := 0; index < length; index++ {
+		matched, detail := evaluate(index)
+		if matched && firstDetail == "" {
+			firstDetail = detail
 		}
-		groupMatches[groupIndex] = combine(group.operator, ruleMatches)
+		if operator == "OR" && matched {
+			return true, detail
+		}
+		if operator == "AND" && !matched {
+			return false, ""
+		}
 	}
-	return combine(c.operator, groupMatches)
+	return operator == "AND", firstDetail
 }
 
-func (r compiledRule) match(data requestData) bool {
-	actual := requestValue(r.WAFRequestRule, data)
+func (r compiledCondition) match(data requestData) (bool, string) {
+	candidates := requestValues(r.WAFCondition, data)
+	for _, candidate := range candidates {
+		if r.matchValue(candidate.value) {
+			if r.Negate {
+				return false, ""
+			}
+			matchedValue := candidate.value
+			if r.Operator == "REGEX" && r.regex != nil {
+				matchedValue = r.regex.FindString(candidate.value)
+			}
+			return true, "variable=" + candidate.name + ";match=" + sanitizeMatchText(matchedValue, candidate.sensitive)
+		}
+	}
+	if r.Negate {
+		return true, "negated=" + r.Field
+	}
+	return false, ""
+}
+
+func (r compiledCondition) matchValue(actual string) bool {
 	expected := r.Value
 	if !r.CaseSensitive && r.Operator != "REGEX" && r.Operator != "CIDR" {
 		actual, expected = strings.ToLower(actual), strings.ToLower(expected)
 	}
-
-	matched := false
 	switch r.Operator {
 	case "EXISTS":
-		matched = actual != ""
+		return actual != ""
 	case "EQUALS":
-		matched = actual == expected
+		return actual == expected
 	case "CONTAINS":
-		matched = strings.Contains(actual, expected)
+		return strings.Contains(actual, expected)
 	case "PREFIX":
-		matched = strings.HasPrefix(actual, expected)
+		return strings.HasPrefix(actual, expected)
 	case "SUFFIX":
-		matched = strings.HasSuffix(actual, expected)
+		return strings.HasSuffix(actual, expected)
 	case "REGEX":
-		matched = r.regex != nil && r.regex.MatchString(actual)
+		return r.regex != nil && r.regex.MatchString(actual)
 	case "IN":
 		for _, candidate := range r.Values {
 			if !r.CaseSensitive {
 				candidate = strings.ToLower(candidate)
 			}
 			if actual == candidate {
-				matched = true
-				break
+				return true
 			}
 		}
 	case "CIDR":
@@ -684,49 +688,64 @@ func (r compiledRule) match(data requestData) bool {
 		if err == nil {
 			for _, prefix := range r.cidrs {
 				if prefix.Contains(address) {
-					matched = true
-					break
+					return true
 				}
 			}
 		}
 	}
-	if r.Negate {
-		return !matched
-	}
-	return matched
+	return false
 }
 
-func requestValue(rule policy.WAFRequestRule, data requestData) string {
+func requestValues(condition policy.WAFCondition, data requestData) []requestCandidate {
 	r := data.request
-	switch rule.Field {
-	case "METHOD":
-		return r.Method
-	case "HOST":
-		return r.Host
-	case "PATH":
-		return r.URL.Path
-	case "RAW_QUERY":
-		return r.URL.RawQuery
-	case "QUERY":
-		return r.URL.Query().Get(rule.Name)
-	case "HEADER":
-		return r.Header.Get(rule.Name)
-	case "COOKIE":
-		cookie, err := r.Cookie(rule.Name)
-		if err == nil {
-			return cookie.Value
-		}
-	case "BODY":
-		return data.body
-	case "CLIENT_IP":
-		return data.ip
-	case "USER_AGENT":
-		return r.UserAgent()
+	single := func(name, value string) []requestCandidate {
+		return []requestCandidate{{name: name, value: value, sensitive: sensitiveMatchKey(name)}}
 	}
-	return ""
+	switch condition.Field {
+	case "METHOD":
+		return single("METHOD", r.Method)
+	case "HOST":
+		return single("HOST", r.Host)
+	case "PATH":
+		return single("PATH", r.URL.Path)
+	case "RAW_QUERY":
+		return single("RAW_QUERY", r.URL.RawQuery)
+	case "QUERY":
+		return single("QUERY:"+condition.FieldName, r.URL.Query().Get(condition.FieldName))
+	case "QUERY_VALUES":
+		query := r.URL.Query()
+		result := make([]requestCandidate, 0, len(query))
+		for _, name := range sortedQueryNames(query) {
+			for _, value := range query[name] {
+				result = append(result, requestCandidate{name: "QUERY:" + name, value: value, sensitive: sensitiveMatchKey(name)})
+			}
+		}
+		return result
+	case "REQUEST_TARGET":
+		result := []requestCandidate{{name: "REQUEST_TARGET", value: r.URL.RequestURI()}, {name: "PATH", value: r.URL.Path}}
+		for _, candidate := range requestValues(policy.WAFCondition{Field: "QUERY_VALUES"}, data) {
+			result = append(result, candidate)
+		}
+		return result
+	case "HEADER":
+		return single("HEADER:"+condition.FieldName, r.Header.Get(condition.FieldName))
+	case "COOKIE":
+		cookie, err := r.Cookie(condition.FieldName)
+		if err == nil {
+			return single("COOKIE:"+condition.FieldName, cookie.Value)
+		}
+		return single("COOKIE:"+condition.FieldName, "")
+	case "BODY":
+		return single("BODY", data.body)
+	case "CLIENT_IP":
+		return single("CLIENT_IP", data.ip)
+	case "USER_AGENT":
+		return single("USER_AGENT", r.UserAgent())
+	}
+	return nil
 }
 
-func rateKey(rule policy.RateLimitRule, data requestData) string {
+func rateKey(rule policy.WAFRule, data requestData) string {
 	switch rule.Key {
 	case "CLIENT_IP":
 		return data.ip
@@ -740,8 +759,7 @@ func rateKey(rule policy.RateLimitRule, data requestData) string {
 		}
 		return "missing:" + data.ip
 	case "COOKIE":
-		cookie, err := data.request.Cookie(rule.KeyName)
-		if err == nil {
+		if cookie, err := data.request.Cookie(rule.KeyName); err == nil {
 			return cookie.Value
 		}
 		return "missing:" + data.ip
@@ -751,62 +769,37 @@ func rateKey(rule policy.RateLimitRule, data requestData) string {
 	return ""
 }
 
-func combine(operator string, values []bool) bool {
-	if operator == "OR" {
-		for _, value := range values {
-			if value {
-				return true
-			}
-		}
-		return false
+var secretMatchKey = regexp.MustCompile(`(?i)(?:authorization|cookie|password|passwd|secret|token|api[-_]?key|session|credential)`)
+var longOpaqueValue = regexp.MustCompile(`[A-Za-z0-9_+/=-]{24,}`)
+
+func sensitiveMatchKey(value string) bool { return secretMatchKey.MatchString(value) }
+
+func sanitizeMatchText(value string, sensitive bool) string {
+	if sensitive {
+		return "[REDACTED]"
 	}
-	for _, value := range values {
-		if !value {
-			return false
+	value = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) || r == ';' {
+			return ' '
 		}
+		return r
+	}, value)
+	value = strings.Join(strings.Fields(value), " ")
+	value = longOpaqueValue.ReplaceAllString(value, "[REDACTED]")
+	characters := []rune(value)
+	if len(characters) > 96 {
+		value = string(characters[:96]) + "..."
 	}
-	return true
+	return value
 }
 
-var presetPatterns = map[string]*regexp.Regexp{
-	"SQL_INJECTION":     regexp.MustCompile(`(?i)(?:\bunion\b.{0,24}\bselect\b|\bselect\b.{0,24}\bfrom\b|\bor\b\s+['"]?\d+['"]?\s*=\s*['"]?\d+|(?:--|#|/\*)\s*$|\bsleep\s*\(|\bbenchmark\s*\()`),
-	"XSS":               regexp.MustCompile(`(?i)(?:<\s*script\b|javascript\s*:|on(?:error|load|click|mouseover)\s*=|<\s*(?:iframe|object|embed|svg)\b)`),
-	"PATH_TRAVERSAL":    regexp.MustCompile(`(?i)(?:\.\./|\.\.\\|%2e%2e(?:%2f|/|%5c|\\)|%252e%252e)`),
-	"COMMAND_INJECTION": regexp.MustCompile(`(?i)(?:[;&|\x60]\s*(?:sh|bash|cmd|powershell|curl|wget|nc)\b|\$\([^)]{1,200}\)|\b(?:cat|chmod|chown)\s+/(?:etc|proc|sys)/)`),
-	"SCANNER":           regexp.MustCompile(`(?i)(?:/\.env(?:$|[/?])|/\.git(?:$|[/?])|/wp-admin(?:$|[/?])|/wp-login\.php|/phpmyadmin(?:$|[/?])|/server-status(?:$|[/?]))`),
-	"BAD_BOTS":          regexp.MustCompile(`(?i)(?:sqlmap|nikto|nuclei|masscan|zgrab|acunetix|nessus|metasploit|dirbuster|gobuster)`),
-}
-
-func matchPreset(preset string, data requestData) (bool, string) {
-	pattern := presetPatterns[preset]
-	if pattern == nil {
-		return false, ""
+func sortedQueryNames(values map[string][]string) []string {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
 	}
-	switch preset {
-	case "PATH_TRAVERSAL", "SCANNER":
-		value := data.request.URL.EscapedPath() + "?" + data.request.URL.RawQuery
-		return presetPatternMatch(pattern, "REQUEST_TARGET", value, false)
-	case "BAD_BOTS":
-		return presetPatternMatch(pattern, "USER_AGENT", data.request.UserAgent(), false)
-	default:
-		query := data.request.URL.Query()
-		for _, name := range sortedQueryNames(query) {
-			for _, value := range query[name] {
-				if matched, detail := presetPatternMatch(pattern, "QUERY:"+name, value, sensitiveMatchKey(name)); matched {
-					return true, detail
-				}
-			}
-		}
-		return presetPatternMatch(pattern, "BODY", data.body, false)
-	}
-}
-
-func presetPatternMatch(pattern *regexp.Regexp, location, value string, sensitive bool) (bool, string) {
-	match := pattern.FindString(value)
-	if match == "" {
-		return false, ""
-	}
-	return true, "variable=" + location + ";match=" + sanitizeMatchText(match, sensitive)
+	sort.Strings(names)
+	return names
 }
 
 type counterStore struct {
@@ -815,10 +808,11 @@ type counterStore struct {
 	operations uint64
 }
 
+const maxLocalRateKeys = 4096
+
 type counter struct {
 	windowStart time.Time
 	count       int
-	bannedUntil time.Time
 	lastSeen    time.Time
 }
 
@@ -830,36 +824,35 @@ func limiterFor(siteID, ruleID string) *counterStore {
 	return value.(*counterStore)
 }
 
-func (s *counterStore) allow(key string, now time.Time, rule policy.RateLimitRule) (bool, time.Duration) {
+func (s *counterStore) allow(key string, now time.Time, rule policy.WAFRule) (bool, time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
 	window := time.Duration(rule.WindowSeconds) * time.Second
-	entry := s.entries[key]
-	entry.lastSeen = now
-	if now.Before(entry.bannedUntil) {
-		s.entries[key] = entry
-		return false, entry.bannedUntil.Sub(now)
+	entry, exists := s.entries[key]
+	if !exists && len(s.entries) >= maxLocalRateKeys {
+		var oldestKey string
+		var oldestTime time.Time
+		for candidate, value := range s.entries {
+			if oldestKey == "" || value.lastSeen.Before(oldestTime) {
+				oldestKey, oldestTime = candidate, value.lastSeen
+			}
+		}
+		delete(s.entries, oldestKey)
 	}
+	entry.lastSeen = now
 	if entry.windowStart.IsZero() || now.Sub(entry.windowStart) >= window {
 		entry.windowStart, entry.count = now, 0
 	}
-	limit := rule.Requests + rule.Burst
-	if entry.count >= limit {
-		retry := window - now.Sub(entry.windowStart)
-		if rule.BanSeconds > 0 {
-			entry.bannedUntil = now.Add(time.Duration(rule.BanSeconds) * time.Second)
-			retry = time.Duration(rule.BanSeconds) * time.Second
-		}
+	if entry.count >= rule.Requests+rule.Burst {
 		s.entries[key] = entry
-		return false, retry
+		return false, window - now.Sub(entry.windowStart)
 	}
 	entry.count++
 	s.entries[key] = entry
 	s.operations++
 	if s.operations%1024 == 0 {
 		for candidate, value := range s.entries {
-			if now.Sub(value.lastSeen) > 2*window && now.After(value.bannedUntil) {
+			if now.Sub(value.lastSeen) > 2*window {
 				delete(s.entries, candidate)
 			}
 		}

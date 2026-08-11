@@ -1,6 +1,26 @@
 package waf
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func captchaRequest(target, address string) *http.Request {
+	request := httptest.NewRequest(http.MethodGet, target, nil)
+	request.RemoteAddr = address + ":1234"
+	request.Header.Set("User-Agent", "Mozilla/5.0 Chrome/136.0 Safari/537.36")
+	return request
+}
+
+func testBrowserEnvironment(request *http.Request) browserEnvironment {
+	return browserEnvironment{
+		Version: browserEnvironmentVersion, UserAgent: request.UserAgent(), Platform: "MacIntel", Vendor: "Google Inc.",
+		Languages: []string{"en-US"}, Timezone: "UTC", Cookies: true, Worker: true, WebAssembly: true, Crypto: true,
+		Canvas: true, WebGL: true, WebGLRenderer: "Apple GPU", LocalStorage: true, SessionStorage: true, IndexedDB: true,
+		HardwareConcurrency: 8, ScreenWidth: 1440, ScreenHeight: 900, ColorDepth: 24, OuterWidth: 1440, OuterHeight: 900,
+	}
+}
 
 func TestBrowserEnvironmentRejectsHighConfidenceAutomation(t *testing.T) {
 	request := captchaRequest("http://example.test/protected", "192.0.2.1")

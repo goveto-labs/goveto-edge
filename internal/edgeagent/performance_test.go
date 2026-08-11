@@ -50,13 +50,15 @@ func TestAgentPerformanceTarget(t *testing.T) {
 	}
 	waf := securitypolicy.DefaultWAFPolicy()
 	waf.Enabled = true
+	waf.RuleSets = nil
 	for index := 0; index < 12; index++ {
-		waf.Groups = append(waf.Groups, securitypolicy.WAFRuleGroup{
-			ID: fmt.Sprintf("rule-%d", index), Enabled: true, Operator: "AND", Action: "BLOCK",
-			Rules: []securitypolicy.WAFRequestRule{
-				{Field: "PATH", Operator: "PREFIX", Value: fmt.Sprintf("/blocked-%d/", index)},
-				{Field: "HEADER", Name: "X-Attack", Operator: "REGEX", Value: `(?i)(?:attack|scanner)`},
-			},
+		waf.RuleSets = append(waf.RuleSets, securitypolicy.WAFRuleSet{
+			ID: fmt.Sprintf("set-%d", index), Name: fmt.Sprintf("Rule set %d", index), Enabled: true,
+			Rules: []securitypolicy.WAFRule{{
+				ID: fmt.Sprintf("rule-%d", index), Name: "Blocked path", Enabled: true, Type: securitypolicy.WAFRuleTypeMatch,
+				Conditions: securitypolicy.WAFConditions{Operator: "AND", Groups: []securitypolicy.WAFConditionGroup{{Operator: "AND", Conditions: []securitypolicy.WAFCondition{{Field: "PATH", Operator: "PREFIX", Value: fmt.Sprintf("/blocked-%d/", index)}}}}},
+				Action:     securitypolicy.WAFAction{Type: securitypolicy.WAFActionBlock, StatusCode: http.StatusForbidden},
+			}},
 		})
 	}
 	config.WAF = toMap(t, waf)

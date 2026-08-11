@@ -102,7 +102,6 @@ func updateDelivery(db *client.Client, publishService *publisher.Service) echo.H
 				query.Policy.CompressionJson.Set(empty),
 				query.Policy.DeliveryJson.Set(encoded),
 				query.Policy.WafJson.Set(empty),
-				query.Policy.CcJson.Set(empty),
 				query.Policy.AccessJson.Set(empty),
 			).Do(ctx); createErr != nil {
 				return createErr

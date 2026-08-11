@@ -846,9 +846,6 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		if err = json.Unmarshal(policy.AccessJson, &config.Access); err != nil {
 			return config, nil, fmt.Errorf("decode access policy: %w", err)
 		}
-		if err = json.Unmarshal(policy.CcJson, &config.RateLimit); err != nil {
-			return config, nil, fmt.Errorf("decode rate-limit policy: %w", err)
-		}
 	}
 
 	nodes, err := db.Node.Query().

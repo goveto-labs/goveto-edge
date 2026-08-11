@@ -31694,7 +31694,7 @@ func (a PasswordResetTokenActions) GroupBy(ctx context.Context, fields []string,
 
 func quotedPolicyTable(c *Client) string { return c.quoteIdentifier("policies") }
 func quotedPolicyColumns(c *Client) string {
-	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "access_json", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -31714,8 +31714,6 @@ func quotePolicyField(c *Client, field string) (string, error) {
 	case "delivery_json":
 		return c.quoteIdentifier(field), nil
 	case "waf_json":
-		return c.quoteIdentifier(field), nil
-	case "cc_json":
 		return c.quoteIdentifier(field), nil
 	case "access_json":
 		return c.quoteIdentifier(field), nil
@@ -31932,14 +31930,14 @@ func (b PolicyCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Polic
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildPolicyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"})
+		q, args := b.action.buildPolicyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "access_json", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Policy.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Policy
-			if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Policy.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -31966,7 +31964,7 @@ func (b PolicyCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[s
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+		returningColumns = []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "access_json", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -32218,7 +32216,7 @@ func (a PolicyActions) FindMany(ctx context.Context, opts ...query.PolicyQueryOp
 	var results []model.Policy
 	for rows.Next() {
 		var item model.Policy
-		if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -32250,7 +32248,7 @@ func (a PolicyActions) FindUnique(ctx context.Context, where query.PolicyWhereCl
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Policy
-	if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -32281,7 +32279,7 @@ func (a PolicyActions) CreateOne(ctx context.Context, sets ...query.PolicySetCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -32300,7 +32298,7 @@ func (a PolicyActions) CreateMany(ctx context.Context, data []query.PolicyCreate
 }
 
 func (a PolicyActions) buildPolicyCreateManySQL(data []query.PolicyCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "cc_json", "access_json", "created_at", "updated_at"}
+	cols := []string{"id", "name", "cache_json", "compression_json", "delivery_json", "waf_json", "access_json", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -32373,7 +32371,7 @@ func (a PolicyActions) UpdateOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -32478,7 +32476,7 @@ func (a PolicyActions) UpsertOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Policy.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -32502,7 +32500,7 @@ func (a PolicyActions) DeleteOne(ctx context.Context, where query.PolicyWhereCla
 		q += " RETURNING " + quotedPolicyColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Policy
-		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.CcJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Name, &item.CacheJson, &item.CompressionJson, &item.DeliveryJson, &item.WafJson, &item.AccessJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

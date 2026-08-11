@@ -57,7 +57,7 @@ func TestCreateSiteBundleRejectsInvalidImportedPolicyBeforeDatabaseWrite(t *test
 	}
 
 	bundle = validManagementBundle()
-	bundle.WAF = json.RawMessage(`{"enabled":true,"mode":"INVALID"}`)
+	bundle.WAF = json.RawMessage(`{"enabled":true,"rule_sets":[{"id":"bad","enabled":true,"rules":[{"id":"bad-rule","enabled":true,"type":"MATCH","conditions":{"operator":"AND","groups":[{"id":"bad-group","operator":"AND","conditions":[{"id":"bad-condition","field":"PATH","operator":"REGEX","value":"["}]}]},"action":{"type":"BLOCK"}}]}]}`)
 	_, err = createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "invalid WAF policy") {
 		t.Fatalf("invalid WAF policy error = %v", err)

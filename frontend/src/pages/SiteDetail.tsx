@@ -97,53 +97,30 @@ function withSecurityEditorIDs(policy: SecurityPolicy): SecurityPolicy {
     return {
         waf: {
             ...policy.waf,
-            rollout_percentage: 100,
-            block_response: policy.waf.block_response ?? { type: 'DEFAULT' },
-            presets: policy.waf.presets ?? [],
-            groups: (policy.waf.groups ?? []).map((group) => ({
-                ...group,
-                rollout_percentage: group.rollout_percentage ?? 100,
-                response: group.response ?? { type: 'DEFAULT' },
-                rules: (group.rules ?? []).map((rule) => ({
+            rule_sets: (policy.waf.rule_sets ?? []).map((ruleSet) => ({
+                ...ruleSet,
+                rules: (ruleSet.rules ?? []).map((rule) => ({
                     ...rule,
                     id: rule.id ?? crypto.randomUUID(),
-                })),
-            })),
-            exceptions: (policy.waf.exceptions ?? []).map((exception) => ({
-                ...exception,
-                conditions: {
-                    ...exception.conditions,
-                    group_operator: exception.conditions?.group_operator ?? 'AND',
-                    groups: (exception.conditions?.groups ?? []).map((group) => ({
-                        ...group,
-                        id: group.id ?? crypto.randomUUID(),
-                        rules: (group.rules ?? []).map((rule) => ({
-                            ...rule,
-                            id: rule.id ?? crypto.randomUUID(),
+                    conditions: {
+                        operator: rule.conditions?.operator ?? 'AND',
+                        groups: (rule.conditions?.groups ?? []).map((group) => ({
+                            id: group.id ?? crypto.randomUUID(),
+                            operator: group.operator ?? 'AND',
+                            conditions: (group.conditions ?? []).map((condition) => ({
+                                ...condition,
+                                id: condition.id ?? crypto.randomUUID(),
+                            })),
                         })),
-                    })),
-                },
+                    },
+                    action: {
+                        ...rule.action,
+                        response: rule.action.response ?? { type: 'DEFAULT' },
+                    },
+                })),
             })),
         },
         access: policy.access,
-        rate_limit: {
-            ...policy.rate_limit,
-            rules: (policy.rate_limit.rules ?? []).map((rule) => ({
-                ...rule,
-                conditions: {
-                    ...rule.conditions,
-                    group_operator: rule.conditions?.group_operator ?? 'AND',
-                    groups: (rule.conditions?.groups ?? []).map((group) => ({
-                        ...group,
-                        id: group.id ?? crypto.randomUUID(),
-                        rules: (group.rules ?? []).map((condition) => ({
-                            ...condition,
-                            id: condition.id ?? crypto.randomUUID(),
-                        })),
-                    })),
-                },
-            })),
-        },
     };
 }
 
@@ -356,17 +333,7 @@ export default function SiteDetail() {
     const [security, setSecurity] = useState<SecurityPolicy>({
         waf: {
             enabled: true,
-            engine: 'GOVETO_COMPAT',
-            rule_set_version: '2026.07.1',
-            auto_update: true,
-            rollout_percentage: 100,
-            mode: 'BLOCK',
-            block_status: 403,
-            block_response: { type: 'DEFAULT' },
-            max_body_bytes: 65536,
-            presets: [],
-            groups: [],
-            exceptions: [],
+            rule_sets: [],
         },
         access: {
             enabled: false,
@@ -386,7 +353,6 @@ export default function SiteDetail() {
             temporary_blocks: false,
             temporary_block_failure: 'OPEN',
         },
-        rate_limit: { enabled: false, backend: 'LOCAL', failure_mode: 'LOCAL', rules: [] },
     });
     const [clusters, setClusters] = useState<ClusterChoice[]>([]);
     const [certificates, setCertificates] = useState<Certificate[]>([]);
@@ -716,7 +682,6 @@ export default function SiteDetail() {
             const savedSecurity = withSecurityEditorIDs({
                 waf: result.waf,
                 access: result.access,
-                rate_limit: result.rate_limit,
             });
             savedSecurityRef.current = savedSecurity;
             setSecurity(savedSecurity);

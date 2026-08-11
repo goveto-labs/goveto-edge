@@ -2,249 +2,94 @@ package policy
 
 import (
 	"encoding/json"
-	"strings"
+	"net/http"
 	"testing"
 )
 
-func TestDefaultSecurityPoliciesSerializeEmptyCollectionsAsArrays(t *testing.T) {
-	waf := DefaultWAFPolicy()
-	if !waf.Enabled {
-		t.Fatal("WAF must be enabled by default")
+func TestDefaultWAFPolicyContainsOrderedBuiltins(t *testing.T) {
+	policy := DefaultWAFPolicy()
+	want := []string{"builtin-xss", "builtin-path-traversal", "builtin-sensitive-directories", "builtin-sql-injection", "builtin-cc"}
+	if !policy.Enabled || len(policy.RuleSets) != len(want) {
+		t.Fatalf("unexpected defaults: %#v", policy)
 	}
-	value := struct {
-		WAF       WAFPolicy       `json:"waf"`
-		Access    AccessPolicy    `json:"access"`
-		RateLimit RateLimitPolicy `json:"rate_limit"`
-	}{WAF: waf, Access: DefaultAccessPolicy(), RateLimit: DefaultRateLimitPolicy()}
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	text := string(encoded)
-	for _, expected := range []string{`"groups":[]`, `"exceptions":[]`, `"rules":[]`, `"ip_allowlist":[]`} {
-		if !strings.Contains(text, expected) {
-			t.Fatalf("default security JSON missing %s: %s", expected, text)
+	for index, id := range want {
+		if policy.RuleSets[index].ID != id || !policy.RuleSets[index].Enabled {
+			t.Fatalf("rule set %d = %#v, want %q enabled", index, policy.RuleSets[index], id)
 		}
+	}
+	cc := policy.RuleSets[4].Rules[0]
+	if cc.Type != WAFRuleTypeRateLimit || cc.Key != "CLIENT_IP_PATH" || cc.Requests != 60 || cc.WindowSeconds != 60 || cc.Burst != 20 {
+		t.Fatalf("unexpected CC defaults: %#v", cc)
+	}
+	if cc.Backend != "REDIS" || cc.FailureMode != "LOCAL" {
+		t.Fatalf("unexpected CC backend semantics: %#v", cc)
+	}
+	if cc.Action.Type != WAFActionShowPage || cc.Action.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("unexpected CC action: %#v", cc.Action)
 	}
 }
 
-func TestAccessPolicyNormalizesNetworkAndRequestControls(t *testing.T) {
-	policy := DefaultAccessPolicy()
-	policy.Enabled = true
-	policy.TrustedProxies = []string{"10.0.0.1", "10.0.0.0/8"}
-	policy.IPBlocklist = []string{"192.0.2.4"}
-	policy.AllowedMethods = []string{"get", "HEAD"}
-	policy.AllowedRefererHosts = []string{"HTTPS://EXAMPLE.COM/path", "*.static.example"}
+func TestWAFPolicyMissingRuleSetsGetsFreshBuiltins(t *testing.T) {
+	var policy WAFPolicy
+	if err := json.Unmarshal([]byte(`{"enabled":false,"engine":"CORAZA_CRS","groups":[{}]}`), &policy); err != nil {
+		t.Fatal(err)
+	}
 	if err := policy.NormalizeAndValidate(); err != nil {
 		t.Fatal(err)
 	}
-	if policy.IPBlocklist[0] != "192.0.2.4/32" || policy.AllowedMethods[0] != "GET" || policy.AllowedRefererHosts[0] != "*.static.example" {
-		t.Fatalf("access policy was not normalized: %#v", policy)
+	if policy.Enabled || len(policy.RuleSets) != 5 {
+		t.Fatalf("legacy fields affected normalized policy: %#v", policy)
 	}
 }
 
-func TestAccessPolicyPublicNormalizationIgnoresGeoIPPath(t *testing.T) {
-	policy := DefaultAccessPolicy()
-	policy.AllowedCountries = []string{"us"}
-	policy.GeoIPDatabase = "/client/controlled.mmdb"
-	if err := policy.NormalizeAndValidatePublic(); err != nil {
-		t.Fatal(err)
-	}
-	if policy.GeoIPDatabase != "" || len(policy.AllowedCountries) != 1 || policy.AllowedCountries[0] != "US" {
-		t.Fatalf("unexpected normalized access policy: %#v", policy)
-	}
-}
-
-func TestVersionedWAFExceptionsAndDistributedFailureModeValidate(t *testing.T) {
-	waf := DefaultWAFPolicy()
-	waf.Exceptions = []WAFException{{Enabled: true, RuleIDs: []string{"preset:XSS"}}}
-	if err := waf.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if waf.RuleSetVersion != CurrentWAFRuleSetVersion || waf.Exceptions[0].ID == "" {
-		t.Fatalf("WAF version or exception was not normalized: %#v", waf)
-	}
-	rate := RateLimitPolicy{Backend: "redis", FailureMode: "closed"}
-	if err := rate.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if rate.Backend != "REDIS" || rate.FailureMode != "CLOSED" {
-		t.Fatalf("rate backend was not normalized: %#v", rate)
-	}
-}
-
-func TestRateLimitSupportsPathCounter(t *testing.T) {
-	policy := DefaultRateLimitPolicy()
-	policy.Rules = []RateLimitRule{{
-		ID: "path", Enabled: true, Key: "PATH", Requests: 10, WindowSeconds: 60,
+func TestWAFPolicyPreservesRuleSetAndRuleOrder(t *testing.T) {
+	policy := WAFPolicy{Enabled: true, RuleSets: []WAFRuleSet{
+		{ID: "second", Enabled: true, Rules: []WAFRule{matchTestRule("b"), matchTestRule("a")}},
+		{ID: "first", Enabled: true, Rules: []WAFRule{matchTestRule("c")}},
 	}}
 	if err := policy.NormalizeAndValidate(); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestWAFPolicyNormalizesComplexGroups(t *testing.T) {
-	policy := DefaultWAFPolicy()
-	policy.Enabled = true
-	policy.Groups = []WAFRuleGroup{{
-		Name:     "Admin protection",
-		Enabled:  true,
-		Operator: "and",
-		Action:   "block",
-		Rules: []WAFRequestRule{
-			{Field: "path", Operator: "prefix", Value: "/admin"},
-			{Field: "client_ip", Operator: "cidr", Values: []string{"192.0.2.0/24"}, Negate: true},
-		},
-	}}
-	if err := policy.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if policy.Groups[0].ID != "group-1" || policy.Groups[0].Operator != "AND" {
-		t.Fatalf("policy was not normalized: %#v", policy.Groups[0])
+	if policy.RuleSets[0].ID != "second" || policy.RuleSets[0].Rules[0].ID != "b" || policy.RuleSets[0].Rules[1].ID != "a" {
+		t.Fatalf("normalization changed ordering: %#v", policy.RuleSets)
 	}
 }
 
-func TestWAFPolicyRejectsInvalidRegexAndCIDR(t *testing.T) {
-	for _, rule := range []WAFRequestRule{
-		{Field: "PATH", Operator: "REGEX", Value: "["},
-		{Field: "CLIENT_IP", Operator: "CIDR", Values: []string{"bad"}},
-	} {
-		policy := DefaultWAFPolicy()
-		policy.Groups = []WAFRuleGroup{{Enabled: true, Operator: "AND", Rules: []WAFRequestRule{rule}}}
+func TestWAFPolicyValidatesRulesAndActions(t *testing.T) {
+	tests := []WAFRule{
+		{ID: "regex", Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "REGEX", Value: "["}), Action: WAFAction{Type: WAFActionBlock}},
+		{ID: "rate", Enabled: true, Type: WAFRuleTypeRateLimit, Key: "CLIENT_IP", Requests: 0, WindowSeconds: 60, Action: WAFAction{Type: WAFActionShowPage}},
+		{ID: "backend", Enabled: true, Type: WAFRuleTypeRateLimit, Key: "CLIENT_IP", Requests: 1, WindowSeconds: 60, Backend: "SQL", Action: WAFAction{Type: WAFActionShowPage}},
+		{ID: "failure", Enabled: true, Type: WAFRuleTypeRateLimit, Key: "CLIENT_IP", Requests: 1, WindowSeconds: 60, Backend: "REDIS", FailureMode: "IGNORE", Action: WAFAction{Type: WAFActionShowPage}},
+		{ID: "redirect", Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/"}), Action: WAFAction{Type: WAFActionRedirect, RedirectURL: "javascript:alert(1)"}},
+		{ID: "tag", Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/"}), Action: WAFAction{Type: WAFActionTag, Tag: "bad tag"}},
+	}
+	for _, rule := range tests {
+		policy := WAFPolicy{Enabled: true, RuleSets: []WAFRuleSet{{ID: "set", Enabled: true, Rules: []WAFRule{rule}}}}
 		if err := policy.NormalizeAndValidate(); err == nil {
-			t.Fatalf("expected rule to be rejected: %#v", rule)
+			t.Fatalf("rule %q unexpectedly validated", rule.ID)
 		}
 	}
 }
 
-func TestWAFPolicyValidatesActionsAndCustomResponses(t *testing.T) {
-	policy := DefaultWAFPolicy()
-	policy.BlockResponse = WAFResponse{Type: WAFResponseJSON, Body: `{"error":"blocked"}`}
-	policy.Groups = []WAFRuleGroup{
-		{Enabled: true, Operator: "AND", Action: WAFActionShowPage, Response: WAFResponse{Type: WAFResponseHTML, Body: "<h1>Denied</h1>"}, Rules: []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/page"}}},
-		{Enabled: true, Operator: "AND", Action: WAFActionRedirect, RedirectURL: "/login", Rules: []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/redirect"}}},
-		{Enabled: true, Operator: "AND", Action: WAFActionTag, Tag: "risk.high", Rules: []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/tag"}}},
-	}
+func matchTestRule(id string) WAFRule {
+	return WAFRule{ID: id, Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/"}), Action: WAFAction{Type: WAFActionMonitor}}
+}
+
+func TestWAFPolicyNormalizesCompoundConditions(t *testing.T) {
+	policy := WAFPolicy{Enabled: true, RuleSets: []WAFRuleSet{{ID: "compound", Enabled: true, Rules: []WAFRule{{
+		ID: "rule", Enabled: true, Type: WAFRuleTypeMatch,
+		Conditions: WAFConditions{Operator: "and", Groups: []WAFConditionGroup{
+			{Operator: "and", Conditions: []WAFCondition{{Field: "method", Operator: "equals", Value: "POST"}}},
+			{Operator: "or", Conditions: []WAFCondition{{Field: "path", Operator: "equals", Value: "/login"}, {Field: "path", Operator: "equals", Value: "/register"}}},
+		}},
+		Action: WAFAction{Type: WAFActionBlock},
+	}}}}}
 	if err := policy.NormalizeAndValidate(); err != nil {
 		t.Fatal(err)
 	}
-	if policy.Groups[1].RedirectStatus != 302 || policy.Groups[0].Response.Type != WAFResponseHTML {
-		t.Fatalf("action defaults were not normalized: %#v", policy.Groups)
-	}
-}
-
-func TestWAFPolicyRejectsUnsafeActionConfiguration(t *testing.T) {
-	for _, group := range []WAFRuleGroup{
-		{Enabled: true, Operator: "AND", Action: WAFActionRedirect, RedirectURL: "javascript:alert(1)"},
-		{Enabled: true, Operator: "AND", Action: WAFActionTag, Tag: "bad tag"},
-		{Enabled: true, Operator: "AND", Action: WAFActionShowPage, Response: WAFResponse{Type: WAFResponseJSON, Body: "not-json"}},
-	} {
-		group.Rules = []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/"}}
-		policy := DefaultWAFPolicy()
-		policy.Groups = []WAFRuleGroup{group}
-		if err := policy.NormalizeAndValidate(); err == nil {
-			t.Fatalf("expected action configuration to be rejected: %#v", group)
-		}
-	}
-}
-
-func TestRateLimitPolicyValidatesCCRule(t *testing.T) {
-	policy := RateLimitPolicy{Enabled: true, Rules: []RateLimitRule{{
-		Enabled:       true,
-		Name:          "Login CC",
-		Key:           "client_ip_path",
-		Requests:      10,
-		WindowSeconds: 60,
-		Burst:         5,
-		BanSeconds:    120,
-		Conditions: RequestConditions{Groups: []RequestConditionGroup{{
-			Operator: "AND",
-			Rules:    []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/login"}},
-		}}},
-	}}}
-	if err := policy.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if policy.Rules[0].ID != "cc-1" || policy.Rules[0].StatusCode != 429 {
-		t.Fatalf("rate-limit policy was not normalized: %#v", policy.Rules[0])
-	}
-}
-
-func TestWAFAutoBanValidation(t *testing.T) {
-	for _, mutate := range []func(*WAFAutoBan){
-		func(b *WAFAutoBan) { b.Hits = 0 },
-		func(b *WAFAutoBan) { b.Hits = 100001 },
-		func(b *WAFAutoBan) { b.WindowSeconds = 0 },
-		func(b *WAFAutoBan) { b.BanSeconds = 0 },
-		func(b *WAFAutoBan) { b.Scope = "PLANET" },
-	} {
-		policy := DefaultWAFPolicy()
-		policy.Groups = []WAFRuleGroup{{
-			ID: "g", Enabled: true, Operator: "AND", Action: WAFActionBlock,
-			AutoBan: WAFAutoBan{Enabled: true, Hits: 3, WindowSeconds: 60, BanSeconds: 300, Scope: "SITE"},
-			Rules:   []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/x"}},
-		}}
-		mutate(&policy.Groups[0].AutoBan)
-		if err := policy.NormalizeAndValidate(); err == nil {
-			t.Fatalf("expected auto-ban validation error for %#v", policy.Groups[0].AutoBan)
-		}
-	}
-}
-
-func TestWAFAutoBanDisabledIsDefaulted(t *testing.T) {
-	policy := DefaultWAFPolicy()
-	policy.Groups = []WAFRuleGroup{{
-		ID: "g", Enabled: true, Operator: "AND", Action: WAFActionBlock,
-		Rules: []WAFRequestRule{{Field: "PATH", Operator: "EQUALS", Value: "/x"}},
-	}}
-	if err := policy.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if policy.Groups[0].AutoBan.Enabled || policy.Groups[0].AutoBan.Scope != "SITE" {
-		t.Fatalf("disabled auto-ban should default scope to SITE: %#v", policy.Groups[0].AutoBan)
-	}
-}
-
-func TestWAFRuleSetVersionAcceptsKnownAndAutoUpdates(t *testing.T) {
-	policy := DefaultWAFPolicy()
-	policy.AutoUpdate = true
-	policy.RuleSetVersion = ""
-	if err := policy.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if policy.RuleSetVersion != LatestWAFRuleSetVersion {
-		t.Fatalf("AutoUpdate did not pin latest: %q", policy.RuleSetVersion)
-	}
-
-	policy = DefaultWAFPolicy()
-	policy.AutoUpdate = false
-	policy.RuleSetVersion = KnownWAFRuleSetVersions[0]
-	if err := policy.NormalizeAndValidate(); err != nil {
-		t.Fatalf("known version rejected: %v", err)
-	}
-
-	policy = DefaultWAFPolicy()
-	policy.AutoUpdate = false
-	policy.RuleSetVersion = "2999.01.1"
-	if err := policy.NormalizeAndValidate(); err == nil {
-		t.Fatal("expected unknown version to be rejected")
-	}
-}
-
-func TestCorazaCRSRuleSetVersionNormalizesPerEngine(t *testing.T) {
-	waf := DefaultWAFPolicy()
-	waf.Engine = WAFEngineCorazaCRS
-	waf.RuleSetVersion = CurrentWAFRuleSetVersion
-	if err := waf.NormalizeAndValidate(); err != nil {
-		t.Fatal(err)
-	}
-	if waf.RuleSetVersion != LatestCorazaCRSVersion {
-		t.Fatalf("Coraza auto-update version=%q", waf.RuleSetVersion)
-	}
-
-	waf.AutoUpdate = false
-	waf.RuleSetVersion = CurrentWAFRuleSetVersion
-	if err := waf.NormalizeAndValidate(); err == nil {
-		t.Fatal("Coraza accepted a compatibility-engine rule set version")
+	conditions := policy.RuleSets[0].Rules[0].Conditions
+	if conditions.Operator != "AND" || conditions.Groups[1].Operator != "OR" || conditions.Groups[1].Conditions[0].Field != "PATH" {
+		t.Fatalf("conditions were not normalized: %#v", conditions)
 	}
 }

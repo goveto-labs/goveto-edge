@@ -526,7 +526,6 @@ type Policy struct {
 	CompressionJson json.RawMessage `db:"compression_json" json:"compressionJson"`
 	DeliveryJson    json.RawMessage `db:"delivery_json" json:"deliveryJson"`
 	WafJson         json.RawMessage `db:"waf_json" json:"wafJson"`
-	CcJson          json.RawMessage `db:"cc_json" json:"ccJson"`
 	AccessJson      json.RawMessage `db:"access_json" json:"accessJson"`
 	CreatedAt       time.Time       `db:"created_at" json:"createdAt"`
 	UpdatedAt       time.Time       `db:"updated_at" json:"updatedAt"`

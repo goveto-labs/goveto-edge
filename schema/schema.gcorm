@@ -767,7 +767,6 @@ model Policy {
   compressionJson Json     @default("{}") @map("compression_json")
   deliveryJson    Json     @default("{}") @map("delivery_json")
   wafJson         Json     @map("waf_json")
-  ccJson          Json     @map("cc_json")
   accessJson      Json     @map("access_json")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @default(now()) @updatedAt @map("updated_at")
