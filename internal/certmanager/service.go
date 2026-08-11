@@ -29,6 +29,28 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
+const reconcileTerminalCertificateJobsSQL = `WITH latest AS (
+	SELECT DISTINCT ON (certificate_id) certificate_id, operation, status, error FROM certificate_jobs
+	ORDER BY certificate_id, updated_at DESC
+) UPDATE certificates c SET status=(CASE WHEN j.operation='REVOKE' THEN
+	CASE WHEN c.revoked_at IS NOT NULL THEN 'REVOKED' ELSE 'REVOCATION_FAILED' END
+	WHEN j.status='CANCELLED' THEN
+	CASE WHEN c.expires_at IS NULL THEN 'PENDING'
+		WHEN c.expires_at<=NOW() THEN 'EXPIRED'
+		WHEN c.expires_at<=NOW()+(c.renew_before_days*INTERVAL '1 day') THEN 'EXPIRING'
+		ELSE c.status::text END
+	ELSE 'RENEWAL_FAILED' END)::"CertificateStatus",
+	last_renewal_error=CASE WHEN j.operation='REVOKE' OR j.status='CANCELLED' THEN NULL
+		ELSE COALESCE(j.error, 'certificate lifecycle job ended without completing') END,
+	last_revocation_error=CASE WHEN j.operation='REVOKE' THEN
+		COALESCE(j.error, c.last_revocation_error, 'certificate revocation job ended without completing')
+		ELSE c.last_revocation_error END,
+	updated_at=NOW() FROM latest j WHERE c.id=j.certificate_id
+	AND j.status IN ('FAILED','DEAD_LETTER','CANCELLED')
+	AND c.status IN ('PENDING','DEPLOYING','REVOKING') AND NOT EXISTS (
+		SELECT 1 FROM certificate_jobs active WHERE active.certificate_id=c.id
+		AND active.status IN ('PENDING','RUNNING'))`
+
 const defaultACMEDirectory = "https://acme-v02.api.letsencrypt.org/directory"
 
 var ErrCertificateMustBeRevoked = errors.New("issued ACME certificate must be revoked before deletion")
@@ -138,27 +160,7 @@ func (s *Service) reconcileTerminalJobs(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
-		_, err := s.db.RawExec(ctx, `WITH latest AS (
-			SELECT DISTINCT ON (certificate_id) certificate_id, operation, status, error FROM certificate_jobs
-			ORDER BY certificate_id, updated_at DESC
-		) UPDATE certificates c SET status=CASE WHEN j.operation='REVOKE' THEN
-			CASE WHEN c.revoked_at IS NOT NULL THEN 'REVOKED' ELSE 'REVOCATION_FAILED' END
-			WHEN j.status='CANCELLED' THEN
-			CASE WHEN c.expires_at IS NULL THEN 'PENDING'
-				WHEN c.expires_at<=NOW() THEN 'EXPIRED'
-				WHEN c.expires_at<=NOW()+(c.renew_before_days*INTERVAL '1 day') THEN 'EXPIRING'
-				ELSE c.status END
-			ELSE 'RENEWAL_FAILED' END,
-			last_renewal_error=CASE WHEN j.operation='REVOKE' OR j.status='CANCELLED' THEN NULL
-				ELSE COALESCE(j.error, 'certificate lifecycle job ended without completing') END,
-			last_revocation_error=CASE WHEN j.operation='REVOKE' THEN
-				COALESCE(j.error, c.last_revocation_error, 'certificate revocation job ended without completing')
-				ELSE c.last_revocation_error END,
-			updated_at=NOW() FROM latest j WHERE c.id=j.certificate_id
-			AND j.status IN ('FAILED','DEAD_LETTER','CANCELLED')
-			AND c.status IN ('PENDING','DEPLOYING','REVOKING') AND NOT EXISTS (
-				SELECT 1 FROM certificate_jobs active WHERE active.certificate_id=c.id
-				AND active.status IN ('PENDING','RUNNING'))`)
+		_, err := s.db.RawExec(ctx, reconcileTerminalCertificateJobsSQL)
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("reconcile terminal certificate jobs", "error", err)
 		}
