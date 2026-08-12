@@ -134,6 +134,7 @@ func (h *Handler) Provision(ctx caddy.Context) error {
 	h.distributedErr = nil
 	h.rateBackend = nil
 	h.trustedProxies = nil
+	h.inspectBody = false
 	if h.SiteID == "" {
 		return fmt.Errorf("site_id is required")
 	}
@@ -240,12 +241,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 			}
 		}
 	}
-	if h.inspectBody && r.Body != nil {
-		body, err := io.ReadAll(io.LimitReader(r.Body, wafRequestBodyLimit))
+	if h.WAF.Enabled && h.inspectBody && r.Body != nil {
+		body, err := io.ReadAll(io.LimitReader(r.Body, wafRequestBodyLimit+1))
 		if err != nil {
 			return err
 		}
-		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+		if len(body) > wafRequestBodyLimit {
+			_ = r.Body.Close()
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			setSecurityEvent(w.Header(), "BLOCK", "request-body-limit", "body_inspection", "body_too_large")
+			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+			return nil
+		}
+		if err = r.Body.Close(); err != nil {
+			return err
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		data.body = string(body)
 	}
 

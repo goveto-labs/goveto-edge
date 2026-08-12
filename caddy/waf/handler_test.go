@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -20,6 +22,22 @@ import (
 type nextHandler struct {
 	calls int
 	tags  string
+}
+
+type bodyCaptureHandler struct {
+	calls int
+	body  string
+}
+
+func (h *bodyCaptureHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
+	h.calls++
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		return err
+	}
+	h.body = string(body)
+	w.WriteHeader(http.StatusOK)
+	return nil
 }
 
 func (h *nextHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) error {
@@ -104,6 +122,113 @@ func TestBuiltinsInspectDecodedQueryBodyAndPath(t *testing.T) {
 				t.Fatalf("status=%d rule=%q next=%d", response.Code, response.Header().Get("X-Goveto-WAF-Rule"), next.calls)
 			}
 		})
+	}
+}
+
+func TestBodyInspectionFailsClosedAtLimit(t *testing.T) {
+	waf := singleRulePolicy(policy.WAFRule{
+		ID: "body", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "BODY", Operator: "CONTAINS", Value: "blocked"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	})
+	h := provisionHandler(t, "body-limit", waf)
+	for _, size := range []int{wafRequestBodyLimit - 1, wafRequestBodyLimit, wafRequestBodyLimit + 1} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			body := strings.Repeat("a", size)
+			request := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body))
+			response := httptest.NewRecorder()
+			next := &bodyCaptureHandler{}
+			if err := h.ServeHTTP(response, request, next); err != nil {
+				t.Fatal(err)
+			}
+			if size <= wafRequestBodyLimit {
+				if response.Code != http.StatusOK || next.calls != 1 || next.body != body {
+					t.Fatalf("size=%d status=%d next=%d forwarded=%d", size, response.Code, next.calls, len(next.body))
+				}
+				return
+			}
+			if response.Code != http.StatusRequestEntityTooLarge || next.calls != 0 {
+				t.Fatalf("size=%d status=%d next=%d", size, response.Code, next.calls)
+			}
+			if response.Header().Get("X-Goveto-WAF") != "BLOCK" || response.Header().Get("X-Goveto-WAF-Rule") != "request-body-limit" {
+				t.Fatalf("size=%d headers=%v", size, response.Header())
+			}
+		})
+	}
+}
+
+func TestBodyLimitAppliesOnlyWhenEnabledRulesInspectBody(t *testing.T) {
+	waf := singleRulePolicy(policy.WAFRule{
+		ID: "path", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/blocked"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	})
+	h := provisionHandler(t, "no-body-rule", waf)
+	body := strings.Repeat("a", wafRequestBodyLimit+1)
+	response := httptest.NewRecorder()
+	next := &bodyCaptureHandler{}
+	if err := h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)), next); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || next.calls != 1 || next.body != body {
+		t.Fatalf("status=%d next=%d forwarded=%d", response.Code, next.calls, len(next.body))
+	}
+}
+
+func TestBodyInspectionChecksLastByteWithinLimit(t *testing.T) {
+	waf := singleRulePolicy(policy.WAFRule{
+		ID: "body-tail", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "BODY", Operator: "SUFFIX", Value: "blocked"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	})
+	h := provisionHandler(t, "body-tail", waf)
+	body := strings.Repeat("a", wafRequestBodyLimit-len("blocked")) + "blocked"
+	response := httptest.NewRecorder()
+	next := &bodyCaptureHandler{}
+	if err := h.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(body)), next); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusForbidden || response.Header().Get("X-Goveto-WAF-Rule") != "body-tail" || next.calls != 0 {
+		t.Fatalf("status=%d rule=%q next=%d", response.Code, response.Header().Get("X-Goveto-WAF-Rule"), next.calls)
+	}
+}
+
+func TestBodyInspectionRejectsOversizedChunkedRequest(t *testing.T) {
+	waf := singleRulePolicy(policy.WAFRule{
+		ID: "body", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "BODY", Operator: "CONTAINS", Value: "blocked"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	})
+	h := provisionHandler(t, "body-chunked", waf)
+	request := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader(strings.Repeat("a", wafRequestBodyLimit+1)))
+	request.ContentLength = -1
+	request.TransferEncoding = []string{"chunked"}
+	response := httptest.NewRecorder()
+	next := &bodyCaptureHandler{}
+	if err := h.ServeHTTP(response, request, next); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusRequestEntityTooLarge || next.calls != 0 {
+		t.Fatalf("status=%d next=%d", response.Code, next.calls)
+	}
+}
+
+func TestProvisionResetsBodyInspectionState(t *testing.T) {
+	h := provisionHandler(t, "reprovision", singleRulePolicy(policy.WAFRule{
+		ID: "body", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "BODY", Operator: "EXISTS"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	}))
+	h.WAF = singleRulePolicy(policy.WAFRule{
+		ID: "path", Enabled: true, Type: policy.WAFRuleTypeMatch,
+		Conditions: testConditions(policy.WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/blocked"}),
+		Action:     policy.WAFAction{Type: policy.WAFActionBlock, StatusCode: http.StatusForbidden},
+	})
+	if err := h.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	if h.inspectBody {
+		t.Fatal("reprovision retained BODY inspection from the previous policy")
 	}
 }
 
