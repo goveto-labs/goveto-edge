@@ -46,17 +46,22 @@ Usage:
   script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
   script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
   script/run_agent_benchmark.sh cache [options]
+  script/run_agent_benchmark.sh waf [options]
 
 Modes:
   quick  Run every origin and CDN scenario with short timings. It omits only
          long Capacity repetitions and the soak test.
   full   Run the same complete screening suite, Capacity timings only for PASS
-         cases, the focused cache matrix, then the long cache-hit stability test.
+         cases, the focused cache matrix, the WAF performance matrix, then the
+         long cache-hit stability test.
   bandwidth  Run only 1 MiB reuse and 16 MiB transfer Capacity cases on the
              stronger 26c-agent4-load10 load-generator layout.
   small-reuse  Compare full observability with control for 1 KiB/16 KiB reuse.
   cache  Run the focused cache matrix: hot hits, cold writes, mixed traffic,
          32-rule matching, range caching, coalescing, and eviction.
+  waf   Run the focused WAF matrix: clean pass-through with the default regex
+        rule sets, malicious block short-circuit, terminal always-match block,
+        and the WAF-before-cache HIT interaction.
 
 Options:
   --runner <name>             default, 26c-agent2, 26c-agent4, 26c-agent4-load10, or 26c-agent8
@@ -65,9 +70,9 @@ Options:
   --max-load-cpu <percent>    Load saturation threshold (default: 85)
   --soak-protocols "h2"       Full-mode stability protocols (default: h2)
   --soak-duration <duration>  Full-mode stability duration (default: 6h)
-  --cache-warmup <duration>   Full/cache matrix warmup per case (default: 5s)
-  --cache-duration <duration> Full/cache measurement per repeat (default: 15s)
-  --cache-repeats <count>     Full/cache measurement repeats (default: 3)
+  --cache-warmup <duration>   Full/cache/waf matrix warmup per case (default: 5s)
+  --cache-duration <duration> Full/cache/waf measurement per repeat (default: 15s)
+  --cache-repeats <count>     Full/cache/waf measurement repeats (default: 3)
   --baseline-run <run-id>     Optional: compare each case with the same case from this run
   --establish-baseline        Optional: mark this run as a fresh baseline (no comparison)
   --case-filter <regex>       Run only case names matching this Bash regex
@@ -80,7 +85,7 @@ EOF
 
 die() { echo "error: $*" >&2; exit 1; }
 
-if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" || "$1" == "small-reuse" || "$1" == "cache" ]]; then
+if (($# > 0)) && [[ "$1" == "quick" || "$1" == "full" || "$1" == "bandwidth" || "$1" == "small-reuse" || "$1" == "cache" || "$1" == "waf" ]]; then
   mode="$1"
   shift
 fi
@@ -108,7 +113,7 @@ while (($# > 0)); do
   esac
 done
 
-case "$mode" in quick|full|bandwidth|small-reuse|cache) ;; *) die "mode must be quick, full, bandwidth, small-reuse, or cache" ;; esac
+case "$mode" in quick|full|bandwidth|small-reuse|cache|waf) ;; *) die "mode must be quick, full, bandwidth, small-reuse, cache, or waf" ;; esac
 [[ "$runner" == "26c" ]] && runner="26c-agent8"
 case "$runner" in default|26c-agent2|26c-agent4|26c-agent4-load10|26c-agent8) ;; *) die "invalid runner: $runner" ;; esac
 [[ "$mode" != "bandwidth" || "$runner" == "26c-agent4-load10" ]] || die "bandwidth mode requires --runner 26c-agent4-load10"
@@ -263,6 +268,10 @@ run_case() {
     container_baseline="/results/$run_id/baseline/$baseline_run/$phase/$name/report.json"
     if [[ -s "$baseline_report" ]]; then
       baseline_args=(--baseline-run "$container_baseline")
+    elif [[ "$phase" == "waf" ]]; then
+      # WAF cases are new; an older baseline run may not contain them. Fall back
+      # to a standalone measurement instead of failing the whole comparison.
+      echo "[$phase] $name: baseline report missing, running standalone"
     else
       die "baseline case is missing: $baseline_report"
     fi
@@ -688,6 +697,128 @@ capture_cache_profiles() {
   done
 }
 
+run_waf_screen() {
+  local protocol name
+  for protocol in $protocols; do
+    name="waf-clean-1024b-${protocol}-c32"
+    run_case waf "waf:$name" "$name" "$protocol" \
+      --suite pr --protocol "$protocol" --scenario "waf-clean-1024b" \
+      --url "https://agent:8444/bytes/1024?waf_bench=clean-$run_id" \
+      --host waf.benchmark.example.test --insecure-skip-verify \
+      --concurrency 32 --warmup 1s --duration 5s --repeats 1 \
+      --expected-sha256 "$(sha256_zeros 1024)"
+    name="waf-block-xss-${protocol}-c32"
+    run_case waf "waf:$name" "$name" "$protocol" \
+      --suite pr --protocol "$protocol" --scenario "waf-block-xss" \
+      --url "https://agent:8444/bytes/1024?xss=%3Cscript%3Ealert(1)%3C/script%3E&waf_bench=block-$run_id" \
+      --host waf.benchmark.example.test --insecure-skip-verify \
+      --concurrency 32 --warmup 1s --duration 5s --repeats 1 \
+      --allowed-status 403 --allowed-header X-Goveto-WAF=BLOCK \
+      --allowed-header X-Goveto-WAF-Rule=builtin-xss-query
+  done
+}
+
+run_waf_suite() {
+  local phase="$1" suite="$2" warmup="$3" duration="$4" repeats="$5"
+  local protocol concurrency name
+
+  # Clean pass-through: production-default regex MATCH rule sets (XSS, SQLi,
+  # path traversal, sensitive directories) with the rate limiter disabled so a
+  # sustained run does not flip clean responses to 429. Clean traffic matches
+  # nothing, so every rule set is evaluated per request. The per-request
+  # evaluation cost is the WAF overhead and is visible against the matching
+  # pure-origin-*reuse baseline.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="waf-clean-1024b-${protocol}-c${concurrency}"
+      run_case waf "waf:$name" "$name" "$protocol" \
+        --suite "$suite" --protocol "$protocol" --scenario "waf-clean-1024b" \
+        --url "https://agent:8444/bytes/1024?waf_bench=clean-$run_id" \
+        --host waf.benchmark.example.test --insecure-skip-verify \
+        --concurrency "$concurrency" --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
+        --expected-sha256 "$(sha256_zeros 1024)"
+    done
+  done
+
+  # Malicious block: a terminal XSS match short-circuits before the origin.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="waf-block-xss-${protocol}-c${concurrency}"
+      run_case waf "waf:$name" "$name" "$protocol" \
+        --suite "$suite" --protocol "$protocol" --scenario "waf-block-xss" \
+        --url "https://agent:8444/bytes/1024?xss=%3Cscript%3Ealert(1)%3C/script%3E&waf_bench=block-$run_id" \
+        --host waf.benchmark.example.test --insecure-skip-verify \
+        --concurrency "$concurrency" --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
+        --allowed-status 403 --allowed-header X-Goveto-WAF=BLOCK \
+        --allowed-header X-Goveto-WAF-Rule=builtin-xss-query
+    done
+  done
+
+  # WAF + cache HIT: the WAF handler runs before the cache handler, so even hot
+  # HITs pay the full rule evaluation cost. This is the per-request tax that
+  # cache-hit throughput alone cannot see.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="waf-cache-hit-1024b-${protocol}-c${concurrency}"
+      run_case waf "waf:$name" "$name" "$protocol" \
+        --suite "$suite" --protocol "$protocol" --scenario "waf-cache-hit-1024b" \
+        --url "https://agent:8444/bytes/1024?waf_bench=hit-$run_id" \
+        --host waf-cache.benchmark.example.test --insecure-skip-verify \
+        --concurrency "$concurrency" --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
+        --expected-sha256 "$(sha256_zeros 1024)" \
+        --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache \
+        --min-cache-hits 1 --require-cache-writes-drained
+    done
+  done
+
+  # Terminal short-circuit: an always-matching BLOCK rule terminates before
+  # the origin, isolating the upper bound of WAF block throughput.
+  for protocol in $protocols; do
+    for concurrency in 32 128; do
+      name="waf-block-all-${protocol}-c${concurrency}"
+      run_case waf "waf:$name" "$name" "$protocol" \
+        --suite "$suite" --protocol "$protocol" --scenario "waf-block-all" \
+        --url "https://agent:8444/bytes/1024?waf_bench=blockall-$run_id" \
+        --host waf-block.benchmark.example.test --insecure-skip-verify \
+        --concurrency "$concurrency" --warmup "$warmup" --duration "$duration" --repeats "$repeats" \
+        --allowed-status 403 --allowed-header X-Goveto-WAF=BLOCK \
+        --allowed-header X-Goveto-WAF-Rule=benchmark-block-all
+    done
+  done
+}
+
+capture_waf_profile() {
+  local output="$result_dir/profiles/waf-clean" container_output="/results/$run_id/profiles/waf-clean/load"
+  local load_pid ready=false
+  mkdir -p "$output"
+  curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs-before.pprof" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/heap -o "$output/heap-before.pprof" || true
+  compose --profile run run --rm load agent-bench run \
+    --suite capacity --variant full --protocol h1 --scenario waf-profile-clean \
+    --url "https://agent:8444/bytes/1024?waf_bench=profile-clean-$run_id" \
+    --host waf.benchmark.example.test --insecure-skip-verify \
+    --concurrency 32 --warmup 2s --duration 35s --repeats 1 \
+    --agent-pid 1 --agent-metrics-url http://agent:9900/metrics \
+    --runner-id "$runner" --establish-baseline --output "$container_output" \
+    > "$output/load.log" 2>&1 &
+  load_pid=$!
+  for _attempt in $(seq 1 20); do
+    if curl -fsS http://127.0.0.1:19900/variant | jq -e '.variant == "full"' >/dev/null 2>&1; then
+      ready=true
+      break
+    fi
+    sleep 1
+  done
+  if $ready; then
+    curl -fsS "http://127.0.0.1:19900/debug/pprof/profile?seconds=30" -o "$output/cpu.pprof" || true
+  fi
+  wait "$load_pid" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/allocs -o "$output/allocs-after.pprof" || true
+  curl -fsS http://127.0.0.1:19900/debug/pprof/heap -o "$output/heap-after.pprof" || true
+  $ready || die "benchmark variant did not become ready for WAF profiling"
+}
+
 run_origin_capacity() {
   local protocol size concurrency name key
   for protocol in $protocols; do
@@ -887,7 +1018,7 @@ setup_environment() {
   command -v docker >/dev/null 2>&1 || die "docker is required"
   command -v go >/dev/null 2>&1 || die "go is required"
   command -v jq >/dev/null 2>&1 || die "jq is required"
-  if [[ "$mode" == "small-reuse" || "$mode" == "cache" || "$mode" == "full" ]]; then
+  if [[ "$mode" == "small-reuse" || "$mode" == "cache" || "$mode" == "full" || "$mode" == "waf" ]]; then
     command -v curl >/dev/null 2>&1 || die "curl is required for benchmark control endpoints"
   fi
   docker compose version >/dev/null 2>&1 || die "docker compose is required"
@@ -991,9 +1122,22 @@ if [[ "$mode" == "cache" ]]; then
   exit
 fi
 
+if [[ "$mode" == "waf" ]]; then
+  echo "Running focused WAF performance and correctness suite..."
+  run_waf_suite waf capacity "$cache_warmup" "$cache_duration" "$cache_repeats"
+  if ! $dry_run; then
+    capture_waf_profile
+  fi
+  print_summary
+  (( ${status_counts[PRODUCT_FAIL]:-0} == 0 && ${status_counts[LOAD_SATURATED]:-0} == 0 && ${status_counts[ENV_INVALID]:-0} == 0 ))
+  exit
+fi
+
 echo "Running complete quick screening suite..."
 run_origin_screen
 run_cdn_suite screen pr 2s 8s 1
+echo "Running WAF correctness screen..."
+run_waf_screen
 
 if [[ "$mode" == "full" ]]; then
   echo "Starting Capacity stage for PASS cases..."
@@ -1004,6 +1148,11 @@ if [[ "$mode" == "full" ]]; then
   run_cache_benchmark
   if ! $dry_run; then
     capture_cache_profiles
+  fi
+  echo "Starting complete WAF performance stage..."
+  run_waf_suite waf capacity 30s 120s 3
+  if ! $dry_run; then
+    capture_waf_profile
   fi
   echo "Starting long stability stage..."
   run_soak

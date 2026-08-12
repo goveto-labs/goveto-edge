@@ -37,7 +37,7 @@ func main() {
 	caCert, caKey, caPEM, _ := issueCA()
 	serverCert, serverKey := issueLeaf(caCert, caKey, "benchmark-gateway", []string{*serverName}, nil, true)
 	clientCert, clientKey := issueLeaf(caCert, caKey, *nodeID, nil, nil, false)
-	domains := []string{"benchmark.example.test", "cache.benchmark.example.test", "cache-alt.benchmark.example.test", "cache-rules.benchmark.example.test", "multi.benchmark.example.test", "resilient.benchmark.example.test", "limit.benchmark.example.test"}
+	domains := []string{"benchmark.example.test", "cache.benchmark.example.test", "cache-alt.benchmark.example.test", "cache-rules.benchmark.example.test", "multi.benchmark.example.test", "resilient.benchmark.example.test", "limit.benchmark.example.test", "waf.benchmark.example.test", "waf-cache.benchmark.example.test", "waf-block.benchmark.example.test"}
 	edgeCert, edgeKey := issueLeaf(caCert, caKey, domains[0], domains, nil, true)
 	write(filepath.Join(*output, "certs", "ca.crt"), caPEM, 0600)
 	write(filepath.Join(*output, "certs", "server.crt"), serverCert, 0600)
@@ -67,6 +67,24 @@ func main() {
 	resilientPolicy := edgeprotocol.DefaultOriginPolicy()
 	resilientPolicy.Transport.KeepAliveIdleTimeoutMS = 15000
 
+	// benchmarkWAFPolicy keeps the production-default regex MATCH rule sets
+	// (XSS, SQL injection, path traversal, sensitive directories) that dominate
+	// the per-request evaluation cost, but disables the builtin-cc rate limiter
+	// so a sustained throughput run does not flip clean responses to 429. The
+	// rate-limit cost is measured separately by the request-rate-limit case.
+	wafDefault := benchmarkWAFPolicy()
+	wafBlock := cachepolicy.WAFPolicy{Enabled: true, RuleSets: []cachepolicy.WAFRuleSet{{
+		ID: "benchmark-block", Name: "benchmark terminal block", Enabled: true,
+		Rules: []cachepolicy.WAFRule{{
+			ID: "benchmark-block-all", Name: "block all requests", Enabled: true,
+			Type: cachepolicy.WAFRuleTypeMatch,
+			Conditions: cachepolicy.WAFConditions{Operator: "AND", Groups: []cachepolicy.WAFConditionGroup{{
+				Operator: "AND", Conditions: []cachepolicy.WAFCondition{{Field: "PATH", Operator: "PREFIX", Value: "/"}},
+			}}},
+			Action: cachepolicy.WAFAction{Type: cachepolicy.WAFActionBlock, StatusCode: 403},
+		}},
+	}}}
+
 	sites := []edgeprotocol.SiteConfig{
 		{SiteID: "benchmark-site", Version: 1, Domains: []string{domains[0]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy},
 		{SiteID: "benchmark-cache", Version: 1, Domains: domains[1:3], Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(cache)},
@@ -74,6 +92,9 @@ func main() {
 		{SiteID: "benchmark-multi", Version: 1, Domains: []string{domains[4]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "round_robin", OriginPolicy: originPolicy},
 		{SiteID: "benchmark-resilient", Version: 1, Domains: []string{domains[5]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}, {Protocol: "http", Address: "origin2:8080"}}, Scheduler: "first", OriginPolicy: resilientPolicy},
 		{SiteID: "benchmark-limit", Version: 1, Domains: []string{domains[6]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, WAF: asMap(waf)},
+		{SiteID: "benchmark-waf", Version: 1, Domains: []string{domains[7]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, WAF: asMap(wafDefault)},
+		{SiteID: "benchmark-waf-cache", Version: 1, Domains: []string{domains[8]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, Cache: asMap(cache), WAF: asMap(wafDefault)},
+		{SiteID: "benchmark-waf-block", Version: 1, Domains: []string{domains[9]}, Listener: listener, Certificates: []edgeprotocol.CertificateConfig{certificate}, Origins: []edgeprotocol.OriginConfig{{Protocol: "http", Address: "origin:8080"}}, OriginPolicy: originPolicy, WAF: asMap(wafBlock)},
 	}
 	tasks := []edgeprotocol.AgentTask{task(edgeprotocol.TaskNodeCacheConfig, edgeprotocol.NodeCacheConfig{CacheDirectory: "/opt/goveto-edge/cache", AutoMaxSize: false, MaxSizeBytes: 24 << 20, MaxDiskUsagePercent: 90})}
 	for _, site := range sites {
@@ -104,6 +125,16 @@ func asMap(value any) map[string]any {
 		log.Fatal(err)
 	}
 	return result
+}
+
+func benchmarkWAFPolicy() cachepolicy.WAFPolicy {
+	policy := cachepolicy.DefaultWAFPolicy()
+	for index := range policy.RuleSets {
+		if policy.RuleSets[index].ID == "builtin-cc" {
+			policy.RuleSets[index].Enabled = false
+		}
+	}
+	return policy
 }
 
 func benchmarkCachePolicies() (cachepolicy.CachePolicy, cachepolicy.CachePolicy, error) {

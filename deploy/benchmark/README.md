@@ -8,6 +8,7 @@ script/run_agent_benchmark.sh full [options]
 script/run_agent_benchmark.sh bandwidth --runner 26c-agent4-load10 [options]
 script/run_agent_benchmark.sh small-reuse --runner 26c-agent8 [options]
 script/run_agent_benchmark.sh cache [options]
+script/run_agent_benchmark.sh waf [options]
 ```
 
 `quick` runs the complete functional screen. It covers all origin and CDN test
@@ -21,10 +22,10 @@ probes. It skips only the long Capacity and stability stages.
 `full` starts with the same complete screen. It then runs Capacity only for
 cases whose screen status is exactly `PASS`, using a 30 second warmup, 120 second
 measurement, three repetitions, and focused concurrency 32/128. It next runs
-the same complete cache matrix exposed by the standalone `cache` command.
-Finally it runs a 15 minute cache-hit preflight followed by the long stability
-test (H2 for six hours by default) only after the corresponding Capacity case
-passes.
+the same complete cache matrix exposed by the standalone `cache` command, then
+the same complete WAF matrix exposed by the standalone `waf` command. Finally it
+runs a 15 minute cache-hit preflight followed by the long stability test (H2 for
+six hours by default) only after the corresponding Capacity case passes.
 
 `bandwidth` runs only the 1 MiB reuse c32/c128 and 16 MiB transfer c8 Capacity
 cases. It requires `26c-agent4-load10`, keeping this follow-up separate from the
@@ -45,6 +46,30 @@ cache-key, header-key, and hashed-key settings. H1 additionally exercises disk
 eviction under the configured cache capacity. Every case validates cache
 telemetry and response behavior, so an origin-only result cannot pass as a
 cache measurement.
+
+`waf` is the standalone entry point for the complete WAF performance suite that
+is also included in `full`. The data plane runs the WAF handler before the cache
+handler, so WAF rule evaluation is a per-request cost paid even on a cache HIT.
+For every selected protocol it measures four paths at c32/c128:
+
+- `waf-clean`: clean traffic through the production-default regex MATCH rule
+  sets (XSS, SQL injection, path traversal, sensitive directories). Clean
+  traffic matches nothing, so every rule set is evaluated per request; the
+  per-request evaluation cost is the WAF overhead and is visible against the
+  matching `pure-origin-*-reuse` baseline.
+- `waf-block-xss`: a terminal builtin XSS match short-circuits before the origin.
+- `waf-block-all`: an always-matching terminal BLOCK rule isolates the block
+  short-circuit ceiling.
+- `waf-cache-hit`: hot HITs on a cached site that also has the default WAF
+  policy, the only place the hidden per-request WAF tax on cached traffic is
+  visible.
+
+The default `builtin-cc` rate limiter is disabled on the WAF sites so a
+sustained throughput run does not flip clean responses to 429; the rate-limit
+cost is measured separately by the `request-rate-limit-h1` case. Clean cases
+assert a 200 and the origin body SHA-256; block cases assert a 403 with
+`X-Goveto-WAF=BLOCK` and the expected `X-Goveto-WAF-Rule`; the cache-hit case
+additionally asserts `X-Cache=HIT/STALE` with a drained write queue.
 
 ## Commands
 
@@ -68,12 +93,19 @@ script/run_agent_benchmark.sh cache --runner 26c-agent4 \
   --cache-warmup 2s --cache-duration 5s --cache-repeats 1
 ```
 
+Run the dedicated WAF matrix with the same cache-style timings:
+
+```sh
+script/run_agent_benchmark.sh waf --runner 26c-agent4
+```
+
 Inspect every expanded case without starting Docker:
 
 ```sh
 script/run_agent_benchmark.sh quick --runner 26c-agent8 --dry-run
 script/run_agent_benchmark.sh full --runner 26c-agent2 --dry-run
 script/run_agent_benchmark.sh cache --runner 26c-agent4 --dry-run
+script/run_agent_benchmark.sh waf --runner 26c-agent4 --dry-run
 ```
 
 Available runner layouts are `default`, `26c-agent2`, `26c-agent4`,
@@ -96,10 +128,11 @@ and connection-mode match. Run `script/run_agent_benchmark.sh --help` for all
 options.
 
 The cache matrix timings in `full` and `cache` default to a 5 second warmup,
-15 second measurement, and three repetitions. Override them with
-`--cache-warmup`, `--cache-duration`, and `--cache-repeats`. The coalescing and
-eviction cases intentionally use one repeat because they depend on a freshly
-cold key or cache-capacity transition.
+15 second measurement, and three repetitions. The `waf` matrix uses the same
+timings and the same overrides. Override them with `--cache-warmup`,
+`--cache-duration`, and `--cache-repeats`. The coalescing and eviction cases
+intentionally use one repeat because they depend on a freshly cold key or
+cache-capacity transition.
 
 ## Result validity
 
@@ -149,6 +182,15 @@ second. All cache cases require the write queue to drain without rejections.
 Direct `agent-bench` runs can add `--min-rps`, `--max-p99`,
 `--max-allocation-bytes-per-request`, `--require-cache-writes-drained`,
 `--min-baseline-rps-ratio`, and `--max-baseline-allocation-ratio` gates.
+
+WAF cases are new. Comparing a run that includes WAF cases against an older
+run that predates them will not fail: a missing WAF baseline report makes that
+case run standalone instead of aborting the comparison. The first run with WAF
+cases should therefore use `--establish-baseline` so the next run can regress
+the WAF cases with `--baseline-run`. The clean pass-through case is the
+reference for the WAF overhead; compare its summary against the matching
+`pure-origin-1024b-reuse-<proto>-c<conc>` Capacity case to quantify the
+per-request rule-evaluation cost.
 
 ## H3 prerequisite
 
