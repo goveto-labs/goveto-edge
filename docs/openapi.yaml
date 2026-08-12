@@ -622,7 +622,7 @@ paths:
                                                 format: date-time
                                                 example: "2026-01-02T15:04:05Z"
                                             token:
-                                                type: string
+                                                $ref: '#/components/schemas/wafdsl_token'
                 "400":
                     description: Client Error
                     content:
@@ -9374,6 +9374,150 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/security/dsl/render:
+        post:
+            operationId: renderSecurityDSL
+            summary: Render WAF DSL
+            description: Render a policy, rule set, rule, or condition group as canonical WAF DSL.
+            tags:
+                - sites
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - auth.RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                scope:
+                                    $ref: '#/components/schemas/wafdsl_Scope'
+                                source:
+                                    type: string
+                                target:
+                                    $ref: '#/components/schemas/wafdsl_Target'
+                                waf:
+                                    $ref: '#/components/schemas/policy_WAFPolicy'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            source:
+                                                type: string
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/sites/{site_id}/security/dsl/validate:
+        post:
+            operationId: validateSecurityDSL
+            summary: Validate WAF DSL
+            description: Parse a WAF DSL fragment, merge it into the supplied draft, and validate the complete policy.
+            tags:
+                - sites
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - auth.RequireAuth
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: site_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                scope:
+                                    $ref: '#/components/schemas/wafdsl_Scope'
+                                source:
+                                    type: string
+                                target:
+                                    $ref: '#/components/schemas/wafdsl_Target'
+                                waf:
+                                    $ref: '#/components/schemas/policy_WAFPolicy'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            diagnostics:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/wafdsl_Diagnostic'
+                                            source:
+                                                type: string
+                                            valid:
+                                                type: boolean
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/sites/bulk:
         post:
             operationId: bulkSites
@@ -12517,6 +12661,43 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+        wafdsl_Diagnostic:
+            type: object
+            properties:
+                column:
+                    type: integer
+                    format: int32
+                end_column:
+                    type: integer
+                    format: int32
+                end_line:
+                    type: integer
+                    format: int32
+                line:
+                    type: integer
+                    format: int32
+                message:
+                    type: string
+                severity:
+                    type: string
+        wafdsl_Scope:
+            type: string
+            enum:
+                - POLICY
+                - RULE_SET
+                - RULE
+                - GROUP
+        wafdsl_Target:
+            type: object
+            properties:
+                group_id:
+                    type: string
+                rule_id:
+                    type: string
+                rule_set_id:
+                    type: string
+        wafdsl_token:
+            type: object
     securitySchemes:
         cookie_goveto_session:
             type: apiKey

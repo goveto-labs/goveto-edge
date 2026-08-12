@@ -4,10 +4,14 @@ import type {
     WAFCondition,
     WAFConditionGroup,
     WAFConditions,
+    WAFDSLRenderResponse,
+    WAFDSLRequest,
+    WAFDSLValidationResponse,
     WAFResponse,
     WAFRule,
     WAFRuleSet,
 } from '@/api';
+import type { WAFDSLEditRequest } from '@/components/WAFDSLEditorDialog.tsx';
 
 import {
     closestCenter,
@@ -27,9 +31,10 @@ import {
     verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Button, Input, TextArea } from '@heroui/react';
+import { Button, Input, TextArea, Tooltip } from '@heroui/react';
 import {
     ArrowLeft,
+    Braces,
     ChevronDown,
     ChevronRight,
     GripVertical,
@@ -39,13 +44,19 @@ import {
     ShieldCheck,
     Trash2,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { SettingsActionBar } from '@/components/SettingsActionBar.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
+
+const WAFDSLEditorDialog = lazy(() =>
+    import('@/components/WAFDSLEditorDialog.tsx').then((module) => ({
+        default: module.WAFDSLEditorDialog,
+    }))
+);
 
 const fields = [
     ['METHOD', 'Method'],
@@ -415,6 +426,7 @@ function SortablePreviewRow({
     detail,
     badges = [],
     onEdit,
+    onEditDSL,
     onRemove,
 }: {
     id: string;
@@ -423,6 +435,7 @@ function SortablePreviewRow({
     detail: string;
     badges?: string[];
     onEdit: () => void;
+    onEditDSL?: () => void;
     onRemove: () => void;
 }) {
     const sortable = useSortable({ id });
@@ -468,6 +481,22 @@ function SortablePreviewRow({
             >
                 <Pencil className='h-4 w-4' />
             </Button>
+            {onEditDSL && (
+                <Tooltip>
+                    <Tooltip.Trigger>
+                        <Button
+                            isIconOnly
+                            aria-label={`Edit ${title} as DSL`}
+                            size='sm'
+                            variant='ghost'
+                            onPress={onEditDSL}
+                        >
+                            <Braces className='h-4 w-4' />
+                        </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>Edit as DSL</Tooltip.Content>
+                </Tooltip>
+            )}
             <Button
                 isIconOnly
                 aria-label={`Remove ${title}`}
@@ -487,12 +516,14 @@ function ConditionsEditor({
     onChange,
     onAdd,
     onEdit,
+    onEditDSL,
 }: {
     conditions: WAFConditions;
     optional: boolean;
     onChange: (conditions: WAFConditions) => void;
     onAdd: () => void;
     onEdit: (index: number) => void;
+    onEditDSL: (index: number) => void;
 }) {
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -549,6 +580,7 @@ function ConditionsEditor({
                                     meta={`${group.conditions.length} condition${group.conditions.length === 1 ? '' : 's'}`}
                                     title={`Group ${index + 1} · ${group.operator}`}
                                     onEdit={() => onEdit(index)}
+                                    onEditDSL={() => onEditDSL(index)}
                                     onRemove={() =>
                                         onChange({
                                             ...conditions,
@@ -572,11 +604,13 @@ function RuleEditor({
     onChange,
     onAddGroup,
     onEditGroup,
+    onEditGroupDSL,
 }: {
     rule: WAFRule;
     onChange: (rule: WAFRule) => void;
     onAddGroup: () => void;
     onEditGroup: (index: number) => void;
+    onEditGroupDSL: (index: number) => void;
 }) {
     return (
         <div className='space-y-6'>
@@ -716,6 +750,7 @@ function RuleEditor({
                     onChange={(conditions) => onChange({ ...rule, conditions })}
                     onAdd={onAddGroup}
                     onEdit={onEditGroup}
+                    onEditDSL={onEditGroupDSL}
                 />
             </section>
             <section className='space-y-3 border-t border-border pt-5'>
@@ -735,11 +770,13 @@ function SortableRule({
     rule,
     onChange,
     onEdit,
+    onEditDSL,
     onRemove,
 }: {
     rule: WAFRule;
     onChange: (rule: WAFRule) => void;
     onEdit: () => void;
+    onEditDSL: () => void;
     onRemove: () => void;
 }) {
     const sortable = useSortable({ id: rule.id });
@@ -795,6 +832,20 @@ function SortableRule({
                 >
                     <Pencil className='h-4 w-4' />
                 </Button>
+                <Tooltip>
+                    <Tooltip.Trigger>
+                        <Button
+                            isIconOnly
+                            aria-label={`Edit ${rule.name} as DSL`}
+                            size='sm'
+                            variant='ghost'
+                            onPress={onEditDSL}
+                        >
+                            <Braces className='h-4 w-4' />
+                        </Button>
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>Edit as DSL</Tooltip.Content>
+                </Tooltip>
                 <Button
                     isIconOnly
                     aria-label={`Remove ${rule.name}`}
@@ -908,12 +959,16 @@ function RuleEditorDialog({
     ruleIndex,
     onChange,
     onClose,
+    onEditGroupDSL,
+    onEditRuleDSL,
     onSave,
 }: {
     rule: WAFRule | null;
     ruleIndex: number | null;
     onChange: (rule: WAFRule) => void;
     onClose: () => void;
+    onEditGroupDSL: (index: number) => void;
+    onEditRuleDSL: () => void;
     onSave: () => void;
 }) {
     const [groupDraft, setGroupDraft] = useState<WAFConditionGroup | null>(null);
@@ -1041,12 +1096,21 @@ function RuleEditorDialog({
                         onEditCondition={openCondition}
                     />
                 ) : rule ? (
-                    <RuleEditor
-                        rule={rule}
-                        onAddGroup={() => openGroup(null)}
-                        onChange={onChange}
-                        onEditGroup={openGroup}
-                    />
+                    <div className='space-y-4'>
+                        <div className='flex justify-end'>
+                            <Button size='sm' variant='secondary' onPress={onEditRuleDSL}>
+                                <Braces className='h-4 w-4' />
+                                Edit rule DSL
+                            </Button>
+                        </div>
+                        <RuleEditor
+                            rule={rule}
+                            onAddGroup={() => openGroup(null)}
+                            onChange={onChange}
+                            onEditGroup={openGroup}
+                            onEditGroupDSL={onEditGroupDSL}
+                        />
+                    </div>
                 ) : null}
             </div>
             <DialogFooter>
@@ -1098,12 +1162,18 @@ function RuleEditorDialog({
 
 function SortableRuleSet({
     ruleSet,
+    waf,
     onChange,
+    onOpenDSL,
     onRemove,
+    onWAFChange,
 }: {
     ruleSet: WAFRuleSet;
+    waf: SecurityPolicy['waf'];
     onChange: (ruleSet: WAFRuleSet) => void;
+    onOpenDSL: (request: WAFDSLEditRequest) => void;
     onRemove: () => void;
+    onWAFChange: (waf: SecurityPolicy['waf']) => void;
 }) {
     const [expanded, setExpanded] = useState(true);
     const [ruleDraft, setRuleDraft] = useState<WAFRule | null>(null);
@@ -1143,6 +1213,66 @@ function SortableRuleSet({
                     : ruleSet.rules.map((rule, index) => (index === ruleIndex ? ruleDraft : rule)),
         });
         closeRule();
+    };
+    const draftPolicy = (draft: WAFRule) => {
+        const next = structuredClone(waf);
+        const set = next.rule_sets.find((item) => item.id === ruleSet.id);
+        if (!set) return next;
+        if (ruleIndex === null) set.rules.push(draft);
+        else set.rules[ruleIndex] = draft;
+        return next;
+    };
+    const openRuleDSL = (rule: WAFRule) =>
+        onOpenDSL({
+            title: 'Edit rule DSL',
+            subtitle: `${ruleSet.name} / ${rule.name}`,
+            request: {
+                scope: 'RULE',
+                target: { rule_set_id: ruleSet.id, rule_id: rule.id },
+                waf,
+            },
+            onApply: onWAFChange,
+        });
+    const openDraftRuleDSL = () => {
+        if (!ruleDraft) return;
+        const snapshot = draftPolicy(ruleDraft);
+        const position = ruleIndex ?? ruleSet.rules.length;
+        onOpenDSL({
+            title: 'Edit rule DSL',
+            subtitle: `${ruleSet.name} / ${ruleDraft.name}`,
+            request: {
+                scope: 'RULE',
+                target: { rule_set_id: ruleSet.id, rule_id: ruleDraft.id },
+                waf: snapshot,
+            },
+            onApply: (next) => {
+                const set = next.rule_sets.find((item) => item.id === ruleSet.id);
+                if (set?.rules[position]) setRuleDraft(structuredClone(set.rules[position]));
+            },
+        });
+    };
+    const openDraftGroupDSL = (groupIndex: number) => {
+        if (!ruleDraft) return;
+        const snapshot = draftPolicy(ruleDraft);
+        const position = ruleIndex ?? ruleSet.rules.length;
+        const group = ruleDraft.conditions.groups[groupIndex];
+        onOpenDSL({
+            title: 'Edit condition group DSL',
+            subtitle: `${ruleDraft.name} / Group ${groupIndex + 1}`,
+            request: {
+                scope: 'GROUP',
+                target: {
+                    rule_set_id: ruleSet.id,
+                    rule_id: ruleDraft.id,
+                    group_id: group.id,
+                },
+                waf: snapshot,
+            },
+            onApply: (next) => {
+                const set = next.rule_sets.find((item) => item.id === ruleSet.id);
+                if (set?.rules[position]) setRuleDraft(structuredClone(set.rules[position]));
+            },
+        });
     };
     return (
         <>
@@ -1184,6 +1314,31 @@ function SortableRuleSet({
                         <Plus className='h-4 w-4' />
                         Add rule
                     </Button>
+                    <Tooltip>
+                        <Tooltip.Trigger>
+                            <Button
+                                isIconOnly
+                                aria-label={`Edit ${ruleSet.name} as DSL`}
+                                size='sm'
+                                variant='ghost'
+                                onPress={() =>
+                                    onOpenDSL({
+                                        title: 'Edit rule set DSL',
+                                        subtitle: ruleSet.name,
+                                        request: {
+                                            scope: 'RULE_SET',
+                                            target: { rule_set_id: ruleSet.id },
+                                            waf,
+                                        },
+                                        onApply: onWAFChange,
+                                    })
+                                }
+                            >
+                                <Braces className='h-4 w-4' />
+                            </Button>
+                        </Tooltip.Trigger>
+                        <Tooltip.Content>Edit rule set as DSL</Tooltip.Content>
+                    </Tooltip>
                     <Button
                         isIconOnly
                         aria-label={`Remove ${ruleSet.name}`}
@@ -1222,6 +1377,7 @@ function SortableRuleSet({
                                             })
                                         }
                                         onEdit={() => openRule(index)}
+                                        onEditDSL={() => openRuleDSL(rule)}
                                         onRemove={() =>
                                             onChange({
                                                 ...ruleSet,
@@ -1242,6 +1398,8 @@ function SortableRuleSet({
                 ruleIndex={ruleIndex}
                 onChange={setRuleDraft}
                 onClose={closeRule}
+                onEditGroupDSL={openDraftGroupDSL}
+                onEditRuleDSL={openDraftRuleDSL}
                 onSave={saveRule}
             />
         </>
@@ -1284,6 +1442,8 @@ export function SiteSecuritySettings({
     policy,
     isDirty,
     saving,
+    renderDSL,
+    validateDSL,
     onChange,
     onDiscard,
     onSave,
@@ -1291,10 +1451,13 @@ export function SiteSecuritySettings({
     policy: SecurityPolicy;
     isDirty: boolean;
     saving: boolean;
+    renderDSL: (request: WAFDSLRequest) => Promise<WAFDSLRenderResponse>;
+    validateDSL: (request: WAFDSLRequest) => Promise<WAFDSLValidationResponse>;
     onChange: (policy: SecurityPolicy) => void;
     onDiscard: () => void;
     onSave: () => void;
 }) {
+    const [dslEdit, setDSLEdit] = useState<WAFDSLEditRequest | null>(null);
     const sensors = useSensors(
         useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
         useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 5 } }),
@@ -1342,6 +1505,30 @@ export function SiteSecuritySettings({
                             <Plus className='h-4 w-4' />
                             Add rule set
                         </Button>
+                        <Tooltip>
+                            <Tooltip.Trigger>
+                                <Button
+                                    isIconOnly
+                                    aria-label='Edit WAF policy as DSL'
+                                    variant='ghost'
+                                    onPress={() =>
+                                        setDSLEdit({
+                                            title: 'Edit WAF policy DSL',
+                                            subtitle: 'Current site policy',
+                                            request: {
+                                                scope: 'POLICY',
+                                                target: {},
+                                                waf: policy.waf,
+                                            },
+                                            onApply: (waf) => onChange({ ...policy, waf }),
+                                        })
+                                    }
+                                >
+                                    <Braces className='h-4 w-4' />
+                                </Button>
+                            </Tooltip.Trigger>
+                            <Tooltip.Content>Edit policy as DSL</Tooltip.Content>
+                        </Tooltip>
                     </div>
                 </div>
                 <div className='space-y-4 p-5'>
@@ -1364,6 +1551,7 @@ export function SiteSecuritySettings({
                                         <SortableRuleSet
                                             key={set.id}
                                             ruleSet={set}
+                                            waf={policy.waf}
                                             onChange={(next) =>
                                                 updateSets(
                                                     policy.waf.rule_sets.map((item, current) =>
@@ -1378,6 +1566,8 @@ export function SiteSecuritySettings({
                                                     )
                                                 )
                                             }
+                                            onOpenDSL={setDSLEdit}
+                                            onWAFChange={(waf) => onChange({ ...policy, waf })}
                                         />
                                     ))
                                 )}
@@ -1397,6 +1587,16 @@ export function SiteSecuritySettings({
                     {saving ? 'Saving...' : 'Save security'}
                 </Button>
             </SettingsActionBar>
+            {dslEdit && (
+                <Suspense fallback={null}>
+                    <WAFDSLEditorDialog
+                        renderDSL={renderDSL}
+                        validateDSL={validateDSL}
+                        value={dslEdit}
+                        onClose={() => setDSLEdit(null)}
+                    />
+                </Suspense>
+            )}
         </div>
     );
 }

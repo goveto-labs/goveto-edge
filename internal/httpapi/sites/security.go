@@ -13,12 +13,60 @@ import (
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
+	"goveto-edge/internal/wafdsl"
 )
 
 type securityPolicyResponse struct {
 	WAF          securitypolicy.WAFPolicy `json:"waf"`
 	PublishJob   *types.PublishJob        `json:"publish_job,omitempty"`
 	PublishError string                   `json:"publish_error,omitempty"`
+}
+
+type wafDSLRequest struct {
+	Scope  wafdsl.Scope             `json:"scope"`
+	Target wafdsl.Target            `json:"target"`
+	WAF    securitypolicy.WAFPolicy `json:"waf"`
+	Source string                   `json:"source,omitempty"`
+}
+
+type wafDSLRenderResponse struct {
+	Source string `json:"source"`
+}
+
+// @summary Render WAF DSL
+// @description Render a policy, rule set, rule, or condition group as canonical WAF DSL.
+// @Tags sites
+func renderSecurityDSL(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if err := ensureSiteInCluster(c, db); err != nil {
+			return err
+		}
+		input := wafDSLRequest{}
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		source, err := wafdsl.Render(input.WAF, input.Scope, input.Target)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		return types.JSON(c, http.StatusOK, wafDSLRenderResponse{Source: source})
+	}
+}
+
+// @summary Validate WAF DSL
+// @description Parse a WAF DSL fragment, merge it into the supplied draft, and validate the complete policy.
+// @Tags sites
+func validateSecurityDSL(db *client.Client) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if err := ensureSiteInCluster(c, db); err != nil {
+			return err
+		}
+		input := wafDSLRequest{}
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		return types.JSON(c, http.StatusOK, wafdsl.ParseAndApply(input.WAF, input.Scope, input.Target, input.Source))
+	}
 }
 
 // @summary Get site security policy

@@ -11,6 +11,7 @@ import type {
     SiteListenerConfig,
     SiteOrigin,
     TrafficPoint,
+    WAFDSLRequest,
 } from '@/api';
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
@@ -310,6 +311,14 @@ export default function SiteDetail() {
     const publishing = useMemo(() => publishApi(clusterId), [clusterId]);
     const certificateApi = useMemo(() => certificatesApi(clusterId), [clusterId]);
     const dns = useMemo(() => dnsApi(clusterId), [clusterId]);
+    const renderSecurityDSL = useCallback(
+        (request: WAFDSLRequest) => api.renderSecurityDSL(siteId, request),
+        [api, siteId]
+    );
+    const validateSecurityDSL = useCallback(
+        (request: WAFDSLRequest) => api.validateSecurityDSL(siteId, request),
+        [api, siteId]
+    );
     const parts = detailPath.split('/').filter(Boolean);
     const requestedTab = parts[0] || 'overview';
     const tab: DetailTab =
@@ -1998,7 +2007,9 @@ export default function SiteDetail() {
                                             <SiteSecuritySettings
                                                 isDirty={securityRulesDirty}
                                                 policy={security}
+                                                renderDSL={renderSecurityDSL}
                                                 saving={saving}
+                                                validateDSL={validateSecurityDSL}
                                                 onChange={setSecurity}
                                                 onDiscard={() =>
                                                     setSecurity((current) => ({

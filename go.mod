@@ -3,6 +3,7 @@ module goveto-edge
 go 1.26.5
 
 require (
+	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/andybalholm/brotli v1.2.2
 	github.com/arsfy/gcorm v0.1.12
 	github.com/aws/aws-sdk-go-v2 v1.41.7

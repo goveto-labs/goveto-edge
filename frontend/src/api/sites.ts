@@ -17,6 +17,9 @@ import type {
     SiteSummary,
     SiteTemplate,
     UpdateSiteRequest,
+    WAFDSLRenderResponse,
+    WAFDSLRequest,
+    WAFDSLValidationResponse,
 } from './types.ts';
 
 import { del, get, patch, post, put } from './client.ts';
@@ -56,6 +59,16 @@ export const sitesApi = (clusterId: string) => ({
     updateSecurity: (siteId: string, payload: SecurityPolicy) =>
         put<SiteSecurityUpdateResponse>(
             clusterPath(clusterId, `/sites/${siteId}/security`),
+            payload
+        ),
+    renderSecurityDSL: (siteId: string, payload: WAFDSLRequest) =>
+        post<WAFDSLRenderResponse>(
+            clusterPath(clusterId, `/sites/${siteId}/security/dsl/render`),
+            payload
+        ),
+    validateSecurityDSL: (siteId: string, payload: WAFDSLRequest) =>
+        post<WAFDSLValidationResponse>(
+            clusterPath(clusterId, `/sites/${siteId}/security/dsl/validate`),
             payload
         ),
     getDelivery: (siteId: string) =>

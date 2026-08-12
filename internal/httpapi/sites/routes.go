@@ -86,6 +86,8 @@ func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/delivery", updateDelivery(db, publishService), auth.RequireAuth, write)
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/security", getSecurity(db), auth.RequireAuth, read)
 	e.PUT("/api/v1/clusters/:cluster_id/sites/:site_id/security", updateSecurity(db, publishService), auth.RequireAuth, write)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/security/dsl/render", renderSecurityDSL(db), auth.RequireAuth, read)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/security/dsl/validate", validateSecurityDSL(db), auth.RequireAuth, read)
 }
 
 // @summary List sites

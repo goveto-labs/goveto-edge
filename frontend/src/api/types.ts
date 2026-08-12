@@ -718,6 +718,41 @@ export interface SiteSecurityUpdateResponse extends SecurityPolicy {
     publish_error?: string;
 }
 
+export type WAFDSLScope = 'POLICY' | 'RULE_SET' | 'RULE' | 'GROUP';
+
+export interface WAFDSLTarget {
+    rule_set_id?: string;
+    rule_id?: string;
+    group_id?: string;
+}
+
+export interface WAFDSLRequest {
+    scope: WAFDSLScope;
+    target: WAFDSLTarget;
+    waf: SecurityPolicy['waf'];
+    source?: string;
+}
+
+export interface WAFDSLDiagnostic {
+    severity: 'error' | 'warning';
+    message: string;
+    line: number;
+    column: number;
+    end_line: number;
+    end_column: number;
+}
+
+export interface WAFDSLRenderResponse {
+    source: string;
+}
+
+export interface WAFDSLValidationResponse {
+    valid: boolean;
+    source: string;
+    policy?: SecurityPolicy['waf'];
+    diagnostics: WAFDSLDiagnostic[];
+}
+
 export interface CreateSiteRequest {
     name: string;
     domains: string[];
