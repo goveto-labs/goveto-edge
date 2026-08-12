@@ -1,11 +1,22 @@
 package clusters
 
 import (
+	"context"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
 	"goveto-edge/internal/storage/gen/model"
 )
+
+type notificationRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f notificationRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
 
 func TestValidateNotificationChannelInput(t *testing.T) {
 	enabled := true
@@ -80,5 +91,88 @@ func TestNotificationChannelEncryptionScopeSeparatesClustersAndChannels(t *testi
 		if first == other {
 			t.Fatalf("scope %q must differ from %q", first, other)
 		}
+	}
+}
+
+func TestDeliverGenericNotificationRejectsPrivateDestination(t *testing.T) {
+	target, err := url.Parse("generic+http://127.0.0.1/webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = deliverGenericNotification(context.Background(), target, "message", "title"); err == nil {
+		t.Fatal("private webhook destination was accepted")
+	}
+}
+
+func TestDeliverGenericNotificationUsesBoundedClient(t *testing.T) {
+	httpClient := &http.Client{Transport: notificationRoundTripper(func(*http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(strings.Repeat("x", notificationResponseLimit+1))),
+		}, nil
+	})}
+	target, err := url.Parse("generic+https://8.8.8.8/hook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = deliverGenericNotificationWithClient(context.Background(), httpClient, target, "message", "title"); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("oversized response error = %v", err)
+	}
+}
+
+func TestValidateNotificationURLRejectsUnsafeServicesAndGenericOptions(t *testing.T) {
+	for _, rawURL := range []string{
+		"googlechat://127.0.0.1/?key=value&token=value",
+		"teams://tenant/a/b?host=127.0.0.1",
+		"generic+http://example.com/hook",
+		"generic+https://example.com/hook?method=DELETE",
+		"generic+https://example.com/hook?disabletls=yes",
+	} {
+		if _, err := validateNotificationURL(rawURL); err == nil {
+			t.Fatalf("unsafe notification URL %q was accepted", rawURL)
+		}
+	}
+}
+
+func TestDeliverGenericNotificationRejectsUnsafeHeader(t *testing.T) {
+	target, err := url.Parse("generic+https://8.8.8.8/hook?%40Host=internal.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = deliverGenericNotification(context.Background(), target, "message", "title"); err == nil || !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("unsafe header error = %v", err)
+	}
+}
+
+func TestCustomHostHTTPRequestUsesHTTPS(t *testing.T) {
+	for _, test := range []struct {
+		service string
+		rawURL  string
+	}{
+		{service: "bark", rawURL: "bark://:device-key@api.day.app"},
+		{service: "gotify", rawURL: "gotify://gotify.example.com/AzyoeNS.D4iJLVa"},
+		{service: "ntfy", rawURL: "ntfy://ntfy.sh/goveto-alerts"},
+	} {
+		t.Run(test.service, func(t *testing.T) {
+			parsed, err := url.Parse(test.rawURL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			target, _, _, err := customHostHTTPRequest(test.service, parsed, "message", "title")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if target.Scheme != "https" || target.Hostname() != parsed.Hostname() {
+				t.Fatalf("target = %s", target)
+			}
+		})
+	}
+}
+
+func TestParseMailboxesRejectsHeaderInjection(t *testing.T) {
+	if _, err := parseMailboxes("ops@example.com\r\nBcc: attacker@example.com"); err == nil {
+		t.Fatal("SMTP recipient header injection was accepted")
 	}
 }

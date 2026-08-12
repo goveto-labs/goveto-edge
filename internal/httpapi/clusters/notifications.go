@@ -1,7 +1,9 @@
 package clusters
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -18,6 +20,7 @@ import (
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
@@ -25,6 +28,14 @@ import (
 )
 
 const notificationURLLimit = 8192
+
+const notificationResponseLimit = 1 << 20
+
+var (
+	notificationOutboundPolicy = outboundhttp.NewPolicy()
+	notificationHTTPClient     = notificationOutboundPolicy.Client()
+	notificationSendSlots      = make(chan struct{}, 16)
+)
 
 type notificationChannelRequest struct {
 	Name    string `json:"name"`
@@ -235,7 +246,7 @@ func testNotificationChannel(db *client.Client, cipher *node.CredentialCipher) e
 		if err != nil {
 			return errors.New("decrypt notification channel URL")
 		}
-		if err = deliverTestNotification(rawURL, item.ClusterId, item.Name); err != nil {
+		if err = deliverTestNotification(ctx, rawURL, item.ClusterId, item.Name); err != nil {
 			return err
 		}
 		audit.SetResourceID(c, item.Id)
@@ -263,26 +274,149 @@ func testDraftNotificationChannel() echo.HandlerFunc {
 		if name == "" {
 			name = "draft"
 		}
-		if err := deliverTestNotification(rawURL, c.Param("cluster_id"), name); err != nil {
+		if err := deliverTestNotification(c.Request().Context(), rawURL, c.Param("cluster_id"), name); err != nil {
 			return err
 		}
 		return types.JSON(c, http.StatusOK, map[string]bool{"delivered": true})
 	}
 }
 
-func deliverTestNotification(rawURL, clusterID, channelName string) error {
+func deliverTestNotification(ctx context.Context, rawURL, clusterID, channelName string) error {
+	select {
+	case notificationSendSlots <- struct{}{}:
+		defer func() { <-notificationSendSlots }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusUnprocessableEntity, "notification URL is invalid")
+	}
+	service := strings.ToLower(strings.SplitN(parsed.Scheme, "+", 2)[0])
+	message := fmt.Sprintf("Goveto notification test\nCluster: %s\nChannel: %s", clusterID, channelName)
+	switch service {
+	case "bark", "gotify", "ntfy", "smtp":
+		if err = deliverCustomHostNotification(ctx, service, parsed, message, "Goveto notification test"); err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
+		}
+		return nil
+	case "generic":
+		if err = deliverGenericNotification(ctx, parsed, message, "Goveto notification test"); err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
+		}
+		return nil
+	}
 	sender, err := shoutrrr.CreateSender(rawURL)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, "notification URL is invalid")
 	}
 	sender.Timeout = 10 * time.Second
-	message := fmt.Sprintf("Goveto notification test\nCluster: %s\nChannel: %s", clusterID, channelName)
 	for _, sendErr := range sender.Send(message, &shoutrrrtypes.Params{"title": "Goveto notification test"}) {
 		if sendErr != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
 		}
 	}
 	return nil
+}
+
+func deliverGenericNotification(ctx context.Context, serviceURL *url.URL, message, title string) error {
+	return deliverGenericNotificationWithClient(ctx, notificationHTTPClient, serviceURL, message, title)
+}
+
+func deliverGenericNotificationWithClient(ctx context.Context, httpClient *http.Client, serviceURL *url.URL, message, title string) error {
+	target := *serviceURL
+	switch {
+	case strings.HasPrefix(strings.ToLower(target.Scheme), "generic+"):
+		target.Scheme = target.Scheme[len("generic+"):]
+	case strings.EqualFold(target.Scheme, "generic"):
+		target.Scheme = "https"
+	default:
+		return errors.New("invalid generic webhook scheme")
+	}
+	query := target.Query()
+	method := strings.ToUpper(strings.TrimSpace(query.Get("method")))
+	if method == "" {
+		method = http.MethodPost
+	}
+	if method != http.MethodPost {
+		return errors.New("generic webhooks only support POST")
+	}
+	contentType := strings.TrimSpace(query.Get("contenttype"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	body := []byte(message)
+	if strings.EqualFold(query.Get("template"), "json") {
+		messageKey := strings.TrimSpace(query.Get("messagekey"))
+		if messageKey == "" {
+			messageKey = "message"
+		}
+		titleKey := strings.TrimSpace(query.Get("titlekey"))
+		if titleKey == "" {
+			titleKey = "title"
+		}
+		payload := map[string]string{messageKey: message, titleKey: title}
+		for key, values := range query {
+			if strings.HasPrefix(key, "$") && len(values) > 0 {
+				payload[strings.TrimPrefix(key, "$")] = values[0]
+			}
+		}
+		var err error
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+	} else if template := strings.TrimSpace(query.Get("template")); template != "" {
+		return fmt.Errorf("generic webhook template %q is not supported", template)
+	}
+	for key := range query {
+		switch {
+		case strings.HasPrefix(key, "@"), strings.HasPrefix(key, "$"), isGenericConfigKey(key):
+			query.Del(key)
+		case strings.HasPrefix(key, "__"):
+			values := query[key]
+			query.Del(key)
+			query[strings.TrimPrefix(key, "__")] = values
+		}
+	}
+	target.RawQuery = query.Encode()
+	if err := notificationOutboundPolicy.ValidateURL(ctx, &target, "https"); err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Accept", contentType)
+	for key, values := range serviceURL.Query() {
+		if strings.HasPrefix(key, "@") && len(values) > 0 {
+			name := http.CanonicalHeaderKey(strings.TrimPrefix(key, "@"))
+			if isForbiddenWebhookHeader(name) {
+				return fmt.Errorf("generic webhook header %q is not allowed", name)
+			}
+			request.Header.Set(name, values[0])
+		}
+	}
+	return sendBoundedNotificationRequest(httpClient, request)
+}
+
+func isForbiddenWebhookHeader(name string) bool {
+	switch name {
+	case "Connection", "Content-Length", "Host", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGenericConfigKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "contenttype", "disabletls", "messagekey", "method", "template", "title", "titlekey":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateNotificationChannelInput(input notificationChannelRequest, requireURL bool) (name, rawURL, service string, err error) {
@@ -319,10 +453,34 @@ func validateNotificationURL(rawURL string) (string, error) {
 		return "", errors.New("url must be a valid Shoutrrr URL")
 	}
 	service := strings.ToLower(strings.SplitN(parsed.Scheme, "+", 2)[0])
+	if !isSupportedNotificationService(service) {
+		return "", errors.New("notification service is not supported")
+	}
+	if service == "generic" {
+		targetScheme := strings.ToLower(strings.TrimPrefix(parsed.Scheme, "generic+"))
+		if targetScheme != "https" && !strings.EqualFold(parsed.Scheme, "generic") {
+			return "", errors.New("generic webhook must use HTTPS")
+		}
+		if strings.EqualFold(parsed.Query().Get("disabletls"), "yes") || strings.EqualFold(parsed.Query().Get("disabletls"), "true") {
+			return "", errors.New("generic webhook must use HTTPS")
+		}
+		if method := strings.ToUpper(strings.TrimSpace(parsed.Query().Get("method"))); method != "" && method != http.MethodPost {
+			return "", errors.New("generic webhook only supports POST")
+		}
+	}
 	if _, createErr := shoutrrr.CreateSender(rawURL); createErr != nil {
 		return "", errors.New("url must be a valid Shoutrrr URL")
 	}
 	return service, nil
+}
+
+func isSupportedNotificationService(service string) bool {
+	switch service {
+	case "bark", "discord", "generic", "gotify", "logger", "ntfy", "pushover", "slack", "smtp", "telegram":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureUniqueNotificationChannelName(ctx context.Context, db *client.Client, clusterID, name, excludeID string) error {
