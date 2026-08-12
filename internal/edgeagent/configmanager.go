@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -257,6 +258,146 @@ func renderCaddyConfig(sites map[string]SiteConfig, defaultListen, _ string, nod
 	return renderManagedCaddyConfig(sites, defaultListen, "", nodeConfigs...)
 }
 
+type listenerServerKey struct {
+	port int
+	tls  bool
+	h2   bool
+	h3   bool
+}
+
+func (key listenerServerKey) name() string {
+	mode := "http"
+	if key.tls {
+		mode = "https"
+	}
+	return "edge_" + mode + "_" + strconv.Itoa(key.port)
+}
+
+func listenerBindings(listener ListenerConfig) ([]listenerServerKey, error) {
+	bindings := make([]listenerServerKey, 0, 2)
+	if listener.HTTPEnabled {
+		bindings = append(bindings, listenerServerKey{port: listener.HTTPPort})
+	}
+	if listener.HTTPSEnabled {
+		bindings = append(bindings, listenerServerKey{
+			port: listener.HTTPSPort,
+			tls:  true,
+			h2:   listener.HTTP2Enabled,
+			h3:   listener.HTTP3Enabled,
+		})
+	}
+	if len(bindings) == 2 && bindings[0].port == bindings[1].port {
+		return nil, fmt.Errorf("HTTP and HTTPS cannot share port %d", bindings[0].port)
+	}
+	return bindings, nil
+}
+
+type managedServerBuilder struct {
+	binding     listenerServerKey
+	listen      string
+	routes      []any
+	errorRoutes []any
+	policies    []any
+	loggerNames map[string][]string
+}
+
+func newManagedServerBuilder(binding listenerServerKey, listen string) *managedServerBuilder {
+	return &managedServerBuilder{binding: binding, listen: listen, loggerNames: make(map[string][]string)}
+}
+
+func (builder *managedServerBuilder) config() map[string]any {
+	serverID := builder.binding.name()
+	routes := make([]any, 0, len(builder.routes)+2)
+	routes = append(routes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers_"+serverID))
+	routes = append(routes, cloneRoutesWithIDSuffix(builder.routes, "_"+serverID)...)
+	routes = append(routes, map[string]any{
+		"@id": "goveto_unmatched_host_" + serverID,
+		"handle": []any{
+			map[string]any{
+				"handler":     "static_response",
+				"status_code": http.StatusNotFound,
+				"body":        "site host not configured\n",
+			},
+		},
+		"terminal": true,
+	})
+	errorRoutes := make([]any, 0, len(builder.errorRoutes)+1)
+	errorRoutes = append(errorRoutes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers_errors_"+serverID))
+	errorRoutes = append(errorRoutes, cloneRoutesWithIDSuffix(builder.errorRoutes, "_"+serverID)...)
+	protocols := []string{"h1"}
+	if builder.binding.h2 {
+		protocols = append(protocols, "h2")
+	}
+	if builder.binding.h3 {
+		protocols = append(protocols, "h3")
+	}
+	server := map[string]any{
+		"listen":          []string{builder.listen},
+		"protocols":       protocols,
+		"idle_timeout":    durationMS(30_000),
+		"routes":          routes,
+		"automatic_https": map[string]any{"disable": true},
+		"logs": map[string]any{
+			"logger_names": builder.loggerNames, "skip_unmapped_hosts": true,
+		},
+		"errors": map[string]any{"routes": errorRoutes},
+	}
+	if builder.binding.tls {
+		server["tls_connection_policies"] = builder.policies
+	}
+	return server
+}
+
+func cloneRoutesWithIDSuffix(routes []any, suffix string) []any {
+	cloned := make([]any, len(routes))
+	for index, route := range routes {
+		cloned[index] = cloneConfigValueWithIDSuffix(route, suffix)
+	}
+	return cloned
+}
+
+func cloneConfigValueWithIDSuffix(value any, suffix string) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		cloned := make(map[string]any, len(typed))
+		for key, item := range typed {
+			if key == "@id" {
+				if id, ok := item.(string); ok {
+					cloned[key] = id + suffix
+					continue
+				}
+			}
+			cloned[key] = cloneConfigValueWithIDSuffix(item, suffix)
+		}
+		return cloned
+	case []any:
+		cloned := make([]any, len(typed))
+		for index, item := range typed {
+			cloned[index] = cloneConfigValueWithIDSuffix(item, suffix)
+		}
+		return cloned
+	default:
+		return value
+	}
+}
+
+func managedListenAddress(defaultListen string, port int) (string, error) {
+	address := strings.TrimSpace(defaultListen)
+	network := "tcp"
+	if configuredNetwork, remainder, ok := strings.Cut(address, "/"); ok {
+		if configuredNetwork != "tcp" && configuredNetwork != "tcp4" && configuredNetwork != "tcp6" {
+			return "", fmt.Errorf("unsupported listener network %q", configuredNetwork)
+		}
+		network = configuredNetwork
+		address = remainder
+	}
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return "", fmt.Errorf("parse EDGE_USER_LISTEN %q: %w", defaultListen, err)
+	}
+	return network + "/" + net.JoinHostPort(host, strconv.Itoa(port)), nil
+}
+
 func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPPath string, nodeConfigs ...NodeConfig) ([]byte, error) {
 	nodeConfig := defaultNodeConfig()
 	if len(nodeConfigs) > 0 {
@@ -272,11 +413,6 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 	}
 	sort.Strings(ids)
 
-	routes := make([]any, 0, len(ids)*2+2)
-	errorRoutes := make([]any, 0, 1)
-	routes = append(routes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers"))
-	errorRoutes = append(errorRoutes, stripCaddyIdentityHeadersRoute("goveto_strip_identity_headers_errors"))
-	loggerNames := make(map[string][]string, len(ids))
 	customLogs := map[string]any{
 		"default": map[string]any{
 			"writer":  map[string]any{"output": "goveto_buffer"},
@@ -284,9 +420,9 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		},
 	}
 
-	listeners, protocols := map[string]struct{}{}, map[string]struct{}{"h1": {}}
-	listeners[defaultListen] = struct{}{}
-	policies, certificates := make([]any, 0), make([]any, 0)
+	serverBuilders := make(map[listenerServerKey]*managedServerBuilder)
+	serverPorts := make(map[int]listenerServerKey)
+	certificates := make([]any, 0)
 	var geoIPValidationOnce sync.Once
 	var geoIPValidationErr error
 	validateGeoIP := func() error {
@@ -307,6 +443,44 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		if site.Disabled {
 			continue
 		}
+		bindings, err := listenerBindings(site.Listener)
+		if err != nil {
+			return nil, fmt.Errorf("site %s listener: %w", id, err)
+		}
+		if len(site.ACMEChallenges) > 0 {
+			challengeBinding := listenerServerKey{port: 80}
+			found := false
+			for _, binding := range bindings {
+				if binding == challengeBinding {
+					found = true
+					break
+				}
+			}
+			if !found {
+				bindings = append(bindings, challengeBinding)
+			}
+		}
+		for _, binding := range bindings {
+			if existing, ok := serverPorts[binding.port]; ok && existing != binding {
+				if existing.tls != binding.tls {
+					return nil, fmt.Errorf("site %s listener: port %d cannot mix HTTP and HTTPS", id, binding.port)
+				}
+				return nil, fmt.Errorf("site %s listener: port %d has incompatible HTTP/2 or HTTP/3 settings", id, binding.port)
+			}
+			serverPorts[binding.port] = binding
+			if serverBuilders[binding] == nil {
+				listen, listenErr := managedListenAddress(defaultListen, binding.port)
+				if listenErr != nil {
+					return nil, listenErr
+				}
+				serverBuilders[binding] = newManagedServerBuilder(binding, listen)
+			}
+		}
+		acmeRoutes := make([]any, 0, len(site.ACMEChallenges))
+		redirectRoutes := make([]any, 0, 1)
+		routes := make([]any, 0, 16)
+		errorRoutes := make([]any, 0, 4)
+		policies := make([]any, 0, 1)
 		loggerName := "site_" + id
 		customLogs[loggerName] = map[string]any{
 			"writer": map[string]any{
@@ -315,16 +489,13 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			"encoder": accessLogEncoder(),
 			"include": []string{"http.log.access." + loggerName},
 		}
-		for _, domain := range site.Domains {
-			loggerNames[strings.ToLower(domain)] = []string{loggerName}
-		}
 
 		listener := site.Listener
 		for _, challenge := range site.ACMEChallenges {
 			if challenge.Domain == "" || challenge.Token == "" || challenge.KeyAuth == "" {
 				return nil, fmt.Errorf("site %s has invalid ACME HTTP-01 challenge", id)
 			}
-			routes = append(routes, map[string]any{
+			acmeRoutes = append(acmeRoutes, map[string]any{
 				"@id": "site_" + id + "_acme_" + challenge.Token,
 				"match": []any{map[string]any{
 					"host": []string{challenge.Domain},
@@ -336,18 +507,6 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				}},
 				"terminal": true,
 			})
-		}
-		if listener.HTTPEnabled {
-			listeners[":"+strconv.Itoa(listener.HTTPPort)] = struct{}{}
-		}
-		if listener.HTTPSEnabled {
-			listeners[":"+strconv.Itoa(listener.HTTPSPort)] = struct{}{}
-			if listener.HTTP2Enabled {
-				protocols["h2"] = struct{}{}
-			}
-			if listener.HTTP3Enabled {
-				protocols["h3"] = struct{}{}
-			}
 		}
 		deliveryPolicy, deliveryConfigured, err := decodeDeliveryPolicy(site.Delivery)
 		if err != nil {
@@ -371,7 +530,11 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		})
 
 		if listener.RedirectHTTPToHTTPS {
-			routes = append(routes, map[string]any{
+			redirectPort := ""
+			if listener.HTTPSPort != 443 {
+				redirectPort = ":" + strconv.Itoa(listener.HTTPSPort)
+			}
+			redirectRoutes = append(redirectRoutes, map[string]any{
 				"@id": "site_" + id + "_redirect",
 				"match": []any{
 					map[string]any{
@@ -384,7 +547,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 						"handler":     "static_response",
 						"status_code": 301,
 						"headers": map[string]any{
-							"Location": []string{"https://{http.request.host}{http.request.uri}"},
+							"Location": []string{"https://{http.request.host}" + redirectPort + "{http.request.uri}"},
 						},
 					},
 				},
@@ -658,34 +821,34 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				})
 			}
 		}
+		for _, binding := range bindings {
+			builder := serverBuilders[binding]
+			if binding.tls {
+				builder.routes = append(builder.routes, routes...)
+				builder.errorRoutes = append(builder.errorRoutes, errorRoutes...)
+			} else {
+				builder.routes = append(builder.routes, acmeRoutes...)
+				isConfiguredHTTP := listener.HTTPEnabled && binding.port == listener.HTTPPort
+				if !isConfiguredHTTP {
+					// Temporary HTTP-01 listener serves only challenge routes.
+				} else if listener.RedirectHTTPToHTTPS {
+					builder.routes = append(builder.routes, redirectRoutes...)
+				} else {
+					builder.routes = append(builder.routes, routes...)
+					builder.errorRoutes = append(builder.errorRoutes, errorRoutes...)
+				}
+			}
+			for _, domain := range site.Domains {
+				builder.loggerNames[strings.ToLower(domain)] = []string{loggerName}
+			}
+			if binding.tls {
+				builder.policies = append(builder.policies, policies...)
+			}
+		}
 	}
-	routes = append(routes, map[string]any{
-		"@id": "goveto_unmatched_host",
-		"handle": []any{
-			map[string]any{
-				"handler":     "static_response",
-				"status_code": http.StatusNotFound,
-				"body":        "site host not configured\n",
-			},
-		},
-		"terminal": true,
-	})
-
-	listen := keys(listeners)
-	protocolList := keys(protocols)
-	servers := map[string]any{
-		"edge": map[string]any{
-			"listen":                  listen,
-			"protocols":               protocolList,
-			"idle_timeout":            durationMS(30_000),
-			"routes":                  routes,
-			"tls_connection_policies": policies,
-			"automatic_https":         map[string]any{"disable": true},
-			"logs": map[string]any{
-				"logger_names": loggerNames, "skip_unmapped_hosts": true,
-			},
-			"errors": map[string]any{"routes": errorRoutes},
-		},
+	servers := make(map[string]any, len(serverBuilders))
+	for binding, builder := range serverBuilders {
+		servers[binding.name()] = builder.config()
 	}
 	config := map[string]any{
 		"admin":   map[string]any{"disabled": true},
@@ -949,14 +1112,6 @@ func stringMapValue(values map[string]any, key string) string {
 	return value
 }
 
-func keys(values map[string]struct{}) []string {
-	result := make([]string, 0, len(values))
-	for value := range values {
-		result = append(result, value)
-	}
-	sort.Strings(result)
-	return result
-}
 func cloneMap(source map[string]any) map[string]any {
 	target := make(map[string]any, len(source)+1)
 	for key, value := range source {

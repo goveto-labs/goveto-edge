@@ -1,7 +1,9 @@
 package edgeagent
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net"
@@ -220,6 +222,66 @@ func TestRenderCaddyConfigIncludesACMEHTTPChallengeBeforeSiteRoutes(t *testing.T
 	}
 }
 
+func TestRenderCaddyConfigAddsChallengeOnlyHTTPListenerForHTTPSOnlySite(t *testing.T) {
+	ensureAgentLogSink(t)
+	config := validHTTPSConfig(t)
+	ca, caKey, _ := createTestCertificateAuthority(t)
+	certificate, privateKeyPEM := createSignedCertificate(t, ca, caKey, config.Domains[0], true)
+	config.Certificates = []CertificateConfig{{
+		CertificatePEM: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]})),
+		PrivateKeyPEM:  privateKeyPEM,
+	}}
+	config.Listener.HTTPEnabled = false
+	config.Listener.RedirectHTTPToHTTPS = false
+	config.ACMEChallenges = []ACMEChallengeConfig{{Domain: config.Domains[0], Token: "token", KeyAuth: "token.key"}}
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, "127.0.0.1:80", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := parsedCaddyServers(t, encoded)
+	challengeServer := requireCaddyServer(t, servers, listenerServerKey{port: 80})
+	tlsServer := requireCaddyServer(t, servers, listenerServerKey{
+		port: config.Listener.HTTPSPort, tls: true,
+		h2: config.Listener.HTTP2Enabled, h3: config.Listener.HTTP3Enabled,
+	})
+	assertServerContainsRoute(t, challengeServer, "site_"+config.SiteID+"_acme_token", true)
+	assertServerContainsSite(t, challengeServer, config, false)
+	assertServerContainsRoute(t, tlsServer, "site_"+config.SiteID+"_acme_token", false)
+	assertServerContainsSite(t, tlsServer, config, true)
+	if got := asStringSlice(challengeServer["listen"]); len(got) != 1 || got[0] != "tcp/127.0.0.1:80" {
+		t.Fatalf("challenge listener=%#v", got)
+	}
+	var caddyConfig *caddy.Config
+	if err = json.Unmarshal(caddy.RemoveMetaFields(encoded), &caddyConfig); err != nil {
+		t.Fatal(err)
+	}
+	if err = caddy.Validate(caddyConfig); err != nil {
+		t.Fatalf("Caddy rejected HTTPS-only challenge config: %v", err)
+	}
+}
+
+func TestManagedListenAddressPreservesNetworkAndHost(t *testing.T) {
+	for _, test := range []struct {
+		configured string
+		want       string
+	}{
+		{configured: ":80", want: "tcp/:8443"},
+		{configured: "127.0.0.1:80", want: "tcp/127.0.0.1:8443"},
+		{configured: "tcp4/0.0.0.0:80", want: "tcp4/0.0.0.0:8443"},
+		{configured: "tcp6/[::1]:80", want: "tcp6/[::1]:8443"},
+	} {
+		t.Run(test.configured, func(t *testing.T) {
+			got, err := managedListenAddress(test.configured, 8443)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != test.want {
+				t.Fatalf("managedListenAddress()=%q want=%q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRenderCaddyConfigBindsSiteMetadataToAccessLogger(t *testing.T) {
 	config := validHTTPConfig(t)
 	config.Version = 42
@@ -269,14 +331,16 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 	apps := parsed["apps"].(map[string]any)
 	httpApp := apps["http"].(map[string]any)
 	servers := httpApp["servers"].(map[string]any)
-	edge := servers["edge"].(map[string]any)
+	edge := servers[listenerServerKey{port: config.Listener.HTTPPort}.name()].(map[string]any)
 	if edge["idle_timeout"] != float64(30*time.Second) {
 		t.Fatalf("unexpected server idle timeout: %#v", edge["idle_timeout"])
 	}
 	listen := asStringSlice(edge["listen"])
-	sitePort := ":" + strconv.Itoa(config.Listener.HTTPPort)
-	if !contains(listen, ":80") || !contains(listen, sitePort) {
+	if len(servers) != 1 || !contains(listen, "tcp/:"+strconv.Itoa(config.Listener.HTTPPort)) {
 		t.Fatalf("unexpected listeners: %#v", listen)
+	}
+	if strings.Contains(string(encoded), `tcp/:80`) && config.Listener.HTTPPort != 80 {
+		t.Fatalf("default :80 listener was added without a site declaration: %s", encoded)
 	}
 	routes := edge["routes"].([]any)
 	if len(routes) < 1 {
@@ -304,8 +368,8 @@ func TestRenderCaddyConfigHTTPSite(t *testing.T) {
 		t.Fatalf("log buffer writer missing: %s", raw)
 	}
 	for _, expected := range []string{
-		`"@id":"goveto_strip_identity_headers"`,
-		`"@id":"goveto_strip_identity_headers_errors"`,
+		`"@id":"goveto_strip_identity_headers_edge_http_`,
+		`"@id":"goveto_strip_identity_headers_errors_edge_http_`,
 		`"delete":["Server","Via"]`,
 		`"delete":["Via"]`,
 	} {
@@ -339,6 +403,201 @@ func TestRenderCaddyConfigHTTPSSite(t *testing.T) {
 	}
 }
 
+func TestRenderCaddyConfigIsolatesListenerTLSAndProtocols(t *testing.T) {
+	httpOnly := validHTTPConfig(t)
+	httpOnly.SiteID = "http-only"
+	httpOnly.Domains = []string{"plain.example.com"}
+	httpsOnly := validHTTPSConfig(t)
+	httpsOnly.SiteID = "https-only"
+	httpsOnly.Domains = []string{"secure.example.com"}
+	httpsOnly.Listener.HTTPEnabled = false
+	httpsOnly.Listener.RedirectHTTPToHTTPS = false
+	httpsOnly.Listener.HTTP3Enabled = false
+	redirect := validHTTPSConfig(t)
+	redirect.SiteID = "redirect"
+	redirect.Domains = []string{"redirect.example.com"}
+	redirect.Listener.HTTP2Enabled = false
+	redirect.Listener.HTTP3Enabled = false
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{
+		httpOnly.SiteID: httpOnly, httpsOnly.SiteID: httpsOnly, redirect.SiteID: redirect,
+	}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	servers := parsedCaddyServers(t, encoded)
+	if len(servers) != 4 {
+		t.Fatalf("server count=%d want=4: %s", len(servers), encoded)
+	}
+	plain := requireCaddyServer(t, servers, listenerServerKey{port: httpOnly.Listener.HTTPPort})
+	secure := requireCaddyServer(t, servers, listenerServerKey{port: httpsOnly.Listener.HTTPSPort, tls: true, h2: true})
+	redirectHTTP := requireCaddyServer(t, servers, listenerServerKey{port: redirect.Listener.HTTPPort})
+	redirectHTTPS := requireCaddyServer(t, servers, listenerServerKey{port: redirect.Listener.HTTPSPort, tls: true})
+	assertServerContainsSite(t, plain, httpOnly, true)
+	assertServerContainsSite(t, secure, httpsOnly, true)
+	assertServerContainsSite(t, redirectHTTP, redirect, false)
+	assertServerContainsSite(t, redirectHTTPS, redirect, true)
+	assertServerContainsRoute(t, redirectHTTP, "site_"+redirect.SiteID+"_redirect", true)
+	assertServerContainsRoute(t, redirectHTTPS, "site_"+redirect.SiteID+"_redirect", false)
+	for _, test := range []struct {
+		server map[string]any
+		site   SiteConfig
+	}{
+		{plain, httpsOnly}, {plain, redirect}, {secure, httpOnly}, {secure, redirect},
+		{redirectHTTP, httpOnly}, {redirectHTTP, httpsOnly}, {redirectHTTPS, httpOnly}, {redirectHTTPS, httpsOnly},
+	} {
+		assertServerContainsSite(t, test.server, test.site, false)
+	}
+	if _, ok := plain["tls_connection_policies"]; ok {
+		t.Fatalf("plain HTTP server has TLS policies: %#v", plain)
+	}
+	if !contains(asStringSlice(secure["protocols"]), "h2") || contains(asStringSlice(secure["protocols"]), "h3") {
+		t.Fatalf("HTTPS protocols leaked across listeners: %#v", secure["protocols"])
+	}
+	if got := asStringSlice(redirectHTTPS["protocols"]); len(got) != 1 || got[0] != "h1" {
+		t.Fatalf("redirect HTTPS protocols=%#v want h1 only", got)
+	}
+	location := "https://{http.request.host}:" + strconv.Itoa(redirect.Listener.HTTPSPort) + "{http.request.uri}"
+	if !strings.Contains(string(encoded), location) {
+		t.Fatalf("custom-port redirect target %q missing: %s", location, encoded)
+	}
+}
+
+func TestRenderCaddyConfigRejectsIncompatibleSharedPort(t *testing.T) {
+	plain := validHTTPConfig(t)
+	plain.SiteID = "plain"
+	tlsSite := validHTTPSConfig(t)
+	tlsSite.SiteID = "tls"
+	tlsSite.Listener.HTTPEnabled = false
+	tlsSite.Listener.RedirectHTTPToHTTPS = false
+	tlsSite.Listener.HTTPSPort = plain.Listener.HTTPPort
+	if _, err := renderCaddyConfig(map[string]SiteConfig{plain.SiteID: plain, tlsSite.SiteID: tlsSite}, ":80", ""); err == nil || !strings.Contains(err.Error(), "mix HTTP and HTTPS") {
+		t.Fatalf("shared HTTP/TLS port error=%v", err)
+	}
+
+	first := validHTTPSConfig(t)
+	first.SiteID = "first"
+	first.Listener.HTTPEnabled = false
+	first.Listener.RedirectHTTPToHTTPS = false
+	first.Listener.HTTP3Enabled = false
+	second := first
+	second.SiteID = "second"
+	second.Domains = []string{"second.example.com"}
+	second.Listener.HTTP3Enabled = true
+	if _, err := renderCaddyConfig(map[string]SiteConfig{first.SiteID: first, second.SiteID: second}, ":80", ""); err == nil || !strings.Contains(err.Error(), "HTTP/2 or HTTP/3") {
+		t.Fatalf("shared protocol port error=%v", err)
+	}
+}
+
+func TestListenerTLSIsolationOnRealSockets(t *testing.T) {
+	ensureAgentLogSink(t)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, r.Host)
+	}))
+	defer origin.Close()
+	originAddress := strings.TrimPrefix(origin.URL, "http://")
+
+	httpPort, httpsPort := freePort(t), freePort(t)
+	ca, caKey, _ := createTestCertificateAuthority(t)
+	certificate, privateKeyPEM := createSignedCertificate(t, ca, caKey, "secure.example.test", true)
+	certificatePEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}))
+	httpSite := SiteConfig{
+		SiteID: "plain", Version: 1, Domains: []string{"plain.example.test"},
+		Listener: ListenerConfig{HTTPEnabled: true, HTTPPort: httpPort},
+		Origins:  []OriginConfig{{Protocol: "http", Address: originAddress}},
+	}
+	httpsSite := SiteConfig{
+		SiteID: "secure", Version: 1, Domains: []string{"secure.example.test"},
+		Listener:     ListenerConfig{HTTPSEnabled: true, HTTPSPort: httpsPort, HTTP2Enabled: true, TLSMinVersion: "TLS1_2"},
+		Certificates: []CertificateConfig{{CertificatePEM: certificatePEM, PrivateKeyPEM: privateKeyPEM}},
+		Origins:      []OriginConfig{{Protocol: "http", Address: originAddress}},
+	}
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), ":80")
+	if err := manager.ApplySite(httpSite); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.ApplySite(httpsSite); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Stop()
+
+	plainClient := &http.Client{Timeout: 5 * time.Second}
+	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(httpPort)+"/", nil)
+	request.Host = httpsSite.Domains[0]
+	response, err := plainClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("HTTPS-only host reached through HTTP listener: status=%d", response.StatusCode)
+	}
+
+	request, _ = http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(httpPort)+"/", nil)
+	request.Host = httpSite.Domains[0]
+	response, err = plainClient.Do(request)
+	if err != nil {
+		t.Fatalf("HTTP-only listener unexpectedly required TLS: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("HTTP-only listener status=%d", response.StatusCode)
+	}
+
+	tlsClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS12, ServerName: httpsSite.Domains[0], InsecureSkipVerify: true,
+	}}, Timeout: 5 * time.Second}
+	request, _ = http.NewRequest(http.MethodGet, "https://127.0.0.1:"+strconv.Itoa(httpsPort)+"/", nil)
+	request.Host = httpsSite.Domains[0]
+	response, err = tlsClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("HTTPS listener status=%d", response.StatusCode)
+	}
+}
+
+func TestRedirectListenerIsolationOnRealSockets(t *testing.T) {
+	ensureAgentLogSink(t)
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer origin.Close()
+	httpPort, httpsPort := freePort(t), freePort(t)
+	ca, caKey, _ := createTestCertificateAuthority(t)
+	certificate, privateKeyPEM := createSignedCertificate(t, ca, caKey, "redirect.example.test", true)
+	certificatePEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Certificate[0]}))
+	site := SiteConfig{
+		SiteID: "redirect", Version: 1, Domains: []string{"redirect.example.test"},
+		Listener: ListenerConfig{
+			HTTPEnabled: true, HTTPPort: httpPort, RedirectHTTPToHTTPS: true,
+			HTTPSEnabled: true, HTTPSPort: httpsPort, HTTP2Enabled: true, TLSMinVersion: "TLS1_2",
+		},
+		Certificates: []CertificateConfig{{CertificatePEM: certificatePEM, PrivateKeyPEM: privateKeyPEM}},
+		Origins:      []OriginConfig{{Protocol: "http", Address: strings.TrimPrefix(origin.URL, "http://")}},
+	}
+	manager := NewConfigManager(filepath.Join(t.TempDir(), "sites.json"), "127.0.0.1:80")
+	if err := manager.ApplySite(site); err != nil {
+		t.Fatalf("apply dual-protocol redirect site: %v", err)
+	}
+	defer manager.Stop()
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }, Timeout: 5 * time.Second}
+	request, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(httpPort)+"/path?q=1", nil)
+	request.Host = site.Domains[0] + ":" + strconv.Itoa(httpPort)
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	wantLocation := "https://" + site.Domains[0] + ":" + strconv.Itoa(httpsPort) + "/path?q=1"
+	if response.StatusCode != http.StatusMovedPermanently || response.Header.Get("Location") != wantLocation {
+		t.Fatalf("redirect status=%d location=%q want=%q", response.StatusCode, response.Header.Get("Location"), wantLocation)
+	}
+}
+
 func TestRenderCaddyConfigMultipleSitesSorted(t *testing.T) {
 	a := validHTTPConfig(t)
 	a.SiteID = "site-b"
@@ -346,6 +605,7 @@ func TestRenderCaddyConfigMultipleSitesSorted(t *testing.T) {
 	b := validHTTPConfig(t)
 	b.SiteID = "site-a"
 	b.Domains = []string{"a.example.com"}
+	b.Listener.HTTPPort = a.Listener.HTTPPort
 	encoded, err := renderCaddyConfig(map[string]SiteConfig{
 		a.SiteID: a,
 		b.SiteID: b,
@@ -354,8 +614,9 @@ func TestRenderCaddyConfigMultipleSitesSorted(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := string(encoded)
-	idxA := strings.Index(raw, `"@id":"site_site-a"`)
-	idxB := strings.Index(raw, `"@id":"site_site-b"`)
+	suffix := "_edge_http_" + strconv.Itoa(a.Listener.HTTPPort)
+	idxA := strings.Index(raw, `"@id":"site_site-a`+suffix+`"`)
+	idxB := strings.Index(raw, `"@id":"site_site-b`+suffix+`"`)
 	if idxA < 0 || idxB < 0 || idxA > idxB {
 		t.Fatalf("sites not sorted by id: a=%d b=%d raw=%s", idxA, idxB, raw)
 	}
@@ -583,7 +844,7 @@ func TestCacheConfigSkipsCacheRoutesInDevMode(t *testing.T) {
 	if strings.Contains(text, `"handler":"goveto_cache"`) || strings.Contains(text, `"@id":"site_site-1_cache_`) {
 		t.Fatalf("dev mode generated cache routes: %s", text)
 	}
-	if !strings.Contains(text, `"@id":"site_site-1"`) {
+	if !strings.Contains(text, `"@id":"site_site-1_edge_http_`) {
 		t.Fatalf("dev mode removed the plain proxy route: %s", text)
 	}
 }
@@ -689,14 +950,14 @@ func TestCacheConfigRendersPerRuleTTLInOrder(t *testing.T) {
 	}
 	text := string(encoded)
 	for _, expected := range []string{
-		`"@id":"site_site-1_cache_0"`, `"@id":"site_site-1_cache_1"`,
+		`"@id":"site_site-1_cache_0_edge_http_`, `"@id":"site_site-1_cache_1_edge_http_`,
 		`"default_ttl":3600`, `"404":30`, `"default_ttl":300`,
 	} {
 		if !strings.Contains(text, expected) {
 			t.Fatalf("missing per-rule cache config %s: %s", expected, text)
 		}
 	}
-	if strings.Index(text, `"@id":"site_site-1_cache_0"`) > strings.Index(text, `"@id":"site_site-1_cache_1"`) {
+	if strings.Index(text, `"@id":"site_site-1_cache_0_edge_http_`) > strings.Index(text, `"@id":"site_site-1_cache_1_edge_http_`) {
 		t.Fatal("cache rule route order changed")
 	}
 }
@@ -1150,6 +1411,57 @@ func asStringSlice(value any) []string {
 		}
 	}
 	return result
+}
+
+func parsedCaddyServers(t *testing.T, encoded []byte) map[string]any {
+	t.Helper()
+	var parsed map[string]any
+	if err := json.Unmarshal(encoded, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	return parsed["apps"].(map[string]any)["http"].(map[string]any)["servers"].(map[string]any)
+}
+
+func requireCaddyServer(t *testing.T, servers map[string]any, binding listenerServerKey) map[string]any {
+	t.Helper()
+	server, ok := servers[binding.name()].(map[string]any)
+	if !ok {
+		t.Fatalf("server %q missing from %#v", binding.name(), servers)
+	}
+	return server
+}
+
+func assertServerContainsSite(t *testing.T, server map[string]any, site SiteConfig, want bool) {
+	t.Helper()
+	routes, _ := server["routes"].([]any)
+	wantIDPrefix := "site_" + site.SiteID + "_edge_"
+	found := false
+	for _, raw := range routes {
+		route, _ := raw.(map[string]any)
+		if id, _ := route["@id"].(string); strings.HasPrefix(id, wantIDPrefix) {
+			found = true
+			break
+		}
+	}
+	if found != want {
+		t.Fatalf("server contains site %s = %t, want %t", site.SiteID, found, want)
+	}
+}
+
+func assertServerContainsRoute(t *testing.T, server map[string]any, idPrefix string, want bool) {
+	t.Helper()
+	routes, _ := server["routes"].([]any)
+	found := false
+	for _, raw := range routes {
+		route, _ := raw.(map[string]any)
+		if id, _ := route["@id"].(string); strings.HasPrefix(id, idPrefix+"_edge_") {
+			found = true
+			break
+		}
+	}
+	if found != want {
+		t.Fatalf("server contains route %s = %t, want %t", idPrefix, found, want)
+	}
 }
 
 func contains(values []string, want string) bool {
