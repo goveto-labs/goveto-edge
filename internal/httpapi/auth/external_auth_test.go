@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"github.com/labstack/echo/v5"
 	"golang.org/x/oauth2"
 
+	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/settings"
 )
 
@@ -24,6 +27,30 @@ func TestValidReturnPath(t *testing.T) {
 		if got := validReturnPath(input); got != want {
 			t.Fatalf("validReturnPath(%q) = %q, want %q", input, got, want)
 		}
+	}
+}
+
+func TestExternalAuthCallbackClearsBrowserBindingOnProviderFailure(t *testing.T) {
+	sessions := authn.NewSessionStore(nil, nil, "session", time.Hour, true)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/providers/callback?error=access_denied&state=state-1", nil)
+	recorder := httptest.NewRecorder()
+	c := echo.New().NewContext(request, recorder)
+	sessions.SetExternalAuthBindingCookie(c, "state-1", "binding")
+	bindingCookie := recorder.Result().Cookies()[0]
+	request.AddCookie(bindingCookie)
+	recorder = httptest.NewRecorder()
+	c = echo.New().NewContext(request, recorder)
+
+	if err := externalAuthCallback(nil, sessions, nil, nil)(c); err != nil {
+		t.Fatal(err)
+	}
+	response := recorder.Result()
+	if response.StatusCode != http.StatusFound {
+		t.Fatalf("callback status = %d, want %d", response.StatusCode, http.StatusFound)
+	}
+	cookies := response.Cookies()
+	if len(cookies) != 1 || cookies[0].Name != bindingCookie.Name || cookies[0].MaxAge >= 0 || !cookies[0].HttpOnly || !cookies[0].Secure {
+		t.Fatalf("cleared browser binding cookie = %#v", cookies)
 	}
 }
 

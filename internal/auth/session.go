@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -28,6 +29,10 @@ const currentSessionIDKey = "auth.current_session_id"
 var ErrSessionNotFound = errors.New("session not found")
 
 var ErrExternalAuthStateNotFound = errors.New("external authentication state not found")
+
+var ErrExternalAuthBindingMismatch = errors.New("external authentication browser binding mismatch")
+
+const externalAuthStateTTL = 10 * time.Minute
 
 type currentUserContextKey struct{}
 
@@ -58,20 +63,22 @@ type SessionMetadata struct {
 }
 
 type ExternalAuthState struct {
-	CodeVerifier string `json:"code_verifier"`
-	ReturnPath   string `json:"return_path"`
-	ProviderID   string `json:"provider_id"`
+	CodeVerifier       string `json:"code_verifier"`
+	ReturnPath         string `json:"return_path"`
+	ProviderID         string `json:"provider_id"`
+	BrowserBindingHash string `json:"browser_binding_hash"`
 }
 
-func (s *SessionStore) StoreExternalAuthState(ctx context.Context, state string, value ExternalAuthState) error {
+func (s *SessionStore) StoreExternalAuthState(ctx context.Context, state string, value ExternalAuthState, browserBinding string) error {
+	value.BrowserBindingHash = tokenHash(browserBinding)
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	return s.redis.Set(ctx, "external-auth:state:"+state, encoded, 10*time.Minute).Err()
+	return s.redis.Set(ctx, "external-auth:state:"+state, encoded, externalAuthStateTTL).Err()
 }
 
-func (s *SessionStore) ConsumeExternalAuthState(ctx context.Context, state string) (ExternalAuthState, error) {
+func (s *SessionStore) ConsumeExternalAuthState(ctx context.Context, state, browserBinding string) (ExternalAuthState, error) {
 	key := "external-auth:state:" + state
 	encoded, err := s.redis.GetDel(ctx, key).Bytes()
 	if errors.Is(err, redis.Nil) {
@@ -84,7 +91,38 @@ func (s *SessionStore) ConsumeExternalAuthState(ctx context.Context, state strin
 	if err = json.Unmarshal(encoded, &value); err != nil {
 		return ExternalAuthState{}, err
 	}
+	bindingHash := tokenHash(browserBinding)
+	if value.BrowserBindingHash == "" || subtle.ConstantTimeCompare([]byte(value.BrowserBindingHash), []byte(bindingHash)) != 1 {
+		return ExternalAuthState{}, ErrExternalAuthBindingMismatch
+	}
 	return value, nil
+}
+
+func (s *SessionStore) SetExternalAuthBindingCookie(c *echo.Context, state, binding string) {
+	c.SetCookie(&http.Cookie{
+		Name: s.externalAuthBindingCookieName(state), Value: binding, Path: "/",
+		MaxAge: int(externalAuthStateTTL.Seconds()), Expires: time.Now().Add(externalAuthStateTTL),
+		HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (s *SessionStore) ExternalAuthBinding(c *echo.Context, state string) string {
+	cookie, err := c.Cookie(s.externalAuthBindingCookieName(state))
+	if err != nil {
+		return ""
+	}
+	return cookie.Value
+}
+
+func (s *SessionStore) ClearExternalAuthBindingCookie(c *echo.Context, state string) {
+	c.SetCookie(&http.Cookie{
+		Name: s.externalAuthBindingCookieName(state), Path: "/", MaxAge: -1, Expires: time.Unix(1, 0),
+		HttpOnly: true, Secure: s.secure, SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (s *SessionStore) externalAuthBindingCookieName(state string) string {
+	return s.cookieName + "_external_auth_" + tokenHash(state)
 }
 
 func (s *SessionStore) Create(ctx context.Context, uid string, metadata ...SessionMetadata) (string, error) {

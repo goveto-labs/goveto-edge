@@ -116,12 +116,17 @@ func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Stor
 		if err != nil {
 			return err
 		}
+		browserBinding, err := randomURLToken(32)
+		if err != nil {
+			return err
+		}
 		verifier := oauth2.GenerateVerifier()
 		if err = sessions.StoreExternalAuthState(c.Request().Context(), state, authn.ExternalAuthState{
 			CodeVerifier: verifier, ReturnPath: validReturnPath(c.QueryParam("return_to")), ProviderID: config.ID,
-		}); err != nil {
+		}, browserBinding); err != nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "login state storage unavailable")
 		}
+		sessions.SetExternalAuthBindingCookie(c, state, browserBinding)
 		return c.Redirect(http.StatusFound, oauthConfig.AuthCodeURL(
 			state, oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(verifier),
 		))
@@ -130,15 +135,17 @@ func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Stor
 
 func externalAuthCallback(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher settings.SecretCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
+		state := strings.TrimSpace(c.QueryParam("state"))
+		browserBinding := sessions.ExternalAuthBinding(c, state)
+		sessions.ClearExternalAuthBindingCookie(c, state)
 		if c.QueryParam("error") != "" {
 			return externalAuthFailure(c, "The identity provider rejected the login")
 		}
-		state := strings.TrimSpace(c.QueryParam("state"))
 		code := strings.TrimSpace(c.QueryParam("code"))
 		if state == "" || code == "" {
 			return externalAuthFailure(c, "The single sign-on response is incomplete")
 		}
-		loginState, err := sessions.ConsumeExternalAuthState(c.Request().Context(), state)
+		loginState, err := sessions.ConsumeExternalAuthState(c.Request().Context(), state, browserBinding)
 		if err != nil {
 			return externalAuthFailure(c, "The single sign-on request expired")
 		}

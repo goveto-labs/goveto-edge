@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -65,20 +66,64 @@ func (store *fakeRedisStore) Del(_ context.Context, keys ...string) *redis.IntCm
 
 func TestExternalAuthStateIsConsumedOnce(t *testing.T) {
 	store := &fakeRedisStore{}
-	sessions := &SessionStore{redis: store}
+	sessions := &SessionStore{redis: store, cookieName: "session", secure: true}
 	want := ExternalAuthState{CodeVerifier: "verifier", ReturnPath: "/jobs", ProviderID: "provider-1"}
-	if err := sessions.StoreExternalAuthState(context.Background(), "state", want); err != nil {
+	if err := sessions.StoreExternalAuthState(context.Background(), "state", want, "browser-binding"); err != nil {
 		t.Fatal(err)
 	}
-	got, err := sessions.ConsumeExternalAuthState(context.Background(), "state")
+	if strings.Contains(store.values["external-auth:state:state"], "browser-binding") {
+		t.Fatal("raw browser binding was stored in Redis")
+	}
+	got, err := sessions.ConsumeExternalAuthState(context.Background(), "state", "browser-binding")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != want {
+	if got.CodeVerifier != want.CodeVerifier || got.ReturnPath != want.ReturnPath || got.ProviderID != want.ProviderID || got.BrowserBindingHash == "" {
 		t.Fatalf("external authentication state = %#v, want %#v", got, want)
 	}
-	if _, err = sessions.ConsumeExternalAuthState(context.Background(), "state"); err != ErrExternalAuthStateNotFound {
+	if _, err = sessions.ConsumeExternalAuthState(context.Background(), "state", "browser-binding"); err != ErrExternalAuthStateNotFound {
 		t.Fatalf("second consumption error = %v, want %v", err, ErrExternalAuthStateNotFound)
+	}
+}
+
+func TestExternalAuthStateRejectsAnotherBrowser(t *testing.T) {
+	store := &fakeRedisStore{}
+	sessions := &SessionStore{redis: store, cookieName: "session"}
+	if err := sessions.StoreExternalAuthState(context.Background(), "state", ExternalAuthState{}, "first-browser"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.ConsumeExternalAuthState(context.Background(), "state", "another-browser"); err != ErrExternalAuthBindingMismatch {
+		t.Fatalf("binding mismatch error = %v, want %v", err, ErrExternalAuthBindingMismatch)
+	}
+	if _, err := sessions.ConsumeExternalAuthState(context.Background(), "state", "first-browser"); err != ErrExternalAuthStateNotFound {
+		t.Fatalf("mismatched state was not consumed: %v", err)
+	}
+}
+
+func TestExternalAuthBindingCookieLifecycle(t *testing.T) {
+	sessions := &SessionStore{cookieName: "session", secure: true}
+	recorder := httptest.NewRecorder()
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/api/v1/auth/providers/start", nil), recorder)
+	sessions.SetExternalAuthBindingCookie(c, "state-1", "binding")
+	cookie := recorder.Result().Cookies()[0]
+	if cookie.Name != sessions.externalAuthBindingCookieName("state-1") || cookie.Value != "binding" || !cookie.HttpOnly || !cookie.Secure || cookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("external authentication binding cookie = %#v", cookie)
+	}
+	if cookie.Name == sessions.externalAuthBindingCookieName("state-2") {
+		t.Fatal("different OAuth states use the same browser binding cookie")
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/providers/callback", nil)
+	request.AddCookie(cookie)
+	recorder = httptest.NewRecorder()
+	c = echo.New().NewContext(request, recorder)
+	if got := sessions.ExternalAuthBinding(c, "state-1"); got != "binding" {
+		t.Fatalf("external authentication binding = %q", got)
+	}
+	sessions.ClearExternalAuthBindingCookie(c, "state-1")
+	cleared := recorder.Result().Cookies()[0]
+	if cleared.Name != cookie.Name || cleared.MaxAge >= 0 || !cleared.HttpOnly || !cleared.Secure || cleared.Path != cookie.Path {
+		t.Fatalf("cleared external authentication binding cookie = %#v", cleared)
 	}
 }
 
