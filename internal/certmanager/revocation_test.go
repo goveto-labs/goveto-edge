@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/mholt/acmez/v3/acme"
 )
 
 func TestRevokeACMECertificateSendsReasonAndAcceptsAlreadyRevoked(t *testing.T) {
@@ -76,7 +78,8 @@ func TestRevokeACMECertificateSendsReasonAndAcceptsAlreadyRevoked(t *testing.T) 
 			}))
 			defer server.Close()
 
-			if err := revokeACMECertificate(context.Background(), server.URL+"/directory", leaf[0], signer, 1); err != nil {
+			client := &acme.Client{Directory: server.URL + "/directory", HTTPClient: server.Client()}
+			if err := revokeACMECertificate(context.Background(), client, leaf[0], signer, 1); err != nil {
 				t.Fatal(err)
 			}
 		})

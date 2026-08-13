@@ -4,7 +4,6 @@ package certificates
 import (
 	"errors"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -170,9 +169,8 @@ func issueACME(db *client.Client, service *certmanager.Service) echo.HandlerFunc
 		}
 		directory := strings.TrimSpace(input.DirectoryURL)
 		if directory != "" {
-			parsed, parseErr := url.Parse(directory)
-			if parseErr != nil || parsed.Scheme != "https" || parsed.Host == "" {
-				return echo.NewHTTPError(http.StatusBadRequest, "directory_url must be an HTTPS URL")
+			if err = service.ValidateACMEDirectory(c.Request().Context(), directory); err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, "directory_url must be a public HTTPS URL")
 			}
 		}
 		if input.RenewBeforeDays == 0 {

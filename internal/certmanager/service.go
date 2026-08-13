@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"goveto-edge/internal/dnsprovider"
 	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -52,6 +55,8 @@ const reconcileTerminalCertificateJobsSQL = `WITH latest AS (
 		AND active.status IN ('PENDING','RUNNING'))`
 
 const defaultACMEDirectory = "https://acme-v02.api.letsencrypt.org/directory"
+
+const maxACMEResponseBytes = 2 << 20
 
 var ErrCertificateMustBeRevoked = errors.New("issued ACME certificate must be revoked before deletion")
 var ErrCertificateNotFound = errors.New("certificate not found")
@@ -84,15 +89,63 @@ type Publisher interface {
 }
 
 type Service struct {
-	db        *client.Client
-	cipher    *node.CredentialCipher
-	publisher Publisher
-	jobs      *jobqueue.Manager
-	httpState sync.Map
+	db             *client.Client
+	cipher         *node.CredentialCipher
+	publisher      Publisher
+	jobs           *jobqueue.Manager
+	outboundPolicy *outboundhttp.Policy
+	acmeHTTPClient *http.Client
+	httpState      sync.Map
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher, publisher Publisher) *Service {
-	return &Service{db: db, cipher: cipher, publisher: publisher, jobs: jobqueue.New(db)}
+	policy := outboundhttp.NewPolicy()
+	return &Service{
+		db: db, cipher: cipher, publisher: publisher, jobs: jobqueue.New(db),
+		outboundPolicy: policy, acmeHTTPClient: newACMEHTTPClient(policy),
+	}
+}
+
+type acmeRoundTripper struct {
+	policy *outboundhttp.Policy
+	next   http.RoundTripper
+}
+
+func (transport acmeRoundTripper) RoundTrip(request *http.Request) (*http.Response, error) {
+	if err := transport.policy.ValidateURL(request.Context(), request.URL, "https"); err != nil {
+		return nil, fmt.Errorf("validate ACME endpoint: %w", err)
+	}
+	response, err := transport.next.RoundTrip(request)
+	if err != nil {
+		return nil, err
+	}
+	response.Body = http.MaxBytesReader(nil, response.Body, maxACMEResponseBytes)
+	return response, nil
+}
+
+func newACMEHTTPClient(policy *outboundhttp.Policy) *http.Client {
+	httpClient := policy.Client()
+	httpClient.Transport = acmeRoundTripper{policy: policy, next: httpClient.Transport}
+	return httpClient
+}
+
+// ValidateACMEDirectory rejects custom ACME servers that are not public HTTPS destinations.
+func (s *Service) ValidateACMEDirectory(ctx context.Context, directory string) error {
+	target, err := url.Parse(strings.TrimSpace(directory))
+	if err != nil {
+		return fmt.Errorf("parse ACME directory URL: %w", err)
+	}
+	if err = s.outboundPolicy.ValidateURL(ctx, target, "https"); err != nil {
+		return fmt.Errorf("validate ACME directory URL: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) acmeClient(ctx context.Context, directory string) (*acme.Client, error) {
+	if err := s.ValidateACMEDirectory(ctx, directory); err != nil {
+		return nil, err
+	}
+	return &acme.Client{Directory: directory, HTTPClient: s.acmeHTTPClient}, nil
 }
 
 func (s *Service) EncryptPrivateKey(clusterID, certificateID, privateKey string) (string, error) {
@@ -438,7 +491,11 @@ func (s *Service) revokeCertificate(ctx context.Context, certificate *model.Cert
 		if certificate.AcmeDirectoryUrl != nil && strings.TrimSpace(*certificate.AcmeDirectoryUrl) != "" {
 			directory = strings.TrimSpace(*certificate.AcmeDirectoryUrl)
 		}
-		err = revokeACMECertificate(ctx, directory, certificates[0], signer, reason)
+		acmeClient, err := s.acmeClient(ctx, directory)
+		if err != nil {
+			return s.recordRevocationError(ctx, certificate.Id, err)
+		}
+		err = revokeACMECertificate(ctx, acmeClient, certificates[0], signer, reason)
 		if err != nil {
 			return s.recordRevocationError(ctx, certificate.Id, fmt.Errorf("revoke ACME certificate: %w", err))
 		}
@@ -480,8 +537,7 @@ func (s *Service) revokeCertificate(ctx context.Context, certificate *model.Cert
 	return err
 }
 
-func revokeACMECertificate(ctx context.Context, directory string, certificate *x509.Certificate, key crypto.Signer, reason int) error {
-	client := acme.Client{Directory: directory}
+func revokeACMECertificate(ctx context.Context, client *acme.Client, certificate *x509.Certificate, key crypto.Signer, reason int) error {
 	err := client.RevokeCertificate(ctx, acme.Account{}, certificate, key, reason)
 	var problem acme.Problem
 	if errors.As(err, &problem) && problem.Type == acme.ProblemTypeAlreadyRevoked {
@@ -676,10 +732,14 @@ func (s *Service) obtainACME(ctx context.Context, certificate *model.Certificate
 	if certificate.AcmeDirectoryUrl != nil && strings.TrimSpace(*certificate.AcmeDirectoryUrl) != "" {
 		directory = strings.TrimSpace(*certificate.AcmeDirectoryUrl)
 	}
+	acmeClient, err := s.acmeClient(ctx, directory)
+	if err != nil {
+		return Material{}, err
+	}
 	if certificate.AcmeEmail == nil || strings.TrimSpace(*certificate.AcmeEmail) == "" {
 		return Material{}, errors.New("ACME email is required")
 	}
-	account, err := s.loadOrCreateAccount(ctx, certificate.ClusterId, directory, strings.TrimSpace(*certificate.AcmeEmail))
+	account, err := s.loadOrCreateAccount(ctx, acmeClient, certificate.ClusterId, directory, strings.TrimSpace(*certificate.AcmeEmail))
 	if err != nil {
 		return Material{}, err
 	}
@@ -699,7 +759,7 @@ func (s *Service) obtainACME(ctx context.Context, certificate *model.Certificate
 		}
 		solvers[acme.ChallengeTypeHTTP01] = solver
 	}
-	client := acmez.Client{Client: &acme.Client{Directory: directory}, ChallengeSolvers: solvers}
+	client := acmez.Client{Client: acmeClient, ChallengeSolvers: solvers}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return Material{}, err
@@ -719,7 +779,7 @@ func (s *Service) obtainACME(ctx context.Context, certificate *model.Certificate
 	return ValidateMaterial(string(chains[0].ChainPEM), privateKey, time.Now().UTC())
 }
 
-func (s *Service) loadOrCreateAccount(ctx context.Context, clusterID, directory, email string) (acme.Account, error) {
+func (s *Service) loadOrCreateAccount(ctx context.Context, acmeClient *acme.Client, clusterID, directory, email string) (acme.Account, error) {
 	stored, err := s.db.ACMEAccount.Query().Where(
 		query.ACMEAccount.ClusterId.Equals(clusterID), query.ACMEAccount.DirectoryUrl.Equals(directory), query.ACMEAccount.Email.Equals(email),
 	).First(ctx)
@@ -754,8 +814,7 @@ func (s *Service) loadOrCreateAccount(ctx context.Context, clusterID, directory,
 	if err != nil {
 		return acme.Account{}, err
 	}
-	client := acme.Client{Directory: directory}
-	account, err := client.NewAccount(ctx, acme.Account{Contact: []string{"mailto:" + email}, TermsOfServiceAgreed: true, PrivateKey: key})
+	account, err := acmeClient.NewAccount(ctx, acme.Account{Contact: []string{"mailto:" + email}, TermsOfServiceAgreed: true, PrivateKey: key})
 	if err != nil {
 		return acme.Account{}, fmt.Errorf("register ACME account: %w", err)
 	}
