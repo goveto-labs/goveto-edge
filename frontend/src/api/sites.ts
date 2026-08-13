@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     BulkSiteResult,
     CachePolicy,
@@ -29,7 +30,8 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const sitesApi = (clusterId: string) => ({
-    list: () => get<SiteSummary[]>(clusterPath(clusterId, '/sites')),
+    list: (config?: AxiosRequestConfig) =>
+        get<SiteSummary[]>(clusterPath(clusterId, '/sites'), config),
     get: (siteId: string) => get<SiteDetails>(clusterPath(clusterId, `/sites/${siteId}`)),
     update: (siteId: string, payload: UpdateSiteRequest) =>
         patch<SiteDetails>(clusterPath(clusterId, `/sites/${siteId}`), payload),
@@ -88,7 +90,8 @@ export const sitesApi = (clusterId: string) => ({
         action: 'ENABLE' | 'DISABLE' | 'PUBLISH' | 'SET_DELIVERY';
         delivery?: DeliveryPolicy;
     }) => post<BulkSiteResult[]>(clusterPath(clusterId, '/sites/bulk'), payload),
-    listTemplates: () => get<SiteTemplate[]>(clusterPath(clusterId, '/site-templates')),
+    listTemplates: (config?: AxiosRequestConfig) =>
+        get<SiteTemplate[]>(clusterPath(clusterId, '/site-templates'), config),
     getTemplate: (templateId: string) =>
         get<SiteTemplate>(clusterPath(clusterId, `/site-templates/${templateId}`)),
     createTemplate: (payload: { name: string; site_id?: string; config?: SiteBundle }) =>

@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     Certificate,
     CertificateJob,
@@ -13,7 +14,8 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const certificatesApi = (clusterId: string) => ({
-    list: () => get<Certificate[]>(clusterPath(clusterId, '/certificates')),
+    list: (config?: AxiosRequestConfig) =>
+        get<Certificate[]>(clusterPath(clusterId, '/certificates'), config),
     create: (payload: CreateCertificateRequest) =>
         post<Certificate>(clusterPath(clusterId, '/certificates'), payload),
     createACME: (payload: CreateACMECertificateRequest) =>

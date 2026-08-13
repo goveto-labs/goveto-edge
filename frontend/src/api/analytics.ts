@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     AnalyticsParams,
     DistributionItem,
@@ -20,12 +21,13 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const analyticsApi = (clusterId: string) => ({
-    overview: (params: Pick<AnalyticsParams, 'site_id'> = {}) =>
+    overview: (params: Pick<AnalyticsParams, 'site_id'> = {}, config?: AxiosRequestConfig) =>
         get<MonitoringOverview>(
             clusterPath(
                 clusterId,
                 `/analytics/overview${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
-            )
+            ),
+            config
         ),
     summary: (params: AnalyticsParams) =>
         get<Summary>(
@@ -48,12 +50,13 @@ export const analyticsApi = (clusterId: string) => ({
                 `/analytics/top-ips${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
             )
         ),
-    traffic: (params: AnalyticsParams & { period: '24h' | '30d' }) =>
+    traffic: (params: AnalyticsParams & { period: '24h' | '30d' }, config?: AxiosRequestConfig) =>
         get<TrafficResponse>(
             clusterPath(
                 clusterId,
                 `/analytics/traffic${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
-            )
+            ),
+            config
         ),
     wafTraffic: (params: Pick<AnalyticsParams, 'site_id'> & { period: '24h' | '30d' }) =>
         get<WAFTrafficResponse>(
@@ -68,13 +71,15 @@ export const analyticsApi = (clusterId: string) => ({
             period?: '24h' | '30d';
             sort?: 'requests' | 'traffic';
             limit?: number;
-        }
+        },
+        config?: AxiosRequestConfig
     ) =>
         get<DistributionItem[]>(
             clusterPath(
                 clusterId,
                 `/analytics/rankings/${dimension}${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
-            )
+            ),
+            config
         ),
     distributions: (
         dimension: string,
@@ -82,20 +87,26 @@ export const analyticsApi = (clusterId: string) => ({
             period?: '24h' | '30d';
             sort?: 'requests' | 'traffic';
             limit?: number;
-        }
+        },
+        config?: AxiosRequestConfig
     ) =>
         get<DistributionItem[]>(
             clusterPath(
                 clusterId,
                 `/analytics/distributions/${dimension}${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
-            )
+            ),
+            config
         ),
-    nodeRuntime: (params: { node_id?: string; period?: '12h' | '24h' | '30d' }) =>
+    nodeRuntime: (
+        params: { node_id?: string; period?: '12h' | '24h' | '30d' },
+        config?: AxiosRequestConfig
+    ) =>
         get<NodeRuntimeResponse>(
             clusterPath(
                 clusterId,
                 `/analytics/nodes/runtime${buildQuery(params as unknown as Record<string, string | number | boolean | undefined>)}`
-            )
+            ),
+            config
         ),
     latestNodeRuntime: (nodeId?: string) =>
         get<NodeSnapshot[]>(

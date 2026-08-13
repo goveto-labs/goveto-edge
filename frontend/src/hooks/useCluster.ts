@@ -11,7 +11,7 @@ import {
     useState,
 } from 'react';
 
-import { clustersApi } from '@/api';
+import { cancelPendingReads, clustersApi } from '@/api';
 import { useAuth } from '@/hooks/useAuth.ts';
 
 interface ClusterContextValue {
@@ -36,6 +36,8 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
     const [error, setError] = useState<string | null>(null);
     const [loadedForUserId, setLoadedForUserId] = useState<string | null>(null);
     const requestVersion = useRef(0);
+    const selectionVersion = useRef(0);
+    const selectionQueue = useRef(Promise.resolve());
     const ready = !!user && loadedForUserId === user.id;
 
     const refresh = useCallback(async () => {
@@ -55,6 +57,7 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
         try {
             const result = await clustersApi.list();
             if (version !== requestVersion.current) return;
+            cancelPendingReads();
             setClusters(result.clusters ?? []);
             setCurrentClusterId(result.selected_cluster_id ?? '');
             setLoadedForUserId(userId);
@@ -72,11 +75,20 @@ export function ClusterProvider({ children }: { children: React.ReactNode }) {
         void refresh();
         return () => {
             requestVersion.current++;
+            selectionVersion.current++;
         };
     }, [refresh]);
 
     const setClusterId = useCallback(async (id: string) => {
-        await clustersApi.select(id);
+        const version = ++selectionVersion.current;
+        const selection = selectionQueue.current.then(() => clustersApi.select(id));
+        selectionQueue.current = selection.then(
+            () => undefined,
+            () => undefined
+        );
+        await selection;
+        if (version !== selectionVersion.current) return;
+        cancelPendingReads();
         setCurrentClusterId(id);
     }, []);
 

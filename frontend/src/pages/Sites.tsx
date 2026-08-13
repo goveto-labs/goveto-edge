@@ -35,33 +35,45 @@ export default function Sites() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const loadSites = useCallback(async () => {
-        if (!clusterId) return;
-        setLoading(true);
-        try {
-            const siteItems = await api.list();
-            setSites(siteItems);
-            setSelected(
-                (current) =>
-                    new Set([...current].filter((id) => siteItems.some((site) => site.id === id)))
-            );
+    const loadSites = useCallback(
+        async (signal?: AbortSignal) => {
+            if (!clusterId) return;
+            setLoading(true);
             try {
-                setTemplates(await api.listTemplates());
-                setError('');
-            } catch (templateError) {
-                setTemplates([]);
-                setError(
-                    templateError instanceof ApiError
-                        ? `Sites loaded, but templates are unavailable: ${templateError.message}`
-                        : 'Sites loaded, but templates are unavailable'
+                const siteItems = await api.list({ signal });
+                if (signal?.aborted) return;
+                setSites(siteItems);
+                setSelected(
+                    (current) =>
+                        new Set(
+                            [...current].filter((id) => siteItems.some((site) => site.id === id))
+                        )
                 );
+                try {
+                    const templateItems = await api.listTemplates({ signal });
+                    if (signal?.aborted) return;
+                    setTemplates(templateItems);
+                    setError('');
+                } catch (templateError) {
+                    if (signal?.aborted) return;
+                    setTemplates([]);
+                    setError(
+                        templateError instanceof ApiError
+                            ? `Sites loaded, but templates are unavailable: ${templateError.message}`
+                            : 'Sites loaded, but templates are unavailable'
+                    );
+                }
+            } catch (loadError) {
+                if (signal?.aborted) return;
+                setError(
+                    loadError instanceof ApiError ? loadError.message : 'Failed to load sites'
+                );
+            } finally {
+                if (!signal?.aborted) setLoading(false);
             }
-        } catch (loadError) {
-            setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
-        } finally {
-            setLoading(false);
-        }
-    }, [api, clusterId]);
+        },
+        [api, clusterId]
+    );
 
     useAutoRefresh(loadSites, Boolean(clusterId));
 

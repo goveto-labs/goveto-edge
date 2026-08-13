@@ -191,20 +191,28 @@ export default function Certificates() {
             .sort((left, right) => expiryTime(left) - expiryTime(right));
     }, [certs, expiryFilter]);
 
-    const load = useCallback(async () => {
-        if (!clusterId) return;
-        try {
-            const [certificateData, dnsConfig] = await Promise.all([
-                api.list(),
-                dns.config().catch(() => null),
-            ]);
-            setCerts(certificateData);
-            setZones(dnsConfig?.zones ?? []);
-            setError('');
-        } catch (err) {
-            setError(message(err, 'Failed to load certificates'));
-        }
-    }, [api, clusterId, dns]);
+    const load = useCallback(
+        async (signal?: AbortSignal) => {
+            if (!clusterId) return;
+            try {
+                const [certificateData, dnsConfig] = await Promise.all([
+                    api.list({ signal }),
+                    dns.config({ signal }).catch((dnsError) => {
+                        if (signal?.aborted) throw dnsError;
+                        return null;
+                    }),
+                ]);
+                if (signal?.aborted) return;
+                setCerts(certificateData);
+                setZones(dnsConfig?.zones ?? []);
+                setError('');
+            } catch (err) {
+                if (signal?.aborted) return;
+                setError(message(err, 'Failed to load certificates'));
+            }
+        },
+        [api, clusterId, dns]
+    );
 
     useAutoRefresh(load, Boolean(clusterId));
 

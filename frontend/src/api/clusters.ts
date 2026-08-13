@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     ClusterChoice,
     ClusterGroup,
@@ -25,12 +26,14 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const clusterApi = (clusterId: string) => ({
-    dnsLines: () => get<DNSLine[]>(clusterPath(clusterId, '/dns-lines')),
+    dnsLines: (config?: AxiosRequestConfig) =>
+        get<DNSLine[]>(clusterPath(clusterId, '/dns-lines'), config),
 
     groups: () => get<ClusterGroup[]>(clusterPath(clusterId, '/groups')),
     createGroup: (name: string) => post<ClusterGroup>(clusterPath(clusterId, '/groups'), { name }),
 
-    regions: () => get<ClusterRegion[]>(clusterPath(clusterId, '/regions')),
+    regions: (config?: AxiosRequestConfig) =>
+        get<ClusterRegion[]>(clusterPath(clusterId, '/regions'), config),
     createRegion: (name: string) =>
         post<ClusterRegion>(clusterPath(clusterId, '/regions'), { name }),
 

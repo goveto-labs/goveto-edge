@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     DNSConfigResponse,
     DNSManagedRecord,
@@ -47,7 +48,7 @@ export interface UpdateDNSZoneRequest {
 export const dnsApi = (clusterId: string) => {
     const base = `/clusters/${clusterId}/dns`;
     return {
-        config: () => get<DNSConfigResponse>(base),
+        config: (config?: AxiosRequestConfig) => get<DNSConfigResponse>(base, config),
         update: (payload: UpdateDNSConfig) => put<DNSConfigResponse>(base, payload),
         delete: () => del(base),
         refresh: () => post<DNSConfigResponse>(`${base}/refresh`),

@@ -11,7 +11,7 @@ export { analyticsApi } from './analytics.ts';
 export { auditApi } from './audit.ts';
 export { authApi } from './auth.ts';
 export { certificatesApi } from './certificates.ts';
-export { ApiError, apiClient, buildQuery } from './client.ts';
+export { ApiError, apiClient, buildQuery, cancelPendingReads } from './client.ts';
 export { clusterApi, clustersApi } from './clusters.ts';
 export { dnsApi } from './dns.ts';
 export { initializationApi } from './initialization.ts';

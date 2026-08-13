@@ -1,3 +1,4 @@
+import type { AxiosRequestConfig } from 'axios';
 import type {
     CreateNodeRequest,
     Node,
@@ -21,7 +22,7 @@ function clusterPath(clusterId: string, path: string) {
 }
 
 export const nodesApi = (clusterId: string) => ({
-    list: () => get<Node[]>(clusterPath(clusterId, '/nodes')),
+    list: (config?: AxiosRequestConfig) => get<Node[]>(clusterPath(clusterId, '/nodes'), config),
     get: (nodeId: string) => get<Node>(clusterPath(clusterId, `/nodes/${nodeId}`)),
     create: (payload: CreateNodeRequest) => post<Node>(clusterPath(clusterId, '/nodes'), payload),
     testConnection: (ssh: NodeSSH) =>

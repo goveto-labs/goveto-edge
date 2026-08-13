@@ -74,8 +74,18 @@ export const apiClient = axios.create({
     },
 });
 
+let pendingReadController = new AbortController();
+
+export function cancelPendingReads() {
+    pendingReadController.abort();
+    pendingReadController = new AbortController();
+}
+
 apiClient.interceptors.request.use((config) => {
     const method = (config.method || 'get').toLowerCase();
+    if (['get', 'head', 'options'].includes(method) && !config.signal) {
+        config.signal = pendingReadController.signal;
+    }
     if (!['get', 'head', 'options'].includes(method) && typeof document !== 'undefined') {
         const csrfCookie = document.cookie
             .split('; ')

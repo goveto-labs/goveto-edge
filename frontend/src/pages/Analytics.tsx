@@ -212,90 +212,105 @@ export default function Analytics() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
-    const load = useCallback(async () => {
-        if (!clusterId) return;
-        setLoading(true);
-        const params = { site_id: siteId, period, limit: 10 } as const;
-        try {
-            const [
-                overviewData,
-                trafficData,
-                nodeData,
-                domainData,
-                extensionData,
-                statusData,
-                methodData,
-                pathData,
-                ipRequestData,
-                ipTrafficData,
-                countryData,
-                clientRegionData,
-                nodeUsageData,
-                clusterRegionData,
-                dnsLineData,
-            ] = await Promise.all([
-                api.overview({ site_id: siteId }),
-                api.traffic({ site_id: siteId, period }),
-                nodeApi.list(),
-                api.rankings('domain', { ...params, sort: 'requests' }),
-                api.distributions('extension', { ...params, sort: 'requests' }),
-                api.distributions('status', { ...params, sort: 'requests' }),
-                api.distributions('method', { ...params, sort: 'requests' }),
-                api.rankings('path', { ...params, sort: 'requests' }),
-                api.rankings('ip', { ...params, sort: 'requests' }),
-                api.rankings('ip', { ...params, sort: 'traffic' }),
-                api.rankings('country', { ...params, sort: 'traffic', limit: 100 }),
-                api.rankings('region', { ...params, sort: 'traffic', limit: 100 }),
-                api.rankings('node', { ...params, sort: 'traffic', limit: 100 }),
-                cluster.regions(),
-                cluster.dnsLines(),
-            ]);
-            setOverview(overviewData);
-            setTraffic(trafficData.series);
-            setNodes(nodeData);
-            setSelectedNode((current) =>
-                nodeData.some((node) => node.id === current) ? current : nodeData[0]?.id || ''
-            );
-            setDomains(domainData);
-            setExtensions(extensionData);
-            setStatuses(statusData);
-            setMethods(methodData);
-            setPaths(pathData);
-            setIpsByRequests(ipRequestData);
-            setIpsByTraffic(ipTrafficData);
-            setCountries(countryData);
-            setClientRegions(clientRegionData);
-            setNodeUsage(nodeUsageData);
-            setClusterRegions(clusterRegionData);
-            setDnsLines(dnsLineData);
-            setError('');
-        } catch (loadError) {
-            setError(
-                loadError instanceof ApiError ? loadError.message : 'Failed to load monitoring data'
-            );
-        } finally {
-            setLoading(false);
-        }
-    }, [api, cluster, clusterId, nodeApi, period, siteId]);
+    const load = useCallback(
+        async (signal?: AbortSignal) => {
+            if (!clusterId) return;
+            setLoading(true);
+            const params = { site_id: siteId, period, limit: 10 } as const;
+            try {
+                const [
+                    overviewData,
+                    trafficData,
+                    nodeData,
+                    domainData,
+                    extensionData,
+                    statusData,
+                    methodData,
+                    pathData,
+                    ipRequestData,
+                    ipTrafficData,
+                    countryData,
+                    clientRegionData,
+                    nodeUsageData,
+                    clusterRegionData,
+                    dnsLineData,
+                ] = await Promise.all([
+                    api.overview({ site_id: siteId }, { signal }),
+                    api.traffic({ site_id: siteId, period }, { signal }),
+                    nodeApi.list({ signal }),
+                    api.rankings('domain', { ...params, sort: 'requests' }, { signal }),
+                    api.distributions('extension', { ...params, sort: 'requests' }, { signal }),
+                    api.distributions('status', { ...params, sort: 'requests' }, { signal }),
+                    api.distributions('method', { ...params, sort: 'requests' }, { signal }),
+                    api.rankings('path', { ...params, sort: 'requests' }, { signal }),
+                    api.rankings('ip', { ...params, sort: 'requests' }, { signal }),
+                    api.rankings('ip', { ...params, sort: 'traffic' }, { signal }),
+                    api.rankings('country', { ...params, sort: 'traffic', limit: 100 }, { signal }),
+                    api.rankings('region', { ...params, sort: 'traffic', limit: 100 }, { signal }),
+                    api.rankings('node', { ...params, sort: 'traffic', limit: 100 }, { signal }),
+                    cluster.regions({ signal }),
+                    cluster.dnsLines({ signal }),
+                ]);
+                if (signal?.aborted) return;
+                setOverview(overviewData);
+                setTraffic(trafficData.series);
+                setNodes(nodeData);
+                setSelectedNode((current) =>
+                    nodeData.some((node) => node.id === current) ? current : nodeData[0]?.id || ''
+                );
+                setDomains(domainData);
+                setExtensions(extensionData);
+                setStatuses(statusData);
+                setMethods(methodData);
+                setPaths(pathData);
+                setIpsByRequests(ipRequestData);
+                setIpsByTraffic(ipTrafficData);
+                setCountries(countryData);
+                setClientRegions(clientRegionData);
+                setNodeUsage(nodeUsageData);
+                setClusterRegions(clusterRegionData);
+                setDnsLines(dnsLineData);
+                setError('');
+            } catch (loadError) {
+                if (signal?.aborted) return;
+                setError(
+                    loadError instanceof ApiError
+                        ? loadError.message
+                        : 'Failed to load monitoring data'
+                );
+            } finally {
+                if (!signal?.aborted) setLoading(false);
+            }
+        },
+        [api, cluster, clusterId, nodeApi, period, siteId]
+    );
 
     useAutoRefresh(load, Boolean(clusterId));
 
-    const loadRuntime = useCallback(async () => {
-        if (!clusterId || !selectedNode) {
-            setRuntime([]);
-            return;
-        }
-        try {
-            const result = await api.nodeRuntime({ node_id: selectedNode, period: '12h' });
-            setRuntime(result.series);
-        } catch (runtimeError) {
-            setError(
-                runtimeError instanceof ApiError
-                    ? runtimeError.message
-                    : 'Failed to load node trends'
-            );
-        }
-    }, [api, clusterId, selectedNode]);
+    const loadRuntime = useCallback(
+        async (signal?: AbortSignal) => {
+            if (!clusterId || !selectedNode) {
+                setRuntime([]);
+                return;
+            }
+            try {
+                const result = await api.nodeRuntime(
+                    { node_id: selectedNode, period: '12h' },
+                    { signal }
+                );
+                if (signal?.aborted) return;
+                setRuntime(result.series);
+            } catch (runtimeError) {
+                if (signal?.aborted) return;
+                setError(
+                    runtimeError instanceof ApiError
+                        ? runtimeError.message
+                        : 'Failed to load node trends'
+                );
+            }
+        },
+        [api, clusterId, selectedNode]
+    );
 
     useAutoRefresh(loadRuntime, Boolean(clusterId && selectedNode));
 

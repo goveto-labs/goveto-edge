@@ -2,16 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useOutlet } from 'react-router-dom';
 
 import { LoadingSurface } from '@/components/LoadingSurface.tsx';
+import { clusterPageKey } from '@/components/pageKey.ts';
 import { useApiLoading } from '@/hooks/useApiLoading.tsx';
-
-function pageKey(pathname: string) {
-    const nodeDetail = pathname.match(/^\/nodes\/([^/]+)/);
-    if (nodeDetail && nodeDetail[1] !== 'create') return `/nodes/${nodeDetail[1]}`;
-    const siteDetail = pathname.match(/^\/sites\/([^/]+)/);
-    if (siteDetail && siteDetail[1] !== 'create') return `/sites/${siteDetail[1]}`;
-    if (/^\/settings\/admin(?:\/|$)/.test(pathname)) return '/settings/admin';
-    return pathname;
-}
+import { useCluster } from '@/hooks/useCluster.ts';
 
 /**
  * Compact route-switch indicator pinned to the top-left corner. Renders
@@ -38,7 +31,8 @@ export function PageTransition() {
     const location = useLocation();
     const element = useOutlet();
     const { pending } = useApiLoading();
-    const currentPageKey = pageKey(location.pathname);
+    const { clusterId } = useCluster();
+    const currentPageKey = clusterPageKey(clusterId, location.pathname);
     const usesLocalLoading =
         /^\/(?:nodes|sites)\/(?!create(?:\/|$))[^/]+(?:\/|$)/.test(location.pathname) ||
         /^\/settings\/admin(?:\/|$)/.test(location.pathname);
@@ -85,6 +79,7 @@ export function PageTransition() {
                 label='Updating page data'
             >
                 <div
+                    key={currentPageKey}
                     className={`min-h-full transition-opacity ease-out ${isVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
                     style={{ transitionDuration: isVisible ? '200ms' : '0ms' }}
                 >
