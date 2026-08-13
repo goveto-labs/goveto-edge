@@ -3,12 +3,28 @@ package analytics
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
+	"math"
+	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/storage/gen/client"
+	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
+
+	"github.com/google/uuid"
+	"golang.org/x/net/http/httpguts"
+)
+
+const (
+	originHealthMaxPastAge   = 31 * 24 * time.Hour
+	originHealthMaxFutureAge = 5 * time.Minute
+	originHealthMaxLatencyMS = float64((24 * time.Hour) / time.Millisecond)
+	originHealthMaxAddress   = 512
 )
 
 type Ingest struct {
@@ -61,15 +77,16 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 	if err != nil {
 		return err
 	}
+	originMetrics, invalidOriginMetrics := decodeOriginHealthBatch(records, clusterID, nodeID, time.Now().UTC())
+	authorizedOriginSites, err := i.resolveOriginHealthSites(ctx, clusterID, nodeID, originMetrics)
+	if err != nil {
+		return err
+	}
 
 	events := make([]WebRequestLog, 0, len(records))
+	unauthorizedOriginMetrics := 0
 	for _, r := range records {
 		if r.Type == "origin_health" {
-			if metric, ok := decodeOriginHealth(r.Payload, clusterID, nodeID); ok {
-				if err := i.store.InsertOriginHealth(ctx, metric); err != nil {
-					return err
-				}
-			}
 			continue
 		}
 		if r.Type == "node_runtime" {
@@ -148,6 +165,23 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 			events = append(events, event)
 		}
 	}
+	for _, metric := range originMetrics {
+		if !authorizedOriginSites[metric.SiteID] {
+			unauthorizedOriginMetrics++
+			continue
+		}
+		if err := i.store.InsertOriginHealth(ctx, metric); err != nil {
+			return err
+		}
+	}
+	if invalidOriginMetrics > 0 || unauthorizedOriginMetrics > 0 {
+		slog.Warn("rejected origin health metrics",
+			"cluster_id", clusterID,
+			"node_id", nodeID,
+			"invalid", invalidOriginMetrics,
+			"unauthorized", unauthorizedOriginMetrics,
+		)
+	}
 
 	if i.archive != nil {
 		if err := i.archive.Write(ctx, clusterID, nodeID, records); err != nil {
@@ -205,7 +239,91 @@ func (i *Ingest) resolveSites(
 	return direct, nil
 }
 
-func decodeOriginHealth(payload []byte, clusterID, nodeID string) (OriginHealthMetric, bool) {
+func (i *Ingest) resolveOriginHealthSites(
+	ctx context.Context,
+	clusterID, nodeID string,
+	metrics []OriginHealthMetric,
+) (map[string]bool, error) {
+	ids := originHealthSiteIDs(metrics)
+	if len(ids) == 0 {
+		return map[string]bool{}, nil
+	}
+
+	sites, err := i.db.Site.Query().Where(
+		query.Site.ClusterId.Equals(clusterID),
+		query.Site.Id.In(ids...),
+	).Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	clusterSites := make(map[string]bool, len(sites))
+	for _, site := range sites {
+		clusterSites[site.Id] = true
+	}
+
+	versions, err := i.db.NodeSiteConfigVersion.Query().Where(
+		query.NodeSiteConfigVersion.NodeId.Equals(nodeID),
+		query.NodeSiteConfigVersion.SiteId.In(ids...),
+		query.NodeSiteConfigVersion.Status.In(
+			model.ConfigStatusPUBLISHED,
+			model.ConfigStatusROLLED_BACK,
+		),
+	).Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nodeSites := make(map[string]bool, len(versions))
+	for _, version := range versions {
+		nodeSites[version.SiteId] = true
+	}
+	return intersectOriginHealthSites(clusterSites, nodeSites), nil
+}
+
+func originHealthSiteIDs(metrics []OriginHealthMetric) []string {
+	seen := make(map[string]struct{}, len(metrics))
+	ids := make([]string, 0, len(metrics))
+	for _, metric := range metrics {
+		if _, ok := seen[metric.SiteID]; ok {
+			continue
+		}
+		seen[metric.SiteID] = struct{}{}
+		ids = append(ids, metric.SiteID)
+	}
+	return ids
+}
+
+func intersectOriginHealthSites(clusterSites, nodeSites map[string]bool) map[string]bool {
+	result := make(map[string]bool, min(len(clusterSites), len(nodeSites)))
+	for siteID := range clusterSites {
+		if nodeSites[siteID] {
+			result[siteID] = true
+		}
+	}
+	return result
+}
+
+func decodeOriginHealthBatch(
+	records []edgeprotocol.LogRecord,
+	clusterID, nodeID string,
+	now time.Time,
+) ([]OriginHealthMetric, int) {
+	metrics := make([]OriginHealthMetric, 0)
+	rejected := 0
+	for _, record := range records {
+		if record.Type != "origin_health" {
+			continue
+		}
+		metric, ok := decodeOriginHealth(record.Payload, clusterID, nodeID, now)
+		if !ok {
+			rejected++
+			continue
+		}
+		metrics = append(metrics, metric)
+	}
+	return metrics, rejected
+}
+
+func decodeOriginHealth(payload []byte, clusterID, nodeID string, now time.Time) (OriginHealthMetric, bool) {
 	var metric struct {
 		Minute           time.Time `json:"minute"`
 		SiteID           string    `json:"site_id"`
@@ -218,13 +336,67 @@ func decodeOriginHealth(payload []byte, clusterID, nodeID string) (OriginHealthM
 		AverageLatencyMS float64   `json:"average_latency_ms"`
 		ErrorRate        float64   `json:"error_rate"`
 	}
-	if json.Unmarshal(payload, &metric) != nil || metric.SiteID == "" || metric.OriginAddress == "" || metric.Minute.IsZero() {
+	if json.Unmarshal(payload, &metric) != nil {
 		return OriginHealthMetric{}, false
 	}
-	return OriginHealthMetric{
+	result := OriginHealthMetric{
 		Minute: metric.Minute, ClusterID: clusterID, NodeID: nodeID, SiteID: metric.SiteID,
 		OriginAddress: metric.OriginAddress, Healthy: metric.Healthy, Available: metric.Available,
 		Fails: metric.Fails, Requests: metric.Requests, Errors: metric.Errors,
 		AverageLatencyMS: metric.AverageLatencyMS, ErrorRate: metric.ErrorRate,
-	}, true
+	}
+	if !validOriginHealthMetric(&result, now) {
+		return OriginHealthMetric{}, false
+	}
+	return result, true
+}
+
+func validOriginHealthMetric(metric *OriginHealthMetric, now time.Time) bool {
+	metric.SiteID = strings.TrimSpace(metric.SiteID)
+	metric.OriginAddress = strings.TrimSpace(metric.OriginAddress)
+	metric.Minute = metric.Minute.UTC()
+	siteID, err := uuid.Parse(metric.SiteID)
+	if err != nil {
+		return false
+	}
+	metric.SiteID = siteID.String()
+	if metric.Minute.IsZero() || !metric.Minute.Equal(metric.Minute.Truncate(time.Minute)) ||
+		metric.Minute.Before(now.Add(-originHealthMaxPastAge)) ||
+		metric.Minute.After(now.Add(originHealthMaxFutureAge)) ||
+		!validOriginHealthAddress(metric.OriginAddress) ||
+		metric.Fails < 0 || int64(metric.Fails) > math.MaxInt32 ||
+		metric.Requests > math.MaxInt64 || metric.Errors > metric.Requests ||
+		math.IsNaN(metric.AverageLatencyMS) || math.IsInf(metric.AverageLatencyMS, 0) ||
+		metric.AverageLatencyMS < 0 || metric.AverageLatencyMS > originHealthMaxLatencyMS ||
+		math.IsNaN(metric.ErrorRate) || math.IsInf(metric.ErrorRate, 0) ||
+		metric.ErrorRate < 0 || metric.ErrorRate > 1 {
+		return false
+	}
+	if metric.Requests == 0 {
+		if metric.AverageLatencyMS != 0 {
+			return false
+		}
+		metric.ErrorRate = 0
+		return true
+	}
+	metric.ErrorRate = float64(metric.Errors) / float64(metric.Requests)
+	return true
+}
+
+func validOriginHealthAddress(address string) bool {
+	if address == "" || len(address) > originHealthMaxAddress {
+		return false
+	}
+	if network, dialAddress, found := strings.Cut(address, "/"); found {
+		if network != "tcp4" && network != "tcp6" {
+			return false
+		}
+		address = dialAddress
+	}
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || host == "" || len(host) > 253 || !httpguts.ValidHostHeader(host) {
+		return false
+	}
+	portNumber, err := strconv.Atoi(port)
+	return err == nil && portNumber > 0 && portNumber <= 65535
 }
