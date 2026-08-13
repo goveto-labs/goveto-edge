@@ -1,6 +1,7 @@
 package dnssync
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -79,5 +80,97 @@ func TestRecordKeyNormalizesEquivalentIPv6(t *testing.T) {
 	right := key("edge.example.com", model.DNSRecordTypeAAAA, "2001:db8::1", "default")
 	if left != right {
 		t.Fatalf("equivalent IPv6 record keys differ: %q != %q", left, right)
+	}
+}
+
+func TestCoalescePendingClusterActionTracksLatestConfig(t *testing.T) {
+	job := model.DNSSyncJob{Action: model.DNSSyncActionUPSERT_CLUSTER}
+
+	action, siteID, changed := coalescePendingAction(job, nil, model.DNSSyncActionDELETE_CLUSTER)
+	if !changed || action != model.DNSSyncActionDELETE_CLUSTER || siteID != nil {
+		t.Fatalf("disable coalesce = (%q, %v, %v)", action, siteID, changed)
+	}
+
+	job.Action = action
+	job.SiteId = siteID
+	action, siteID, changed = coalescePendingAction(job, nil, model.DNSSyncActionUPSERT_CLUSTER)
+	if !changed || action != model.DNSSyncActionUPSERT_CLUSTER || siteID != nil {
+		t.Fatalf("re-enable coalesce = (%q, %v, %v)", action, siteID, changed)
+	}
+
+	job.Action = action
+	job.SiteId = siteID
+	if _, _, changed = coalescePendingAction(job, nil, model.DNSSyncActionUPSERT_CLUSTER); changed {
+		t.Fatal("identical pending cluster action should be reused")
+	}
+}
+
+func TestClusterActionSupersedesPendingSiteAction(t *testing.T) {
+	siteID := "site-1"
+	job := model.DNSSyncJob{Action: model.DNSSyncActionUPSERT_SITE, SiteId: &siteID}
+	action, pendingSiteID, changed := coalescePendingAction(job, nil, model.DNSSyncActionDELETE_CLUSTER)
+	if !changed || action != model.DNSSyncActionDELETE_CLUSTER || pendingSiteID != nil {
+		t.Fatalf("cluster coalesce = (%q, %v, %v)", action, pendingSiteID, changed)
+	}
+}
+
+func TestRefreshPendingJobSetsMakesLatestActionImmediatelyRunnable(t *testing.T) {
+	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
+	sets := refreshPendingJobSets(model.DNSSyncActionDELETE_CLUSTER, nil, now)
+	got := make(map[string]any, len(sets))
+	for _, set := range sets {
+		got[set.Field] = set.Value
+	}
+	want := map[string]any{
+		"action":              model.DNSSyncActionDELETE_CLUSTER,
+		"attempts":            0,
+		"next_attempt_at":     now,
+		"lease_owner":         nil,
+		"lease_until":         nil,
+		"heartbeat_at":        nil,
+		"cancel_requested_at": nil,
+		"timeout_at":          nil,
+		"result_json":         nil,
+		"compensation_json":   nil,
+		"error":               nil,
+		"updated_at":          now,
+		"site_id":             nil,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("refreshPendingJobSets() = %#v; want %#v", got, want)
+	}
+}
+
+func TestResolveClusterActionUsesLockedConfigState(t *testing.T) {
+	tests := []struct {
+		name       string
+		requested  model.DNSSyncAction
+		config     *model.DNSProviderConfig
+		want       model.DNSSyncAction
+		configured bool
+	}{
+		{
+			name: "late upsert cannot overwrite disabled delete", requested: model.DNSSyncActionUPSERT_CLUSTER,
+			config: &model.DNSProviderConfig{Enabled: false}, want: model.DNSSyncActionDELETE_CLUSTER, configured: true,
+		},
+		{
+			name: "late delete cannot overwrite re-enabled upsert", requested: model.DNSSyncActionDELETE_CLUSTER,
+			config: &model.DNSProviderConfig{Enabled: true}, want: model.DNSSyncActionUPSERT_CLUSTER, configured: true,
+		},
+		{
+			name: "deleted config does not enqueue stale work", requested: model.DNSSyncActionUPSERT_CLUSTER,
+		},
+		{
+			name: "site action is unchanged", requested: model.DNSSyncActionUPSERT_SITE,
+			want: model.DNSSyncActionUPSERT_SITE, configured: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, configured := resolveClusterAction(test.requested, test.config)
+			if got != test.want || configured != test.configured {
+				t.Fatalf("resolveClusterAction() = (%q, %v); want (%q, %v)", got, configured, test.want, test.configured)
+			}
+		})
 	}
 }

@@ -79,3 +79,12 @@ func TestZoneUpdateRequiresValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigSyncAction(t *testing.T) {
+	if got := configSyncAction(true); got != model.DNSSyncActionUPSERT_CLUSTER {
+		t.Fatalf("configSyncAction(true) = %q", got)
+	}
+	if got := configSyncAction(false); got != model.DNSSyncActionDELETE_CLUSTER {
+		t.Fatalf("configSyncAction(false) = %q", got)
+	}
+}

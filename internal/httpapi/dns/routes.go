@@ -81,7 +81,7 @@ func Register(
 	credentials := clusteraccess.RequirePermission(db, rbac.PermissionCredentialManage)
 	nodeManage := clusteraccess.RequirePermission(db, rbac.PermissionNodeManage)
 	group.GET("", getConfig(db), read)
-	group.PUT("", updateConfig(db, cipher), credentials)
+	group.PUT("", updateConfig(db, cipher, service), credentials)
 	group.DELETE("", deleteConfig(db, service), credentials)
 	group.POST("/refresh", refreshConfig(db, cipher), credentials)
 	group.GET("/zones", listZones(db), read)
@@ -213,6 +213,7 @@ func getConfig(db *client.Client) echo.HandlerFunc {
 func updateConfig(
 	db *client.Client,
 	cipher *node.CredentialCipher,
+	service *dnssync.Service,
 ) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input configRequest
@@ -431,8 +432,8 @@ func updateConfig(
 			if storeErr := storeProviderLines(ctx, tx, clusterID, providerLines, now); storeErr != nil {
 				return storeErr
 			}
-
-			return nil
+			_, enqueueErr := service.EnqueueLatestTx(ctx, tx, clusterID, configSyncAction(enabled))
+			return enqueueErr
 		})
 		if err != nil {
 			return err
@@ -580,7 +581,10 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		items, err := db.DNSSyncJob.Query().
 			Where(
 				query.DNSSyncJob.ClusterId.Equals(c.Param("cluster_id")),
-				query.DNSSyncJob.Action.Equals(model.DNSSyncActionUPSERT_CLUSTER),
+				query.DNSSyncJob.Action.In(
+					model.DNSSyncActionUPSERT_CLUSTER,
+					model.DNSSyncActionDELETE_CLUSTER,
+				),
 				query.DNSSyncJob.SiteId.IsNull(),
 			).
 			OrderBy(query.DNSSyncJob.CreatedAt.Desc()).
@@ -1020,6 +1024,13 @@ func deleteZone(db *client.Client) echo.HandlerFunc {
 		audit.SetChange(c, before, nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}
+}
+
+func configSyncAction(enabled bool) model.DNSSyncAction {
+	if enabled {
+		return model.DNSSyncActionUPSERT_CLUSTER
+	}
+	return model.DNSSyncActionDELETE_CLUSTER
 }
 
 func zoneUpdateRequiresValidation(

@@ -94,6 +94,17 @@ func (s *Service) Enqueue(
 	return job, err
 }
 
+// EnqueueLatestTx makes a cluster-wide configuration change immediately
+// runnable, replacing any pending work with the latest desired action.
+func (s *Service) EnqueueLatestTx(
+	ctx context.Context,
+	db *client.Client,
+	clusterID string,
+	action model.DNSSyncAction,
+) (*model.DNSSyncJob, error) {
+	return s.enqueueTx(ctx, db, clusterID, nil, action, true)
+}
+
 // EnqueueTx creates at most one pending follow-up job for a cluster. A new
 // pending job is allowed while another job is running so changes that happen
 // during reconciliation cannot be lost.
@@ -104,21 +115,57 @@ func (s *Service) EnqueueTx(
 	siteID *string,
 	action model.DNSSyncAction,
 ) (*model.DNSSyncJob, error) {
+	return s.enqueueTx(ctx, db, clusterID, siteID, action, false)
+}
+
+type pendingDNSJob struct {
+	ID     string              `db:"id"`
+	SiteID *string             `db:"site_id"`
+	Action model.DNSSyncAction `db:"action"`
+}
+
+func (s *Service) enqueueTx(
+	ctx context.Context,
+	db *client.Client,
+	clusterID string,
+	siteID *string,
+	action model.DNSSyncAction,
+	refreshPending bool,
+) (*model.DNSSyncJob, error) {
 	if err := LockClusterTx(ctx, db, clusterID); err != nil {
 		return nil, err
 	}
-	active, err := db.DNSSyncJob.Query().
-		Where(
-			query.DNSSyncJob.ClusterId.Equals(clusterID),
-			query.DNSSyncJob.Status.Equals(model.JobStatusPENDING),
-		).
-		OrderBy(query.DNSSyncJob.CreatedAt.Asc()).
-		First(ctx)
+	if siteID == nil && isClusterAction(action) {
+		config, err := EndpointConfig(ctx, db, clusterID)
+		if err != nil {
+			return nil, err
+		}
+		var configured bool
+		action, configured = resolveClusterAction(action, config)
+		if !configured {
+			return nil, nil
+		}
+	}
+	active, err := client.Raw[pendingDNSJob](ctx, db, `SELECT id, site_id, action
+		FROM dns_sync_jobs WHERE cluster_id=$1 AND status='PENDING'
+		ORDER BY created_at ASC FOR UPDATE LIMIT 1`, clusterID)
 	if err != nil {
 		return nil, err
 	}
-	if active != nil {
-		return active, nil
+	if len(active) > 0 {
+		current := active[0]
+		coalescedAction, pendingSiteID, changed := coalescePendingAction(
+			model.DNSSyncJob{Action: current.Action, SiteId: current.SiteID},
+			siteID,
+			action,
+		)
+		if !changed && !refreshPending {
+			return db.DNSSyncJob.FindUnique(ctx, query.DNSSyncJob.Id.Equals(current.ID))
+		}
+		return db.DNSSyncJob.Update().
+			Where(query.DNSSyncJob.Id.Equals(current.ID)).
+			Set(refreshPendingJobSets(coalescedAction, pendingSiteID, time.Now())...).
+			Do(ctx)
 	}
 
 	now := time.Now()
@@ -132,6 +179,65 @@ func (s *Service) EnqueueTx(
 		sets = append(sets, query.DNSSyncJob.SiteId.Set(*siteID))
 	}
 	return db.DNSSyncJob.Create().Set(sets...).Do(ctx)
+}
+
+func isClusterAction(action model.DNSSyncAction) bool {
+	return action == model.DNSSyncActionUPSERT_CLUSTER || action == model.DNSSyncActionDELETE_CLUSTER
+}
+
+func resolveClusterAction(
+	requested model.DNSSyncAction,
+	config *model.DNSProviderConfig,
+) (model.DNSSyncAction, bool) {
+	if !isClusterAction(requested) {
+		return requested, true
+	}
+	if config == nil {
+		return "", false
+	}
+	if config.Enabled {
+		return model.DNSSyncActionUPSERT_CLUSTER, true
+	}
+	return model.DNSSyncActionDELETE_CLUSTER, true
+}
+
+func refreshPendingJobSets(
+	action model.DNSSyncAction,
+	siteID *string,
+	now time.Time,
+) []query.DNSSyncJobSetClause {
+	sets := []query.DNSSyncJobSetClause{
+		query.DNSSyncJob.Action.Set(action),
+		query.DNSSyncJob.Attempts.Set(0),
+		query.DNSSyncJob.NextAttemptAt.Set(now),
+		query.DNSSyncJob.LeaseOwner.SetNull(),
+		query.DNSSyncJob.LeaseUntil.SetNull(),
+		query.DNSSyncJob.HeartbeatAt.SetNull(),
+		query.DNSSyncJob.CancelRequestedAt.SetNull(),
+		query.DNSSyncJob.TimeoutAt.SetNull(),
+		query.DNSSyncJob.ResultJson.SetNull(),
+		query.DNSSyncJob.CompensationJson.SetNull(),
+		query.DNSSyncJob.Error.SetNull(),
+		query.DNSSyncJob.UpdatedAt.Set(now),
+	}
+	if siteID == nil {
+		return append(sets, query.DNSSyncJob.SiteId.SetNull())
+	}
+	return append(sets, query.DNSSyncJob.SiteId.Set(*siteID))
+}
+
+// A cluster-wide request describes the latest desired state and supersedes any
+// pending work for the cluster. Site-scoped requests keep an existing pending
+// cluster job because a full reconciliation already covers them.
+func coalescePendingAction(
+	active model.DNSSyncJob,
+	siteID *string,
+	action model.DNSSyncAction,
+) (model.DNSSyncAction, *string, bool) {
+	if siteID == nil && (active.Action != action || active.SiteId != nil) {
+		return action, nil, true
+	}
+	return active.Action, active.SiteId, false
 }
 
 // CancelActiveTx cancels obsolete pending jobs while holding the cluster lock.
