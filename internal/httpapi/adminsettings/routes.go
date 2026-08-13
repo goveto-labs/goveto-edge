@@ -2,6 +2,7 @@
 package adminsettings
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/settings"
@@ -84,6 +86,50 @@ type registrationRequest struct {
 	CaptchaSecret   string `json:"captcha_secret"`
 }
 
+type gatewayAddressAuthority interface {
+	PrepareGatewayAddressUpdate(string) (func(), error)
+}
+
+type gatewayAddressNotifier interface {
+	NotifyAuthorityUpdateTx(context.Context, *client.Client, string) error
+}
+
+type applyPreparedAdminSettings func(
+	context.Context,
+	*settings.PreparedAdminSettingsUpdate,
+	func(*client.Client) error,
+) error
+
+func persistAdminSettingsUpdate(
+	ctx context.Context,
+	prepared *settings.PreparedAdminSettingsUpdate,
+	addressChanged bool,
+	address string,
+	authority gatewayAddressAuthority,
+	gateway gatewayAddressNotifier,
+	apply applyPreparedAdminSettings,
+) error {
+	applyGatewayAddress := func() {}
+	if addressChanged && authority != nil {
+		var err error
+		applyGatewayAddress, err = authority.PrepareGatewayAddressUpdate(address)
+		if err != nil {
+			return err
+		}
+	}
+	var notifyGatewayAddress func(*client.Client) error
+	if addressChanged && gateway != nil {
+		notifyGatewayAddress = func(tx *client.Client) error {
+			return gateway.NotifyAuthorityUpdateTx(ctx, tx, address)
+		}
+	}
+	if err := apply(ctx, prepared, notifyGatewayAddress); err != nil {
+		return err
+	}
+	applyGatewayAddress()
+	return nil
+}
+
 func buildCaptchaConfig(input registrationRequest, current settings.CaptchaConfig) (settings.CaptchaConfig, error) {
 	config := settings.CaptchaConfig{
 		Provider: input.CaptchaProvider, SiteKey: input.CaptchaSiteKey, SecretKey: input.CaptchaSecret,
@@ -118,14 +164,22 @@ type authenticationProviderRequest struct {
 	AutoCreateUsers  bool                      `json:"auto_create_users"`
 }
 
-func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, cipher settings.SecretCipher, restartControlPlane func()) {
+func Register(
+	e *echo.Echo,
+	db *client.Client,
+	settingStore *settings.Store,
+	cipher settings.SecretCipher,
+	authority *edgecontrol.Authority,
+	gateway *edgecontrol.Gateway,
+	restartControlPlane func(),
+) {
 	group := e.Group(
 		"/api/v1/admin/settings",
 		authn.RequireAuth,
 		clusteraccess.RequirePlatform(db, rbac.PermissionPlatformSettingsManage),
 	)
 	group.GET("", get(settingStore, cipher))
-	group.PUT("", update(settingStore, cipher, restartControlPlane))
+	group.PUT("", update(settingStore, cipher, authority, gateway, restartControlPlane))
 }
 
 // @summary Get instance settings
@@ -144,7 +198,13 @@ func get(settingStore *settings.Store, cipher settings.SecretCipher) echo.Handle
 // @summary Update instance settings
 // @description Update system-level settings as a platform administrator.
 // @Tags admin settings
-func update(settingStore *settings.Store, cipher settings.SecretCipher, restartControlPlane func()) echo.HandlerFunc {
+func update(
+	settingStore *settings.Store,
+	cipher settings.SecretCipher,
+	authority *edgecontrol.Authority,
+	gateway *edgecontrol.Gateway,
+	restartControlPlane func(),
+) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input updateRequest
 		if err := c.Bind(&input); err != nil {
@@ -213,13 +273,14 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		}
 
 		restartRequired := currentAddress != address || !reflect.DeepEqual(currentProxy, input.HTTPProxy)
+		addressChanged := currentAddress != address
 		settingsUpdate := settings.AdminSettingsUpdate{
 			RequireTOTP:         input.Authentication.RequireTOTP,
 			AuthProviders:       storedProviders,
 			RegistrationEnabled: input.Authentication.Registration.Enabled,
 			Captcha:             captchaConfig,
 		}
-		if currentAddress != address {
+		if addressChanged {
 			settingsUpdate.AgentGatewayPublicAddress = &address
 		}
 		if !reflect.DeepEqual(currentProxy, input.HTTPProxy) {
@@ -237,7 +298,10 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		if err != nil {
 			return err
 		}
-		if err = settingStore.ApplyAdminSettingsUpdate(c.Request().Context(), prepared); err != nil {
+		if err = persistAdminSettingsUpdate(
+			c.Request().Context(), prepared, addressChanged, address, authority, gateway,
+			settingStore.ApplyAdminSettingsUpdate,
+		); err != nil {
 			return err
 		}
 

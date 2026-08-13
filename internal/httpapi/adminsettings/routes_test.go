@@ -1,12 +1,79 @@
 package adminsettings
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"goveto-edge/internal/settings"
+	"goveto-edge/internal/storage/gen/client"
 )
+
+type testGatewayAddressAuthority struct {
+	transactionStarted *bool
+	prepared           bool
+	published          string
+}
+
+func (a *testGatewayAddressAuthority) PrepareGatewayAddressUpdate(address string) (func(), error) {
+	if *a.transactionStarted {
+		return nil, errors.New("authority prepared after transaction started")
+	}
+	a.prepared = true
+	return func() { a.published = address }, nil
+}
+
+type testGatewayAddressNotifier struct {
+	transactionStarted *bool
+	err                error
+	address            string
+}
+
+func (n *testGatewayAddressNotifier) NotifyAuthorityUpdateTx(_ context.Context, _ *client.Client, address string) error {
+	if !*n.transactionStarted {
+		return errors.New("notification ran outside transaction")
+	}
+	n.address = address
+	return n.err
+}
+
+func TestPersistAdminSettingsUpdatePublishesOnlyAfterSuccessfulCommit(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		notifyErr     error
+		wantPublished string
+	}{
+		{name: "commit", wantPublished: "new.example.com:9443"},
+		{name: "rollback", notifyErr: errors.New("notify failed")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			transactionStarted := false
+			authority := &testGatewayAddressAuthority{transactionStarted: &transactionStarted}
+			notifier := &testGatewayAddressNotifier{transactionStarted: &transactionStarted, err: test.notifyErr}
+			apply := func(_ context.Context, _ *settings.PreparedAdminSettingsUpdate, hook func(*client.Client) error) error {
+				transactionStarted = true
+				if hook != nil {
+					return hook(nil)
+				}
+				return nil
+			}
+			err := persistAdminSettingsUpdate(
+				context.Background(), nil, true, "new.example.com:9443", authority, notifier, apply,
+			)
+			if !errors.Is(err, test.notifyErr) {
+				t.Fatalf("persistAdminSettingsUpdate() error = %v, want %v", err, test.notifyErr)
+			}
+			if !authority.prepared || notifier.address != "new.example.com:9443" {
+				t.Fatalf("prepare/notify missing: authority=%+v notifier=%+v", authority, notifier)
+			}
+			if authority.published != test.wantPublished {
+				t.Fatalf("published address = %q, want %q", authority.published, test.wantPublished)
+			}
+		})
+	}
+}
 
 func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	encoded, err := json.Marshal(response{

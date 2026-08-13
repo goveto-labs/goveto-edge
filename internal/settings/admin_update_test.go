@@ -230,7 +230,7 @@ func TestApplyAdminSettingsUpdateRollsBackOnNthWriteFailure(t *testing.T) {
 		t.Fatal("database transaction began before validation and encryption completed")
 	}
 
-	err = store.ApplyAdminSettingsUpdate(context.Background(), prepared)
+	err = store.ApplyAdminSettingsUpdate(context.Background(), prepared, nil)
 	if err == nil || !strings.Contains(err.Error(), "injected setting write failure") {
 		t.Fatalf("ApplyAdminSettingsUpdate() error = %v", err)
 	}
@@ -247,5 +247,29 @@ func TestApplyAdminSettingsUpdateRollsBackOnNthWriteFailure(t *testing.T) {
 			"transaction counters = upserts:%d begin:%d commit:%d rollback:%d",
 			database.upsertCount, database.beginCount, database.commitCount, database.rollbackCount,
 		)
+	}
+}
+
+func TestApplyAdminSettingsUpdateRollsBackWhenTransactionHookFails(t *testing.T) {
+	initial := map[string]string{RequireTOTPKey: `false`}
+	database := &atomicUpdateDB{settings: maps.Clone(initial)}
+	sqlDB := sql.OpenDB(atomicUpdateConnector{driver: &atomicUpdateDriver{db: database}})
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	store := New(client.New(sqlDB), nil)
+
+	prepared, err := PrepareAdminSettingsUpdate(AdminSettingsUpdate{}, nil, CaptchaConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hookErr := errors.New("injected notification failure")
+	err = store.ApplyAdminSettingsUpdate(context.Background(), prepared, func(*client.Client) error {
+		return hookErr
+	})
+	if !errors.Is(err, hookErr) {
+		t.Fatalf("ApplyAdminSettingsUpdate() error = %v, want %v", err, hookErr)
+	}
+	if !maps.Equal(database.settings, initial) || database.commitCount != 0 || database.rollbackCount != 1 {
+		t.Fatalf("transaction was not rolled back: settings=%v commit=%d rollback=%d", database.settings, database.commitCount, database.rollbackCount)
 	}
 }

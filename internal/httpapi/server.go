@@ -89,7 +89,7 @@ func New(
 	health.Register(e, db, analyticsData)
 	initialization.Register(e, orm, settingStore, limiter, authority, gateway)
 	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, secretCiphers.TOTP, captchaVerifier, limiter)
-	adminsettings.Register(e, orm, settingStore, secretCiphers.General, restartControlPlane)
+	adminsettings.Register(e, orm, settingStore, secretCiphers.General, authority, gateway, restartControlPlane)
 	clusters.Register(e, orm, sessions, secretCiphers.Notification)
 	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, secretCiphers.DNS, dnsService)

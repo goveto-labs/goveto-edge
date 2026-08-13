@@ -294,7 +294,11 @@ func PrepareAdminSettingsUpdate(
 
 // ApplyAdminSettingsUpdate persists every prepared value and its audit record
 // in one transaction.
-func (s *Store) ApplyAdminSettingsUpdate(ctx context.Context, prepared *PreparedAdminSettingsUpdate) error {
+func (s *Store) ApplyAdminSettingsUpdate(
+	ctx context.Context,
+	prepared *PreparedAdminSettingsUpdate,
+	afterSettings func(*client.Client) error,
+) error {
 	if prepared == nil {
 		return errors.New("prepared admin settings update is required")
 	}
@@ -304,6 +308,9 @@ func (s *Store) ApplyAdminSettingsUpdate(ctx context.Context, prepared *Prepared
 			if err := store.setPrepared(ctx, setting); err != nil {
 				return err
 			}
+		}
+		if afterSettings != nil {
+			return afterSettings(tx)
 		}
 		return nil
 	})
