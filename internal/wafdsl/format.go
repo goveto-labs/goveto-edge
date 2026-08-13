@@ -12,6 +12,16 @@ func formatPolicy(value policy.WAFPolicy) string {
 	out.WriteString("waf " + enabledWord(value.Enabled) + " {\n")
 	out.WriteString("  trusted_proxy_chain " + enabledWord(value.TrustedProxyChain) + "\n")
 	out.WriteString("  trusted_proxies " + formatSet(value.TrustedProxies, true) + "\n")
+	limit := value.BodyInspectLimitBytes
+	if limit == 0 {
+		limit = policy.DefaultWAFBodyInspectLimitBytes
+	}
+	overLimit := strings.ToLower(value.BodyOverLimitAction)
+	if overLimit == "" {
+		overLimit = "partial"
+	}
+	out.WriteString("  body_inspect_limit " + strconv.FormatInt(limit, 10) + "\n")
+	out.WriteString("  body_over_limit " + overLimit + "\n")
 	for _, set := range value.RuleSets {
 		out.WriteString("\n")
 		out.WriteString(formatRuleSet(set, 2))

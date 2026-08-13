@@ -161,6 +161,7 @@ func (p *parser) parsePolicy() (policy.WAFPolicy, error) {
 	}
 	result := policy.WAFPolicy{Enabled: enabled, TrustedProxies: []string{}, RuleSets: []policy.WAFRuleSet{}}
 	seenProxyChain, seenProxies := false, false
+	seenBodyLimit, seenBodyOverLimit := false, false
 	for !p.accept("}") {
 		if p.done() {
 			return result, p.errorHere("expected policy property or closing brace")
@@ -180,12 +181,34 @@ func (p *parser) parsePolicy() (policy.WAFPolicy, error) {
 			p.index++
 			result.TrustedProxies, err = p.parseStringSet(true)
 			seenProxies = true
+		case "body_inspect_limit":
+			if seenBodyLimit {
+				return result, p.errorHere("body_inspect_limit may only be declared once")
+			}
+			p.index++
+			var limit int
+			limit, err = p.parseNumber()
+			result.BodyInspectLimitBytes = int64(limit)
+			seenBodyLimit = true
+		case "body_over_limit":
+			if seenBodyOverLimit {
+				return result, p.errorHere("body_over_limit may only be declared once")
+			}
+			p.index++
+			if p.accept("block") {
+				result.BodyOverLimitAction = policy.WAFBodyOverLimitBlock
+			} else if p.accept("partial") {
+				result.BodyOverLimitAction = policy.WAFBodyOverLimitPartial
+			} else {
+				err = p.errorHere("expected block or partial")
+			}
+			seenBodyOverLimit = true
 		case "ruleset":
 			var set policy.WAFRuleSet
 			set, err = p.parseRuleSet()
 			result.RuleSets = append(result.RuleSets, set)
 		default:
-			err = p.errorHere("expected trusted_proxy_chain, trusted_proxies, or ruleset")
+			err = p.errorHere("expected trusted_proxy_chain, trusted_proxies, body_inspect_limit, body_over_limit, or ruleset")
 		}
 		if err != nil {
 			return result, err

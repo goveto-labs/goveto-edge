@@ -770,9 +770,16 @@ export default function SiteDetail() {
         }
     );
     const securityRulesDirty = !valuesEqual(
-        { enabled: security.waf.enabled, rule_sets: security.waf.rule_sets },
+        {
+            enabled: security.waf.enabled,
+            body_inspect_limit_bytes: security.waf.body_inspect_limit_bytes,
+            body_over_limit_action: security.waf.body_over_limit_action,
+            rule_sets: security.waf.rule_sets,
+        },
         {
             enabled: savedSecurityRef.current.waf.enabled,
+            body_inspect_limit_bytes: savedSecurityRef.current.waf.body_inspect_limit_bytes,
+            body_over_limit_action: savedSecurityRef.current.waf.body_over_limit_action,
             rule_sets: savedSecurityRef.current.waf.rule_sets,
         }
     );

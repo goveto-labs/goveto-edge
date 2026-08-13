@@ -501,6 +501,8 @@ paths:
                                                 type: array
                                                 items:
                                                     $ref: '#/components/schemas/auth_authProviderPublicResponse'
+                                            registration_enabled:
+                                                type: boolean
     /api/v1/auth/password:
         put:
             operationId: changePassword
@@ -656,48 +658,10 @@ paths:
                                         type: string
                                     msg:
                                         type: string
-    /api/v1/auth/providers/{provider_id}/start:
-        get:
-            operationId: externalAuthStart
-            summary: External auth start
-            tags:
-                - auth-providers
-            x-middlewares:
-                - httpsecurity.Middleware
-                - sessions.Session
-                - sessions.RequireActiveUser
-                - authapi.RequireTOTPEnrollment
-                - audit.Middleware
-                - limiter.Limit
-            parameters:
-                - name: provider_id
-                  in: path
-                  required: true
-                  schema:
-                    type: string
-                - name: return_to
-                  in: query
-                  schema:
-                    type: string
-            responses:
-                "302":
-                    description: Response
-                "503":
-                    description: Server Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/auth/providers/{provider_id}/link:
         post:
-            operationId: externalAuthLink
-            summary: Link external identity
-            description: Start an external authentication flow that links the verified identity to the current user.
+            operationId: externalAuthStart
+            summary: External auth start
             tags:
                 - auth-providers
             security:
@@ -722,19 +686,83 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: External provider authorization URL.
+                    description: OK
                     content:
                         application/json:
                             schema:
                                 type: object
                                 properties:
-                                    authorization_url:
+                                    code:
                                         type: string
-                                        format: uri
-                "401":
-                    description: Authentication required.
+                                    data:
+                                        type: object
+                                        properties:
+                                            authorization_url:
+                                                type: string
+                "302":
+                    description: Response
                 "503":
-                    description: Login state storage unavailable.
+                    description: Server Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/auth/providers/{provider_id}/start:
+        get:
+            operationId: get_api_v1_auth_providers_provider_id_start
+            summary: External auth start
+            tags:
+                - auth-providers
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - limiter.Limit
+            parameters:
+                - name: provider_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: return_to
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            authorization_url:
+                                                type: string
+                "302":
+                    description: Response
+                "503":
+                    description: Server Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/auth/providers/callback:
         get:
             operationId: externalAuthCallback
@@ -5796,17 +5824,6 @@ paths:
             responses:
                 "204":
                     description: OK
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/cache-config:
         get:
             operationId: getCacheConfig
@@ -8851,17 +8868,6 @@ paths:
                                         type: array
                                         items:
                                             $ref: '#/components/schemas/types_PublishJob'
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
         post:
             operationId: enqueue
             summary: Enqueue publish
@@ -8983,17 +8989,6 @@ paths:
                                         type: string
                                     data:
                                         $ref: '#/components/schemas/types_PublishJob'
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/clusters/{cluster_id}/sites/{site_id}/purge:
         get:
             operationId: get_api_v1_clusters_cluster_id_sites_site_id_purge
@@ -9273,17 +9268,6 @@ paths:
                                                 type:
                                                     - string
                                                     - "null"
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/clusters/{cluster_id}/sites/{site_id}/security:
         get:
             operationId: getSecurity
@@ -9328,6 +9312,11 @@ paths:
                                             waf:
                                                 type: object
                                                 properties:
+                                                    body_inspect_limit_bytes:
+                                                        type: integer
+                                                        format: int64
+                                                    body_over_limit_action:
+                                                        type: string
                                                     enabled:
                                                         type: boolean
                                                     rule_sets:
@@ -10449,6 +10438,8 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/adminsettings_authenticationProviderRequest'
+                registration:
+                    $ref: '#/components/schemas/adminsettings_registrationRequest'
                 require_totp:
                     type: boolean
         adminsettings_authenticationResponse:
@@ -10460,7 +10451,31 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/adminsettings_authenticationProviderResponse'
+                registration:
+                    $ref: '#/components/schemas/adminsettings_registrationResponse'
                 require_totp:
+                    type: boolean
+        adminsettings_registrationRequest:
+            type: object
+            properties:
+                captcha_provider:
+                    type: string
+                captcha_secret:
+                    type: string
+                captcha_site_key:
+                    type: string
+                enabled:
+                    type: boolean
+        adminsettings_registrationResponse:
+            type: object
+            properties:
+                captcha_provider:
+                    type: string
+                captcha_secret_configured:
+                    type: boolean
+                captcha_site_key:
+                    type: string
+                enabled:
                     type: boolean
         analytics_DistributionItem:
             type: object
@@ -11832,6 +11847,11 @@ components:
         policy_WAFPolicy:
             type: object
             properties:
+                body_inspect_limit_bytes:
+                    type: integer
+                    format: int64
+                body_over_limit_action:
+                    type: string
                 enabled:
                     type: boolean
                 rule_sets:

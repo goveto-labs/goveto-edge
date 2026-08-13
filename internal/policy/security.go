@@ -31,6 +31,14 @@ const (
 )
 
 const (
+	WAFBodyOverLimitBlock   = "BLOCK"
+	WAFBodyOverLimitPartial = "PARTIAL"
+
+	DefaultWAFBodyInspectLimitBytes = 64 << 10
+	MaxWAFBodyInspectLimitBytes     = 64 << 20
+)
+
+const (
 	defaultXSSPattern                = `(?i)(?:<\s*script\b|javascript\s*:|on(?:error|load|click|mouseover)\s*=|<\s*(?:iframe|object|embed|svg)\b)`
 	defaultPathTraversalPattern      = `((\.+)(/+)){2,}`
 	defaultSensitiveDirectoryPattern = `(?i)(?:^|/)\.(?:git|svn|htaccess|idea|env|vscode)(?:/|$)`
@@ -42,7 +50,11 @@ type WAFPolicy struct {
 	TrustedProxyChain bool         `json:"trusted_proxy_chain"`
 	TrustedProxies    []string     `json:"trusted_proxies"`
 	RuleSets          []WAFRuleSet `json:"rule_sets"`
-	GeoIPDatabase     string       `json:"geoip_database,omitempty" openapi:"-"`
+
+	BodyInspectLimitBytes int64  `json:"body_inspect_limit_bytes,omitempty"`
+	BodyOverLimitAction   string `json:"body_over_limit_action,omitempty"`
+
+	GeoIPDatabase string `json:"geoip_database,omitempty" openapi:"-"`
 }
 
 type WAFRuleSet struct {
@@ -168,6 +180,24 @@ func singleWAFCondition(condition WAFCondition) WAFConditions {
 
 func (p *WAFPolicy) NormalizeAndValidate() error {
 	p.GeoIPDatabase = strings.TrimSpace(p.GeoIPDatabase)
+	p.BodyOverLimitAction = strings.ToUpper(strings.TrimSpace(p.BodyOverLimitAction))
+	if p.BodyOverLimitAction == "" {
+		p.BodyOverLimitAction = WAFBodyOverLimitPartial
+	}
+	switch p.BodyOverLimitAction {
+	case WAFBodyOverLimitBlock, WAFBodyOverLimitPartial:
+	default:
+		return errors.New("body_over_limit_action must be BLOCK or PARTIAL")
+	}
+	if p.BodyInspectLimitBytes < 0 {
+		return errors.New("body_inspect_limit_bytes cannot be negative")
+	}
+	if p.BodyInspectLimitBytes == 0 {
+		p.BodyInspectLimitBytes = DefaultWAFBodyInspectLimitBytes
+	}
+	if p.BodyInspectLimitBytes > MaxWAFBodyInspectLimitBytes {
+		return fmt.Errorf("body_inspect_limit_bytes cannot exceed %d", MaxWAFBodyInspectLimitBytes)
+	}
 	trustedProxies, err := normalizeWAFPrefixes(p.TrustedProxies)
 	if err != nil {
 		return fmt.Errorf("trusted_proxies: %w", err)

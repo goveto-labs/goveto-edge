@@ -1531,6 +1531,39 @@ export function SiteSecuritySettings({
                         </Tooltip>
                     </div>
                 </div>
+                <div className='grid gap-3 border-b border-border px-5 py-4 sm:grid-cols-2'>
+                    <NumericInput
+                        label='Body inspection limit (bytes)'
+                        variant='secondary'
+                        max={67108864}
+                        min={1}
+                        value={policy.waf.body_inspect_limit_bytes ?? 65536}
+                        onChange={(body_inspect_limit_bytes) =>
+                            onChange({
+                                ...policy,
+                                waf: { ...policy.waf, body_inspect_limit_bytes },
+                            })
+                        }
+                    />
+                    <SelectField
+                        label='When body exceeds limit'
+                        variant='secondary'
+                        options={[
+                            { id: 'PARTIAL', label: 'Inspect head and pass through' },
+                            { id: 'BLOCK', label: 'Reject with 413' },
+                        ]}
+                        value={policy.waf.body_over_limit_action ?? 'PARTIAL'}
+                        onChange={(value) =>
+                            onChange({
+                                ...policy,
+                                waf: {
+                                    ...policy.waf,
+                                    body_over_limit_action: value as 'BLOCK' | 'PARTIAL',
+                                },
+                            })
+                        }
+                    />
+                </div>
                 <div className='space-y-4 p-5'>
                     <DndContext
                         collisionDetection={closestCenter}

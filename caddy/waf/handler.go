@@ -28,8 +28,6 @@ import (
 	"goveto-edge/internal/policy"
 )
 
-const wafRequestBodyLimit = 64 << 10
-
 const (
 	rateBackendInitialBackoff = time.Second
 	rateBackendMaxBackoff     = 30 * time.Second
@@ -117,6 +115,13 @@ type rateBackendError struct {
 
 func (e *rateBackendError) Error() string { return e.err.Error() }
 func (e *rateBackendError) Unwrap() error { return e.err }
+
+// readCloser pairs a Reader with a Closer so a partially buffered request
+// body can stream its unbuffered remainder through to the upstream.
+type readCloser struct {
+	io.Reader
+	io.Closer
+}
 
 //go:embed templates/*.html templates/*.js
 var pageFiles embed.FS
@@ -244,23 +249,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 	}
 	if h.WAF.Enabled && h.inspectBody && r.Body != nil {
-		body, err := io.ReadAll(io.LimitReader(r.Body, wafRequestBodyLimit+1))
+		limit := h.WAF.BodyInspectLimitBytes
+		body, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 		if err != nil {
 			return err
 		}
-		if len(body) > wafRequestBodyLimit {
-			_ = r.Body.Close()
-			w.Header().Set("Cache-Control", "private, no-store")
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			setSecurityEvent(w.Header(), "BLOCK", "request-body-limit", "body_inspection", "body_too_large")
-			http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
-			return nil
+		if int64(len(body)) > limit {
+			if h.WAF.BodyOverLimitAction == policy.WAFBodyOverLimitBlock {
+				_ = r.Body.Close()
+				w.Header().Set("Cache-Control", "private, no-store")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				setSecurityEvent(w.Header(), "BLOCK", "request-body-limit", "body_inspection", "body_too_large")
+				http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+				return nil
+			}
+			// PARTIAL: inspect only the head of the body and stream the full
+			// request through to the upstream so large uploads keep working.
+			r.Body = readCloser{Reader: io.MultiReader(bytes.NewReader(body), r.Body), Closer: r.Body}
+			data.body = string(body[:limit])
+		} else {
+			if err = r.Body.Close(); err != nil {
+				return err
+			}
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			data.body = string(body)
 		}
-		if err = r.Body.Close(); err != nil {
-			return err
-		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
-		data.body = string(body)
 	}
 
 	if h.WAF.Enabled {

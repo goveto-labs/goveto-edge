@@ -100,6 +100,39 @@ func TestWAFPolicyValidatesRulesAndActions(t *testing.T) {
 	}
 }
 
+func TestWAFPolicyBodyInspectionLimits(t *testing.T) {
+	policy := DefaultWAFPolicy()
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.BodyOverLimitAction != WAFBodyOverLimitPartial {
+		t.Fatalf("default body_over_limit_action = %q, want %q", policy.BodyOverLimitAction, WAFBodyOverLimitPartial)
+	}
+	if policy.BodyInspectLimitBytes != DefaultWAFBodyInspectLimitBytes {
+		t.Fatalf("default body_inspect_limit_bytes = %d, want %d", policy.BodyInspectLimitBytes, DefaultWAFBodyInspectLimitBytes)
+	}
+
+	policy = DefaultWAFPolicy()
+	policy.BodyOverLimitAction = " block "
+	policy.BodyInspectLimitBytes = 1 << 20
+	if err := policy.NormalizeAndValidate(); err != nil {
+		t.Fatal(err)
+	}
+	if policy.BodyOverLimitAction != WAFBodyOverLimitBlock {
+		t.Fatalf("body_over_limit_action = %q, want %q", policy.BodyOverLimitAction, WAFBodyOverLimitBlock)
+	}
+
+	for _, next := range []WAFPolicy{
+		{Enabled: true, BodyOverLimitAction: "IGNORE"},
+		{Enabled: true, BodyInspectLimitBytes: -1},
+		{Enabled: true, BodyInspectLimitBytes: MaxWAFBodyInspectLimitBytes + 1},
+	} {
+		if err := next.NormalizeAndValidate(); err == nil {
+			t.Fatalf("policy %#v unexpectedly validated", next)
+		}
+	}
+}
+
 func matchTestRule(id string) WAFRule {
 	return WAFRule{ID: id, Enabled: true, Type: WAFRuleTypeMatch, Conditions: singleWAFCondition(WAFCondition{Field: "PATH", Operator: "EQUALS", Value: "/"}), Action: WAFAction{Type: WAFActionMonitor}}
 }

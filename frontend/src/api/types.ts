@@ -723,6 +723,8 @@ export interface SecurityPolicy {
         enabled: boolean;
         trusted_proxy_chain: boolean;
         trusted_proxies: string[];
+        body_inspect_limit_bytes?: number;
+        body_over_limit_action?: 'BLOCK' | 'PARTIAL';
         rule_sets: WAFRuleSet[];
     };
 }
