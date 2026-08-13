@@ -571,7 +571,7 @@ run_cache_benchmark() {
   # together with actual disk eviction and bounded RSS growth.
   if has_protocol "$protocols" h1; then
     restart_cache_agent_group eviction
-    purge_eviction_keys
+    reset_benchmark_cache
     run_case cache cache:cache-eviction-16m-h1 cache-eviction-16m-h1 h1 \
       --suite capacity --protocol h1 --scenario cache-eviction-16m-h1 \
       --url https://agent:8444/pattern/16777216 --host cache.benchmark.example.test \
@@ -853,20 +853,6 @@ run_cdn_case() {
   run_case "$phase" "$key" "$name" "$protocol" "$@"
 }
 
-purge_eviction_keys() {
-  $dry_run && return
-  local key
-  for key in 1 2; do
-    compose --profile run run --rm load agent-bench run \
-      --suite pr --protocol h1 --scenario eviction-purge \
-      --method PURGE --url "https://agent:8444/pattern/16777216?_bench=$key" \
-      --host cache.benchmark.example.test --insecure-skip-verify \
-      --concurrency 1 --skip-warmup --duration 100ms --repeats 1 --expected-status 204 \
-      --output "/tmp/agent-bench-eviction-purge-$key" >/dev/null || \
-      die "failed to purge eviction benchmark key $key"
-  done
-}
-
 run_cdn_suite() {
   local phase="$1" suite="$2" warmup="$3" duration="$4" repeats="$5"
   local protocol size name
@@ -902,7 +888,7 @@ run_cdn_suite() {
   local eviction_duration="$duration"
   [[ "$phase" == "screen" ]] && eviction_duration="30s"
   if has_protocol "$protocols" h1; then
-    purge_eviction_keys
+    reset_benchmark_cache
     run_cdn_case "$phase" cache-eviction-16m-h1 h1 --suite "$suite" --protocol h1 --scenario cache-eviction-16m-h1 \
       --url https://agent:8444/pattern/16777216 --host cache.benchmark.example.test --insecure-skip-verify \
       --concurrency 4 --warmup 1s --duration "$eviction_duration" --repeats 1 --unique-query --unique-query-cardinality 2 \

@@ -915,14 +915,6 @@ export function SiteCacheSettings({
                                 }
                             />
                             <SettingToggle
-                                label='Allow PURGE method'
-                                description='Enable authenticated cache invalidation.'
-                                selected={cache.allow_purge_method ?? false}
-                                onChange={(allow_purge_method) =>
-                                    onChange({ ...cache, allow_purge_method })
-                                }
-                            />
-                            <SettingToggle
                                 label='Serve stale on error'
                                 description='Use expired content during origin failures.'
                                 selected={cache.stale?.enabled ?? true}

@@ -7932,8 +7932,6 @@ paths:
                         schema:
                             type: object
                             properties:
-                                allow_purge_method:
-                                    type: boolean
                                 bypass_cache_control:
                                     type: array
                                     items:
@@ -11523,8 +11521,6 @@ components:
         policy_CachePolicy:
             type: object
             properties:
-                allow_purge_method:
-                    type: boolean
                 bypass_cache_control:
                     type: array
                     items:

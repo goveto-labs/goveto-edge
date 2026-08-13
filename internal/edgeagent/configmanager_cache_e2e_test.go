@@ -22,7 +22,6 @@ import (
 	"github.com/shirou/gopsutil/v4/process"
 
 	_ "goveto-edge/caddy/cachematch"
-	_ "goveto-edge/caddy/cachepurge"
 	_ "goveto-edge/caddy/govetocache"
 	cachefs "goveto-edge/caddy/simplefs"
 	_ "goveto-edge/caddy/waf"
@@ -581,24 +580,15 @@ func TestAgentCacheEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("external PURGE method evicts the requested URL", func(t *testing.T) {
-		config.Version++
-		cache.AllowPurgeMethod = true
-		config.Cache = toMap(t, cache)
-		if err := manager.ApplySite(config); err != nil {
-			t.Fatal(err)
-		}
+	t.Run("external PURGE method is rejected without evicting", func(t *testing.T) {
 		primeCache(t, counters, port, config.Domains[0], "/external-purge")
 		response := requestEdge(t, port, config.Domains[0], "PURGE", "/external-purge", nil)
-		if response.status != http.StatusNoContent {
+		if response.status != http.StatusMethodNotAllowed {
 			t.Fatalf("PURGE status=%d body=%q", response.status, response.body)
 		}
-		if response.header.Get("X-Goveto-Purged-Objects") != "1" {
-			t.Fatalf("PURGE object count=%q", response.header.Get("X-Goveto-Purged-Objects"))
-		}
 		requestEdge(t, port, config.Domains[0], http.MethodGet, "/external-purge", nil)
-		if counters.count("GET /external-purge ") != 2 {
-			t.Fatal("external PURGE did not evict the URL")
+		if counters.count("GET /external-purge ") != 1 {
+			t.Fatal("external PURGE evicted the cached URL")
 		}
 	})
 

@@ -962,6 +962,26 @@ func TestCacheConfigRendersPerRuleTTLInOrder(t *testing.T) {
 	}
 }
 
+func TestCacheConfigRejectsLegacyPublicPurgeMethod(t *testing.T) {
+	config := validHTTPConfig(t)
+	config.Cache = enabledCachePolicy(t)
+	config.Cache["allow_purge_method"] = true
+
+	encoded, err := renderCaddyConfig(map[string]SiteConfig{config.SiteID: config}, ":80", "node-host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := string(encoded)
+	if strings.Contains(raw, "goveto_cache_purge") {
+		t.Fatalf("legacy policy enabled the public purge handler: %s", raw)
+	}
+	rejectIndex := strings.Index(raw, `"@id":"site_site-1_reject_purge_edge_http_`)
+	proxyIndex := strings.Index(raw, `"@id":"site_site-1_edge_http_`)
+	if rejectIndex < 0 || proxyIndex < 0 || rejectIndex > proxyIndex {
+		t.Fatalf("PURGE rejection is missing or follows the proxy route: %s", raw)
+	}
+}
+
 func TestDecodeCachePolicyDoesNotMergeDefaultRuleTTL(t *testing.T) {
 	policy := cachePolicyWithCatchAllRule()
 	policy.Rules[0].TTL.Status = map[string]int{}

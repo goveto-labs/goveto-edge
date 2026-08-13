@@ -510,6 +510,25 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 				"terminal": true,
 			})
 		}
+		// Cache invalidation is available only through authenticated management
+		// tasks. Never forward a data-plane PURGE request to an origin.
+		rejectPurgeRoute := map[string]any{
+			"@id": "site_" + id + "_reject_purge",
+			"match": []any{
+				map[string]any{
+					"host":   site.Domains,
+					"method": []string{"PURGE"},
+				},
+			},
+			"handle": []any{
+				map[string]any{
+					"handler":     "static_response",
+					"status_code": http.StatusMethodNotAllowed,
+				},
+			},
+			"terminal": true,
+		}
+		routes = append(routes, rejectPurgeRoute)
 		deliveryPolicy, deliveryConfigured, err := decodeDeliveryPolicy(site.Delivery)
 		if err != nil {
 			return nil, fmt.Errorf("site %s delivery policy: %w", id, err)
@@ -532,6 +551,7 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 		})
 
 		if listener.RedirectHTTPToHTTPS {
+			redirectRoutes = append(redirectRoutes, rejectPurgeRoute)
 			redirectPort := ""
 			if listener.HTTPSPort != 443 {
 				redirectPort = ":" + strconv.Itoa(listener.HTTPSPort)
@@ -751,25 +771,6 @@ func renderManagedCaddyConfig(sites map[string]SiteConfig, defaultListen, geoIPP
 			return nil, fmt.Errorf("site %s cache policy: %w", id, err)
 		} else if ok && len(cachePolicy.Rules) > 0 && !cachePolicy.DevMode {
 			methods := cachePolicy.Methods
-			if cachePolicy.AllowPurgeMethod {
-				routes = append(routes, map[string]any{
-					"@id": "site_" + id + "_purge",
-					"match": []any{
-						map[string]any{
-							"host":   site.Domains,
-							"method": []string{"PURGE"},
-						},
-					},
-					"handle": []any{
-						map[string]any{
-							"handler": "goveto_cache_purge",
-							"path":    filepath.Join(nodeConfig.CacheDirectory, id),
-							"hosts":   site.Domains,
-						},
-					},
-					"terminal": true,
-				})
-			}
 			for ruleIndex, rule := range cachePolicy.Rules {
 				cachedHandlers := append([]any(nil), handlers...)
 				cachedHandlers = append(cachedHandlers,

@@ -139,7 +139,6 @@ func benchmarkWAFPolicy() cachepolicy.WAFPolicy {
 
 func benchmarkCachePolicies() (cachepolicy.CachePolicy, cachepolicy.CachePolicy, error) {
 	standard := cachepolicy.DefaultCachePolicy()
-	standard.AllowPurgeMethod = true
 	standard.Stale.IfErrorSeconds = 3600
 	standard.Stale.WhileRevalidateSeconds = 30
 	standard.Rules = []cachepolicy.CacheRule{benchmarkCacheRule("Default", cachepolicy.CacheConditions{

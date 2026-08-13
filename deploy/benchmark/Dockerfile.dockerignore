@@ -12,8 +12,6 @@ caddy/*
 !caddy/agentlog/**
 !caddy/cachematch/
 !caddy/cachematch/**
-!caddy/cachepurge/
-!caddy/cachepurge/**
 !caddy/compression/
 !caddy/compression/**
 !caddy/govetocache/

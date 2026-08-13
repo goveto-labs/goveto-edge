@@ -10,7 +10,6 @@ import (
 	_ "github.com/caddyserver/caddy/v2/modules/standard"
 
 	_ "goveto-edge/caddy/cachematch"
-	_ "goveto-edge/caddy/cachepurge"
 	_ "goveto-edge/caddy/govetocache"
 	_ "goveto-edge/caddy/waf"
 	"goveto-edge/internal/edgeagent"

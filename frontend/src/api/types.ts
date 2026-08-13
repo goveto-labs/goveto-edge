@@ -796,7 +796,6 @@ export interface CachePolicy {
         age?: boolean;
     };
     dev_mode?: boolean;
-    allow_purge_method?: boolean;
     request_coalescing?: boolean;
     cache_range_requests?: boolean;
     max_body_bytes?: number;
