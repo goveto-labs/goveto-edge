@@ -10,8 +10,14 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
+	"fmt"
+	"net"
+	"sync"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/credentials"
 
 	"goveto-edge/internal/node"
 )
@@ -54,7 +60,10 @@ func TestAuthorityIsStableAcrossControlPlaneReplicas(t *testing.T) {
 	if string(first.caPEM) != string(second.caPEM) {
 		t.Fatal("replicas derived different agent CAs")
 	}
-	firstServer, err := x509.ParseCertificate(first.serverCert.Certificate[0])
+	if !bytes.Equal(first.runtime.Load().serverCert.Certificate[0], second.runtime.Load().serverCert.Certificate[0]) {
+		t.Fatal("replicas derived different gateway certificates")
+	}
+	firstServer, err := x509.ParseCertificate(first.runtime.Load().serverCert.Certificate[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,6 +74,184 @@ func TestAuthorityIsStableAcrossControlPlaneReplicas(t *testing.T) {
 	if block == nil {
 		t.Fatal("missing CA PEM block")
 	}
+}
+
+func TestAuthorityUpdatesGatewayWithoutRestartingTLSConfig(t *testing.T) {
+	authority := testAuthority(t)
+	tlsConfig := authority.ServerTLSConfig()
+	initialBundle, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAuthorityTLSHandshake(t, tlsConfig, initialBundle, "control.example")
+
+	if err := authority.UpdateGatewayAddress("agents.example.net:9443"); err != nil {
+		t.Fatal(err)
+	}
+	bundle, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.GatewayAddress != "agents.example.net:9443" || bundle.ServerName != "agents.example.net" {
+		t.Fatalf("updated identity endpoint = %q / %q", bundle.GatewayAddress, bundle.ServerName)
+	}
+	assertAuthorityTLSHandshake(t, tlsConfig, bundle, bundle.ServerName)
+	assertAuthorityTLSHandshakeFails(t, tlsConfig, bundle, "control.example")
+}
+
+func TestPreparedGatewayUpdateIsNotVisibleUntilApplied(t *testing.T) {
+	authority := testAuthority(t)
+	apply, err := authority.PrepareGatewayAddressUpdate("agents.example.net:9443")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.GatewayAddress != "control.example:8443" {
+		t.Fatalf("prepared update became visible early: %q", before.GatewayAddress)
+	}
+
+	apply()
+	after, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.GatewayAddress != "agents.example.net:9443" || after.ServerName != "agents.example.net" {
+		t.Fatalf("applied identity endpoint = %q / %q", after.GatewayAddress, after.ServerName)
+	}
+}
+
+func TestInvalidGatewayUpdateKeepsCurrentRuntime(t *testing.T) {
+	authority := testAuthority(t)
+	if err := authority.UpdateGatewayAddress(":9443"); err == nil {
+		t.Fatal("expected empty gateway host to be rejected")
+	}
+	bundle, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.GatewayAddress != "control.example:8443" || bundle.ServerName != "control.example" {
+		t.Fatalf("failed update changed identity endpoint = %q / %q", bundle.GatewayAddress, bundle.ServerName)
+	}
+}
+
+func TestConcurrentGatewayUpdatesKeepIdentityEndpointConsistent(t *testing.T) {
+	authority := testAuthority(t)
+	endpoints := []struct {
+		address string
+		name    string
+	}{
+		{address: "agents-a.example.net:8443", name: "agents-a.example.net"},
+		{address: "agents-b.example.net:9443", name: "agents-b.example.net"},
+	}
+
+	var wait sync.WaitGroup
+	errors := make(chan error, 64)
+	for worker := 0; worker < 8; worker++ {
+		wait.Add(1)
+		go func(worker int) {
+			defer wait.Done()
+			for iteration := 0; iteration < 25; iteration++ {
+				endpoint := endpoints[(worker+iteration)%len(endpoints)]
+				if err := authority.UpdateGatewayAddress(endpoint.address); err != nil {
+					errors <- err
+					return
+				}
+				bundle, err := authority.IssueNode(fmt.Sprintf("node-%d-%d", worker, iteration))
+				if err != nil {
+					errors <- err
+					return
+				}
+				matched := false
+				for _, candidate := range endpoints {
+					if bundle.GatewayAddress == candidate.address && bundle.ServerName == candidate.name {
+						matched = true
+						break
+					}
+				}
+				if !matched {
+					errors <- fmt.Errorf("torn identity endpoint %q / %q", bundle.GatewayAddress, bundle.ServerName)
+					return
+				}
+			}
+		}(worker)
+	}
+	wait.Wait()
+	close(errors)
+	for err := range errors {
+		t.Fatal(err)
+	}
+}
+
+func assertAuthorityTLSHandshake(t *testing.T, serverConfig *tls.Config, bundle CredentialBundle, serverName string) {
+	t.Helper()
+	if err := authorityTLSHandshake(serverConfig, bundle, serverName); err != nil {
+		t.Fatalf("TLS handshake for %q failed: %v", serverName, err)
+	}
+}
+
+func assertAuthorityTLSHandshakeFails(t *testing.T, serverConfig *tls.Config, bundle CredentialBundle, serverName string) {
+	t.Helper()
+	if err := authorityTLSHandshake(serverConfig, bundle, serverName); err == nil {
+		t.Fatalf("TLS handshake for stale server name %q succeeded", serverName)
+	}
+}
+
+func authorityTLSHandshake(serverConfig *tls.Config, bundle CredentialBundle, serverName string) error {
+	clientCertificate, err := tls.X509KeyPair([]byte(bundle.Certificate), []byte(bundle.PrivateKey))
+	if err != nil {
+		return err
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM([]byte(bundle.CACertificate)) {
+		return errors.New("load authority CA")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	defer listener.Close()
+
+	serverCredentials := credentials.NewTLS(serverConfig)
+	serverResult := make(chan error, 1)
+	go func() {
+		serverConn, acceptErr := listener.Accept()
+		if acceptErr != nil {
+			serverResult <- acceptErr
+			return
+		}
+		defer serverConn.Close()
+		_ = serverConn.SetDeadline(time.Now().Add(5 * time.Second))
+		securedConn, _, handshakeErr := serverCredentials.ServerHandshake(serverConn)
+		if securedConn != nil {
+			defer securedConn.Close()
+		}
+		serverResult <- handshakeErr
+	}()
+	clientConn, err := net.DialTimeout("tcp", listener.Addr().String(), 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer clientConn.Close()
+	_ = clientConn.SetDeadline(time.Now().Add(5 * time.Second))
+	clientErr := tls.Client(clientConn, &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		ServerName:   serverName,
+		RootCAs:      roots,
+		Certificates: []tls.Certificate{clientCertificate},
+		NextProtos:   []string{"h2"},
+	}).Handshake()
+	if clientErr != nil {
+		clientConn.Close()
+	}
+	serverErr := <-serverResult
+	if clientErr != nil {
+		return clientErr
+	}
+	return serverErr
 }
 
 func TestSignCSRRejectsMismatchedIdentity(t *testing.T) {

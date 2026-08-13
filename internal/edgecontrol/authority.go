@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"goveto-edge/internal/node"
@@ -37,9 +38,13 @@ type CredentialBundle struct {
 }
 
 type Authority struct {
-	ca             *x509.Certificate
-	caKey          ed25519.PrivateKey
-	caPEM          []byte
+	ca      *x509.Certificate
+	caKey   ed25519.PrivateKey
+	caPEM   []byte
+	runtime atomic.Pointer[authorityRuntime]
+}
+
+type authorityRuntime struct {
 	gatewayAddress string
 	serverName     string
 	serverCert     tls.Certificate
@@ -61,11 +66,6 @@ func NewAuthorityWithCAKey(encodedKey, gatewayAddress string) (*Authority, error
 }
 
 func newAuthority(caSeed []byte, gatewayAddress string) (*Authority, error) {
-	host, _, err := net.SplitHostPort(gatewayAddress)
-	if err != nil || strings.TrimSpace(host) == "" {
-		return nil, fmt.Errorf("agent gateway public address must be host:port: %w", err)
-	}
-
 	caKey := ed25519.NewKeyFromSeed(caSeed)
 	caTemplate := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
@@ -86,13 +86,31 @@ func newAuthority(caSeed []byte, gatewayAddress string) (*Authority, error) {
 	}
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
 
-	serverSeed := sha256.Sum256(append(append([]byte(nil), caSeed...), []byte("goveto-edge/agent-mtls/server/v2\x00"+host)...))
+	authority := &Authority{ca: ca, caKey: caKey, caPEM: caPEM}
+	runtime, err := authority.buildRuntime(gatewayAddress)
+	if err != nil {
+		return nil, err
+	}
+	authority.runtime.Store(runtime)
+	return authority, nil
+}
+
+func (a *Authority) buildRuntime(gatewayAddress string) (*authorityRuntime, error) {
+	host, _, err := net.SplitHostPort(gatewayAddress)
+	if err != nil || strings.TrimSpace(host) == "" {
+		if err == nil {
+			err = errors.New("host is required")
+		}
+		return nil, fmt.Errorf("agent gateway public address must be host:port: %w", err)
+	}
+
+	serverSeed := sha256.Sum256(append(append([]byte(nil), a.caKey.Seed()...), []byte("goveto-edge/agent-mtls/server/v2\x00"+host)...))
 	serverKey := ed25519.NewKeyFromSeed(serverSeed[:])
 	serverTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject:      pkix.Name{CommonName: host},
-		NotBefore:    caTemplate.NotBefore,
-		NotAfter:     caTemplate.NotAfter,
+		NotBefore:    a.ca.NotBefore,
+		NotAfter:     a.ca.NotAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	}
@@ -101,7 +119,7 @@ func newAuthority(caSeed []byte, gatewayAddress string) (*Authority, error) {
 	} else {
 		serverTemplate.DNSNames = []string{host}
 	}
-	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, ca, serverKey.Public(), caKey)
+	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, a.ca, serverKey.Public(), a.caKey)
 	if err != nil {
 		return nil, fmt.Errorf("create gateway certificate: %w", err)
 	}
@@ -116,25 +134,57 @@ func newAuthority(caSeed []byte, gatewayAddress string) (*Authority, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Authority{
-		ca: ca, caKey: caKey, caPEM: caPEM, gatewayAddress: gatewayAddress,
-		serverName: host, serverCert: serverCert,
+	return &authorityRuntime{
+		gatewayAddress: gatewayAddress,
+		serverName:     host,
+		serverCert:     serverCert,
 	}, nil
+}
+
+// PrepareGatewayAddressUpdate validates the public address and builds its
+// server certificate before returning a no-fail function that atomically makes
+// both values visible. Callers can prepare before a transaction and publish
+// only after it commits.
+func (a *Authority) PrepareGatewayAddressUpdate(gatewayAddress string) (func(), error) {
+	if current := a.runtime.Load(); current != nil && current.gatewayAddress == gatewayAddress {
+		return func() {}, nil
+	}
+	runtime, err := a.buildRuntime(gatewayAddress)
+	if err != nil {
+		return nil, err
+	}
+	return func() {
+		a.runtime.Store(runtime)
+	}, nil
+}
+
+// UpdateGatewayAddress atomically updates identities issued by this Authority
+// and the certificate served by any existing ServerTLSConfig.
+func (a *Authority) UpdateGatewayAddress(gatewayAddress string) error {
+	apply, err := a.PrepareGatewayAddressUpdate(gatewayAddress)
+	if err != nil {
+		return err
+	}
+	apply()
+	return nil
 }
 
 func (a *Authority) ServerTLSConfig() *tls.Config {
 	pool := x509.NewCertPool()
 	pool.AddCert(a.ca)
 	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{a.serverCert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    pool,
-		NextProtos:   []string{"h2"},
+		MinVersion: tls.VersionTLS13,
+		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return &a.runtime.Load().serverCert, nil
+		},
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  pool,
+		NextProtos: []string{"h2"},
 	}
 }
 
 func (a *Authority) IssueNode(nodeID string) (CredentialBundle, error) {
+	runtime := a.runtime.Load()
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return CredentialBundle{}, err
@@ -148,7 +198,7 @@ func (a *Authority) IssueNode(nodeID string) (CredentialBundle, error) {
 		return CredentialBundle{}, err
 	}
 	return CredentialBundle{
-		NodeID: nodeID, GatewayAddress: a.gatewayAddress, ServerName: a.serverName,
+		NodeID: nodeID, GatewayAddress: runtime.gatewayAddress, ServerName: runtime.serverName,
 		CACertificate: string(a.caPEM), Certificate: certificatePEM,
 		PrivateKey: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privateDER})),
 		Serial:     serial, NotAfter: notAfter,

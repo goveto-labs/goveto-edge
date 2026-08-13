@@ -58,7 +58,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	// Registration only wires handlers as closures, so nil dependencies are
 	// safe here: nothing dereferences them until a request is served.
 	health.Register(e, nil)
-	initialization.Register(e, nil, nil, nil)
+	initialization.Register(e, nil, nil, nil, nil, nil)
 	authapi.Register(e, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)

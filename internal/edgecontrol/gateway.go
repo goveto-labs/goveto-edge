@@ -23,6 +23,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"goveto-edge/internal/edgeprotocol"
+	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
 )
@@ -40,6 +41,7 @@ const (
 	completedTaskTTL       = 7 * 24 * time.Hour
 	dispatchCleanupTimeout = 5 * time.Second
 	gatewayEventTopic      = "goveto_edge_gateway_events"
+	authorityUpdateEvent   = "authority_update"
 )
 
 const cancelAbandonedTaskSQL = `UPDATE agent_tasks SET status='CANCELLED',
@@ -112,9 +114,10 @@ type agentLogQueueState struct {
 }
 
 type gatewayEvent struct {
-	Source string `json:"source"`
-	Kind   string `json:"kind"`
-	NodeID string `json:"node_id"`
+	Source         string `json:"source"`
+	Kind           string `json:"kind"`
+	NodeID         string `json:"node_id,omitempty"`
+	GatewayAddress string `json:"gateway_address,omitempty"`
 }
 
 func NewGateway(
@@ -137,8 +140,10 @@ func (g *Gateway) Run(ctx context.Context) {
 	g.cleanupTasks(ctx)
 	sweepTicker := time.NewTicker(taskSweepInterval)
 	cleanupTicker := time.NewTicker(time.Hour)
+	authorityTicker := time.NewTicker(taskSweepInterval)
 	defer sweepTicker.Stop()
 	defer cleanupTicker.Stop()
+	defer authorityTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -147,6 +152,8 @@ func (g *Gateway) Run(ctx context.Context) {
 			g.runTaskSweep(ctx)
 		case <-cleanupTicker.C:
 			g.cleanupTasks(ctx)
+		case <-authorityTicker.C:
+			g.refreshAuthority(ctx)
 		}
 	}
 }
@@ -927,12 +934,47 @@ func (g *Gateway) signal(ctx context.Context, kind, nodeID string) {
 	}
 }
 
+// NotifyAuthorityUpdateTx queues a cross-replica Authority refresh. PostgreSQL
+// delivers the notification only if the surrounding transaction commits.
+func (g *Gateway) NotifyAuthorityUpdateTx(ctx context.Context, tx *client.Client, gatewayAddress string) error {
+	payload, err := json.Marshal(gatewayEvent{
+		Source: g.instanceID, Kind: authorityUpdateEvent, GatewayAddress: gatewayAddress,
+	})
+	if err != nil {
+		return err
+	}
+	_, err = tx.RawExec(ctx, `SELECT pg_notify($1, $2)`, gatewayEventTopic, string(payload))
+	return err
+}
+
 func (g *Gateway) applyEvent(event gatewayEvent) {
 	switch event.Kind {
 	case "wake":
 		g.wakeLocal(event.NodeID)
 	case "disconnect":
 		g.disconnectLocal(event.NodeID)
+	case authorityUpdateEvent:
+		if g.authority != nil {
+			if err := g.authority.UpdateGatewayAddress(event.GatewayAddress); err != nil {
+				slog.Warn("apply agent gateway address update", "error", err)
+			}
+		}
+	}
+}
+
+func (g *Gateway) refreshAuthority(ctx context.Context) {
+	if g.db == nil || g.authority == nil {
+		return
+	}
+	address, found, err := settings.New(g.db, nil).AgentGatewayPublicAddress(ctx)
+	if err != nil {
+		slog.Warn("refresh agent gateway address", "error", err)
+		return
+	}
+	if found {
+		if err := g.authority.UpdateGatewayAddress(address); err != nil {
+			slog.Warn("apply refreshed agent gateway address", "error", err)
+		}
 	}
 }
 
@@ -980,7 +1022,8 @@ func (g *Gateway) listenForEventsOnce(ctx context.Context) error {
 			return err
 		}
 		var event gatewayEvent
-		if json.Unmarshal([]byte(payload), &event) != nil || event.Source == g.instanceID || event.NodeID == "" {
+		if json.Unmarshal([]byte(payload), &event) != nil || event.Source == g.instanceID ||
+			(event.NodeID == "" && (event.Kind != authorityUpdateEvent || event.GatewayAddress == "")) {
 			continue
 		}
 		g.applyEvent(event)

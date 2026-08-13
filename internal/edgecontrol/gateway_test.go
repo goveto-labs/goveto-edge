@@ -183,6 +183,22 @@ func TestApplyEventIgnoresUnknownKinds(t *testing.T) {
 	}
 }
 
+func TestApplyAuthorityUpdateChangesIssuedEndpoint(t *testing.T) {
+	authority := testAuthority(t)
+	gateway := NewGateway(nil, nil, authority, nil, nil)
+	gateway.applyEvent(gatewayEvent{
+		Kind: authorityUpdateEvent, GatewayAddress: "agents.example.net:9443",
+	})
+
+	bundle, err := authority.IssueNode("550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.GatewayAddress != "agents.example.net:9443" || bundle.ServerName != "agents.example.net" {
+		t.Fatalf("replica identity endpoint = %q / %q", bundle.GatewayAddress, bundle.ServerName)
+	}
+}
+
 func TestWakeIsNonBlockingWhenAlreadySignaled(t *testing.T) {
 	gateway := NewGateway(nil, nil, nil, nil, nil)
 	active := &session{cancel: func() {}, wake: make(chan struct{}, 1), owner: "test"}

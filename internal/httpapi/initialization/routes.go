@@ -9,6 +9,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/audit"
+	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/password"
@@ -39,10 +40,17 @@ type userResponse struct {
 	Status model.UserStatus `json:"status"`
 }
 
-func Register(e *echo.Echo, db *client.Client, settingStore *settings.Store, limiter *httpsecurity.RateLimiter) {
+func Register(
+	e *echo.Echo,
+	db *client.Client,
+	settingStore *settings.Store,
+	limiter *httpsecurity.RateLimiter,
+	authority *edgecontrol.Authority,
+	gateway *edgecontrol.Gateway,
+) {
 	group := e.Group("/api/v1/init")
 	group.GET("/status", status(settingStore), limiter.Limit("initialization-status", 60, time.Minute))
-	group.POST("", initialize(db), limiter.Limit("initialization", 5, time.Hour))
+	group.POST("", initialize(db, authority, gateway), limiter.Limit("initialization", 5, time.Hour))
 }
 
 // @summary Instance initialization status
@@ -61,7 +69,7 @@ func status(settingStore *settings.Store) echo.HandlerFunc {
 // @summary Initialize instance
 // @description Create the first administrator account and mark the instance initialized.
 // @Tags initialization
-func initialize(db *client.Client) echo.HandlerFunc {
+func initialize(db *client.Client, authority *edgecontrol.Authority, gateway *edgecontrol.Gateway) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input request
 		if err := c.Bind(&input); err != nil {
@@ -79,6 +87,13 @@ func initialize(db *client.Client) echo.HandlerFunc {
 		}
 		if err := password.Validate(input.Password); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
+		applyGatewayAddress := func() {}
+		if authority != nil {
+			applyGatewayAddress, err = authority.PrepareGatewayAddressUpdate(gatewayAddress)
+			if err != nil {
+				return err
+			}
 		}
 
 		hash, err := password.Hash(input.Password)
@@ -116,11 +131,18 @@ func initialize(db *client.Client) echo.HandlerFunc {
 			if err := store.SetAgentGatewayPublicAddress(ctx, gatewayAddress); err != nil {
 				return err
 			}
-			return store.Set(ctx, settings.InstanceInitializedKey, true, "Whether initial instance setup has completed")
+			if err := store.Set(ctx, settings.InstanceInitializedKey, true, "Whether initial instance setup has completed"); err != nil {
+				return err
+			}
+			if gateway != nil {
+				return gateway.NotifyAuthorityUpdateTx(ctx, tx, gatewayAddress)
+			}
+			return nil
 		})
 		if err != nil {
 			return err
 		}
+		applyGatewayAddress()
 
 		response := userResponse{
 			ID: administrator.Id, Email: administrator.Email, Name: administrator.Name,

@@ -86,7 +86,7 @@ func New(
 	}
 
 	health.Register(e, db, analyticsData)
-	initialization.Register(e, orm, settingStore, limiter)
+	initialization.Register(e, orm, settingStore, limiter, authority, gateway)
 	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, captchaVerifier, limiter)
 	adminsettings.Register(e, orm, settingStore, secretCiphers.General, restartControlPlane)
 	clusters.Register(e, orm, sessions, secretCiphers.Notification)
