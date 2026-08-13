@@ -48,6 +48,15 @@ func TestCreateSiteBundleRejectsNegativeOriginPriorityBeforeDatabaseWrite(t *tes
 	}
 }
 
+func TestCreateSiteBundleRejectsInvalidHostHeaderBeforeDatabaseWrite(t *testing.T) {
+	bundle := validManagementBundle()
+	bundle.Origins[0].HostHeader = "origin.example.com\r\nX-Injected: true"
+	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	if err == nil || !strings.Contains(err.Error(), "host_header") {
+		t.Fatalf("invalid host_header error = %v", err)
+	}
+}
+
 func TestCreateSiteBundleRejectsInvalidImportedPolicyBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
 	bundle.Cache = json.RawMessage(`{"ttl":{"default_seconds":-1}}`)

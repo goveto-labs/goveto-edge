@@ -21,6 +21,7 @@ import (
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/jobqueue"
 	"goveto-edge/internal/node"
+	siteconfig "goveto-edge/internal/site"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -750,13 +751,11 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		config.Domains = append(config.Domains, item.Hostname)
 	}
 	for _, item := range backends {
-		config.Origins = append(config.Origins, edgeprotocol.OriginConfig{
-			Protocol:   strings.ToLower(string(item.Protocol)),
-			Address:    item.Address,
-			HostHeader: value(item.HostHeader),
-			Weight:     item.Weight,
-			Priority:   item.Priority,
-		})
+		origin, originErr := originConfig(site.Id, item)
+		if originErr != nil {
+			return config, nil, originErr
+		}
+		config.Origins = append(config.Origins, origin)
 	}
 
 	links, err := db.SiteCertificate.Query().
@@ -870,6 +869,20 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 		return config, nil, errors.New("cluster has no publishable nodes")
 	}
 	return config, targets, nil
+}
+
+func originConfig(siteID string, backend model.OriginBackend) (edgeprotocol.OriginConfig, error) {
+	hostHeader, err := siteconfig.NormalizeHostHeader(value(backend.HostHeader))
+	if err != nil {
+		return edgeprotocol.OriginConfig{}, fmt.Errorf("site %s origin backend %s: %w", siteID, backend.Id, err)
+	}
+	return edgeprotocol.OriginConfig{
+		Protocol:   strings.ToLower(string(backend.Protocol)),
+		Address:    backend.Address,
+		HostHeader: hostHeader,
+		Weight:     backend.Weight,
+		Priority:   backend.Priority,
+	}, nil
 }
 
 func wafChallengeSecret(cipher *node.CredentialCipher, siteID string) string {

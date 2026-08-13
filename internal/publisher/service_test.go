@@ -23,6 +23,19 @@ func TestSemanticConfigHashIgnoresVersion(t *testing.T) {
 	}
 }
 
+func TestOriginConfigRejectsInvalidStoredHostHeader(t *testing.T) {
+	hostHeader := "origin.example.com\r\nX-Injected: true"
+	_, err := originConfig("site-1", model.OriginBackend{Id: "backend-1", HostHeader: &hostHeader})
+	if err == nil {
+		t.Fatal("invalid stored host_header was accepted")
+	}
+	for _, fragment := range []string{"site site-1", "origin backend backend-1", "host_header"} {
+		if !strings.Contains(err.Error(), fragment) {
+			t.Fatalf("origin error missing %q: %v", fragment, err)
+		}
+	}
+}
+
 func TestSuccessfulTargetsPartitionsResults(t *testing.T) {
 	targets := []target{{NodeID: "a"}, {NodeID: "b"}, {NodeID: "c"}}
 	results := []targetResult{{NodeID: "a", Success: true}, {NodeID: "b", Error: "timeout"}, {NodeID: "c", Success: true}}

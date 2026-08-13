@@ -16,6 +16,7 @@ import (
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/rbac"
+	siteconfig "goveto-edge/internal/site"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -150,7 +151,10 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 				if err != nil {
 					return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 				}
-				origins[index].HostHeader = strings.TrimSpace(origins[index].HostHeader)
+				origins[index].HostHeader, err = siteconfig.NormalizeHostHeader(origins[index].HostHeader)
+				if err != nil {
+					return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+				}
 				if origins[index].Weight <= 0 {
 					origins[index].Weight = 1
 				}

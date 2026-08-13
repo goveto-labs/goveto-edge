@@ -18,6 +18,7 @@ import (
 	"goveto-edge/internal/httpapi/types"
 	deliverypolicy "goveto-edge/internal/policy"
 	"goveto-edge/internal/publisher"
+	siteconfig "goveto-edge/internal/site"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -381,6 +382,10 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 			return "", normalizeErr
 		}
 		bundle.Origins[i].Address = address
+		bundle.Origins[i].HostHeader, normalizeErr = siteconfig.NormalizeHostHeader(bundle.Origins[i].HostHeader)
+		if normalizeErr != nil {
+			return "", normalizeErr
+		}
 		if bundle.Origins[i].Weight <= 0 {
 			bundle.Origins[i].Weight = 1
 		}

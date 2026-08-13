@@ -22,6 +22,7 @@ import (
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/rbac"
+	siteconfig "goveto-edge/internal/site"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -183,6 +184,10 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 			}
 			input.Origins[index].Address = address
+			input.Origins[index].HostHeader, err = siteconfig.NormalizeHostHeader(input.Origins[index].HostHeader)
+			if err != nil {
+				return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+			}
 			if input.Origins[index].Weight <= 0 {
 				input.Origins[index].Weight = 1
 			}
@@ -257,10 +262,8 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 					query.OriginBackend.Weight.Set(origin.Weight),
 					query.OriginBackend.Priority.Set(origin.Priority),
 				}
-				if strings.TrimSpace(origin.HostHeader) != "" {
-					sets = append(sets, query.OriginBackend.HostHeader.Set(
-						strings.TrimSpace(origin.HostHeader),
-					))
+				if origin.HostHeader != "" {
+					sets = append(sets, query.OriginBackend.HostHeader.Set(origin.HostHeader))
 				}
 				if _, err := tx.OriginBackend.Create().Set(sets...).Do(ctx); err != nil {
 					return err
