@@ -36,6 +36,7 @@ type ConfigManager struct {
 	defaultListen string
 	nodeConfig    NodeConfig
 	geoIPPath     string
+	loadCaddy     func([]byte, bool) error
 }
 
 var ErrGeoIPUnavailable = errors.New("managed GeoIP database is not installed")
@@ -44,6 +45,7 @@ func NewConfigManager(path, defaultListen string) *ConfigManager {
 	manager := &ConfigManager{
 		sites:      map[string]SiteConfig{},
 		nodeConfig: defaultNodeConfig(),
+		loadCaddy:  caddy.Load,
 	}
 	manager.path = path
 	manager.defaultListen = defaultListen
@@ -64,7 +66,7 @@ func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	if err != nil {
 		return err
 	}
-	if err = caddy.Load(encoded, true); err != nil {
+	if err = m.loadCaddy(encoded, true); err != nil {
 		return err
 	}
 	m.nodeConfig = config

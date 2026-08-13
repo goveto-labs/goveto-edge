@@ -6,7 +6,11 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
+	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,6 +41,52 @@ func TestExecuteTaskRejectsInvalidPayloads(t *testing.T) {
 		if result.Success || result.Error == "" || result.TaskID != task.ID {
 			t.Fatalf("task %s: unexpected result %#v", task.ID, result)
 		}
+	}
+}
+
+func TestNodeCacheTaskPersistsOnlyAfterCaddyAcceptsConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "node.json")
+	store := NewNodeConfigStore(path)
+	manager := NewConfigManager("", ":0")
+	loadErr := errors.New("injected caddy load failure")
+	manager.loadCaddy = func([]byte, bool) error { return loadErr }
+	client := &channelClient{configs: manager, nodeConfigs: store}
+	desired := NodeConfig{
+		CacheDirectory:      "/srv/goveto-cache",
+		AutoMaxSize:         false,
+		MaxSizeBytes:        1 << 30,
+		MaxDiskUsagePercent: 75,
+	}
+	payload, err := json.Marshal(desired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := edgeprotocol.AgentTask{ID: "cache", Kind: edgeprotocol.TaskNodeCacheConfig, Payload: payload}
+
+	result := client.executeTask(context.Background(), task)
+	if result.Success || !strings.Contains(result.Error, loadErr.Error()) {
+		t.Fatalf("failed load result = %#v", result)
+	}
+	if got := store.Get(); !reflect.DeepEqual(got, defaultNodeConfig()) {
+		t.Fatalf("heartbeat config changed after failed load: %#v", got)
+	}
+	if !reflect.DeepEqual(manager.nodeConfig, defaultNodeConfig()) {
+		t.Fatalf("manager config changed after failed load: %#v", manager.nodeConfig)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("failed config was persisted: %v", err)
+	}
+
+	manager.loadCaddy = func([]byte, bool) error { return nil }
+	result = client.executeTask(context.Background(), task)
+	if !result.Success {
+		t.Fatalf("retry result = %#v", result)
+	}
+	if got := store.Get(); !reflect.DeepEqual(got, desired) {
+		t.Fatalf("heartbeat config after retry = %#v; want %#v", got, desired)
+	}
+	if got := NewNodeConfigStore(path).Get(); !reflect.DeepEqual(got, desired) {
+		t.Fatalf("persisted config after retry = %#v; want %#v", got, desired)
 	}
 }
 

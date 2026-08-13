@@ -321,10 +321,10 @@ func (c *channelClient) executeTaskWithClient(ctx context.Context, task edgeprot
 	case edgeprotocol.TaskNodeCacheConfig:
 		var config NodeConfig
 		if err = json.Unmarshal(task.Payload, &config); err == nil {
-			err = c.nodeConfigs.Set(config)
+			err = c.configs.SetNodeConfig(config)
 		}
 		if err == nil {
-			err = c.configs.SetNodeConfig(c.nodeConfigs.Get())
+			err = c.nodeConfigs.Set(config)
 		}
 		value = c.nodeConfigs.Get()
 	case edgeprotocol.TaskSyncGeoIP:
