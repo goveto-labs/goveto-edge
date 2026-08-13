@@ -33,6 +33,7 @@ export default function Login() {
     const [loading, setLoading] = useState(false);
     const [methods, setMethods] = useState<AuthMethods>({
         local_login_enabled: true,
+        registration_enabled: false,
         providers: [],
     });
 
@@ -201,7 +202,7 @@ export default function Login() {
                         </div>
                     )}
 
-                    {methods.local_login_enabled && (
+                    {methods.local_login_enabled && methods.registration_enabled && (
                         <p className='mt-8 text-center text-sm text-muted'>
                             No account?{' '}
                             <Link

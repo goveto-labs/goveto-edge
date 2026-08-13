@@ -30,8 +30,9 @@ import (
 )
 
 type authMethodsResponse struct {
-	LocalLoginEnabled bool                         `json:"local_login_enabled"`
-	Providers         []authProviderPublicResponse `json:"providers"`
+	LocalLoginEnabled   bool                         `json:"local_login_enabled"`
+	RegistrationEnabled bool                         `json:"registration_enabled"`
+	Providers           []authProviderPublicResponse `json:"providers"`
 }
 
 type authProviderPublicResponse struct {
@@ -82,13 +83,24 @@ func authMethods(settingStore *settings.Store, cipher settings.SecretCipher) ech
 		if err != nil {
 			return err
 		}
+		registrationEnabled, err := settingStore.RegistrationEnabled(c.Request().Context())
+		if err != nil {
+			return err
+		}
+		captchaConfig, found, err := settingStore.Captcha(c.Request().Context(), cipher)
+		if err != nil {
+			return err
+		}
+		registrationEnabled = registrationEnabled && localEnabled && found &&
+			captchaConfig.Provider != "" && captchaConfig.SiteKey != "" && captchaConfig.SecretConfigured
 		configs, _, err := settingStore.AuthProviders(c.Request().Context(), cipher)
 		if err != nil {
 			return err
 		}
 		response := authMethodsResponse{
-			LocalLoginEnabled: localEnabled,
-			Providers:         []authProviderPublicResponse{},
+			LocalLoginEnabled:   localEnabled,
+			RegistrationEnabled: registrationEnabled,
+			Providers:           []authProviderPublicResponse{},
 		}
 		for _, config := range configs {
 			if !config.Enabled {

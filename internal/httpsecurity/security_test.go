@@ -41,6 +41,16 @@ func TestMiddlewareSetsSecurityHeadersAndRequestID(t *testing.T) {
 			t.Fatalf("%s = %q, want %q", name, got, want)
 		}
 	}
+	csp := recorder.Header().Get("Content-Security-Policy")
+	for _, source := range []string{
+		"script-src 'self' https://challenges.cloudflare.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/",
+		"connect-src 'self' https://challenges.cloudflare.com https://www.google.com/recaptcha/",
+		"frame-src https://challenges.cloudflare.com https://www.google.com/recaptcha/",
+	} {
+		if !strings.Contains(csp, source) {
+			t.Fatalf("CSP is missing CAPTCHA source %q: %s", source, csp)
+		}
+	}
 }
 
 func TestMiddlewareRejectsMissingCSRFForAuthenticatedMutation(t *testing.T) {

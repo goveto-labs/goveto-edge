@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { ApiError, authApi } from '@/api';
+import { CaptchaWidget } from '@/components/CaptchaWidget.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 
 export default function Register() {
@@ -17,6 +18,7 @@ export default function Register() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [captchaToken, setCaptchaToken] = useState('');
+    const [captchaResetKey, setCaptchaResetKey] = useState(0);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
     const [loading, setLoading] = useState(false);
@@ -49,6 +51,8 @@ export default function Register() {
                       ? err.message
                       : 'Registration failed';
             setError(message);
+            setCaptchaToken('');
+            setCaptchaResetKey((current) => current + 1);
         } finally {
             setLoading(false);
         }
@@ -146,17 +150,20 @@ export default function Register() {
                                 onChange={(e) => setPassword(e.target.value)}
                             />
                         </div>
-                        <div className='flex flex-col gap-1'>
-                            <Label htmlFor='register-captcha'>Captcha token</Label>
-                            <Input
-                                variant='secondary'
-                                id='register-captcha'
-                                required
-                                value={captchaToken}
-                                onChange={(e) => setCaptchaToken(e.target.value)}
+                        {config?.captcha && (
+                            <CaptchaWidget
+                                provider={config.captcha.provider}
+                                resetKey={captchaResetKey}
+                                siteKey={config.captcha.site_key}
+                                onToken={setCaptchaToken}
                             />
-                        </div>
-                        <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
+                        )}
+                        <Button
+                            fullWidth
+                            isDisabled={loading || captchaToken === ''}
+                            type='submit'
+                            variant='primary'
+                        >
                             {loading ? (
                                 <span className='flex items-center justify-center gap-2'>
                                     <Loader2 className='h-4 w-4 animate-spin' />

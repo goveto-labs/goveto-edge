@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -15,6 +16,7 @@ import (
 const (
 	ProviderRecaptcha  = "recaptcha"
 	ProviderCloudflare = "cloudflare"
+	maxResponseBytes   = 64 << 10
 )
 
 type Verifier struct {
@@ -58,7 +60,7 @@ func (v *Verifier) Verify(ctx context.Context, provider, secret, token, remoteIP
 	var result struct {
 		Success bool `json:"success"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, maxResponseBytes)).Decode(&result); err != nil {
 		return false, err
 	}
 	return result.Success, nil

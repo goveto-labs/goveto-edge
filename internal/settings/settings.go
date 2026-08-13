@@ -37,7 +37,15 @@ const (
 	httpProxyDescription     = "Client IP forwarding headers used by the control plane"
 	localLoginDescription    = "Whether email and password login is available"
 	authProvidersDescription = "OAuth 2.0 and OpenID Connect login providers"
+	captchaDescription       = "CAPTCHA provider used to protect public registration"
+	registrationDescription  = "Whether users may create accounts through public registration"
 	jobRetentionDescription  = "Retention policy for terminal jobs, executions, and site configuration versions"
+)
+
+const (
+	CaptchaProviderCloudflare = "cloudflare"
+	CaptchaProviderRecaptcha  = "recaptcha"
+	captchaSecretScope        = "settings:auth.captcha:secret_key"
 )
 
 var DefaultClientIPHeaders = []string{"X-Forwarded-For", "X-Real-IP", "Forwarded"}
@@ -590,13 +598,188 @@ func validHostname(host string) bool {
 }
 
 type CaptchaConfig struct {
-	Provider  string `json:"provider"`
-	SecretKey string `json:"secret_key"`
-	SiteKey   string `json:"site_key"`
+	Provider         string `json:"provider"`
+	SecretKey        string `json:"-"`
+	SiteKey          string `json:"site_key"`
+	SecretConfigured bool   `json:"-"`
+	secretEncrypted  string
 }
 
-func (s *Store) Captcha(ctx context.Context) (CaptchaConfig, bool, error) {
-	var config CaptchaConfig
-	found, err := s.Get(ctx, CaptchaKey, &config)
-	return config, found, err
+type storedCaptchaConfig struct {
+	Provider           string `json:"provider"`
+	SiteKey            string `json:"site_key"`
+	LegacySecretKey    string `json:"secret_key,omitempty"`
+	SecretKeyEncrypted string `json:"secret_key_encrypted,omitempty"`
+}
+
+func (c *CaptchaConfig) NormalizeAndValidate(requireComplete bool) error {
+	c.Provider = strings.ToLower(strings.TrimSpace(c.Provider))
+	if c.Provider == "turnstile" {
+		c.Provider = CaptchaProviderCloudflare
+	}
+	c.SiteKey = strings.TrimSpace(c.SiteKey)
+	c.SecretKey = strings.TrimSpace(c.SecretKey)
+	c.SecretConfigured = c.SecretConfigured || c.SecretKey != ""
+
+	if c.Provider != "" && c.Provider != CaptchaProviderCloudflare && c.Provider != CaptchaProviderRecaptcha {
+		return fmt.Errorf("unsupported CAPTCHA provider %q", c.Provider)
+	}
+	if len(c.SiteKey) > 2048 || len(c.SecretKey) > 2048 {
+		return errors.New("CAPTCHA keys must not exceed 2048 characters")
+	}
+	if requireComplete && (c.Provider == "" || c.SiteKey == "" || !c.SecretConfigured) {
+		return errors.New("public registration requires a CAPTCHA provider, site key, and secret key")
+	}
+	return nil
+}
+
+func (s *Store) Captcha(ctx context.Context, cipher SecretCipher) (CaptchaConfig, bool, error) {
+	var stored storedCaptchaConfig
+	found, err := s.Get(ctx, CaptchaKey, &stored)
+	if err != nil || !found {
+		return CaptchaConfig{}, found, err
+	}
+	config := CaptchaConfig{
+		Provider: stored.Provider, SiteKey: stored.SiteKey,
+		SecretConfigured: stored.SecretKeyEncrypted != "" || stored.LegacySecretKey != "",
+		secretEncrypted:  stored.SecretKeyEncrypted,
+	}
+	switch {
+	case stored.SecretKeyEncrypted != "":
+		if cipher == nil {
+			return CaptchaConfig{}, true, errors.New("CAPTCHA secret cipher is unavailable")
+		}
+		config.SecretKey, err = cipher.DecryptScoped(captchaSecretScope, stored.SecretKeyEncrypted)
+		if err != nil {
+			return CaptchaConfig{}, true, fmt.Errorf("decrypt CAPTCHA secret key: %w", err)
+		}
+	case stored.LegacySecretKey != "":
+		// Read legacy plaintext long enough for the startup rewrap to migrate it.
+		config.SecretKey = stored.LegacySecretKey
+	}
+	if err = config.NormalizeAndValidate(false); err != nil {
+		return CaptchaConfig{}, true, fmt.Errorf("stored CAPTCHA setting is invalid: %w", err)
+	}
+	return config, true, nil
+}
+
+func (s *Store) SetRegistrationConfig(ctx context.Context, enabled bool, config CaptchaConfig, cipher SecretCipher) error {
+	newSecret := strings.TrimSpace(config.SecretKey) != ""
+	if err := config.NormalizeAndValidate(false); err != nil {
+		return err
+	}
+	config.SecretConfigured = config.SecretKey != ""
+	if config.SecretKey == "" {
+		current, found, err := s.Captcha(ctx, cipher)
+		if err != nil {
+			return err
+		}
+		if found && current.Provider == config.Provider {
+			config.SecretKey = current.SecretKey
+			config.SecretConfigured = current.SecretConfigured
+			config.secretEncrypted = current.secretEncrypted
+		}
+	}
+	if err := config.NormalizeAndValidate(enabled); err != nil {
+		return err
+	}
+	stored := storedCaptchaConfig{Provider: config.Provider, SiteKey: config.SiteKey}
+	if !newSecret && config.secretEncrypted != "" {
+		stored.SecretKeyEncrypted = config.secretEncrypted
+	} else if config.SecretKey != "" {
+		if cipher == nil {
+			return errors.New("CAPTCHA secret cipher is unavailable")
+		}
+		encrypted, err := cipher.EncryptScoped(captchaSecretScope, config.SecretKey)
+		if err != nil {
+			return fmt.Errorf("encrypt CAPTCHA secret key: %w", err)
+		}
+		stored.SecretKeyEncrypted = encrypted
+	}
+
+	// Write the feature gate last when enabling and first when disabling so a
+	// partial database failure cannot expose registration without CAPTCHA.
+	if !enabled {
+		if err := s.Set(ctx, RegistrationEnabledKey, false, registrationDescription); err != nil {
+			return err
+		}
+	}
+	if err := s.Set(ctx, CaptchaKey, stored, captchaDescription); err != nil {
+		return err
+	}
+	if enabled {
+		return s.Set(ctx, RegistrationEnabledKey, true, registrationDescription)
+	}
+	return nil
+}
+
+type CaptchaSecretCipher interface {
+	SecretCipher
+	SecretRewrapper
+}
+
+// RewrapCaptchaSecret encrypts legacy plaintext settings and rotates existing
+// ciphertext while retaining fields written by newer versions.
+func (s *Store) RewrapCaptchaSecret(ctx context.Context, cipher CaptchaSecretCipher) error {
+	setting, err := s.db.DynamicSetting.FindUnique(ctx, query.DynamicSetting.Key.Equals(CaptchaKey))
+	if err != nil {
+		return fmt.Errorf("read CAPTCHA setting for rewrap: %w", err)
+	}
+	if setting == nil {
+		return nil
+	}
+	encoded, changed, err := rewrapCaptchaJSON(setting.ValueJson, cipher)
+	if err != nil || !changed {
+		return err
+	}
+	_, err = s.db.DynamicSetting.Update().Where(query.DynamicSetting.Key.Equals(CaptchaKey)).Set(
+		query.DynamicSetting.ValueJson.Set(encoded),
+	).Do(ctx)
+	if err != nil {
+		return fmt.Errorf("persist rewrapped CAPTCHA secret: %w", err)
+	}
+	return nil
+}
+
+func rewrapCaptchaJSON(value json.RawMessage, cipher CaptchaSecretCipher) (json.RawMessage, bool, error) {
+	var config map[string]json.RawMessage
+	if err := json.Unmarshal(value, &config); err != nil {
+		return nil, false, fmt.Errorf("decode CAPTCHA setting for rewrap: %w", err)
+	}
+	var plaintext, encrypted string
+	if raw := config["secret_key"]; raw != nil {
+		if err := json.Unmarshal(raw, &plaintext); err != nil {
+			return nil, false, fmt.Errorf("decode legacy CAPTCHA secret: %w", err)
+		}
+	}
+	if raw := config["secret_key_encrypted"]; raw != nil {
+		if err := json.Unmarshal(raw, &encrypted); err != nil {
+			return nil, false, fmt.Errorf("decode encrypted CAPTCHA secret: %w", err)
+		}
+	}
+	if encrypted == "" && plaintext == "" {
+		return value, false, nil
+	}
+	wrapped := encrypted
+	changed := false
+	var err error
+	if encrypted != "" {
+		wrapped, changed, err = cipher.RewrapScoped(captchaSecretScope, encrypted)
+	} else {
+		wrapped, err = cipher.EncryptScoped(captchaSecretScope, plaintext)
+		changed = err == nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("rewrap CAPTCHA secret: %w", err)
+	}
+	if !changed && plaintext == "" {
+		return value, false, nil
+	}
+	config["secret_key_encrypted"], _ = json.Marshal(wrapped)
+	delete(config, "secret_key")
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		return nil, false, fmt.Errorf("encode rewrapped CAPTCHA setting: %w", err)
+	}
+	return encoded, true, nil
 }

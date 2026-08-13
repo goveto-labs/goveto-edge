@@ -70,12 +70,21 @@ export interface AuthenticationProviderSettings {
 export interface AuthenticationSettings {
     local_login_enabled: boolean;
     require_totp: boolean;
+    registration: RegistrationSettings;
     providers: AuthenticationProviderSettings[];
+}
+
+export interface RegistrationSettings {
+    enabled: boolean;
+    captcha_provider: 'cloudflare' | 'recaptcha' | '';
+    captcha_site_key: string;
+    captcha_secret_configured: boolean;
 }
 
 export interface UpdateAdminSettings
     extends Omit<AdminSettings, 'restart_required' | 'restarting' | 'authentication'> {
     authentication: AuthenticationSettings & {
+        registration: RegistrationSettings & { captcha_secret?: string };
         providers: Array<AuthenticationProviderSettings & { client_secret?: string }>;
     };
     restart: boolean;
@@ -83,6 +92,7 @@ export interface UpdateAdminSettings
 
 export interface AuthMethods {
     local_login_enabled: boolean;
+    registration_enabled: boolean;
     providers: Array<{
         id: string;
         type: AuthenticationProviderType;

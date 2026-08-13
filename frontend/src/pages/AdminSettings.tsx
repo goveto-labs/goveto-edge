@@ -176,6 +176,7 @@ export default function AdminSettings() {
     const [baseline, setBaseline] = useState('');
     const [baselineNetwork, setBaselineNetwork] = useState('');
     const [providerSecrets, setProviderSecrets] = useState<Record<string, string>>({});
+    const [captchaSecret, setCaptchaSecret] = useState('');
     const [providerDialogOpen, setProviderDialogOpen] = useState(false);
     const [editingProvider, setEditingProvider] = useState<AuthenticationProviderSettings | null>(
         null
@@ -192,8 +193,9 @@ export default function AdminSettings() {
         () =>
             form !== null &&
             (JSON.stringify(editable(form)) !== baseline ||
-                Object.values(providerSecrets).some(Boolean)),
-        [baseline, form, providerSecrets]
+                Object.values(providerSecrets).some(Boolean) ||
+                captchaSecret.trim() !== ''),
+        [baseline, captchaSecret, form, providerSecrets]
     );
     const restartAffected = form !== null && networkSnapshot(form) !== baselineNetwork;
     const retentionValid =
@@ -210,6 +212,7 @@ export default function AdminSettings() {
         setBaseline(JSON.stringify(editable(settings)));
         setBaselineNetwork(networkSnapshot(settings));
         setProviderSecrets({});
+        setCaptchaSecret('');
     }, []);
 
     useEffect(() => {
@@ -260,6 +263,20 @@ export default function AdminSettings() {
             setError('Automatic external user creation cannot be combined with required TOTP.');
             return;
         }
+        const registration = form.authentication.registration;
+        if (registration.enabled && !form.authentication.local_login_enabled) {
+            setError('Public registration requires local login.');
+            return;
+        }
+        if (
+            registration.enabled &&
+            (!registration.captcha_provider ||
+                !registration.captcha_site_key.trim() ||
+                (!registration.captcha_secret_configured && !captchaSecret.trim()))
+        ) {
+            setError('Public registration requires a CAPTCHA provider, site key, and secret key.');
+            return;
+        }
         setSaving(true);
         setError('');
         try {
@@ -267,6 +284,10 @@ export default function AdminSettings() {
                 ...editable(form),
                 authentication: {
                     ...form.authentication,
+                    registration: {
+                        ...form.authentication.registration,
+                        captcha_secret: captchaSecret.trim() || undefined,
+                    },
                     providers: form.authentication.providers.map((provider) => ({
                         ...provider,
                         client_secret: providerSecrets[provider.id] || undefined,
@@ -561,6 +582,164 @@ export default function AdminSettings() {
                                                         })
                                                     }
                                                 />
+                                            </div>
+                                        </ContentCard>
+
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <UserRoundCog className='h-4 w-4 text-muted' />
+                                                    Public registration
+                                                </span>
+                                            }
+                                        >
+                                            <div className='space-y-5'>
+                                                <SettingToggle
+                                                    description='Allow new users to create viewer accounts after completing a CAPTCHA challenge.'
+                                                    label='Public registration'
+                                                    selected={
+                                                        form.authentication.registration.enabled
+                                                    }
+                                                    onChange={(enabled) =>
+                                                        updateForm({
+                                                            ...form,
+                                                            authentication: {
+                                                                ...form.authentication,
+                                                                registration: {
+                                                                    ...form.authentication
+                                                                        .registration,
+                                                                    enabled,
+                                                                },
+                                                            },
+                                                        })
+                                                    }
+                                                />
+                                                <div className='grid gap-4 border-t border-border pt-5 sm:grid-cols-2'>
+                                                    <SelectField
+                                                        id='captcha-provider'
+                                                        label='CAPTCHA provider'
+                                                        options={[
+                                                            {
+                                                                id: 'cloudflare',
+                                                                label: 'Cloudflare Turnstile',
+                                                            },
+                                                            {
+                                                                id: 'recaptcha',
+                                                                label: 'Google reCAPTCHA',
+                                                            },
+                                                        ]}
+                                                        placeholder='Select a provider'
+                                                        value={
+                                                            form.authentication.registration
+                                                                .captcha_provider
+                                                        }
+                                                        variant='secondary'
+                                                        onChange={(captchaProvider) =>
+                                                            updateForm({
+                                                                ...form,
+                                                                authentication: {
+                                                                    ...form.authentication,
+                                                                    registration: {
+                                                                        ...form.authentication
+                                                                            .registration,
+                                                                        captcha_provider:
+                                                                            captchaProvider as
+                                                                                | 'cloudflare'
+                                                                                | 'recaptcha',
+                                                                        captcha_secret_configured:
+                                                                            captchaProvider ===
+                                                                            form.authentication
+                                                                                .registration
+                                                                                .captcha_provider
+                                                                                ? form
+                                                                                      .authentication
+                                                                                      .registration
+                                                                                      .captcha_secret_configured
+                                                                                : false,
+                                                                    },
+                                                                },
+                                                            })
+                                                        }
+                                                    />
+                                                    <FormField
+                                                        htmlFor='captcha-site-key'
+                                                        label='Site key'
+                                                        required={
+                                                            form.authentication.registration.enabled
+                                                        }
+                                                    >
+                                                        <Input
+                                                            autoComplete='off'
+                                                            id='captcha-site-key'
+                                                            required={
+                                                                form.authentication.registration
+                                                                    .enabled
+                                                            }
+                                                            value={
+                                                                form.authentication.registration
+                                                                    .captcha_site_key
+                                                            }
+                                                            variant='secondary'
+                                                            onChange={(event) =>
+                                                                updateForm({
+                                                                    ...form,
+                                                                    authentication: {
+                                                                        ...form.authentication,
+                                                                        registration: {
+                                                                            ...form.authentication
+                                                                                .registration,
+                                                                            captcha_site_key:
+                                                                                event.target.value,
+                                                                        },
+                                                                    },
+                                                                })
+                                                            }
+                                                        />
+                                                    </FormField>
+                                                    <FormField
+                                                        className='sm:col-span-2'
+                                                        htmlFor='captcha-secret'
+                                                        label='Secret key'
+                                                        hint={
+                                                            form.authentication.registration
+                                                                .captcha_secret_configured
+                                                                ? 'A secret is configured. Leave blank to keep it, or enter a replacement.'
+                                                                : 'Stored encrypted and never returned by the API.'
+                                                        }
+                                                        required={
+                                                            form.authentication.registration
+                                                                .enabled &&
+                                                            !form.authentication.registration
+                                                                .captcha_secret_configured
+                                                        }
+                                                    >
+                                                        <Input
+                                                            autoComplete='new-password'
+                                                            id='captcha-secret'
+                                                            placeholder={
+                                                                form.authentication.registration
+                                                                    .captcha_secret_configured
+                                                                    ? 'Configured'
+                                                                    : undefined
+                                                            }
+                                                            required={
+                                                                form.authentication.registration
+                                                                    .enabled &&
+                                                                !form.authentication.registration
+                                                                    .captcha_secret_configured
+                                                            }
+                                                            type='password'
+                                                            value={captchaSecret}
+                                                            variant='secondary'
+                                                            onChange={(event) => {
+                                                                setCaptchaSecret(
+                                                                    event.target.value
+                                                                );
+                                                                setSaved(false);
+                                                            }}
+                                                        />
+                                                    </FormField>
+                                                </div>
                                             </div>
                                         </ContentCard>
 

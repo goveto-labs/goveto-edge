@@ -204,7 +204,7 @@ func setSecurityHeaders(header http.Header, hsts bool) {
 	header.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 	header.Set("Cross-Origin-Opener-Policy", "same-origin")
 	header.Set("Cross-Origin-Resource-Policy", "same-origin")
-	header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'")
+	header.Set("Content-Security-Policy", "default-src 'self'; script-src 'self' https://challenges.cloudflare.com https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://www.google.com/recaptcha/ https://www.gstatic.com/recaptcha/; font-src 'self' data:; connect-src 'self' https://challenges.cloudflare.com https://www.google.com/recaptcha/; frame-src https://challenges.cloudflare.com https://www.google.com/recaptcha/; base-uri 'none'; frame-ancestors 'none'; object-src 'none'; form-action 'self'")
 	if hsts {
 		header.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 	}

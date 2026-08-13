@@ -10,8 +10,11 @@ import (
 
 func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	encoded, err := json.Marshal(response{
-		Authentication: authenticationResponse{Providers: []authenticationProviderResponse{{ClientSecretConfigured: true}}},
-		JobRetention:   settings.DefaultJobRetention,
+		Authentication: authenticationResponse{
+			Registration: registrationResponse{SecretConfigured: true},
+			Providers:    []authenticationProviderResponse{{ClientSecretConfigured: true}},
+		},
+		JobRetention: settings.DefaultJobRetention,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -22,8 +25,30 @@ func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	if !strings.Contains(string(encoded), `"client_secret_configured":true`) {
 		t.Fatalf("OIDC secret configuration state missing from response: %s", encoded)
 	}
+	if strings.Contains(string(encoded), `"captcha_secret":`) || !strings.Contains(string(encoded), `"captcha_secret_configured":true`) {
+		t.Fatalf("CAPTCHA secret response is unsafe: %s", encoded)
+	}
 	if !strings.Contains(string(encoded), `"job_retention":{"history_days":90,"versions_per_site":20}`) {
 		t.Fatalf("job retention setting missing from response: %s", encoded)
+	}
+}
+
+func TestBuildCaptchaConfigDoesNotReuseSecretAcrossProviders(t *testing.T) {
+	current := settings.CaptchaConfig{
+		Provider: settings.CaptchaProviderCloudflare, SiteKey: "old", SecretKey: "secret", SecretConfigured: true,
+	}
+	_, err := buildCaptchaConfig(registrationRequest{
+		Enabled: true, CaptchaProvider: settings.CaptchaProviderRecaptcha, CaptchaSiteKey: "new",
+	}, current)
+	if err == nil {
+		t.Fatal("provider change reused the existing CAPTCHA secret")
+	}
+	config, err := buildCaptchaConfig(registrationRequest{
+		Enabled: true, CaptchaProvider: settings.CaptchaProviderRecaptcha,
+		CaptchaSiteKey: "new", CaptchaSecret: "replacement",
+	}, current)
+	if err != nil || config.SecretKey != "replacement" {
+		t.Fatalf("provider change with replacement secret failed: %#v, %v", config, err)
 	}
 }
 

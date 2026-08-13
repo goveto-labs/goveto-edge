@@ -33,7 +33,15 @@ type response struct {
 type authenticationResponse struct {
 	LocalLoginEnabled bool                             `json:"local_login_enabled"`
 	RequireTOTP       bool                             `json:"require_totp"`
+	Registration      registrationResponse             `json:"registration"`
 	Providers         []authenticationProviderResponse `json:"providers"`
+}
+
+type registrationResponse struct {
+	Enabled          bool   `json:"enabled"`
+	CaptchaProvider  string `json:"captcha_provider"`
+	CaptchaSiteKey   string `json:"captcha_site_key"`
+	SecretConfigured bool   `json:"captcha_secret_configured"`
 }
 
 type authenticationProviderResponse struct {
@@ -65,7 +73,31 @@ type updateRequest struct {
 type authenticationRequest struct {
 	LocalLoginEnabled bool                            `json:"local_login_enabled"`
 	RequireTOTP       bool                            `json:"require_totp"`
+	Registration      registrationRequest             `json:"registration"`
 	Providers         []authenticationProviderRequest `json:"providers"`
+}
+
+type registrationRequest struct {
+	Enabled         bool   `json:"enabled"`
+	CaptchaProvider string `json:"captcha_provider"`
+	CaptchaSiteKey  string `json:"captcha_site_key"`
+	CaptchaSecret   string `json:"captcha_secret"`
+}
+
+func buildCaptchaConfig(input registrationRequest, current settings.CaptchaConfig) (settings.CaptchaConfig, error) {
+	config := settings.CaptchaConfig{
+		Provider: input.CaptchaProvider, SiteKey: input.CaptchaSiteKey, SecretKey: input.CaptchaSecret,
+	}
+	if err := config.NormalizeAndValidate(false); err != nil {
+		return settings.CaptchaConfig{}, err
+	}
+	if config.Provider == current.Provider && current.SecretConfigured {
+		config.SecretConfigured = true
+	}
+	if err := config.NormalizeAndValidate(input.Enabled); err != nil {
+		return settings.CaptchaConfig{}, err
+	}
+	return config, nil
 }
 
 type authenticationProviderRequest struct {
@@ -145,6 +177,14 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		if err != nil {
 			return err
 		}
+		currentCaptcha, _, err := settingStore.Captcha(c.Request().Context(), cipher)
+		if err != nil {
+			return err
+		}
+		captchaConfig, err := buildCaptchaConfig(input.Authentication.Registration, currentCaptcha)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		}
 		currentRetention, err := settingStore.JobRetention(c.Request().Context())
 		if err != nil {
 			return err
@@ -164,6 +204,9 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		}
 		if !input.Authentication.LocalLoginEnabled && enabledProviders == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "local login or an external provider must remain enabled")
+		}
+		if input.Authentication.Registration.Enabled && !input.Authentication.LocalLoginEnabled {
+			return echo.NewHTTPError(http.StatusBadRequest, "public registration requires local login")
 		}
 		if !input.Authentication.LocalLoginEnabled && !authProvidersRuntimeEqual(currentProviders, runtimeProviders) {
 			return echo.NewHTTPError(http.StatusBadRequest, "save and verify provider changes while local login remains enabled before disabling local login")
@@ -194,6 +237,11 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 			return err
 		}
 		if err = settingStore.SetAuthProviders(c.Request().Context(), storedProviders, cipher); err != nil {
+			return err
+		}
+		if err = settingStore.SetRegistrationConfig(
+			c.Request().Context(), input.Authentication.Registration.Enabled, captchaConfig, cipher,
+		); err != nil {
 			return err
 		}
 
@@ -304,6 +352,14 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 	if err != nil {
 		return response{}, err
 	}
+	registrationEnabled, err := settingStore.RegistrationEnabled(c.Request().Context())
+	if err != nil {
+		return response{}, err
+	}
+	captchaConfig, _, err := settingStore.Captcha(c.Request().Context(), cipher)
+	if err != nil {
+		return response{}, err
+	}
 	retention, err := settingStore.JobRetention(c.Request().Context())
 	if err != nil {
 		return response{}, err
@@ -327,7 +383,11 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 		Authentication: authenticationResponse{
 			LocalLoginEnabled: localEnabled,
 			RequireTOTP:       requireTOTP,
-			Providers:         providerResponses,
+			Registration: registrationResponse{
+				Enabled: registrationEnabled, CaptchaProvider: captchaConfig.Provider,
+				CaptchaSiteKey: captchaConfig.SiteKey, SecretConfigured: captchaConfig.SecretConfigured,
+			},
+			Providers: providerResponses,
 		},
 		RestartRequired: restartRequired,
 		Restarting:      restarting,

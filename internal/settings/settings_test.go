@@ -19,6 +19,32 @@ func (testSecretRewrapper) RewrapScoped(scope, value string) (string, bool, erro
 	return "current", true, nil
 }
 
+type testCaptchaCipher struct{}
+
+func (testCaptchaCipher) EncryptScoped(scope, value string) (string, error) {
+	if scope != captchaSecretScope {
+		return "", fmt.Errorf("unexpected scope %q", scope)
+	}
+	return "encrypted:" + value, nil
+}
+
+func (testCaptchaCipher) DecryptScoped(scope, value string) (string, error) {
+	if scope != captchaSecretScope || !strings.HasPrefix(value, "encrypted:") {
+		return "", fmt.Errorf("unexpected ciphertext %q in scope %q", value, scope)
+	}
+	return strings.TrimPrefix(value, "encrypted:"), nil
+}
+
+func (testCaptchaCipher) RewrapScoped(scope, value string) (string, bool, error) {
+	if scope != captchaSecretScope {
+		return "", false, fmt.Errorf("unexpected scope %q", scope)
+	}
+	if value == "encrypted:current" {
+		return value, false, nil
+	}
+	return "encrypted:current", true, nil
+}
+
 func TestValidateAgentGatewayPublicAddress(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -193,5 +219,56 @@ func TestRewrapAuthProviderJSONPreservesProviderFields(t *testing.T) {
 	encodedAgain, changedAgain, err := rewrapAuthProviderJSON(encoded, testSecretRewrapper{})
 	if err != nil || changedAgain || string(encodedAgain) != string(encoded) {
 		t.Fatalf("current value was rewritten: changed=%v err=%v value=%s", changedAgain, err, encodedAgain)
+	}
+}
+
+func TestCaptchaConfigNormalizeAndValidate(t *testing.T) {
+	config := CaptchaConfig{Provider: " Turnstile ", SiteKey: " site ", SecretKey: " secret "}
+	if err := config.NormalizeAndValidate(true); err != nil {
+		t.Fatal(err)
+	}
+	if config.Provider != CaptchaProviderCloudflare || config.SiteKey != "site" || config.SecretKey != "secret" {
+		t.Fatalf("normalized CAPTCHA config = %#v", config)
+	}
+	for _, invalid := range []CaptchaConfig{
+		{Provider: "custom", SiteKey: "site", SecretKey: "secret"},
+		{Provider: CaptchaProviderCloudflare, SiteKey: "", SecretKey: "secret"},
+		{Provider: CaptchaProviderRecaptcha, SiteKey: "site"},
+	} {
+		if err := invalid.NormalizeAndValidate(true); err == nil {
+			t.Fatalf("invalid CAPTCHA config was accepted: %#v", invalid)
+		}
+	}
+}
+
+func TestCaptchaConfigJSONNeverExposesPlaintextSecret(t *testing.T) {
+	config := CaptchaConfig{Provider: CaptchaProviderCloudflare, SiteKey: "site", SecretKey: "plaintext"}
+	encoded, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "plaintext") || strings.Contains(string(encoded), "secret") {
+		t.Fatalf("CAPTCHA secret exposed in JSON: %s", encoded)
+	}
+}
+
+func TestRewrapCaptchaJSONEncryptsLegacySecretAndPreservesFields(t *testing.T) {
+	input := json.RawMessage(`{"provider":"cloudflare","site_key":"site","secret_key":"legacy","future":{"enabled":true}}`)
+	encoded, changed, err := rewrapCaptchaJSON(input, testCaptchaCipher{})
+	if err != nil || !changed {
+		t.Fatalf("rewrapCaptchaJSON() changed=%v err=%v", changed, err)
+	}
+	var stored map[string]json.RawMessage
+	if err = json.Unmarshal(encoded, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if stored["secret_key"] != nil || strings.Contains(string(encoded), `"secret_key":"legacy"`) ||
+		string(stored["secret_key_encrypted"]) != `"encrypted:legacy"` ||
+		string(stored["future"]) != `{"enabled":true}` {
+		t.Fatalf("unexpected rewrapped CAPTCHA setting: %s", encoded)
+	}
+	encodedAgain, changedAgain, err := rewrapCaptchaJSON(encoded, testCaptchaCipher{})
+	if err != nil || !changedAgain || !strings.Contains(string(encodedAgain), "encrypted:current") {
+		t.Fatalf("ciphertext rotation failed: changed=%v err=%v value=%s", changedAgain, err, encodedAgain)
 	}
 }

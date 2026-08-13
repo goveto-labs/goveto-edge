@@ -49,8 +49,8 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, set
 	group := e.Group("/api/v1/auth")
 	group.POST("/login", login(db, sessions, settingStore, totpCipher), limiter.Limit("login", 10, time.Minute))
 	registerExternalAuth(group, db, sessions, settingStore, secretCipher, limiter)
-	group.POST("/register", register(db, settingStore, captchaVerifier), limiter.Limit("register", 5, time.Hour))
-	group.GET("/registration-config", registrationConfig(settingStore), limiter.Limit("captcha-config", 60, time.Minute))
+	group.POST("/register", register(db, settingStore, secretCipher, captchaVerifier), limiter.Limit("register", 5, time.Hour))
+	group.GET("/registration-config", registrationConfig(settingStore, secretCipher), limiter.Limit("captcha-config", 60, time.Minute))
 	group.GET("/me", me(db, settingStore), authn.RequireAuth)
 	group.POST("/logout", logout(sessions), authn.RequireAuth)
 	// Endpoints that verify the current password are throttled per user so a

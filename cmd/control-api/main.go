@@ -256,6 +256,9 @@ func main() {
 			err = settingStore.RewrapAuthProviderSecrets(rewrapCtx, credentialCipher)
 		}
 		if err == nil {
+			err = settingStore.RewrapCaptchaSecret(rewrapCtx, credentialCipher)
+		}
+		if err == nil {
 			err = dnsService.RewrapSecrets(rewrapCtx)
 		}
 		if err == nil {

@@ -35,7 +35,7 @@ type registrationConfigResponse struct {
 // @summary Register
 // @description Create a new user account when registration is enabled; requires captcha.
 // @Tags auth
-func register(db *client.Client, settingStore *settings.Store, verifier *captcha.Verifier) echo.HandlerFunc {
+func register(db *client.Client, settingStore *settings.Store, cipher settings.SecretCipher, verifier *captcha.Verifier) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		initialized, err := settingStore.Initialized(ctx)
@@ -50,6 +50,13 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 			return err
 		}
 		if !enabled {
+			return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
+		}
+		localLoginEnabled, err := settingStore.LocalLoginEnabled(ctx)
+		if err != nil {
+			return err
+		}
+		if !localLoginEnabled {
 			return echo.NewHTTPError(http.StatusForbidden, "registration is disabled")
 		}
 
@@ -68,11 +75,11 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 
-		captchaConfig, found, err := settingStore.Captcha(ctx)
+		captchaConfig, found, err := settingStore.Captcha(ctx, cipher)
 		if err != nil {
 			return err
 		}
-		if !found {
+		if !found || captchaConfig.Provider == "" || captchaConfig.SiteKey == "" || captchaConfig.SecretKey == "" {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "captcha is not configured")
 		}
 		valid, err := verifier.Verify(ctx, captchaConfig.Provider, captchaConfig.SecretKey, input.CaptchaToken, c.RealIP())
@@ -116,19 +123,24 @@ func register(db *client.Client, settingStore *settings.Store, verifier *captcha
 // @summary Registration config
 // @description Return whether registration is enabled and public captcha settings.
 // @Tags auth
-func registrationConfig(settingStore *settings.Store) echo.HandlerFunc {
+func registrationConfig(settingStore *settings.Store, cipher settings.SecretCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		enabled, err := settingStore.RegistrationEnabled(ctx)
 		if err != nil {
 			return err
 		}
-		config, found, err := settingStore.Captcha(ctx)
+		localLoginEnabled, err := settingStore.LocalLoginEnabled(ctx)
 		if err != nil {
 			return err
 		}
-		response := registrationConfigResponse{Enabled: enabled}
-		if found {
+		config, found, err := settingStore.Captcha(ctx, cipher)
+		if err != nil {
+			return err
+		}
+		complete := found && config.Provider != "" && config.SiteKey != "" && config.SecretConfigured
+		response := registrationConfigResponse{Enabled: enabled && localLoginEnabled && complete}
+		if response.Enabled {
 			response.Captcha = &captchaPublicResponse{Provider: config.Provider, SiteKey: config.SiteKey}
 		}
 		return types.JSON(c, http.StatusOK, response)
