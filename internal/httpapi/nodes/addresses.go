@@ -49,22 +49,24 @@ func addAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 			return err
 		}
 
-		created, err := db.NodeAddress.Create().
-			Set(
-				query.NodeAddress.NodeId.Set(node.Id),
-				query.NodeAddress.Address.Set(input.Address),
-			).
-			Do(ctx)
+		var created *model.NodeAddress
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			created, err = tx.NodeAddress.Create().
+				Set(
+					query.NodeAddress.NodeId.Set(node.Id),
+					query.NodeAddress.Address.Set(input.Address),
+				).
+				Do(ctx)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
 		response := types.NewNodeAddress(created)
 		audit.SetChange(c, nil, response)
-		if dnsService != nil {
-			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
-				return err
-			}
-		}
 		return types.JSON(c, http.StatusCreated, response)
 	}
 }
@@ -99,26 +101,28 @@ func updateAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		if err = ensureAddressesAvailable(ctx, db, []string{input.Address}, current.Id); err != nil {
 			return err
 		}
-		updated, err := db.NodeAddress.Update().
-			Where(
-				query.NodeAddress.Id.Equals(c.Param("address_id")),
-				query.NodeAddress.NodeId.Equals(node.Id),
-			).
-			Set(query.NodeAddress.Address.Set(input.Address)).
-			Do(ctx)
+		var updated *model.NodeAddress
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			updated, err = tx.NodeAddress.Update().
+				Where(
+					query.NodeAddress.Id.Equals(c.Param("address_id")),
+					query.NodeAddress.NodeId.Equals(node.Id),
+				).
+				Set(query.NodeAddress.Address.Set(input.Address)).
+				Do(ctx)
+			if err != nil {
+				return err
+			}
+			if updated == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "address not found")
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		if updated == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "address not found")
-		}
 		response := types.NewNodeAddress(updated)
 		audit.SetChange(c, types.NewNodeAddress(current), response)
-		if dnsService != nil {
-			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
-				return err
-			}
-		}
 		return types.JSON(c, http.StatusOK, response)
 	}
 }
@@ -133,22 +137,24 @@ func deleteAddress(db *client.Client, dnsService *dnssync.Service) echo.HandlerF
 		if err != nil {
 			return err
 		}
-		deleted, err := db.NodeAddress.Delete().Where(
-			query.NodeAddress.Id.Equals(c.Param("address_id")),
-			query.NodeAddress.NodeId.Equals(node.Id),
-		).Do(ctx)
+		var deleted *model.NodeAddress
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			deleted, err = tx.NodeAddress.Delete().Where(
+				query.NodeAddress.Id.Equals(c.Param("address_id")),
+				query.NodeAddress.NodeId.Equals(node.Id),
+			).Do(ctx)
+			if err != nil {
+				return err
+			}
+			if deleted == nil {
+				return echo.NewHTTPError(http.StatusNotFound, "address not found")
+			}
+			return nil
+		})
 		if err != nil {
 			return err
 		}
-		if deleted == nil {
-			return echo.NewHTTPError(http.StatusNotFound, "address not found")
-		}
 		audit.SetChange(c, types.NewNodeAddress(deleted), nil)
-		if dnsService != nil {
-			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
-				return err
-			}
-		}
 		return c.NoContent(http.StatusNoContent)
 	}
 }

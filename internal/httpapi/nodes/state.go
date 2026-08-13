@@ -79,7 +79,7 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 				return echo.NewHTTPError(http.StatusBadRequest, "DNS line does not belong to cluster")
 			}
 		}
-		err = db.Tx(ctx, func(tx *client.Client) error {
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
 			if _, err := tx.NodeDNSLine.Delete().Where(query.NodeDNSLine.NodeId.Equals(node.Id)).DoMany(ctx); err != nil {
 				return err
 			}
@@ -98,9 +98,6 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 		before := dnsLinesResponse{NodeID: node.Id, DNSLineIDs: beforeIDs}
 		after := dnsLinesResponse{NodeID: node.Id, DNSLineIDs: afterIDs}
 		audit.SetChange(c, before, after)
-		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
-			return err
-		}
 		return types.JSON(c, http.StatusOK, after)
 	}
 }
@@ -119,7 +116,7 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 			return echo.NewHTTPError(http.StatusConflict, "only a disabled node can be enabled")
 		}
 		before := newNodeStateSnapshot(node)
-		err = db.Tx(ctx, func(tx *client.Client) error {
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
 				query.Node.Status.Set(model.NodeStatusOFFLINE),
 				query.Node.HeartbeatAt.SetNull(),
@@ -137,9 +134,6 @@ func enableNode(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc
 		after.HeartbeatAt = nil
 		after.InstallError = nil
 		audit.SetChange(c, before, after)
-		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
-			return err
-		}
 		return types.JSON(c, http.StatusAccepted, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "waiting for the agent management channel"})
 	}
 }
@@ -172,15 +166,17 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 			return echo.NewHTTPError(http.StatusConflict, "node cannot be disabled while installation is pending")
 		}
 		before := newNodeStateSnapshot(node)
-		err = db.Tx(ctx, func(tx *client.Client) error {
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
 			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(query.Node.Status.Set(model.NodeStatusDISABLED)).Do(ctx); err != nil {
 				return err
 			}
-			_, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
+			if _, err := tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
 				cancel_requested_at=NOW(), error='node was disabled', lease_owner=NULL,
 				lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
-				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id)
-			return err
+				WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, node.Id); err != nil {
+				return err
+			}
+			return nil
 		})
 		if err != nil {
 			return err
@@ -191,9 +187,6 @@ func disableNode(db *client.Client, gateway *edgecontrol.Gateway, dnsService *dn
 		after := before
 		after.Status = model.NodeStatusDISABLED
 		audit.SetChange(c, before, after)
-		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
-			return err
-		}
 		return types.JSON(c, http.StatusOK, nodeStatusResponse{ID: node.Id, Status: model.NodeStatusDISABLED})
 	}
 }
@@ -209,15 +202,21 @@ func revokeNodeCredential(db *client.Client, gateway *edgecontrol.Gateway, dnsSe
 			return err
 		}
 		before := newNodeStateSnapshot(node)
-		if err := gateway.Revoke(ctx, node.Id); err != nil {
+		if err := withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			if err := gateway.RevokeTx(ctx, tx, node.Id); err != nil {
+				return err
+			}
+			if _, err := tx.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
+				query.Node.Status.Set(model.NodeStatusOFFLINE),
+				query.Node.HeartbeatAt.SetNull(),
+			).Do(ctx); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
 			return err
 		}
-		if _, err := db.Node.Update().Where(query.Node.Id.Equals(node.Id)).Set(
-			query.Node.Status.Set(model.NodeStatusOFFLINE),
-			query.Node.HeartbeatAt.SetNull(),
-		).Do(ctx); err != nil {
-			return err
-		}
+		gateway.Disconnect(ctx, node.Id)
 		after := before
 		after.Status = model.NodeStatusOFFLINE
 		after.HeartbeatAt = nil
@@ -226,9 +225,6 @@ func revokeNodeCredential(db *client.Client, gateway *edgecontrol.Gateway, dnsSe
 			map[string]any{"node": before, "credential_revoked": false},
 			map[string]any{"node": after, "credential_revoked": true},
 		)
-		if err := enqueueDNSIfChanged(ctx, dnsService, node.ClusterId); err != nil {
-			return err
-		}
 		response := nodeStatusResponse{
 			ID: node.Id, Status: model.NodeStatusOFFLINE, Message: "management credential revoked; reinstall the node to reconnect",
 		}
@@ -253,4 +249,32 @@ func enqueueDNSIfChanged(ctx context.Context, service *dnssync.Service, clusterI
 	}
 	_, err := service.EnqueueNodeIPIfChanged(ctx, clusterID)
 	return err
+}
+
+func enqueueDNSReconciliationTx(ctx context.Context, tx *client.Client, service *dnssync.Service, clusterID string) error {
+	if service == nil {
+		return nil
+	}
+	_, err := service.EnqueueLatestTx(ctx, tx, clusterID, model.DNSSyncActionUPSERT_CLUSTER)
+	return err
+}
+
+func withDNSReconciliationTx(
+	ctx context.Context,
+	db *client.Client,
+	service *dnssync.Service,
+	clusterID string,
+	mutate func(*client.Client) error,
+) error {
+	return db.Tx(ctx, func(tx *client.Client) error {
+		if service != nil {
+			if err := dnssync.LockClusterTx(ctx, tx, clusterID); err != nil {
+				return err
+			}
+		}
+		if err := mutate(tx); err != nil {
+			return err
+		}
+		return enqueueDNSReconciliationTx(ctx, tx, service, clusterID)
+	})
 }

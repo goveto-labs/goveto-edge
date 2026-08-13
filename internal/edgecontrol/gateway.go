@@ -850,24 +850,28 @@ func (g *Gateway) rotateCredential(
 }
 
 func (g *Gateway) Revoke(ctx context.Context, nodeID string) error {
-	if err := g.db.Tx(ctx, func(tx *client.Client) error {
-		affected, err := tx.RawExec(ctx, `UPDATE node_credentials SET revoked_at = NOW() WHERE node_id = $1`, nodeID)
-		if err != nil {
-			return err
-		}
-		if affected != 1 {
-			return errors.New("node credential is not registered")
-		}
-		_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
-			cancel_requested_at=NOW(), error='node credential was revoked', lease_owner=NULL,
-			lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
-			WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, nodeID)
-		return err
-	}); err != nil {
+	if err := g.db.Tx(ctx, func(tx *client.Client) error { return g.RevokeTx(ctx, tx, nodeID) }); err != nil {
 		return err
 	}
 	g.Disconnect(ctx, nodeID)
 	return nil
+}
+
+// RevokeTx persists credential revocation and task cancellation in the caller's transaction.
+// The caller must disconnect the node only after that transaction commits.
+func (g *Gateway) RevokeTx(ctx context.Context, tx *client.Client, nodeID string) error {
+	affected, err := tx.RawExec(ctx, `UPDATE node_credentials SET revoked_at = NOW() WHERE node_id = $1`, nodeID)
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return errors.New("node credential is not registered")
+	}
+	_, err = tx.RawExec(ctx, `UPDATE agent_tasks SET status = 'CANCELLED',
+		cancel_requested_at=NOW(), error='node credential was revoked', lease_owner=NULL,
+		lease_until=NULL, heartbeat_at=NULL, updated_at=NOW()
+		WHERE node_id = $1 AND status IN ('PENDING', 'RUNNING')`, nodeID)
+	return err
 }
 
 func (g *Gateway) Disconnect(ctx context.Context, nodeID string) {

@@ -29,10 +29,10 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, gateway *edge
 		if node == nil || node.ClusterId != c.Param("cluster_id") {
 			return echo.NewHTTPError(http.StatusNotFound, "node not found")
 		}
-		if err := gateway.Revoke(ctx, nodeID); err != nil {
-			return err
-		}
-		if err := db.Tx(ctx, func(tx *client.Client) error {
+		if err := withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			if err := gateway.RevokeTx(ctx, tx, nodeID); err != nil {
+				return err
+			}
 			if _, err := tx.DNSManagedRecord.Update().
 				Where(query.DNSManagedRecord.NodeId.Equals(&nodeID)).
 				Set(
@@ -66,16 +66,14 @@ func deleteNode(db *client.Client, queue *nodedomain.InstallQueue, gateway *edge
 			if _, err := tx.Node.Delete().Where(query.Node.Id.Equals(nodeID)).DoMany(ctx); err != nil {
 				return err
 			}
+			if err := queue.DeleteTx(ctx, tx, nodeID); err != nil {
+				return err
+			}
 			return nil
 		}); err != nil {
 			return err
 		}
-		if dnsService != nil {
-			if _, err := dnsService.EnqueueNodeIPIfChanged(ctx, node.ClusterId); err != nil {
-				return err
-			}
-		}
-		_ = queue.Delete(ctx, nodeID)
+		gateway.Disconnect(ctx, nodeID)
 		audit.SetChange(c, node, nil)
 		return types.JSON(c, http.StatusOK, nil)
 	}

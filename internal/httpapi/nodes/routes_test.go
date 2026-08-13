@@ -1,11 +1,18 @@
 package nodes
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/labstack/echo/v5"
 )
+
+func TestDNSReconciliationTransactionIsOptional(t *testing.T) {
+	if err := enqueueDNSReconciliationTx(context.Background(), nil, nil, "cluster-1"); err != nil {
+		t.Fatalf("nil DNS service returned error: %v", err)
+	}
+}
 
 func TestRegisterIncludesSSHCredentialRoutes(t *testing.T) {
 	e := echo.New()
