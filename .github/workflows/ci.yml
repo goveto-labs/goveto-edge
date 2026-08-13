@@ -19,7 +19,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build
+      - name: Build release control plane with embedded agents
+        run: script/build_control.sh "$RUNNER_TEMP/control-api"
+      - name: Build all commands and packages
         run: go build ./...
       - name: Vet
         run: go vet ./...
