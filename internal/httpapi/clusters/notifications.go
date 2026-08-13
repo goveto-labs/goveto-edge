@@ -33,9 +33,22 @@ const notificationResponseLimit = 1 << 20
 
 var (
 	notificationOutboundPolicy = outboundhttp.NewPolicy()
-	notificationHTTPClient     = notificationOutboundPolicy.Client("https")
+	notificationHTTPClient     = notificationOutboundPolicy.Client("http", "https")
 	notificationSendSlots      = make(chan struct{}, 16)
 )
+
+// ConfigureNotificationOutbound replaces the outbound policy used to deliver
+// notifications. Pass a policy built with NewPolicyWithAllowlist to permit a
+// curated set of private destinations (e.g. an internal gotify SMTP host); the
+// default policy only permits public destinations. Call once at startup before
+// serving traffic.
+func ConfigureNotificationOutbound(policy *outboundhttp.Policy) {
+	if policy == nil {
+		return
+	}
+	notificationOutboundPolicy = policy
+	notificationHTTPClient = policy.Client("http", "https")
+}
 
 type notificationChannelRequest struct {
 	Name    string `json:"name"`
@@ -380,7 +393,7 @@ func deliverGenericNotificationWithClient(ctx context.Context, httpClient *http.
 		}
 	}
 	target.RawQuery = query.Encode()
-	if err := notificationOutboundPolicy.ValidateURL(ctx, &target, "https"); err != nil {
+	if err := notificationOutboundPolicy.ValidateURL(ctx, &target, "http", "https"); err != nil {
 		return err
 	}
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
@@ -458,20 +471,55 @@ func validateNotificationURL(rawURL string) (string, error) {
 	}
 	if service == "generic" {
 		targetScheme := strings.ToLower(strings.TrimPrefix(parsed.Scheme, "generic+"))
-		if targetScheme != "https" && !strings.EqualFold(parsed.Scheme, "generic") {
-			return "", errors.New("generic webhook must use HTTPS")
-		}
-		if strings.EqualFold(parsed.Query().Get("disabletls"), "yes") || strings.EqualFold(parsed.Query().Get("disabletls"), "true") {
-			return "", errors.New("generic webhook must use HTTPS")
+		if targetScheme != "http" && targetScheme != "https" && !strings.EqualFold(parsed.Scheme, "generic") {
+			return "", errors.New("generic webhook must use HTTP or HTTPS")
 		}
 		if method := strings.ToUpper(strings.TrimSpace(parsed.Query().Get("method"))); method != "" && method != http.MethodPost {
 			return "", errors.New("generic webhook only supports POST")
 		}
 	}
+	// bark/gotify/ntfy/smtp/generic are delivered through a dedicated client, so
+	// validate their host and scheme directly. Shoutrrr's per-service parameter
+	// names differ (e.g. ntfy has no disabletls flag) and would otherwise reject
+	// valid internal HTTP destinations. Remaining SaaS services keep Shoutrrr
+	// validation since their hosts are fixed.
+	if isCustomDeliveryService(service) {
+		if err := validateCustomDeliveryURL(parsed, service); err != nil {
+			return "", err
+		}
+		return service, nil
+	}
 	if _, createErr := shoutrrr.CreateSender(rawURL); createErr != nil {
 		return "", errors.New("url must be a valid Shoutrrr URL")
 	}
 	return service, nil
+}
+
+func isCustomDeliveryService(service string) bool {
+	switch service {
+	case "bark", "generic", "gotify", "ntfy", "smtp":
+		return true
+	default:
+		return false
+	}
+}
+
+func validateCustomDeliveryURL(parsed *url.URL, service string) error {
+	if parsed.Host == "" || strings.TrimSpace(parsed.Hostname()) == "" {
+		return errors.New("notification host is required")
+	}
+	scheme := customHostScheme(parsed)
+	if service != "smtp" && scheme != "http" && scheme != "https" {
+		return errors.New("notification URL must use HTTP or HTTPS")
+	}
+	// Reuse the delivery builder to confirm required per-service fields (Gotify
+	// token, Bark device key, Ntfy topic) are present; the request is discarded.
+	if service != "generic" && service != "smtp" {
+		if _, _, _, err := customHostHTTPRequest(service, parsed, "", ""); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func isSupportedNotificationService(service string) bool {

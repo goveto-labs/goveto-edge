@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/joho/godotenv"
 	"golang.org/x/sys/unix"
+
+	"goveto-edge/internal/outboundhttp"
 )
 
 type Config struct {
@@ -61,6 +64,7 @@ type Config struct {
 	TOTPPreviousKeys               []string
 	AgentCAMasterKey               string
 	AgentCAMasterKeyPinned         bool
+	OutboundPrivateAllowlist       []netip.Prefix
 	DataDir                        string
 	SessionCookieName              string
 	SessionTTL                     time.Duration
@@ -281,6 +285,15 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg.AgentCAMasterKeyPinned = keyConfigured("AGENT_CA_MASTER_KEY")
+	if raw, configured := os.LookupEnv("OUTBOUND_PRIVATE_ALLOWLIST"); configured {
+		parsed, parseErr := outboundhttp.ParseAllowlist(raw)
+		if parseErr != nil {
+			return Config{}, parseErr
+		}
+		cfg.OutboundPrivateAllowlist = parsed
+	} else {
+		cfg.OutboundPrivateAllowlist = outboundhttp.DefaultPrivateAllowlist()
+	}
 	return cfg, nil
 }
 

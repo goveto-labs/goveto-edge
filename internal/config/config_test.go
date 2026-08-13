@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/base64"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -61,6 +62,65 @@ func TestLoadSeparatesPurposeKeysAndAcceptsFileProvider(t *testing.T) {
 	if len(cfg.TOTPPreviousKeys) != 1 || cfg.TOTPPreviousKeys[0] != wantPreviousTOTP {
 		t.Fatalf("TOTP previous keys = %#v, want derived previous root key", cfg.TOTPPreviousKeys)
 	}
+}
+
+func TestOutboundPrivateAllowlistDefaultsAndOverrides(t *testing.T) {
+	setRequired := func(st *testing.T) {
+		st.Setenv("DATABASE_URL", "postgresql://localhost/goveto")
+		st.Setenv("REDIS_URL", "redis://localhost:6379/0")
+		st.Setenv("GOVETO_DATA_DIR", st.TempDir())
+	}
+	t.Run("unset uses RFC1919 default", func(t *testing.T) {
+		setRequired(t)
+		os.Unsetenv("OUTBOUND_PRIVATE_ALLOWLIST")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		has := func(cidr string) bool {
+			p := netip.MustParsePrefix(cidr)
+			for _, entry := range cfg.OutboundPrivateAllowlist {
+				if entry == p {
+					return true
+				}
+			}
+			return false
+		}
+		for _, cidr := range []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"} {
+			if !has(cidr) {
+				t.Errorf("default allowlist missing %s", cidr)
+			}
+		}
+	})
+	t.Run("explicit value overrides default", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("OUTBOUND_PRIVATE_ALLOWLIST", "10.50.0.0/16")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.OutboundPrivateAllowlist) != 1 || cfg.OutboundPrivateAllowlist[0] != netip.MustParsePrefix("10.50.0.0/16") {
+			t.Fatalf("override allowlist = %#v", cfg.OutboundPrivateAllowlist)
+		}
+	})
+	t.Run("explicit empty disables private destinations", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("OUTBOUND_PRIVATE_ALLOWLIST", "")
+		cfg, err := Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(cfg.OutboundPrivateAllowlist) != 0 {
+			t.Fatalf("empty allowlist = %#v, want none", cfg.OutboundPrivateAllowlist)
+		}
+	})
+	t.Run("invalid entry fails fast", func(t *testing.T) {
+		setRequired(t)
+		t.Setenv("OUTBOUND_PRIVATE_ALLOWLIST", "not-a-cidr")
+		if _, err := Load(); err == nil {
+			t.Fatal("invalid allowlist entry was accepted")
+		}
+	})
 }
 
 func TestLoadFromEnvironment(t *testing.T) {

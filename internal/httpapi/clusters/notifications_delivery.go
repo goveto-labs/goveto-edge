@@ -27,7 +27,7 @@ func deliverCustomHostNotification(ctx context.Context, service string, serviceU
 	if err != nil {
 		return err
 	}
-	if err = notificationOutboundPolicy.ValidateURL(ctx, target, "https"); err != nil {
+	if err = notificationOutboundPolicy.ValidateURL(ctx, target, "http", "https"); err != nil {
 		return err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
@@ -48,7 +48,7 @@ func customHostHTTPRequest(service string, serviceURL *url.URL, message, title s
 	}
 	headers := make(http.Header)
 	headers.Set("Content-Type", "application/json")
-	target := &url.URL{Scheme: "https", Host: host}
+	target := &url.URL{Scheme: customHostScheme(serviceURL), Host: host}
 	var payload any
 	switch service {
 	case "bark":
@@ -65,13 +65,17 @@ func customHostHTTPRequest(service string, serviceURL *url.URL, message, title s
 			"icon": query.Get("icon"),
 		}
 	case "gotify":
-		path := strings.TrimSuffix(serviceURL.Path, "/")
-		separator := strings.LastIndex(path, "/")
-		token := strings.TrimPrefix(path[separator:], "/")
+		path := strings.Trim(serviceURL.Path, "/")
+		token := path
+		base := ""
+		if index := strings.LastIndex(path, "/"); index >= 0 {
+			token = path[index+1:]
+			base = path[:index]
+		}
 		if token == "" {
 			return nil, nil, nil, errors.New("Gotify token is required")
 		}
-		target.Path = strings.TrimSuffix(path[:separator], "/") + "/message"
+		target.Path = "/" + base + "/message"
 		target.RawQuery = url.Values{"token": {token}}.Encode()
 		priority, _ := strconv.Atoi(query.Get("priority"))
 		payload = map[string]any{"message": message, "title": title, "priority": priority}
@@ -101,6 +105,25 @@ func customHostHTTPRequest(service string, serviceURL *url.URL, message, title s
 	}
 	encoded, err := json.Marshal(payload)
 	return target, encoded, headers, err
+}
+
+// customHostScheme derives the HTTP scheme for a custom-host service from the
+// Shoutrrr-style URL. A service+http scheme or disabletls flag selects HTTP;
+// everything else defaults to HTTPS. The destination is still SSRF-validated,
+// so private hosts require the operator allowlist regardless of scheme.
+func customHostScheme(serviceURL *url.URL) string {
+	if disable := strings.ToLower(strings.TrimSpace(serviceURL.Query().Get("disabletls"))); disable == "yes" || disable == "true" {
+		return "http"
+	}
+	if _, suffix, ok := strings.Cut(serviceURL.Scheme, "+"); ok {
+		if strings.EqualFold(suffix, "http") {
+			return "http"
+		}
+		if strings.EqualFold(suffix, "https") {
+			return "https"
+		}
+	}
+	return "https"
 }
 
 func sendBoundedNotificationRequest(httpClient *http.Client, request *http.Request) error {
@@ -174,7 +197,7 @@ func deliverSMTPNotification(ctx context.Context, serviceURL *url.URL, message, 
 	}
 	if serviceURL.User != nil && serviceURL.User.Username() != "" {
 		password, _ := serviceURL.User.Password()
-		if err = client.Auth(smtp.PlainAuth("", serviceURL.User.Username(), password, host)); err != nil {
+		if err = client.Auth(smtpPlainAuth{username: serviceURL.User.Username(), password: password}); err != nil {
 			return err
 		}
 	}
@@ -202,6 +225,28 @@ func deliverSMTPNotification(ctx context.Context, serviceURL *url.URL, message, 
 		return err
 	}
 	return client.Quit()
+}
+
+// smtpPlainAuth performs SASL PLAIN authentication. Unlike smtp.PlainAuth it
+// does not require a TLS connection, so SMTP servers that cannot upgrade via
+// STARTTLS remain usable for internal relays. STARTTLS is still attempted when
+// the server supports it, and the destination must clear SSRF validation (public
+// or on the operator allowlist) before credentials are sent.
+type smtpPlainAuth struct {
+	identity string
+	username string
+	password string
+}
+
+func (a smtpPlainAuth) Start(_ *smtp.ServerInfo) (string, []byte, error) {
+	return "PLAIN", []byte(a.identity + "\x00" + a.username + "\x00" + a.password), nil
+}
+
+func (smtpPlainAuth) Next(_ []byte, more bool) ([]byte, error) {
+	if more {
+		return nil, errors.New("unexpected SMTP server challenge")
+	}
+	return nil, nil
 }
 
 func firstQueryValue(values url.Values, keys ...string) string {

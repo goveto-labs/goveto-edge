@@ -28,6 +28,7 @@ import (
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/jobretention"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/settings"
@@ -328,6 +329,10 @@ func main() {
 			stop()
 		}
 	}()
+
+	clusterapi.ConfigureNotificationOutbound(outboundhttp.NewPolicyWithAllowlist(cfg.OutboundPrivateAllowlist))
+	slog.Info("notification destination allowlist configured", "cidrs", cfg.OutboundPrivateAllowlist,
+		"note", "loopback/link-local (cloud metadata) always blocked")
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddress(),

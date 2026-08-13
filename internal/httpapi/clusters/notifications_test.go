@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
+	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/storage/gen/model"
 )
 
@@ -104,6 +106,36 @@ func TestDeliverGenericNotificationRejectsPrivateDestination(t *testing.T) {
 	}
 }
 
+// An operator-curated allowlist is the only way a private destination is
+// accepted; verify the request then actually reaches the (stubbed) endpoint.
+func TestDeliverGenericNotificationAllowsAllowlistedPrivateDestination(t *testing.T) {
+	previousPolicy := notificationOutboundPolicy
+	previousClient := notificationHTTPClient
+	t.Cleanup(func() {
+		notificationOutboundPolicy = previousPolicy
+		notificationHTTPClient = previousClient
+	})
+	notificationOutboundPolicy = outboundhttp.NewPolicyWithAllowlist([]netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+	})
+
+	called := false
+	stub := &http.Client{Transport: notificationRoundTripper(func(*http.Request) (*http.Response, error) {
+		called = true
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader("ok")), Header: make(http.Header)}, nil
+	})}
+	target, err := url.Parse("generic+http://10.0.0.5/webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = deliverGenericNotificationWithClient(context.Background(), stub, target, "message", "title"); err != nil {
+		t.Fatalf("allowlisted private destination rejected: %v", err)
+	}
+	if !called {
+		t.Fatal("request was not dispatched to the allowlisted private destination")
+	}
+}
+
 func TestDeliverGenericNotificationUsesBoundedClient(t *testing.T) {
 	httpClient := &http.Client{Transport: notificationRoundTripper(func(*http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -126,12 +158,24 @@ func TestValidateNotificationURLRejectsUnsafeServicesAndGenericOptions(t *testin
 	for _, rawURL := range []string{
 		"googlechat://127.0.0.1/?key=value&token=value",
 		"teams://tenant/a/b?host=127.0.0.1",
-		"generic+http://example.com/hook",
 		"generic+https://example.com/hook?method=DELETE",
-		"generic+https://example.com/hook?disabletls=yes",
 	} {
 		if _, err := validateNotificationURL(rawURL); err == nil {
 			t.Fatalf("unsafe notification URL %q was accepted", rawURL)
+		}
+	}
+}
+
+// HTTP is permitted for public destinations; SSRF protection is enforced by
+// the outbound policy at delivery time, not by rejecting the scheme here.
+func TestValidateNotificationURLAcceptsHTTPForPublicHosts(t *testing.T) {
+	for _, rawURL := range []string{
+		"generic+http://example.com/hook",
+		"generic+https://example.com/hook?disabletls=yes",
+		"generic://example.com/hook",
+	} {
+		if _, err := validateNotificationURL(rawURL); err != nil {
+			t.Fatalf("public HTTP notification URL %q rejected: %v", rawURL, err)
 		}
 	}
 }
@@ -146,16 +190,21 @@ func TestDeliverGenericNotificationRejectsUnsafeHeader(t *testing.T) {
 	}
 }
 
-func TestCustomHostHTTPRequestUsesHTTPS(t *testing.T) {
-	for _, test := range []struct {
-		service string
-		rawURL  string
+func TestCustomHostHTTPRequestDerivesScheme(t *testing.T) {
+	tests := []struct {
+		name       string
+		service    string
+		rawURL     string
+		wantScheme string
 	}{
-		{service: "bark", rawURL: "bark://:device-key@api.day.app"},
-		{service: "gotify", rawURL: "gotify://gotify.example.com/AzyoeNS.D4iJLVa"},
-		{service: "ntfy", rawURL: "ntfy://ntfy.sh/goveto-alerts"},
-	} {
-		t.Run(test.service, func(t *testing.T) {
+		{name: "bark default https", service: "bark", rawURL: "bark://:device-key@api.day.app", wantScheme: "https"},
+		{name: "gotify default https", service: "gotify", rawURL: "gotify://gotify.example.com/AzyoeNS.D4iJLVa", wantScheme: "https"},
+		{name: "gotify plus http", service: "gotify", rawURL: "gotify+http://gotify.example.com/AzyoeNS.D4iJLVa", wantScheme: "http"},
+		{name: "ntfy disabletls", service: "ntfy", rawURL: "ntfy://ntfy.sh/goveto-alerts?disabletls=yes", wantScheme: "http"},
+		{name: "ntfy plus https", service: "ntfy", rawURL: "ntfy+https://ntfy.sh/goveto-alerts", wantScheme: "https"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
 			parsed, err := url.Parse(test.rawURL)
 			if err != nil {
 				t.Fatal(err)
@@ -164,8 +213,8 @@ func TestCustomHostHTTPRequestUsesHTTPS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if target.Scheme != "https" || target.Hostname() != parsed.Hostname() {
-				t.Fatalf("target = %s", target)
+			if target.Scheme != test.wantScheme || target.Hostname() != parsed.Hostname() {
+				t.Fatalf("target = %s, want scheme %s", target, test.wantScheme)
 			}
 		})
 	}
@@ -174,5 +223,14 @@ func TestCustomHostHTTPRequestUsesHTTPS(t *testing.T) {
 func TestParseMailboxesRejectsHeaderInjection(t *testing.T) {
 	if _, err := parseMailboxes("ops@example.com\r\nBcc: attacker@example.com"); err == nil {
 		t.Fatal("SMTP recipient header injection was accepted")
+	}
+}
+
+// A Gotify URL without a token must be rejected (not panic) at validation time.
+func TestValidateNotificationURLRejectsGotifyWithoutToken(t *testing.T) {
+	for _, raw := range []string{"gotify://gotify.example.com/", "gotify://gotify.example.com"} {
+		if _, err := validateNotificationURL(raw); err == nil {
+			t.Fatalf("gotify URL without token was accepted: %q", raw)
+		}
 	}
 }

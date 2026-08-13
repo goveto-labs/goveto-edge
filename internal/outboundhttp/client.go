@@ -54,16 +54,87 @@ type resolver interface {
 
 // Policy validates and connects to user-controlled network destinations.
 type Policy struct {
-	resolver resolver
-	dialer   net.Dialer
+	resolver         resolver
+	dialer           net.Dialer
+	privateAllowlist []netip.Prefix
 }
 
-// NewPolicy creates a policy backed by the process DNS resolver.
+// NewPolicy creates a policy that only permits public destinations.
 func NewPolicy() *Policy {
 	return &Policy{
 		resolver: net.DefaultResolver,
 		dialer:   net.Dialer{Timeout: defaultDialTimeout, KeepAlive: 30 * time.Second},
 	}
+}
+
+// NewPolicyWithAllowlist returns a policy that additionally permits the
+// supplied private network ranges. This is the only way a non-public address is
+// accepted, so the list must be curated by a platform operator; any cluster
+// owner can otherwise only reach public destinations.
+func NewPolicyWithAllowlist(allowlist []netip.Prefix) *Policy {
+	policy := NewPolicy()
+	policy.privateAllowlist = allowlist
+	return policy
+}
+
+// ParseAllowlist parses a comma-separated list of CIDR prefixes (IPv4/IPv6).
+// Empty input returns nil. Invalid entries error so misconfiguration is caught
+// at startup instead of silently widening access.
+func ParseAllowlist(raw string) ([]netip.Prefix, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	allowlist := make([]netip.Prefix, 0, 4)
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(entry)
+		if err != nil {
+			return nil, fmt.Errorf("invalid destination allowlist entry %q: %w", entry, err)
+		}
+		allowlist = append(allowlist, prefix.Masked())
+	}
+	return allowlist, nil
+}
+
+// DefaultPrivateAllowlist returns the RFC1919 IPv4 ranges and the IPv6 unique
+// local range used when the operator has not configured OUTBOUND_PRIVATE_ALLOWLIST.
+// Loopback, link-local (cloud metadata), unspecified and multicast addresses are
+// never part of this list and remain blocked regardless of configuration.
+func DefaultPrivateAllowlist() []netip.Prefix {
+	return []netip.Prefix{
+		netip.MustParsePrefix("10.0.0.0/8"),
+		netip.MustParsePrefix("172.16.0.0/12"),
+		netip.MustParsePrefix("192.168.0.0/16"),
+		netip.MustParsePrefix("fc00::/7"),
+	}
+}
+
+// allows reports whether an address is public or covered by the allowlist.
+// Loopback, link-local (including cloud metadata services such as
+// 169.254.169.254), unspecified and multicast addresses are always rejected,
+// even if they appear in the operator allowlist: these are the self-SSRF and
+// metadata-exfiltration vectors SSRF protection must never expose.
+func (p *Policy) allows(address netip.Addr) bool {
+	if !address.IsValid() {
+		return false
+	}
+	address = address.Unmap()
+	if !address.IsGlobalUnicast() {
+		return false
+	}
+	if IsPublicAddress(address) {
+		return true
+	}
+	for _, prefix := range p.privateAllowlist {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateURL rejects malformed URLs, credentials, unsupported schemes, and non-public destinations.
@@ -87,7 +158,8 @@ func (p *Policy) ValidateURL(ctx context.Context, target *url.URL, schemes ...st
 	return p.ValidateHost(ctx, target.Hostname())
 }
 
-// ValidateHost resolves a host and requires every result to be a public address.
+// ValidateHost resolves a host and requires every result to be a public address
+// or covered by the configured private allowlist.
 func (p *Policy) ValidateHost(ctx context.Context, host string) error {
 	host = strings.TrimSpace(strings.TrimSuffix(host, "."))
 	if host == "" {
@@ -98,7 +170,7 @@ func (p *Policy) ValidateHost(ctx context.Context, host string) error {
 		return err
 	}
 	for _, address := range addresses {
-		if !IsPublicAddress(address) {
+		if !p.allows(address) {
 			return fmt.Errorf("destination resolves to a non-public address")
 		}
 	}
@@ -133,7 +205,7 @@ func (p *Policy) DialContext(ctx context.Context, network, address string) (net.
 		return nil, err
 	}
 	for _, candidate := range addresses {
-		if !IsPublicAddress(candidate) {
+		if !p.allows(candidate) {
 			return nil, errors.New("destination resolves to a non-public address")
 		}
 	}
