@@ -225,6 +225,7 @@ func (h *Handler) Cleanup() error {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyhttp.Handler) error {
+	stripReservedWAFHeaders(r.Header)
 	requestID := normalizedRequestID(r.Header.Get("X-Request-ID"))
 	r.Header.Set("X-Request-ID", requestID)
 	w.Header().Set("X-Request-ID", requestID)
@@ -276,7 +277,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		for _, decision := range soft {
 			if decision.action == policy.WAFActionTag {
 				appendTag(r.Header, "X-Goveto-WAF-Tags", decision.tag)
-				appendTag(w.Header(), "X-Goveto-WAF-Tags", decision.tag)
 			}
 		}
 		if terminal != nil {
@@ -299,6 +299,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request, next caddyht
 		}
 	}
 	return next.ServeHTTP(w, r)
+}
+
+func stripReservedWAFHeaders(header http.Header) {
+	for name := range header {
+		if strings.EqualFold(name, "X-Goveto-WAF") || strings.HasPrefix(strings.ToLower(name), "x-goveto-waf-") {
+			delete(header, name)
+		}
+	}
 }
 
 func (h *Handler) evaluateWAF(data requestData) ([]wafDecision, *wafDecision, error) {

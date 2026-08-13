@@ -262,8 +262,33 @@ func TestRuleOrderingSoftActionsAndTerminalStop(t *testing.T) {
 	if response.Code != 451 || response.Header().Get("X-Goveto-WAF-Rule") != "stop" || next.calls != 0 {
 		t.Fatalf("status=%d rule=%q next=%d", response.Code, response.Header().Get("X-Goveto-WAF-Rule"), next.calls)
 	}
-	if got := strings.Join(response.Header().Values("X-Goveto-WAF-Tags"), ","); got != "risk.a,risk.b" {
-		t.Fatalf("tags=%q", got)
+	if got := response.Header().Values("X-Goveto-WAF-Tags"); len(got) != 0 {
+		t.Fatalf("internal tags leaked in response: %q", got)
+	}
+}
+
+func TestReservedWAFRequestHeadersAreStripped(t *testing.T) {
+	h := provisionHandler(t, "reserved-headers", policy.WAFPolicy{Enabled: true})
+	request := httptest.NewRequest(http.MethodGet, "/clean", nil)
+	request.Header["X-Goveto-WAF-Tags"] = []string{"forged.one", "forged.two"}
+	request.Header["x-goveto-waf-rule"] = []string{"forged-rule"}
+	request.Header["X-GOVETO-WAF"] = []string{"ALLOW"}
+	request.Header["X-Goveto-Waffle"] = []string{"preserved"}
+	response := httptest.NewRecorder()
+	next := &nextHandler{}
+	if err := h.ServeHTTP(response, request, next); err != nil {
+		t.Fatal(err)
+	}
+	if next.calls != 1 || next.tags != "" {
+		t.Fatalf("upstream calls=%d tags=%q", next.calls, next.tags)
+	}
+	for name := range request.Header {
+		if strings.EqualFold(name, "X-Goveto-WAF") || strings.HasPrefix(strings.ToLower(name), "x-goveto-waf-") {
+			t.Fatalf("reserved client header reached upstream: %q", name)
+		}
+	}
+	if got := request.Header.Get("X-Goveto-Waffle"); got != "preserved" {
+		t.Fatalf("non-reserved header was removed: %q", got)
 	}
 }
 
@@ -480,11 +505,16 @@ func TestHandlerResponseRedirectAndTagActions(t *testing.T) {
 	}
 	next := &nextHandler{}
 	tagged := httptest.NewRecorder()
-	if err := h.ServeHTTP(tagged, httptest.NewRequest(http.MethodGet, "/tag", nil), next); err != nil {
+	taggedRequest := httptest.NewRequest(http.MethodGet, "/tag", nil)
+	taggedRequest.Header["X-Goveto-WAF-Tags"] = []string{"forged.one", "forged.two"}
+	if err := h.ServeHTTP(tagged, taggedRequest, next); err != nil {
 		t.Fatal(err)
 	}
 	if tagged.Code != http.StatusOK || next.tags != "trusted.bot" {
 		t.Fatalf("tag status=%d upstream=%q", tagged.Code, next.tags)
+	}
+	if got := tagged.Header().Values("X-Goveto-WAF-Tags"); len(got) != 0 {
+		t.Fatalf("internal tags leaked in response: %q", got)
 	}
 }
 
