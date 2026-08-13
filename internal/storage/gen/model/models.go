@@ -691,7 +691,7 @@ type User struct {
 	Name                string                `db:"name" json:"name"`
 	Role                UserRole              `db:"role" json:"role"`
 	Status              UserStatus            `db:"status" json:"status"`
-	TotpSecret          *string               `db:"totp_secret" json:"totpSecret"`
+	TotpSecretEncrypted *string               `db:"totp_secret" json:"totpSecretEncrypted"`
 	TotpRecoveryCodes   *json.RawMessage      `db:"totp_recovery_codes" json:"totpRecoveryCodes"`
 	FailedLoginAttempts int                   `db:"failed_login_attempts" json:"failedLoginAttempts"`
 	LastFailedLoginAt   *time.Time            `db:"last_failed_login_at" json:"lastFailedLoginAt"`

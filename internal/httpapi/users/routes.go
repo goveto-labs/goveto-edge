@@ -194,7 +194,7 @@ func newUserResponse(user *model.User) userResponse {
 	}
 	return userResponse{
 		ID: user.Id, Email: user.Email, Name: user.Name, Role: user.Role, Status: user.Status,
-		TOTPEnabled: user.TotpSecret != nil && strings.TrimSpace(*user.TotpSecret) != "",
+		TOTPEnabled: user.TotpSecretEncrypted != nil && strings.TrimSpace(*user.TotpSecretEncrypted) != "",
 		LastLoginAt: user.LastLoginAt, CreatedAt: user.CreatedAt, UpdatedAt: user.UpdatedAt,
 	}
 }

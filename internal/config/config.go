@@ -57,6 +57,8 @@ type Config struct {
 	DNSCredentialPreviousKeys      []string
 	NotificationMasterKey          string
 	NotificationPreviousKeys       []string
+	TOTPMasterKey                  string
+	TOTPPreviousKeys               []string
 	AgentCAMasterKey               string
 	AgentCAMasterKeyPinned         bool
 	DataDir                        string
@@ -268,6 +270,12 @@ func Load() (Config, error) {
 	if cfg.NotificationPreviousKeys, err = purposePreviousKeys("NOTIFICATION_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/notification/v1"); err != nil {
 		return Config{}, err
 	}
+	if cfg.TOTPMasterKey, err = purposeMasterKey(cfg.DataDir, "TOTP_MASTER_KEY", "totp-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/totp/v1", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	if cfg.TOTPPreviousKeys, err = purposePreviousKeys("TOTP_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/totp/v1"); err != nil {
+		return Config{}, err
+	}
 	legacyCAKey := deriveEncodedMasterKey(cfg.NodeCredentialMasterKey, "goveto-edge/agent-mtls/ca/v1")
 	if cfg.AgentCAMasterKey, err = purposeMasterKey(cfg.DataDir, "AGENT_CA_MASTER_KEY", "agent-ca-master.key", legacyCAKey, "", persistPurposeKeys); err != nil {
 		return Config{}, err
@@ -413,8 +421,8 @@ func loadOrCreateNamedMasterKey(dataDir, fileName, initialValue string) (string,
 }
 
 // loadOrMigrateNamedMasterKey persists a purpose-specific master key that is a
-// deterministic function of rootKey (the certificate, DNS, notification and
-// agent CA purpose keys). Unlike the shared root key these values must be
+// deterministic function of rootKey (the certificate, DNS, notification,
+// TOTP and agent CA purpose keys). Unlike the shared root key these values must be
 // re-derived and overwritten when the root key rotates; otherwise callers keep
 // reading the value derived from the previous root and Rewrap becomes a no-op
 // (defeating the purpose of NODE_CREDENTIAL_PREVIOUS_KEYS). The companion

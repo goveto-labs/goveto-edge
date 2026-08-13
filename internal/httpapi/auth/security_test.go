@@ -26,7 +26,7 @@ func TestRecoveryCodesAreUniqueAndStoredAsHashes(t *testing.T) {
 
 func TestHasTOTPAndLoginDelay(t *testing.T) {
 	secret := "secret"
-	if hasTOTP(nil) || hasTOTP(&model.User{}) || !hasTOTP(&model.User{TotpSecret: &secret}) {
+	if hasTOTP(nil) || hasTOTP(&model.User{}) || !hasTOTP(&model.User{TotpSecretEncrypted: &secret}) {
 		t.Fatal("unexpected TOTP state classification")
 	}
 	if loginFailureDelay(5) <= loginFailureDelay(0) || loginFailureDelay(50) != loginFailureDelay(5) {

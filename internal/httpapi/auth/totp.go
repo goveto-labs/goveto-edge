@@ -17,6 +17,7 @@ import (
 	authn "goveto-edge/internal/auth"
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
+	"goveto-edge/internal/node"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/settings"
@@ -46,12 +47,12 @@ type securityPolicyResponse struct {
 	RequireTOTP bool `json:"require_totp"`
 }
 
-func registerTOTP(group *echo.Group, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, sensitive echo.MiddlewareFunc) {
+func registerTOTP(group *echo.Group, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher *node.CredentialCipher, sensitive echo.MiddlewareFunc) {
 	group.POST("/totp/setup", setupTOTP(db), authn.RequireAuth)
-	group.POST("/totp/enable", enableTOTP(db, sessions), authn.RequireAuth, sensitive)
-	group.POST("/totp/reset", resetTOTP(db, sessions), authn.RequireAuth, sensitive)
-	group.POST("/totp/recovery-codes", regenerateRecoveryCodes(db, sessions), authn.RequireAuth, sensitive)
-	group.DELETE("/totp", disableTOTP(db, sessions, settingStore), authn.RequireAuth, sensitive)
+	group.POST("/totp/enable", enableTOTP(db, sessions, cipher), authn.RequireAuth, sensitive)
+	group.POST("/totp/reset", resetTOTP(db, sessions, cipher), authn.RequireAuth, sensitive)
+	group.POST("/totp/recovery-codes", regenerateRecoveryCodes(db, sessions, cipher), authn.RequireAuth, sensitive)
+	group.DELETE("/totp", disableTOTP(db, sessions, settingStore, cipher), authn.RequireAuth, sensitive)
 	group.GET("/security-policy", getSecurityPolicy(settingStore), authn.RequireAuth)
 	group.PUT("/security-policy", updateSecurityPolicy(settingStore), authn.RequireAuth, clusteraccess.RequirePlatform(db, rbac.PermissionPlatformPolicyManage))
 }
@@ -69,7 +70,7 @@ func setupTOTP(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func enableTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
+func enableTOTP(db *client.Client, sessions *authn.SessionStore, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input totpMutationRequest
 		if err := c.Bind(&input); err != nil {
@@ -100,8 +101,12 @@ func enableTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFun
 			return err
 		}
 		encoded, _ := json.Marshal(hashes)
+		encrypted, err := authn.EncryptTOTPSecret(cipher, user.Id, secret)
+		if err != nil {
+			return err
+		}
 		_, err = db.User.Update().Where(query.User.Id.Equals(user.Id)).Set(
-			query.User.TotpSecret.Set(secret), query.User.TotpRecoveryCodes.Set(encoded),
+			query.User.TotpSecretEncrypted.Set(encrypted), query.User.TotpRecoveryCodes.Set(encoded),
 		).DoMany(c.Request().Context())
 		if err != nil {
 			return err
@@ -114,7 +119,7 @@ func enableTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFun
 	}
 }
 
-func resetTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
+func resetTOTP(db *client.Client, sessions *authn.SessionStore, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input totpMutationRequest
 		if err := c.Bind(&input); err != nil {
@@ -127,7 +132,7 @@ func resetTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc
 		if !hasTOTP(user) {
 			return echo.NewHTTPError(http.StatusConflict, "TOTP is not enabled")
 		}
-		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, user, input.Code)
+		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, cipher, user, input.Code)
 		if err != nil {
 			return err
 		}
@@ -135,7 +140,7 @@ func resetTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid TOTP or recovery code")
 		}
 		if _, err = db.User.Update().Where(query.User.Id.Equals(user.Id)).Set(
-			query.User.TotpSecret.SetNull(), query.User.TotpRecoveryCodes.SetNull(),
+			query.User.TotpSecretEncrypted.SetNull(), query.User.TotpRecoveryCodes.SetNull(),
 		).DoMany(c.Request().Context()); err != nil {
 			return err
 		}
@@ -147,7 +152,7 @@ func resetTOTP(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc
 	}
 }
 
-func regenerateRecoveryCodes(db *client.Client, sessions *authn.SessionStore) echo.HandlerFunc {
+func regenerateRecoveryCodes(db *client.Client, sessions *authn.SessionStore, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input totpMutationRequest
 		if err := c.Bind(&input); err != nil {
@@ -160,7 +165,7 @@ func regenerateRecoveryCodes(db *client.Client, sessions *authn.SessionStore) ec
 		if !hasTOTP(user) {
 			return echo.NewHTTPError(http.StatusConflict, "TOTP is not enabled")
 		}
-		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, user, input.Code)
+		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, cipher, user, input.Code)
 		if err != nil {
 			return err
 		}
@@ -184,7 +189,7 @@ func regenerateRecoveryCodes(db *client.Client, sessions *authn.SessionStore) ec
 	}
 }
 
-func disableTOTP(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store) echo.HandlerFunc {
+func disableTOTP(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher *node.CredentialCipher) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		required, err := settingStore.RequireTOTP(c.Request().Context())
 		if err != nil {
@@ -204,7 +209,7 @@ func disableTOTP(db *client.Client, sessions *authn.SessionStore, settingStore *
 		if !hasTOTP(user) {
 			return echo.NewHTTPError(http.StatusConflict, "TOTP is not enabled")
 		}
-		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, user, input.Code)
+		valid, err := verifySecondFactor(c.Request().Context(), db, sessions, cipher, user, input.Code)
 		if err != nil {
 			return err
 		}
@@ -212,7 +217,7 @@ func disableTOTP(db *client.Client, sessions *authn.SessionStore, settingStore *
 			return echo.NewHTTPError(http.StatusUnauthorized, "invalid TOTP or recovery code")
 		}
 		_, err = db.User.Update().Where(query.User.Id.Equals(user.Id)).Set(
-			query.User.TotpSecret.SetNull(), query.User.TotpRecoveryCodes.SetNull(),
+			query.User.TotpSecretEncrypted.SetNull(), query.User.TotpRecoveryCodes.SetNull(),
 		).DoMany(c.Request().Context())
 		if err != nil {
 			return err
@@ -304,12 +309,19 @@ func currentUser(c *echo.Context, db *client.Client) (*model.User, error) {
 	return user, nil
 }
 
-func verifySecondFactor(ctx context.Context, db *client.Client, sessions *authn.SessionStore, user *model.User, value string) (bool, error) {
+func verifySecondFactor(ctx context.Context, db *client.Client, sessions *authn.SessionStore, cipher *node.CredentialCipher, user *model.User, value string) (bool, error) {
 	value = strings.TrimSpace(value)
 	if value == "" || !hasTOTP(user) {
 		return false, nil
 	}
-	if totp.Validate(value, strings.TrimSpace(*user.TotpSecret)) {
+	secret, err := authn.DecryptTOTPSecret(cipher, user.Id, strings.TrimSpace(*user.TotpSecretEncrypted))
+	if err != nil {
+		if recovered, recoveryErr := consumeRecoveryCode(ctx, db, user.Id, value); recoveryErr != nil || recovered {
+			return recovered, recoveryErr
+		}
+		return false, err
+	}
+	if totp.Validate(value, secret) {
 		// A code only counts once: replaying a captured code within its
 		// validity window must fail even though totp.Validate accepts it.
 		return sessions.ConsumeTOTPCode(ctx, user.Id, value)

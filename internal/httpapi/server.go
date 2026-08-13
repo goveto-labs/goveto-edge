@@ -42,6 +42,7 @@ type SecretCiphers struct {
 	General      *node.CredentialCipher
 	DNS          *node.CredentialCipher
 	Notification *node.CredentialCipher
+	TOTP         *node.CredentialCipher
 }
 
 func New(
@@ -87,7 +88,7 @@ func New(
 
 	health.Register(e, db, analyticsData)
 	initialization.Register(e, orm, settingStore, limiter, authority, gateway)
-	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, captchaVerifier, limiter)
+	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, secretCiphers.TOTP, captchaVerifier, limiter)
 	adminsettings.Register(e, orm, settingStore, secretCiphers.General, restartControlPlane)
 	clusters.Register(e, orm, sessions, secretCiphers.Notification)
 	certificates.Register(e, orm, certificateService)

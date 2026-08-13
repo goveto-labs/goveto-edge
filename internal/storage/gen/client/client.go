@@ -41756,7 +41756,7 @@ func (b UserCreateManyBuilder) DoReturning(ctx context.Context) ([]model.User, e
 		}
 		for rows.Next() {
 			var item model.User
-			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("User.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -42035,7 +42035,7 @@ func (a UserActions) FindMany(ctx context.Context, opts ...query.UserQueryOption
 	var results []model.User
 	for rows.Next() {
 		var item model.User
-		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -42067,7 +42067,7 @@ func (a UserActions) FindUnique(ctx context.Context, where query.UserWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.User
-	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -42098,7 +42098,7 @@ func (a UserActions) CreateOne(ctx context.Context, sets ...query.UserSetClause)
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -42190,7 +42190,7 @@ func (a UserActions) UpdateOne(ctx context.Context, where query.UserWhereClause,
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -42295,7 +42295,7 @@ func (a UserActions) UpsertOne(ctx context.Context, where query.UserWhereClause,
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("User.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -42319,7 +42319,7 @@ func (a UserActions) DeleteOne(ctx context.Context, where query.UserWhereClause)
 		q += " RETURNING " + quotedUserColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.User
-		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecret, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.Email, &item.PasswordHash, &item.Name, &item.Role, &item.Status, &item.TotpSecretEncrypted, &item.TotpRecoveryCodes, &item.FailedLoginAttempts, &item.LastFailedLoginAt, &item.LockedUntil, &item.LastLoginAt, &item.PasswordChangedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

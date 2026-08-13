@@ -87,6 +87,13 @@ func (c *CredentialCipher) IsCurrent(value string) bool {
 	return strings.HasPrefix(value, credentialEnvelope+c.primary.id+":")
 }
 
+// IsEnvelope reports whether value uses the versioned encrypted envelope.
+// Callers migrating legacy plaintext can use this to fail closed for malformed
+// ciphertext instead of accidentally treating it as plaintext.
+func (c *CredentialCipher) IsEnvelope(value string) bool {
+	return strings.HasPrefix(value, credentialEnvelope)
+}
+
 // Rewrap decrypts a value and writes it with the primary key when it was
 // encrypted by a previous or legacy key. The boolean reports whether callers
 // should persist the returned ciphertext.

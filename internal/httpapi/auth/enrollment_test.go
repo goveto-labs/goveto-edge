@@ -98,7 +98,7 @@ func TestRequireTOTPEnrollmentConsultsStoreForProtectedPaths(t *testing.T) {
 func TestNewUserResponse(t *testing.T) {
 	user := &model.User{Id: "u-1", Email: "a@b.com", Name: "A", Role: model.UserRoleADMIN, Status: model.UserStatusACTIVE}
 	secret := "JBSWY3DPEHPK3PXP"
-	user.TotpSecret = &secret
+	user.TotpSecretEncrypted = &secret
 
 	response := newUserResponse(user)
 	if response.ID != "u-1" || response.Email != "a@b.com" || response.Role != model.UserRoleADMIN ||
@@ -107,12 +107,12 @@ func TestNewUserResponse(t *testing.T) {
 	}
 
 	// The shared secret must never appear in the serialized payload.
-	user.TotpSecret = &secret
+	user.TotpSecretEncrypted = &secret
 	if !hasTOTP(user) {
 		t.Fatal("hasTOTP should be true when a secret is set")
 	}
 	blank := "   "
-	user.TotpSecret = &blank
+	user.TotpSecretEncrypted = &blank
 	if hasTOTP(user) {
 		t.Fatal("hasTOTP should be false for a whitespace-only secret")
 	}

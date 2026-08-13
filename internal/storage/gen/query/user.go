@@ -38,7 +38,7 @@ type UserQuery struct {
 	Name                userNameField
 	Role                userRoleField
 	Status              userStatusField
-	TotpSecret          userTotpSecretField
+	TotpSecretEncrypted userTotpSecretEncryptedField
 	TotpRecoveryCodes   userTotpRecoveryCodesField
 	FailedLoginAttempts userFailedLoginAttemptsField
 	LastFailedLoginAt   userLastFailedLoginAtField
@@ -63,7 +63,7 @@ const UserPasswordHashColumn = "password_hash"
 const UserNameColumn = "name"
 const UserRoleColumn = "role"
 const UserStatusColumn = "status"
-const UserTotpSecretColumn = "totp_secret"
+const UserTotpSecretEncryptedColumn = "totp_secret"
 const UserTotpRecoveryCodesColumn = "totp_recovery_codes"
 const UserFailedLoginAttemptsColumn = "failed_login_attempts"
 const UserLastFailedLoginAtColumn = "last_failed_login_at"
@@ -81,7 +81,7 @@ var User = UserQuery{
 	Name:                userNameField{},
 	Role:                userRoleField{},
 	Status:              userStatusField{},
-	TotpSecret:          userTotpSecretField{},
+	TotpSecretEncrypted: userTotpSecretEncryptedField{},
 	TotpRecoveryCodes:   userTotpRecoveryCodesField{},
 	FailedLoginAttempts: userFailedLoginAttemptsField{},
 	LastFailedLoginAt:   userLastFailedLoginAtField{},
@@ -524,21 +524,21 @@ func (userStatusField) Desc() UserOrderByClause {
 	return UserOrderByClause{Field: "status", Direction: "DESC"}
 }
 
-// TotpSecretField provides query operations for the totpSecret field.
-type userTotpSecretField struct{}
+// TotpSecretEncryptedField provides query operations for the totpSecretEncrypted field.
+type userTotpSecretEncryptedField struct{}
 
 // Equals creates an equality condition.
-func (userTotpSecretField) Equals(v *string) UserWhereClause {
+func (userTotpSecretEncryptedField) Equals(v *string) UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (userTotpSecretField) Not(v *string) UserWhereClause {
+func (userTotpSecretEncryptedField) Not(v *string) UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (userTotpSecretField) In(vals ...*string) UserWhereClause {
+func (userTotpSecretEncryptedField) In(vals ...*string) UserWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -547,7 +547,7 @@ func (userTotpSecretField) In(vals ...*string) UserWhereClause {
 }
 
 // NotIn creates a NOT IN condition.
-func (userTotpSecretField) NotIn(vals ...*string) UserWhereClause {
+func (userTotpSecretEncryptedField) NotIn(vals ...*string) UserWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -556,42 +556,42 @@ func (userTotpSecretField) NotIn(vals ...*string) UserWhereClause {
 }
 
 // Contains creates a LIKE '%v%' condition.
-func (userTotpSecretField) Contains(v string) UserWhereClause {
+func (userTotpSecretEncryptedField) Contains(v string) UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "CONTAINS", Value: v}
 }
 
 // StartsWith creates a LIKE 'v%' condition.
-func (userTotpSecretField) StartsWith(v string) UserWhereClause {
+func (userTotpSecretEncryptedField) StartsWith(v string) UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "STARTS_WITH", Value: v}
 }
 
 // EndsWith creates a LIKE '%v' condition.
-func (userTotpSecretField) EndsWith(v string) UserWhereClause {
+func (userTotpSecretEncryptedField) EndsWith(v string) UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "ENDS_WITH", Value: v}
 }
 
 // IsNull creates an IS NULL condition.
-func (userTotpSecretField) IsNull() UserWhereClause {
+func (userTotpSecretEncryptedField) IsNull() UserWhereClause {
 	return UserWhereClause{Field: "totp_secret", Operator: "IS NULL", Value: nil}
 }
 
 // Set creates a set operation for create/update.
-func (userTotpSecretField) Set(v string) UserSetClause {
+func (userTotpSecretEncryptedField) Set(v string) UserSetClause {
 	return UserSetClause{Field: "totp_secret", Value: v}
 }
 
 // SetNull sets the field to NULL.
-func (userTotpSecretField) SetNull() UserSetClause {
+func (userTotpSecretEncryptedField) SetNull() UserSetClause {
 	return UserSetClause{Field: "totp_secret", Value: nil}
 }
 
 // Asc returns an ascending order clause for this field.
-func (userTotpSecretField) Asc() UserOrderByClause {
+func (userTotpSecretEncryptedField) Asc() UserOrderByClause {
 	return UserOrderByClause{Field: "totp_secret", Direction: "ASC"}
 }
 
 // Desc returns a descending order clause for this field.
-func (userTotpSecretField) Desc() UserOrderByClause {
+func (userTotpSecretEncryptedField) Desc() UserOrderByClause {
 	return UserOrderByClause{Field: "totp_secret", Direction: "DESC"}
 }
 
@@ -1248,7 +1248,7 @@ type UserCreateInput struct {
 	Name                string
 	Role                model.UserRole
 	Status              model.UserStatus
-	TotpSecret          **string
+	TotpSecretEncrypted **string
 	TotpRecoveryCodes   **json.RawMessage
 	FailedLoginAttempts int
 	LastFailedLoginAt   **time.Time
@@ -1268,7 +1268,7 @@ type UserCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d UserCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecret, d.TotpRecoveryCodes, d.FailedLoginAttempts, d.LastFailedLoginAt, d.LockedUntil, d.LastLoginAt, d.PasswordChangedAt, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.Email, d.PasswordHash, d.Name, d.Role, d.Status, d.TotpSecretEncrypted, d.TotpRecoveryCodes, d.FailedLoginAttempts, d.LastFailedLoginAt, d.LockedUntil, d.LastLoginAt, d.PasswordChangedAt, d.CreatedAt, d.UpdatedAt}
 }
 
 // UserCreateNestedInput supports nested creates and connects.

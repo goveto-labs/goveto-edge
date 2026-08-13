@@ -35,12 +35,14 @@ func TestLoadSeparatesPurposeKeysAndAcceptsFileProvider(t *testing.T) {
 	t.Setenv("REDIS_URL", "redis://localhost:6379/0")
 	t.Setenv("GOVETO_DATA_DIR", dir)
 	root := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	previousRoot := base64.StdEncoding.EncodeToString([]byte("fedcba9876543210fedcba9876543210"))
 	fileKey := base64.StdEncoding.EncodeToString([]byte("abcdef0123456789abcdef0123456789"))
 	keyFile := filepath.Join(dir, "certificate.key")
 	if err := os.WriteFile(keyFile, []byte(fileKey+"\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("NODE_CREDENTIAL_MASTER_KEY", root)
+	t.Setenv("NODE_CREDENTIAL_PREVIOUS_KEYS", previousRoot)
 	t.Setenv("CERTIFICATE_MASTER_KEY_FILE", keyFile)
 	cfg, err := Load()
 	if err != nil {
@@ -49,8 +51,15 @@ func TestLoadSeparatesPurposeKeysAndAcceptsFileProvider(t *testing.T) {
 	if cfg.CertificateMasterKey != fileKey {
 		t.Fatal("certificate key file was not used")
 	}
-	if cfg.DNSCredentialMasterKey == root || cfg.NotificationMasterKey == root || cfg.AgentCAMasterKey == root {
+	if cfg.DNSCredentialMasterKey == root || cfg.NotificationMasterKey == root || cfg.TOTPMasterKey == root || cfg.AgentCAMasterKey == root {
 		t.Fatal("purpose keys were not domain separated")
+	}
+	if cfg.TOTPMasterKey == cfg.CertificateMasterKey || cfg.TOTPMasterKey == cfg.DNSCredentialMasterKey || cfg.TOTPMasterKey == cfg.NotificationMasterKey {
+		t.Fatal("TOTP key was not isolated from other purposes")
+	}
+	wantPreviousTOTP := deriveEncodedMasterKey(previousRoot, "goveto-edge/secrets/totp/v1")
+	if len(cfg.TOTPPreviousKeys) != 1 || cfg.TOTPPreviousKeys[0] != wantPreviousTOTP {
+		t.Fatalf("TOTP previous keys = %#v, want derived previous root key", cfg.TOTPPreviousKeys)
 	}
 }
 

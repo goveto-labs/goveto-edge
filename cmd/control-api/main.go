@@ -145,6 +145,11 @@ func main() {
 		slog.Error("initialize notification credential encryption", "error", err)
 		os.Exit(1)
 	}
+	totpCipher, err := node.NewCredentialCipherKeyring(cfg.TOTPMasterKey, cfg.TOTPPreviousKeys...)
+	if err != nil {
+		slog.Error("initialize TOTP encryption", "error", err)
+		os.Exit(1)
+	}
 	authority, err := edgecontrol.NewAuthorityWithCAKey(cfg.AgentCAMasterKey, agentGatewayPublicAddress)
 	if err != nil {
 		slog.Error("initialize agent certificate authority", "error", err)
@@ -259,6 +264,9 @@ func main() {
 		if err == nil {
 			err = certificateService.RewrapSecrets(rewrapCtx)
 		}
+		if err == nil {
+			err = auth.RewrapTOTPSecrets(rewrapCtx, orm, totpCipher)
+		}
 	}
 	cancelRewrap()
 	if err != nil {
@@ -320,7 +328,7 @@ func main() {
 			db,
 			orm,
 			sessions,
-			httpapi.SecretCiphers{General: credentialCipher, DNS: dnsCipher, Notification: notificationCipher},
+			httpapi.SecretCiphers{General: credentialCipher, DNS: dnsCipher, Notification: notificationCipher, TOTP: totpCipher},
 			authority,
 			gateway,
 			installQueue,

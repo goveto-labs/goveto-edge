@@ -811,7 +811,7 @@ query.PostAuthorIdColumn
   - `Name` (String)
   - `Role` ()
   - `Status` ()
-  - `Totpsecret` (String, optional)
+  - `Totpsecretencrypted` (String, optional)
   - `Totprecoverycodes` (Json, optional)
   - `Failedloginattempts` (Int)
   - `Lastfailedloginat` (DateTime, optional)

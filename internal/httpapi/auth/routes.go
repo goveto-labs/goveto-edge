@@ -14,6 +14,7 @@ import (
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/httpsecurity"
+	"goveto-edge/internal/node"
 	"goveto-edge/internal/password"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -44,9 +45,9 @@ func newUserResponse(user *model.User) userResponse {
 	}
 }
 
-func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, secretCipher settings.SecretCipher, captchaVerifier *captcha.Verifier, limiter *httpsecurity.RateLimiter) {
+func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, secretCipher settings.SecretCipher, totpCipher *node.CredentialCipher, captchaVerifier *captcha.Verifier, limiter *httpsecurity.RateLimiter) {
 	group := e.Group("/api/v1/auth")
-	group.POST("/login", login(db, sessions, settingStore), limiter.Limit("login", 10, time.Minute))
+	group.POST("/login", login(db, sessions, settingStore, totpCipher), limiter.Limit("login", 10, time.Minute))
 	registerExternalAuth(group, db, sessions, settingStore, secretCipher, limiter)
 	group.POST("/register", register(db, settingStore, captchaVerifier), limiter.Limit("register", 5, time.Hour))
 	group.GET("/registration-config", registrationConfig(settingStore), limiter.Limit("captcha-config", 60, time.Minute))
@@ -55,7 +56,7 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, set
 	// Endpoints that verify the current password are throttled per user so a
 	// hijacked session cannot brute-force the account password online.
 	sensitive := limiter.LimitKeyed("auth-sensitive", 10, time.Minute, rateKeyUser)
-	registerTOTP(group, db, sessions, settingStore, sensitive)
+	registerTOTP(group, db, sessions, settingStore, totpCipher, sensitive)
 	registerSessions(group, db, sessions)
 	registerPasswords(group, db, sessions, limiter, sensitive)
 }
@@ -70,7 +71,7 @@ func rateKeyUser(c *echo.Context) string {
 // @summary Login
 // @description Authenticate with email, password and optional TOTP code; sets session cookie.
 // @Tags auth
-func login(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store) echo.HandlerFunc {
+func login(db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, totpCipher *node.CredentialCipher) echo.HandlerFunc {
 	dummyHash, _ := password.Hash("invalid-login-password")
 	return func(c *echo.Context) error {
 		localEnabled, err := settingStore.LocalLoginEnabled(c.Request().Context())
@@ -125,7 +126,7 @@ func login(db *client.Client, sessions *authn.SessionStore, settingStore *settin
 				_ = httpsecurity.Delay(c.Request().Context(), loginFailureDelay(user.FailedLoginAttempts))
 				return echo.NewHTTPError(http.StatusUnauthorized, "totp code is required")
 			}
-			valid, verifyErr := verifySecondFactor(c.Request().Context(), db, sessions, user, input.Code)
+			valid, verifyErr := verifySecondFactor(c.Request().Context(), db, sessions, totpCipher, user, input.Code)
 			if verifyErr != nil {
 				return verifyErr
 			}
@@ -216,5 +217,5 @@ func loginFailureDelay(attempts int) time.Duration {
 }
 
 func hasTOTP(user *model.User) bool {
-	return user != nil && user.TotpSecret != nil && strings.TrimSpace(*user.TotpSecret) != ""
+	return user != nil && user.TotpSecretEncrypted != nil && strings.TrimSpace(*user.TotpSecretEncrypted) != ""
 }
