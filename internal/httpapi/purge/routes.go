@@ -250,16 +250,36 @@ func get(db *client.Client) echo.HandlerFunc {
 		}
 
 		job, err := db.PurgeJob.FindUnique(c.Request().Context(), query.PurgeJob.Id.Equals(c.Param("job_id")))
-		if err != nil || job.SiteId != site.Id {
-			return echo.NewHTTPError(http.StatusNotFound, "purge job not found")
+		if err != nil {
+			return err
+		}
+		if err = requirePurgeJobInSite(job, site.Id); err != nil {
+			return err
 		}
 		return types.JSON(c, http.StatusOK, types.NewPurgeJob(job))
 	}
 }
 func siteInCluster(c *echo.Context, db *client.Client) (*model.Site, error) {
 	site, err := db.Site.FindUnique(c.Request().Context(), query.Site.Id.Equals(c.Param("site_id")))
-	if err != nil || site.ClusterId != c.Param("cluster_id") {
-		return nil, echo.NewHTTPError(http.StatusNotFound, "site not found")
+	if err != nil {
+		return nil, err
+	}
+	if err = requireSiteInCluster(site, c.Param("cluster_id")); err != nil {
+		return nil, err
 	}
 	return site, nil
+}
+
+func requireSiteInCluster(site *model.Site, clusterID string) error {
+	if site == nil || site.ClusterId != clusterID {
+		return echo.NewHTTPError(http.StatusNotFound, "site not found")
+	}
+	return nil
+}
+
+func requirePurgeJobInSite(job *model.PurgeJob, siteID string) error {
+	if job == nil || job.SiteId != siteID {
+		return echo.NewHTTPError(http.StatusNotFound, "purge job not found")
+	}
+	return nil
 }

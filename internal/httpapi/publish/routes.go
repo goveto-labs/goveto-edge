@@ -226,13 +226,19 @@ func getJob(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(c.Param("site_id")))
-		if err != nil || site.ClusterId != c.Param("cluster_id") {
-			return echo.NewHTTPError(http.StatusNotFound, "site not found")
+		if err != nil {
+			return err
+		}
+		if err = requireSiteInCluster(site, c.Param("cluster_id")); err != nil {
+			return err
 		}
 
 		job, err := db.PublishJob.FindUnique(ctx, query.PublishJob.Id.Equals(c.Param("job_id")))
-		if err != nil || job.SiteId != site.Id {
-			return echo.NewHTTPError(http.StatusNotFound, "publish job not found")
+		if err != nil {
+			return err
+		}
+		if err = requirePublishJobInSite(job, site.Id); err != nil {
+			return err
 		}
 		return types.JSON(c, http.StatusOK, types.NewPublishJob(job))
 	}
@@ -245,8 +251,11 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
 		site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(c.Param("site_id")))
-		if err != nil || site.ClusterId != c.Param("cluster_id") {
-			return echo.NewHTTPError(http.StatusNotFound, "site not found")
+		if err != nil {
+			return err
+		}
+		if err = requireSiteInCluster(site, c.Param("cluster_id")); err != nil {
+			return err
 		}
 
 		jobs, err := db.PublishJob.Query().
@@ -264,4 +273,18 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 		}
 		return types.JSON(c, http.StatusOK, result)
 	}
+}
+
+func requireSiteInCluster(site *model.Site, clusterID string) error {
+	if site == nil || site.ClusterId != clusterID {
+		return echo.NewHTTPError(http.StatusNotFound, "site not found")
+	}
+	return nil
+}
+
+func requirePublishJobInSite(job *model.PublishJob, siteID string) error {
+	if job == nil || job.SiteId != siteID {
+		return echo.NewHTTPError(http.StatusNotFound, "publish job not found")
+	}
+	return nil
 }

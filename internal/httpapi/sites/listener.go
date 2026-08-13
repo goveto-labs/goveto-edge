@@ -161,7 +161,14 @@ func updateListener(db *client.Client, publishService *publisher.Service) echo.H
 
 func ensureSiteInCluster(c *echo.Context, db *client.Client) error {
 	site, err := db.Site.FindUnique(c.Request().Context(), query.Site.Id.Equals(c.Param("site_id")))
-	if err != nil || site.ClusterId != c.Param("cluster_id") {
+	if err != nil {
+		return err
+	}
+	return requireSiteInCluster(site, c.Param("cluster_id"))
+}
+
+func requireSiteInCluster(site *model.Site, clusterID string) error {
+	if site == nil || site.ClusterId != clusterID {
 		return echo.NewHTTPError(http.StatusNotFound, "site not found")
 	}
 	return nil

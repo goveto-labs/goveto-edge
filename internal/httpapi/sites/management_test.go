@@ -3,12 +3,29 @@ package sites
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/storage/gen/model"
 )
+
+func TestSiteClusterGuardReturnsNotFound(t *testing.T) {
+	for _, site := range []*model.Site{nil, {ClusterId: "cluster-2"}} {
+		err := requireSiteInCluster(site, "cluster-1")
+		var httpError *echo.HTTPError
+		if !errors.As(err, &httpError) || httpError.Code != http.StatusNotFound {
+			t.Fatalf("site %#v error = %#v, want HTTP 404", site, err)
+		}
+	}
+	if err := requireSiteInCluster(&model.Site{ClusterId: "cluster-1"}, "cluster-1"); err != nil {
+		t.Fatalf("matching site rejected: %v", err)
+	}
+}
 
 func TestPrepareCloneBundleDropsDomainBoundTLS(t *testing.T) {
 	bundle := siteBundle{
