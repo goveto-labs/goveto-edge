@@ -2,6 +2,7 @@ package waf
 
 import (
 	"bytes"
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -480,6 +481,21 @@ func (h Handler) executeDecision(w http.ResponseWriter, r *http.Request, ip stri
 		}
 		token, err := h.challengeToken(decision.id, r, ip)
 		if err != nil {
+			var limited *challengeGenerationLimitError
+			switch {
+			case errors.As(err, &limited):
+				w.Header().Set("Retry-After", strconv.Itoa(max(1, int(limited.retryAfter.Round(time.Second)/time.Second))))
+				w.Header().Set("X-Goveto-WAF-Challenge", "rate_limited")
+				http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+				return nil
+			case errors.Is(err, errPoWGenerationBusy):
+				w.Header().Set("Retry-After", "1")
+				w.Header().Set("X-Goveto-WAF-Challenge", "busy")
+				http.Error(w, http.StatusText(http.StatusServiceUnavailable), http.StatusServiceUnavailable)
+				return nil
+			case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+				return nil
+			}
 			return err
 		}
 		w.Header().Set("Content-Security-Policy", "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; worker-src blob:")

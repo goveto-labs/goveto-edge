@@ -1,6 +1,7 @@
 package waf
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -26,25 +27,37 @@ import (
 )
 
 const (
-	powVersion        = 3
-	powAlgorithm      = "SCRYPT-HMAC"
-	powCounterMinimum = uint32(24)
-	powCounterMaximum = uint32(40)
-	powScryptN        = 16_384
-	powScryptR        = 8
-	powScryptP        = 1
-	powKeyLength      = 32
-	powTargetLength   = 16
-	challengeTTL      = 2 * time.Minute
-	clearanceTTL      = 30 * time.Minute
+	powVersion             = 3
+	powAlgorithm           = "SCRYPT-HMAC"
+	powCounterMinimum      = uint32(24)
+	powCounterMaximum      = uint32(40)
+	powScryptN             = 16_384
+	powScryptR             = 8
+	powScryptP             = 1
+	powKeyLength           = 32
+	powTargetLength        = 16
+	challengeTTL           = 2 * time.Minute
+	clearanceTTL           = 30 * time.Minute
+	powGenerationQueueSize = 16
 )
 
 var (
-	powDomain           = []byte("goveto-edge/waf-scrypt/v3\x00")
-	powWorkerSourceJSON = template.JS(strconv.Quote(mustEmbeddedFile("templates/pow-worker.js")))
-	powGenerationSlots  = make(chan struct{}, 2)
-	powChallengeCache   sync.Map
-	powCacheOperations  atomic.Uint64
+	powDomain                  = []byte("goveto-edge/waf-scrypt/v3\x00")
+	powWorkerSourceJSON        = template.JS(strconv.Quote(mustEmbeddedFile("templates/pow-worker.js")))
+	powGenerationSlots         = make(chan struct{}, 2)
+	powGenerationQueue         = make(chan struct{}, powGenerationQueueSize)
+	powChallengeCache          sync.Map
+	powCacheOperations         atomic.Uint64
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter   = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter     = &counterStore{entries: map[string]counter{}}
+	errPoWGenerationBusy       = errors.New("CAPTCHA challenge generation queue is full")
+)
+
+var (
+	powGlobalGenerationRate = policy.WAFRule{Requests: 8, Burst: 4, WindowSeconds: 1}
+	powSiteGenerationRate   = policy.WAFRule{Requests: 4, Burst: 2, WindowSeconds: 1}
+	powIPGenerationRate     = policy.WAFRule{Requests: 1, Burst: 1, WindowSeconds: 1}
 )
 
 type challengeClaim struct {
@@ -76,7 +89,16 @@ type challengeSolution struct {
 
 type cachedChallenge struct {
 	token     string
+	binding   string
 	expiresAt int64
+}
+
+type challengeGenerationLimitError struct {
+	retryAfter time.Duration
+}
+
+func (e *challengeGenerationLimitError) Error() string {
+	return "CAPTCHA challenge generation rate limit exceeded"
 }
 
 func mustEmbeddedFile(name string) string {
@@ -114,13 +136,19 @@ func (h Handler) hasCaptchaRule() bool {
 
 func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (string, error) {
 	cacheKey := h.challengeCacheKey(ruleID, r, ip)
+	binding := requestBinding(h.challengeKey, r, ip)
 	now := time.Now()
 	if value, ok := powChallengeCache.Load(cacheKey); ok {
 		cached := value.(cachedChallenge)
-		if cached.expiresAt > now.Unix()+5 {
+		if cached.expiresAt > now.Unix()+5 && hmac.Equal([]byte(cached.binding), []byte(binding)) {
 			return cached.token, nil
 		}
-		powChallengeCache.Delete(cacheKey)
+		if cached.expiresAt <= now.Unix()+5 {
+			powChallengeCache.Delete(cacheKey)
+		}
+	}
+	if retryAfter := allowChallengeGeneration(h.SiteID, ip, now); retryAfter > 0 {
+		return "", &challengeGenerationLimitError{retryAfter: retryAfter}
 	}
 
 	nonce := make([]byte, 16)
@@ -137,9 +165,14 @@ func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (stri
 		return "", err
 	}
 	counter := powCounterMinimum + uint32(offset.Uint64())
-	powGenerationSlots <- struct{}{}
-	key, err := deriveScryptKey(nonce, salt, counter, powScryptN, powScryptR, powScryptP)
-	<-powGenerationSlots
+	release, err := acquirePoWGeneration(r.Context(), powGenerationQueue, powGenerationSlots)
+	if err != nil {
+		return "", err
+	}
+	key, err := func() ([]byte, error) {
+		defer release()
+		return deriveScryptKey(nonce, salt, counter, powScryptN, powScryptR, powScryptP)
+	}()
 	if err != nil {
 		return "", err
 	}
@@ -152,7 +185,7 @@ func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (stri
 	expiresAt := now.Add(challengeTTL).Unix()
 	claim := challengeClaim{
 		Version: powVersion, Kind: "challenge", SiteID: h.SiteID, RuleID: ruleID,
-		Binding: requestBinding(h.challengeKey, r, ip), IssuedAt: issuedAt, ExpiresAt: expiresAt,
+		Binding: binding, IssuedAt: issuedAt, ExpiresAt: expiresAt,
 		Algorithm: powAlgorithm, Nonce: base64.RawURLEncoding.EncodeToString(nonce),
 		Salt:   base64.RawURLEncoding.EncodeToString(salt),
 		Target: target, KeySignature: derivedKeySignature, MaxCounter: powCounterMaximum,
@@ -171,9 +204,48 @@ func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (stri
 			return "", err
 		}
 	}
-	powChallengeCache.Store(cacheKey, cachedChallenge{token: token, expiresAt: expiresAt})
+	powChallengeCache.Store(cacheKey, cachedChallenge{token: token, binding: binding, expiresAt: expiresAt})
 	h.pruneChallengeCache(now)
 	return token, nil
+}
+
+func allowChallengeGeneration(siteID, ip string, now time.Time) time.Duration {
+	if allowed, retryAfter := powIPGenerationLimiter.allow(siteID+"\x00"+ip, now, powIPGenerationRate); !allowed {
+		return retryAfter
+	}
+	if allowed, retryAfter := powSiteGenerationLimiter.allow(siteID, now, powSiteGenerationRate); !allowed {
+		return retryAfter
+	}
+	if allowed, retryAfter := powGlobalGenerationLimiter.allow("global", now, powGlobalGenerationRate); !allowed {
+		return retryAfter
+	}
+	return 0
+}
+
+func acquirePoWGeneration(ctx context.Context, queue, slots chan struct{}) (func(), error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case queue <- struct{}{}:
+	default:
+		return nil, errPoWGenerationBusy
+	}
+	select {
+	case slots <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-slots
+			<-queue
+			return nil, err
+		}
+		return func() {
+			<-slots
+			<-queue
+		}, nil
+	case <-ctx.Done():
+		<-queue
+		return nil, ctx.Err()
+	}
 }
 
 func (h Handler) challengeCacheKey(ruleID string, r *http.Request, ip string) string {
@@ -183,8 +255,32 @@ func (h Handler) challengeCacheKey(ruleID string, r *http.Request, ip string) st
 	_, _ = io.WriteString(mac, "\x00")
 	_, _ = io.WriteString(mac, ruleID)
 	_, _ = io.WriteString(mac, "\x00")
-	_, _ = io.WriteString(mac, requestBinding(h.challengeKey, r, ip))
+	_, _ = io.WriteString(mac, ip)
+	_, _ = io.WriteString(mac, "\x00")
+	_, _ = io.WriteString(mac, normalizedChallengeUserAgent(r.UserAgent()))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+func normalizedChallengeUserAgent(value string) string {
+	value = strings.ToLower(value)
+	family := "other"
+	for _, candidate := range []string{"edg/", "opr/", "chrome/", "firefox/", "safari/"} {
+		if strings.Contains(value, candidate) {
+			family = strings.TrimSuffix(candidate, "/")
+			break
+		}
+	}
+	platform := "other"
+	for _, candidate := range []string{"android", "iphone", "ipad", "windows", "macintosh", "linux"} {
+		if strings.Contains(value, candidate) {
+			platform = candidate
+			break
+		}
+	}
+	if strings.Contains(value, "mobile") {
+		platform += "-mobile"
+	}
+	return family + ":" + platform
 }
 
 func (h Handler) pruneChallengeCache(now time.Time) {

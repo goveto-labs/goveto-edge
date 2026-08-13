@@ -611,6 +611,14 @@ func TestProofOfWorkCaptchaGrantsClearance(t *testing.T) {
 }
 
 func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
+	originalGlobalLimiter, originalSiteLimiter, originalIPLimiter := powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	t.Cleanup(func() {
+		powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter = originalGlobalLimiter, originalSiteLimiter, originalIPLimiter
+	})
+
 	h := &Handler{SiteID: "captcha-replay", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err != nil {
 		t.Fatal(err)
@@ -619,6 +627,9 @@ func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
 	h.distributed, h.distributedErr = store, nil
 	ip := "198.51.100.21"
 	base := captchaRequest("http://example.test/protected", ip)
+	cacheKey := h.challengeCacheKey("shield", base, ip)
+	powChallengeCache.Delete(cacheKey)
+	t.Cleanup(func() { powChallengeCache.Delete(cacheKey) })
 	token, err := h.challengeToken("shield", base, ip)
 	if err != nil {
 		t.Fatal(err)
@@ -743,6 +754,179 @@ func TestCaptchaRequiresPublishedChallengeSecret(t *testing.T) {
 	h := &Handler{SiteID: "missing-secret", WAF: captchaPolicy()}
 	if err := h.Provision(caddy.Context{}); err == nil {
 		t.Fatal("CAPTCHA provision should fail without a shared challenge secret")
+	}
+}
+
+func TestPoWGenerationWaitHonorsCancellationAndQueueLimit(t *testing.T) {
+	slots := make(chan struct{}, 1)
+	queue := make(chan struct{}, 8)
+	slots <- struct{}{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		release, err := acquirePoWGeneration(ctx, queue, slots)
+		if release != nil {
+			release()
+		}
+		result <- err
+	}()
+	deadline := time.Now().Add(time.Second)
+	for len(queue) != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(queue) != 1 {
+		t.Fatal("generation request did not enter the bounded queue")
+	}
+	cancel()
+	select {
+	case err := <-result:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("canceled acquire error=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled generation request remained blocked")
+	}
+	if len(queue) != 0 || len(slots) != 1 {
+		t.Fatalf("generation capacity leaked: queue=%d slots=%d", len(queue), len(slots))
+	}
+
+	fullQueue := make(chan struct{}, 1)
+	fullQueue <- struct{}{}
+	if release, err := acquirePoWGeneration(context.Background(), fullQueue, make(chan struct{}, 1)); release != nil || !errors.Is(err, errPoWGenerationBusy) {
+		t.Fatalf("full queue release=%v error=%v", release != nil, err)
+	}
+}
+
+func TestChallengeCacheKeyNormalizesControllableHeaders(t *testing.T) {
+	h := &Handler{SiteID: "captcha-cache-key", challengeKey: []byte("0123456789abcdef0123456789abcdef")}
+	first := captchaRequest("http://example.test/protected", "192.0.2.1")
+	first.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0 Safari/537.36")
+	first.Header.Set("Accept-Language", "en-US")
+	second := captchaRequest("http://example.test/protected", "192.0.2.1")
+	second.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/999.12.34.56 arbitrary")
+	second.Header.Set("Accept-Language", "attacker-controlled")
+	if firstKey, secondKey := h.challengeCacheKey("shield", first, "192.0.2.1"), h.challengeCacheKey("shield", second, "192.0.2.1"); firstKey != secondKey {
+		t.Fatalf("controllable header variants created different cache keys: %q != %q", firstKey, secondKey)
+	}
+	if firstBinding, secondBinding := requestBinding(h.challengeKey, first, "192.0.2.1"), requestBinding(h.challengeKey, second, "192.0.2.1"); firstBinding == secondBinding {
+		t.Fatal("full challenge binding did not retain request-specific headers")
+	}
+}
+
+func TestChallengeCacheNeverReusesTokenAcrossBindings(t *testing.T) {
+	originalGlobalLimiter, originalSiteLimiter, originalIPLimiter := powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	t.Cleanup(func() {
+		powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter = originalGlobalLimiter, originalSiteLimiter, originalIPLimiter
+	})
+
+	h := &Handler{SiteID: "captcha-binding-cache", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
+	if err := h.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	first := captchaRequest("http://example.test/protected", "192.0.2.2")
+	first.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0 Safari/537.36")
+	first.Header.Set("Accept-Language", "en-US")
+	firstToken, err := h.challengeToken("shield", first, "192.0.2.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := captchaRequest("http://example.test/protected", "192.0.2.2")
+	second.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/999.0.0.0 arbitrary")
+	second.Header.Set("Accept-Language", "fr-FR")
+	secondToken, err := h.challengeToken("shield", second, "192.0.2.2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstToken == secondToken {
+		t.Fatal("cache reused a challenge token across distinct request bindings")
+	}
+	claim, ok := h.verifyClaim(secondToken)
+	if !ok || claim.Binding != requestBinding(h.challengeKey, second, "192.0.2.2") {
+		t.Fatal("replacement challenge is not bound to the second request")
+	}
+}
+
+func TestChallengeIPLimitDoesNotConsumeWiderLimits(t *testing.T) {
+	originalGlobalLimiter, originalSiteLimiter, originalIPLimiter := powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter
+	originalGlobalRate, originalSiteRate, originalIPRate := powGlobalGenerationRate, powSiteGenerationRate, powIPGenerationRate
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powGlobalGenerationRate = policy.WAFRule{Requests: 2, WindowSeconds: 1}
+	powSiteGenerationRate = policy.WAFRule{Requests: 3, WindowSeconds: 1}
+	powIPGenerationRate = policy.WAFRule{Requests: 1, WindowSeconds: 1}
+	t.Cleanup(func() {
+		powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter = originalGlobalLimiter, originalSiteLimiter, originalIPLimiter
+		powGlobalGenerationRate, powSiteGenerationRate, powIPGenerationRate = originalGlobalRate, originalSiteRate, originalIPRate
+	})
+
+	now := time.Now()
+	if retryAfter := allowChallengeGeneration("site", "192.0.2.1", now); retryAfter != 0 {
+		t.Fatalf("first IP request rejected: retry after %s", retryAfter)
+	}
+	if retryAfter := allowChallengeGeneration("site", "192.0.2.1", now); retryAfter <= 0 {
+		t.Fatal("second request from the same IP was not limited")
+	}
+	if retryAfter := allowChallengeGeneration("site", "192.0.2.2", now); retryAfter != 0 {
+		t.Fatalf("IP rejection consumed a wider limit: retry after %s", retryAfter)
+	}
+}
+
+func TestCaptchaGenerationRateLimitReturnsTooManyRequests(t *testing.T) {
+	originalGlobalLimiter, originalSiteLimiter, originalIPLimiter := powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter
+	originalGlobalRate, originalSiteRate, originalIPRate := powGlobalGenerationRate, powSiteGenerationRate, powIPGenerationRate
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powGlobalGenerationRate = policy.WAFRule{Requests: 0, WindowSeconds: 1}
+	powSiteGenerationRate = policy.WAFRule{Requests: 0, WindowSeconds: 1}
+	powIPGenerationRate = policy.WAFRule{Requests: 0, WindowSeconds: 1}
+	t.Cleanup(func() {
+		powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter = originalGlobalLimiter, originalSiteLimiter, originalIPLimiter
+		powGlobalGenerationRate, powSiteGenerationRate, powIPGenerationRate = originalGlobalRate, originalSiteRate, originalIPRate
+	})
+
+	h := &Handler{SiteID: "captcha-rate-limit", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
+	if err := h.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	if err := h.ServeHTTP(response, captchaRequest("http://example.test/protected", "192.0.2.44"), &nextHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusTooManyRequests || response.Header().Get("Retry-After") != "1" || response.Header().Get("X-Goveto-WAF-Challenge") != "rate_limited" {
+		t.Fatalf("rate-limited challenge status=%d headers=%v", response.Code, response.Header())
+	}
+}
+
+func TestCaptchaGenerationBusyReturnsServiceUnavailable(t *testing.T) {
+	originalQueue, originalSlots := powGenerationQueue, powGenerationSlots
+	originalGlobalLimiter, originalSiteLimiter, originalIPLimiter := powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter
+	powGenerationQueue = make(chan struct{}, 1)
+	powGenerationSlots = make(chan struct{}, 1)
+	powGenerationQueue <- struct{}{}
+	powGlobalGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powSiteGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	powIPGenerationLimiter = &counterStore{entries: map[string]counter{}}
+	t.Cleanup(func() {
+		powGenerationQueue, powGenerationSlots = originalQueue, originalSlots
+		powGlobalGenerationLimiter, powSiteGenerationLimiter, powIPGenerationLimiter = originalGlobalLimiter, originalSiteLimiter, originalIPLimiter
+	})
+
+	h := &Handler{SiteID: "captcha-busy", ChallengeSecret: testChallengeSecret(), WAF: captchaPolicy()}
+	if err := h.Provision(caddy.Context{}); err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	if err := h.ServeHTTP(response, captchaRequest("http://example.test/protected", "192.0.2.45"), &nextHandler{}); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "1" || response.Header().Get("X-Goveto-WAF-Challenge") != "busy" {
+		t.Fatalf("busy challenge status=%d headers=%v", response.Code, response.Header())
 	}
 }
 
