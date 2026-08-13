@@ -67,6 +67,7 @@ type ExternalAuthState struct {
 	ReturnPath         string `json:"return_path"`
 	ProviderID         string `json:"provider_id"`
 	BrowserBindingHash string `json:"browser_binding_hash"`
+	LinkUserID         string `json:"link_user_id,omitempty"`
 }
 
 func (s *SessionStore) StoreExternalAuthState(ctx context.Context, state string, value ExternalAuthState, browserBinding string) error {

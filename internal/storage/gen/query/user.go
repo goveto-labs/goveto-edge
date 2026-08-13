@@ -48,6 +48,7 @@ type UserQuery struct {
 	CreatedAt           userCreatedAtField
 	UpdatedAt           userUpdatedAtField
 	Sessions            userSessionsRelation
+	ExternalIdentities  userExternalIdentitiesRelation
 	PasswordResetTokens userPasswordResetTokensRelation
 	AuditLogs           userAuditLogsRelation
 	CreatedClusters     userCreatedClustersRelation
@@ -90,6 +91,7 @@ var User = UserQuery{
 	CreatedAt:           userCreatedAtField{},
 	UpdatedAt:           userUpdatedAtField{},
 	Sessions:            userSessionsRelation{},
+	ExternalIdentities:  userExternalIdentitiesRelation{},
 	PasswordResetTokens: userPasswordResetTokensRelation{},
 	AuditLogs:           userAuditLogsRelation{},
 	CreatedClusters:     userCreatedClustersRelation{},
@@ -1159,6 +1161,14 @@ func (userSessionsRelation) Fetch() UserIncludeClause {
 	return UserIncludeClause{Relation: "sessions"}
 }
 
+// ExternalIdentitiesRelation provides relation query helpers for externalIdentities.
+type userExternalIdentitiesRelation struct{}
+
+// Fetch creates an include clause to fetch related externalIdentities.
+func (userExternalIdentitiesRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "externalIdentities"}
+}
+
 // PasswordResetTokensRelation provides relation query helpers for passwordResetTokens.
 type userPasswordResetTokensRelation struct{}
 
@@ -1248,6 +1258,7 @@ type UserCreateInput struct {
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	Sessions            *UserSessionCreateNestedInput
+	ExternalIdentities  *ExternalIdentityCreateNestedInput
 	PasswordResetTokens *PasswordResetTokenCreateNestedInput
 	AuditLogs           *AuditLogCreateNestedInput
 	CreatedClusters     *ClusterCreateNestedInput

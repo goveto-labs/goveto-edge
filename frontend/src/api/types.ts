@@ -92,6 +92,10 @@ export interface AuthMethods {
     }>;
 }
 
+export interface ExternalAuthStartResponse {
+    authorization_url: string;
+}
+
 export interface InitializationStatus {
     initialized: boolean;
 }

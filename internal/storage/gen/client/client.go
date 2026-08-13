@@ -40,6 +40,7 @@ type Client struct {
 	DNSProviderConfig     DNSProviderConfigActions
 	DNSSyncJob            DNSSyncJobActions
 	DynamicSetting        DynamicSettingActions
+	ExternalIdentity      ExternalIdentityActions
 	InstallJob            InstallJobActions
 	JobExecution          JobExecutionActions
 	Node                  NodeActions
@@ -91,6 +92,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.DNSProviderConfig = DNSProviderConfigActions{client: c}
 	c.DNSSyncJob = DNSSyncJobActions{client: c}
 	c.DynamicSetting = DynamicSettingActions{client: c}
+	c.ExternalIdentity = ExternalIdentityActions{client: c}
 	c.InstallJob = InstallJobActions{client: c}
 	c.JobExecution = JobExecutionActions{client: c}
 	c.Node = NodeActions{client: c}
@@ -302,6 +304,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.DNSProviderConfig = DNSProviderConfigActions{client: txClient}
 	txClient.DNSSyncJob = DNSSyncJobActions{client: txClient}
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
+	txClient.ExternalIdentity = ExternalIdentityActions{client: txClient}
 	txClient.InstallJob = InstallJobActions{client: txClient}
 	txClient.JobExecution = JobExecutionActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
@@ -16058,6 +16061,982 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("DynamicSetting.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedExternalIdentityTable(c *Client) string { return c.quoteIdentifier("external_identities") }
+func quotedExternalIdentityColumns(c *Client) string {
+	cols := []string{"id", "user_id", "provider_id", "issuer", "subject", "email", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteExternalIdentityField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "user_id":
+		return c.quoteIdentifier(field), nil
+	case "provider_id":
+		return c.quoteIdentifier(field), nil
+	case "issuer":
+		return c.quoteIdentifier(field), nil
+	case "subject":
+		return c.quoteIdentifier(field), nil
+	case "email":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ExternalIdentity field %q", field)
+	}
+}
+
+// buildExternalIdentityWhere recursively builds a WHERE clause string and arguments.
+func buildExternalIdentityWhere(c *Client, wheres []query.ExternalIdentityWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ExternalIdentityWhereClause); ok {
+				sub, subArgs := buildExternalIdentityWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ExternalIdentityWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildExternalIdentityWhere(c, []query.ExternalIdentityWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ExternalIdentityWhereClause); ok {
+				sub, subArgs := buildExternalIdentityWhere(c, []query.ExternalIdentityWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteExternalIdentityField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ExternalIdentityActions provides database operations for the ExternalIdentity model.
+type ExternalIdentityActions struct {
+	client *Client
+}
+
+// ExternalIdentityCreateBuilder builds a ExternalIdentity create operation incrementally.
+type ExternalIdentityCreateBuilder struct {
+	action ExternalIdentityActions
+	sets   []query.ExternalIdentitySetClause
+}
+
+// Create starts a staged ExternalIdentity create operation.
+func (a ExternalIdentityActions) Create() ExternalIdentityCreateBuilder {
+	return ExternalIdentityCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ExternalIdentityCreateBuilder) Set(sets ...query.ExternalIdentitySetClause) ExternalIdentityCreateBuilder {
+	next := ExternalIdentityCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ExternalIdentitySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ExternalIdentityCreateBuilder) Do(ctx context.Context) (*model.ExternalIdentity, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ExternalIdentityCreateManyBuilder builds a bulk ExternalIdentity insert operation.
+type ExternalIdentityCreateManyBuilder struct {
+	action            ExternalIdentityActions
+	data              []query.ExternalIdentityCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ExternalIdentity insert operation.
+func (a ExternalIdentityActions) BulkCreate(data []query.ExternalIdentityCreateInput) ExternalIdentityCreateManyBuilder {
+	return ExternalIdentityCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ExternalIdentityCreateManyBuilder) OnConflictDoNothing(columns ...string) ExternalIdentityCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ExternalIdentityCreateManyBuilder) Returning(columns ...string) ExternalIdentityCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ExternalIdentityCreateManyBuilder) BatchSize(n int) ExternalIdentityCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ExternalIdentityCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildExternalIdentityCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ExternalIdentity.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ExternalIdentity.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ExternalIdentityCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ExternalIdentity, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ExternalIdentity
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildExternalIdentityCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "user_id", "provider_id", "issuer", "subject", "email", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ExternalIdentity
+			if err := rows.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ExternalIdentityCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "user_id", "provider_id", "issuer", "subject", "email", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildExternalIdentityCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ExternalIdentity.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ExternalIdentityQueryBuilder builds a ExternalIdentity query incrementally.
+type ExternalIdentityQueryBuilder struct {
+	action ExternalIdentityActions
+	opts   []query.ExternalIdentityQueryOption
+}
+
+// Query starts a staged ExternalIdentity query.
+func (a ExternalIdentityActions) Query() ExternalIdentityQueryBuilder {
+	return ExternalIdentityQueryBuilder{action: a}
+}
+
+func (b ExternalIdentityQueryBuilder) withOptions(opts ...query.ExternalIdentityQueryOption) ExternalIdentityQueryBuilder {
+	next := ExternalIdentityQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ExternalIdentityQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ExternalIdentityQueryBuilder) Where(clauses ...query.ExternalIdentityWhereClause) ExternalIdentityQueryBuilder {
+	opts := make([]query.ExternalIdentityQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ExternalIdentityQueryBuilder) OrderBy(clause query.ExternalIdentityOrderByClause) ExternalIdentityQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ExternalIdentityQueryBuilder) Include(clauses ...query.ExternalIdentityIncludeClause) ExternalIdentityQueryBuilder {
+	opts := make([]query.ExternalIdentityQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ExternalIdentityQueryBuilder) Take(n int) ExternalIdentityQueryBuilder {
+	return b.withOptions(query.ExternalIdentityTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ExternalIdentityQueryBuilder) Skip(n int) ExternalIdentityQueryBuilder {
+	return b.withOptions(query.ExternalIdentitySkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ExternalIdentityQueryBuilder) Do(ctx context.Context) ([]model.ExternalIdentity, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ExternalIdentityQueryBuilder) First(ctx context.Context) (*model.ExternalIdentity, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ExternalIdentityQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyExternalIdentityOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ExternalIdentityUpdateBuilder builds a ExternalIdentity update operation incrementally.
+type ExternalIdentityUpdateBuilder struct {
+	action ExternalIdentityActions
+	wheres []query.ExternalIdentityWhereClause
+	sets   []query.ExternalIdentitySetClause
+}
+
+// Update starts a staged ExternalIdentity update operation.
+func (a ExternalIdentityActions) Update() ExternalIdentityUpdateBuilder {
+	return ExternalIdentityUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ExternalIdentityUpdateBuilder) Where(clauses ...query.ExternalIdentityWhereClause) ExternalIdentityUpdateBuilder {
+	next := ExternalIdentityUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ExternalIdentityWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ExternalIdentitySetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ExternalIdentityUpdateBuilder) Set(sets ...query.ExternalIdentitySetClause) ExternalIdentityUpdateBuilder {
+	next := ExternalIdentityUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ExternalIdentityWhereClause(nil), b.wheres...),
+		sets:   make([]query.ExternalIdentitySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ExternalIdentityUpdateBuilder) combinedWhere() (query.ExternalIdentityWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ExternalIdentityWhereClause{}, fmt.Errorf("ExternalIdentity.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ExternalIdentity.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ExternalIdentityUpdateBuilder) Do(ctx context.Context) (*model.ExternalIdentity, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ExternalIdentityUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ExternalIdentityDeleteBuilder builds a ExternalIdentity delete operation incrementally.
+type ExternalIdentityDeleteBuilder struct {
+	action ExternalIdentityActions
+	wheres []query.ExternalIdentityWhereClause
+}
+
+// Delete starts a staged ExternalIdentity delete operation.
+func (a ExternalIdentityActions) Delete() ExternalIdentityDeleteBuilder {
+	return ExternalIdentityDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ExternalIdentityDeleteBuilder) Where(clauses ...query.ExternalIdentityWhereClause) ExternalIdentityDeleteBuilder {
+	next := ExternalIdentityDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ExternalIdentityWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ExternalIdentityDeleteBuilder) combinedWhere() (query.ExternalIdentityWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ExternalIdentityWhereClause{}, fmt.Errorf("ExternalIdentity.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ExternalIdentity.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ExternalIdentityDeleteBuilder) Do(ctx context.Context) (*model.ExternalIdentity, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ExternalIdentityDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ExternalIdentity records.
+func (a ExternalIdentityActions) FindMany(ctx context.Context, opts ...query.ExternalIdentityQueryOption) ([]model.ExternalIdentity, error) {
+	cfg := query.ApplyExternalIdentityOptions(opts)
+	q := "SELECT " + quotedExternalIdentityColumns(a.client) + " FROM " + quotedExternalIdentityTable(a.client)
+	argIdx := 0
+	where, args := buildExternalIdentityWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteExternalIdentityField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ExternalIdentity
+	for rows.Next() {
+		var item model.ExternalIdentity
+		if err := rows.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ExternalIdentity record.
+func (a ExternalIdentityActions) FindFirst(ctx context.Context, opts ...query.ExternalIdentityQueryOption) (*model.ExternalIdentity, error) {
+	opts = append(opts, query.ExternalIdentityTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ExternalIdentity record by unique constraint.
+func (a ExternalIdentityActions) FindUnique(ctx context.Context, where query.ExternalIdentityWhereClause) (*model.ExternalIdentity, error) {
+	argIdx := 0
+	whereSQL, args := buildExternalIdentityWhere(a.client, []query.ExternalIdentityWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedExternalIdentityColumns(a.client) + " FROM " + quotedExternalIdentityTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ExternalIdentity
+	if err := row.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ExternalIdentity.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ExternalIdentity record.
+func (a ExternalIdentityActions) CreateOne(ctx context.Context, sets ...query.ExternalIdentitySetClause) (*model.ExternalIdentity, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ExternalIdentity.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteExternalIdentityField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedExternalIdentityTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedExternalIdentityColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ExternalIdentity
+		if err := row.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ExternalIdentity records.
+func (a ExternalIdentityActions) CreateMany(ctx context.Context, data []query.ExternalIdentityCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ExternalIdentityActions) buildExternalIdentityCreateManySQL(data []query.ExternalIdentityCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "user_id", "provider_id", "issuer", "subject", "email", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedExternalIdentityTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ExternalIdentity record matching the where clause.
+func (a ExternalIdentityActions) UpdateOne(ctx context.Context, where query.ExternalIdentityWhereClause, sets ...query.ExternalIdentitySetClause) (*model.ExternalIdentity, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ExternalIdentity.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteExternalIdentityField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildExternalIdentityWhere(a.client, []query.ExternalIdentityWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedExternalIdentityTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedExternalIdentityColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ExternalIdentity
+		if err := row.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ExternalIdentity.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ExternalIdentity records matching the where clauses.
+func (a ExternalIdentityActions) UpdateMany(ctx context.Context, wheres []query.ExternalIdentityWhereClause, sets ...query.ExternalIdentitySetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ExternalIdentity.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteExternalIdentityField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildExternalIdentityWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedExternalIdentityTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ExternalIdentity.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ExternalIdentity record.
+func (a ExternalIdentityActions) UpsertOne(ctx context.Context, where query.ExternalIdentityWhereClause, create []query.ExternalIdentitySetClause, update []query.ExternalIdentitySetClause) (*model.ExternalIdentity, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ExternalIdentity.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteExternalIdentityField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedExternalIdentityTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteExternalIdentityField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteExternalIdentityField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteExternalIdentityField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedExternalIdentityColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ExternalIdentity
+		if err := row.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ExternalIdentity record matching the where clause.
+func (a ExternalIdentityActions) DeleteOne(ctx context.Context, where query.ExternalIdentityWhereClause) (*model.ExternalIdentity, error) {
+	argIdx := 0
+	whereSQL, args := buildExternalIdentityWhere(a.client, []query.ExternalIdentityWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedExternalIdentityTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedExternalIdentityColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ExternalIdentity
+		if err := row.Scan(&item.Id, &item.UserId, &item.ProviderId, &item.Issuer, &item.Subject, &item.Email, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ExternalIdentity.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ExternalIdentity records matching the where clauses.
+func (a ExternalIdentityActions) DeleteMany(ctx context.Context, wheres ...query.ExternalIdentityWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildExternalIdentityWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedExternalIdentityTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ExternalIdentity.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ExternalIdentity records matching the where clauses.
+func (a ExternalIdentityActions) Count(ctx context.Context, wheres ...query.ExternalIdentityWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildExternalIdentityWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedExternalIdentityTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ExternalIdentity.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ExternalIdentity.
+func (a ExternalIdentityActions) Aggregate(ctx context.Context, opts ...query.ExternalIdentityAggregateOption) (*query.ExternalIdentityAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteExternalIdentityField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedExternalIdentityTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ExternalIdentityAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ExternalIdentity.
+func (a ExternalIdentityActions) GroupBy(ctx context.Context, fields []string, opts ...query.ExternalIdentityAggregateOption) ([]query.ExternalIdentityGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteExternalIdentityField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteExternalIdentityField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedExternalIdentityTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ExternalIdentity.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ExternalIdentityGroupByResult
+	for rows.Next() {
+		r := query.ExternalIdentityGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ExternalIdentity.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

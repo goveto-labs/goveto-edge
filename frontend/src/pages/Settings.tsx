@@ -1,8 +1,9 @@
-import type { TOTPSetup } from '@/api';
+import type { AuthMethods, TOTPSetup } from '@/api';
 
 import { Alert, Button, Input, InputOTP, useOverlayState } from '@heroui/react';
 import { Copy, KeyRound, Loader2, RefreshCw, ShieldCheck, ShieldOff } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import { ApiError, authApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -19,6 +20,7 @@ function errorMessage(error: unknown, fallback: string) {
 
 export default function Settings() {
     const { user, refresh } = useAuth();
+    const [searchParams, setSearchParams] = useSearchParams();
     const setupDialog = useOverlayState();
     const verificationDialog = useOverlayState();
     const recoveryDialog = useOverlayState();
@@ -31,6 +33,46 @@ export default function Settings() {
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const [copied, setCopied] = useState(false);
+    const [authMethods, setAuthMethods] = useState<AuthMethods | null>(null);
+    const [linkingProvider, setLinkingProvider] = useState('');
+
+    useEffect(() => {
+        let active = true;
+        authApi
+            .methods()
+            .then((methods) => {
+                if (active) setAuthMethods(methods);
+            })
+            .catch(() => undefined);
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    useEffect(() => {
+        const authError = searchParams.get('auth_error');
+        const linkSucceeded = searchParams.get('external_link') === 'success';
+        if (authError) setError(authError);
+        if (linkSucceeded) setSuccess('External identity linked.');
+        if (!authError && !linkSucceeded) return;
+        const next = new URLSearchParams(searchParams);
+        next.delete('external_link');
+        next.delete('auth_error');
+        setSearchParams(next, { replace: true });
+    }, [searchParams, setSearchParams]);
+
+    const linkExternalProvider = async (providerId: string) => {
+        setLinkingProvider(providerId);
+        setError('');
+        setSuccess('');
+        try {
+            const result = await authApi.linkExternalProvider(providerId);
+            window.location.assign(result.authorization_url);
+        } catch (linkError) {
+            setError(errorMessage(linkError, 'Failed to start external identity link'));
+            setLinkingProvider('');
+        }
+    };
 
     const clearCredentials = () => {
         setPassword('');
@@ -208,6 +250,47 @@ export default function Settings() {
                     </div>
                 </div>
             </ContentCard>
+
+            {authMethods && authMethods.providers.length > 0 && (
+                <ContentCard noPadding>
+                    <div className='flex flex-col gap-4 px-4 py-4 sm:px-5'>
+                        <div>
+                            <h2 className='text-sm font-semibold'>External identities</h2>
+                            <p className='mt-1 text-xs leading-5 text-muted'>
+                                Connect a verified sign-in provider to this account.
+                            </p>
+                        </div>
+                        <div className='divide-y divide-border rounded-lg border border-border'>
+                            {authMethods.providers.map((provider) => (
+                                <div
+                                    className='flex min-h-14 items-center justify-between gap-4 px-3 py-2.5'
+                                    key={provider.id}
+                                >
+                                    <div className='min-w-0'>
+                                        <div className='truncate text-sm font-medium'>
+                                            {provider.provider_name}
+                                        </div>
+                                        <div className='text-xs text-muted'>{provider.type}</div>
+                                    </div>
+                                    <Button
+                                        isDisabled={linkingProvider !== ''}
+                                        size='sm'
+                                        variant='secondary'
+                                        onPress={() => void linkExternalProvider(provider.id)}
+                                    >
+                                        {linkingProvider === provider.id ? (
+                                            <Loader2 className='h-4 w-4 animate-spin' />
+                                        ) : (
+                                            <KeyRound className='h-4 w-4' />
+                                        )}
+                                        Link
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </ContentCard>
+            )}
 
             <DialogShell
                 icon={<ShieldCheck className='h-5 w-5' />}

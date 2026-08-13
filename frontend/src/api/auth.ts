@@ -1,5 +1,6 @@
 import type {
     AuthMethods,
+    ExternalAuthStartResponse,
     LoginRequest,
     RecoveryCodesResponse,
     RegisterRequest,
@@ -13,6 +14,10 @@ import { del, get, post } from './client.ts';
 
 export const authApi = {
     methods: () => get<AuthMethods>('/auth/methods'),
+    linkExternalProvider: (providerId: string) =>
+        post<ExternalAuthStartResponse>(
+            `/auth/providers/${encodeURIComponent(providerId)}/link?return_to=${encodeURIComponent('/settings?external_link=success')}`
+        ),
     login: (payload: LoginRequest) => post<User>('/auth/login', payload),
     register: (payload: RegisterRequest) => post<User>('/auth/register', payload),
     me: () => get<User>('/auth/me'),

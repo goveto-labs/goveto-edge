@@ -503,6 +503,22 @@ model DynamicSetting {
   @@map("dynamic_settings")
 }
 
+model ExternalIdentity {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  providerId String   @map("provider_id")
+  issuer     String
+  subject    String
+  email      String
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @default(now()) @updatedAt @map("updated_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, issuer, subject])
+  @@index([userId])
+  @@map("external_identities")
+}
+
 model InstallJob {
   id                String    @id @default(uuid())
   nodeId            UUID      @map("node_id")
@@ -958,6 +974,7 @@ model User {
   createdAt           DateTime             @default(now()) @map("created_at")
   updatedAt           DateTime             @default(now()) @updatedAt @map("updated_at")
   sessions            UserSession[]
+  externalIdentities  ExternalIdentity[]
   passwordResetTokens PasswordResetToken[]
   auditLogs           AuditLog[]
   createdClusters     Cluster[]

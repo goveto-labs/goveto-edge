@@ -424,6 +424,20 @@ query.PostAuthorIdColumn
   - `Description` (String, optional)
   - `Updatedat` (DateTime)
 
+### ExternalIdentity
+
+- Client handle: `c.ExternalIdentity`
+- Query namespace: `query.ExternalIdentity`
+- Fields:
+  - `Id` (String, id)
+  - `Userid` (String)
+  - `Providerid` (String)
+  - `Issuer` (String)
+  - `Subject` (String)
+  - `Email` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### InstallJob
 
 - Client handle: `c.InstallJob`

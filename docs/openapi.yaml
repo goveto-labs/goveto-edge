@@ -693,6 +693,48 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/auth/providers/{provider_id}/link:
+        post:
+            operationId: externalAuthLink
+            summary: Link external identity
+            description: Start an external authentication flow that links the verified identity to the current user.
+            tags:
+                - auth-providers
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - limiter.Limit
+            parameters:
+                - name: provider_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: return_to
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: External provider authorization URL.
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    authorization_url:
+                                        type: string
+                                        format: uri
+                "401":
+                    description: Authentication required.
+                "503":
+                    description: Login state storage unavailable.
     /api/v1/auth/providers/callback:
         get:
             operationId: externalAuthCallback

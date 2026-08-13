@@ -36,6 +36,8 @@ func TestEmbeddedSchemaCompilesForDBPush(t *testing.T) {
 		`"next_attempt_at" TIMESTAMPTZ NOT NULL DEFAULT NOW()`,
 		`CREATE INDEX "idx_agent_tasks_status_next_attempt_at" ON "agent_tasks" ("status", "next_attempt_at")`,
 		`'DEAD_LETTER'`,
+		`CREATE TABLE "external_identities"`,
+		`UNIQUE ("provider_id", "issuer", "subject")`,
 	} {
 		if !strings.Contains(plan, expected) {
 			t.Fatalf("schema plan is missing %q", expected)

@@ -42,24 +42,37 @@ type authProviderPublicResponse struct {
 	Enabled      bool                      `json:"enabled"`
 }
 
+type externalAuthStartResponse struct {
+	AuthorizationURL string `json:"authorization_url"`
+}
+
 type externalClaims struct {
 	Subject       string
+	Issuer        string
 	Email         string
 	EmailVerified bool
 	Name          string
 }
 
 type oidcClaims struct {
-	Subject           string `json:"sub"`
-	Email             string `json:"email"`
-	EmailVerified     bool   `json:"email_verified"`
-	PreferredUsername string `json:"preferred_username"`
-	Name              string `json:"name"`
+	Subject       string `json:"sub"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	Name          string `json:"name"`
 }
+
+var (
+	errExternalIdentityConflict = errors.New("This identity is linked to another account")
+	errExternalEmailConflict    = errors.New("An account with this email already exists; sign in locally before linking this provider")
+	errExternalAccountMissing   = errors.New("No local account matches this identity")
+	errExternalVerifiedEmail    = errors.New("A verified email address is required to create an account")
+	errExternalAccountInactive  = errors.New("This account is disabled")
+)
 
 func registerExternalAuth(group *echo.Group, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher settings.SecretCipher, limiter *httpsecurity.RateLimiter) {
 	group.GET("/methods", authMethods(settingStore, cipher), limiter.Limit("auth-methods", 60, time.Minute))
-	group.GET("/providers/:provider_id/start", externalAuthStart(sessions, settingStore, cipher), limiter.Limit("external-auth-start", 30, time.Minute))
+	group.GET("/providers/:provider_id/start", externalAuthStart(sessions, settingStore, cipher, false), limiter.Limit("external-auth-start", 30, time.Minute))
+	group.POST("/providers/:provider_id/link", externalAuthStart(sessions, settingStore, cipher, true), authn.RequireAuth, limiter.Limit("external-auth-link", 10, time.Minute))
 	group.GET("/providers/callback", externalAuthCallback(db, sessions, settingStore, cipher), limiter.Limit("external-auth-callback", 60, time.Minute))
 }
 
@@ -91,11 +104,11 @@ func authMethods(settingStore *settings.Store, cipher settings.SecretCipher) ech
 	}
 }
 
-func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Store, cipher settings.SecretCipher) echo.HandlerFunc {
+func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Store, cipher settings.SecretCipher, link bool) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		configs, _, err := settingStore.AuthProviders(c.Request().Context(), cipher)
 		if err != nil {
-			return externalAuthFailure(c, "Single sign-on is unavailable")
+			return externalAuthStartFailure(c, link, http.StatusServiceUnavailable, "Single sign-on is unavailable")
 		}
 		providerID := strings.TrimSpace(c.Param("provider_id"))
 		var config settings.AuthProviderConfig
@@ -106,11 +119,11 @@ func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Stor
 			}
 		}
 		if config.ID == "" {
-			return externalAuthFailure(c, "The selected sign-in provider is unavailable")
+			return externalAuthStartFailure(c, link, http.StatusBadRequest, "The selected sign-in provider is unavailable")
 		}
 		oauthConfig, _, err := externalOAuthConfig(c.Request().Context(), config)
 		if err != nil {
-			return externalAuthFailure(c, "Single sign-on is unavailable")
+			return externalAuthStartFailure(c, link, http.StatusServiceUnavailable, "Single sign-on is unavailable")
 		}
 		state, err := randomURLToken(32)
 		if err != nil {
@@ -121,15 +134,24 @@ func externalAuthStart(sessions *authn.SessionStore, settingStore *settings.Stor
 			return err
 		}
 		verifier := oauth2.GenerateVerifier()
+		linkUserID := ""
+		if link {
+			linkUserID = authn.CurrentUID(c)
+		}
 		if err = sessions.StoreExternalAuthState(c.Request().Context(), state, authn.ExternalAuthState{
-			CodeVerifier: verifier, ReturnPath: validReturnPath(c.QueryParam("return_to")), ProviderID: config.ID,
+			CodeVerifier: verifier, ReturnPath: validReturnPath(c.QueryParam("return_to")),
+			ProviderID: config.ID, LinkUserID: linkUserID,
 		}, browserBinding); err != nil {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "login state storage unavailable")
 		}
 		sessions.SetExternalAuthBindingCookie(c, state, browserBinding)
-		return c.Redirect(http.StatusFound, oauthConfig.AuthCodeURL(
+		authorizationURL := oauthConfig.AuthCodeURL(
 			state, oauth2.AccessTypeOnline, oauth2.S256ChallengeOption(verifier),
-		))
+		)
+		if link {
+			return types.JSON(c, http.StatusOK, externalAuthStartResponse{AuthorizationURL: authorizationURL})
+		}
+		return c.Redirect(http.StatusFound, authorizationURL)
 	}
 }
 
@@ -138,51 +160,57 @@ func externalAuthCallback(db *client.Client, sessions *authn.SessionStore, setti
 		state := strings.TrimSpace(c.QueryParam("state"))
 		browserBinding := sessions.ExternalAuthBinding(c, state)
 		sessions.ClearExternalAuthBindingCookie(c, state)
-		if c.QueryParam("error") != "" {
-			return externalAuthFailure(c, "The identity provider rejected the login")
-		}
-		code := strings.TrimSpace(c.QueryParam("code"))
-		if state == "" || code == "" {
+		if state == "" {
 			return externalAuthFailure(c, "The single sign-on response is incomplete")
 		}
 		loginState, err := sessions.ConsumeExternalAuthState(c.Request().Context(), state, browserBinding)
 		if err != nil {
 			return externalAuthFailure(c, "The single sign-on request expired")
 		}
+		if loginState.LinkUserID != "" && authn.CurrentUID(c) != loginState.LinkUserID {
+			return externalAuthFlowFailure(c, loginState, "Sign in again before linking this provider")
+		}
+		if c.QueryParam("error") != "" {
+			return externalAuthFlowFailure(c, loginState, "The identity provider rejected the login")
+		}
+		code := strings.TrimSpace(c.QueryParam("code"))
+		if code == "" {
+			return externalAuthFlowFailure(c, loginState, "The single sign-on response is incomplete")
+		}
 		config, err := configuredProvider(c.Request().Context(), settingStore, cipher, loginState.ProviderID)
 		if err != nil {
-			return externalAuthFailure(c, "The selected sign-in provider is unavailable")
+			return externalAuthFlowFailure(c, loginState, "The selected sign-in provider is unavailable")
 		}
 		oauthConfig, oidcProvider, err := externalOAuthConfig(c.Request().Context(), config)
 		if err != nil {
-			return externalAuthFailure(c, "Single sign-on is unavailable")
+			return externalAuthFlowFailure(c, loginState, "Single sign-on is unavailable")
 		}
 		token, err := oauthConfig.Exchange(c.Request().Context(), code, oauth2.VerifierOption(loginState.CodeVerifier))
 		if err != nil {
-			return externalAuthFailure(c, "The identity provider could not complete the login")
+			return externalAuthFlowFailure(c, loginState, "The identity provider could not complete the login")
 		}
 		claims, err := externalUserClaims(c.Request().Context(), config, oidcProvider, oauthConfig, token)
 		if err != nil {
-			return externalAuthFailure(c, err.Error())
+			return externalAuthFlowFailure(c, loginState, err.Error())
 		}
 
-		user, err := db.User.FindUnique(c.Request().Context(), query.User.Email.Equals(claims.Email))
+		user, created, err := resolveExternalUser(c.Request().Context(), db, config, claims, loginState.LinkUserID)
 		if err != nil {
+			if errors.Is(err, errExternalIdentityConflict) || errors.Is(err, errExternalEmailConflict) ||
+				errors.Is(err, errExternalAccountMissing) || errors.Is(err, errExternalVerifiedEmail) ||
+				errors.Is(err, errExternalAccountInactive) {
+				return externalAuthFlowFailure(c, loginState, err.Error())
+			}
 			return err
 		}
-		created := false
-		if user == nil {
-			if !config.AutoCreateUsers {
-				return externalAuthFailure(c, "No local account matches this identity")
-			}
-			user, err = createExternalUser(c.Request().Context(), db, claims)
-			if err != nil {
-				return err
-			}
-			created = true
-		}
-		if user.Status != model.UserStatusACTIVE {
-			return externalAuthFailure(c, "This account is disabled")
+		if loginState.LinkUserID != "" {
+			audit.SetActor(c, user.Id, user.Email)
+			audit.SetResourceID(c, user.Id)
+			audit.SetChange(c, nil, map[string]any{
+				"user_id": user.Id, "provider_id": config.ID, "provider": config.ProviderName,
+				"provider_type": config.Type, "created": created, "linked": true,
+			})
+			return c.Redirect(http.StatusFound, validReturnPath(loginState.ReturnPath))
 		}
 		now := time.Now().UTC()
 		if _, err = db.User.Update().Where(query.User.Id.Equals(user.Id)).Set(
@@ -204,7 +232,7 @@ func externalAuthCallback(db *client.Client, sessions *authn.SessionStore, setti
 		audit.SetResourceID(c, user.Id)
 		audit.SetChange(c, nil, map[string]any{
 			"user_id": user.Id, "provider_id": config.ID, "provider": config.ProviderName,
-			"provider_type": config.Type, "created": created,
+			"provider_type": config.Type, "created": created, "linked": loginState.LinkUserID != "",
 		})
 		return c.Redirect(http.StatusFound, validReturnPath(loginState.ReturnPath))
 	}
@@ -258,17 +286,7 @@ func externalUserClaims(ctx context.Context, config settings.AuthProviderConfig,
 		if err = idToken.Claims(&claims); err != nil {
 			return externalClaims{}, errors.New("The identity token claims are invalid")
 		}
-		email := claims.Email
-		verified := claims.EmailVerified
-		if config.Preset == "MICROSOFT_ENTRA" {
-			if strings.TrimSpace(email) == "" {
-				email = claims.PreferredUsername
-			}
-			verified = strings.TrimSpace(email) != ""
-		}
-		return normalizeExternalClaims(externalClaims{
-			Subject: claims.Subject, Email: email, EmailVerified: verified, Name: claims.Name,
-		})
+		return externalClaimsFromOIDC(idToken.Issuer, claims)
 	}
 
 	client := oauthConfig.Client(ctx, token)
@@ -304,18 +322,175 @@ func externalUserClaims(ctx context.Context, config settings.AuthProviderConfig,
 	return normalizeExternalClaims(claims)
 }
 
+func externalClaimsFromOIDC(issuer string, claims oidcClaims) (externalClaims, error) {
+	return normalizeExternalClaims(externalClaims{
+		Subject: claims.Subject, Issuer: issuer, Email: claims.Email,
+		EmailVerified: claims.EmailVerified, Name: claims.Name,
+	})
+}
+
 func normalizeExternalClaims(claims externalClaims) (externalClaims, error) {
 	claims.Subject = strings.TrimSpace(claims.Subject)
+	claims.Issuer = strings.TrimSpace(claims.Issuer)
 	claims.Email = strings.ToLower(strings.TrimSpace(claims.Email))
 	claims.Name = strings.TrimSpace(claims.Name)
-	if claims.Subject == "" || claims.Email == "" || !claims.EmailVerified {
-		return externalClaims{}, errors.New("A verified email address is required")
+	if claims.Subject == "" {
+		return externalClaims{}, errors.New("The identity provider subject is missing")
 	}
-	address, err := mail.ParseAddress(claims.Email)
-	if err != nil || address.Address != claims.Email {
-		return externalClaims{}, errors.New("The identity provider returned an invalid email address")
+	if claims.Email != "" {
+		address, err := mail.ParseAddress(claims.Email)
+		if err != nil || address.Address != claims.Email {
+			return externalClaims{}, errors.New("The identity provider returned an invalid email address")
+		}
 	}
 	return claims, nil
+}
+
+type externalIdentityDecision int
+
+const (
+	externalIdentityUseExisting externalIdentityDecision = iota
+	externalIdentityBindUser
+	externalIdentityCreateUser
+)
+
+func decideExternalIdentityUser(identityUserID, linkUserID, emailUserID string, autoCreate, verifiedEmail bool) (externalIdentityDecision, string, error) {
+	if identityUserID != "" {
+		if linkUserID != "" && identityUserID != linkUserID {
+			return 0, "", errExternalIdentityConflict
+		}
+		return externalIdentityUseExisting, identityUserID, nil
+	}
+	if linkUserID != "" {
+		return externalIdentityBindUser, linkUserID, nil
+	}
+	if !verifiedEmail {
+		return 0, "", errExternalVerifiedEmail
+	}
+	if emailUserID != "" {
+		return 0, "", errExternalEmailConflict
+	}
+	if !autoCreate {
+		return 0, "", errExternalAccountMissing
+	}
+	return externalIdentityCreateUser, "", nil
+}
+
+func resolveExternalUser(ctx context.Context, db *client.Client, config settings.AuthProviderConfig, claims externalClaims, linkUserID string) (*model.User, bool, error) {
+	issuer := externalIdentityIssuer(config, claims)
+	if issuer == "" {
+		return nil, false, errors.New("external identity issuer is missing")
+	}
+
+	var resolved *model.User
+	created := false
+	err := db.Tx(ctx, func(tx *client.Client) error {
+		identityLock, err := externalIdentityLockKey(config.ID, issuer, claims.Subject)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "external-identity:"+identityLock); err != nil {
+			return err
+		}
+		identity, err := tx.ExternalIdentity.Query().Where(query.ExternalIdentity.AND(
+			query.ExternalIdentity.ProviderId.Equals(config.ID),
+			query.ExternalIdentity.Issuer.Equals(issuer),
+			query.ExternalIdentity.Subject.Equals(claims.Subject),
+		)).First(ctx)
+		if err != nil {
+			return err
+		}
+		identityUserID := ""
+		if identity != nil {
+			identityUserID = identity.UserId
+		}
+
+		var emailUser *model.User
+		emailUserID := ""
+		verifiedEmail := claims.EmailVerified && claims.Email != ""
+		if identity == nil && linkUserID == "" && verifiedEmail {
+			if _, err := tx.RawExec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "external-email:"+claims.Email); err != nil {
+				return err
+			}
+			emailUser, err = tx.User.FindUnique(ctx, query.User.Email.Equals(claims.Email))
+			if err != nil {
+				return err
+			}
+			if emailUser != nil {
+				emailUserID = emailUser.Id
+			}
+		}
+		decision, userID, err := decideExternalIdentityUser(identityUserID, linkUserID, emailUserID, config.AutoCreateUsers, verifiedEmail)
+		if err != nil {
+			return err
+		}
+
+		switch decision {
+		case externalIdentityUseExisting:
+			resolved, err = tx.User.FindUnique(ctx, query.User.Id.Equals(userID))
+			if err != nil {
+				return err
+			}
+			if resolved == nil {
+				return errExternalAccountMissing
+			}
+			if resolved.Status != model.UserStatusACTIVE {
+				return errExternalAccountInactive
+			}
+			if verifiedEmail && identity.Email != claims.Email {
+				_, err = tx.ExternalIdentity.Update().Where(query.ExternalIdentity.Id.Equals(identity.Id)).Set(
+					query.ExternalIdentity.Email.Set(claims.Email),
+				).DoMany(ctx)
+			}
+			return err
+		case externalIdentityBindUser:
+			resolved, err = tx.User.FindUnique(ctx, query.User.Id.Equals(userID))
+			if err != nil {
+				return err
+			}
+			if resolved == nil {
+				return errExternalAccountMissing
+			}
+		case externalIdentityCreateUser:
+			resolved, err = createExternalUser(ctx, tx, claims)
+			if err != nil {
+				return err
+			}
+			created = true
+		}
+		if resolved.Status != model.UserStatusACTIVE {
+			return errExternalAccountInactive
+		}
+
+		identityEmail := claims.Email
+		if identityEmail == "" {
+			identityEmail = resolved.Email
+		}
+		_, err = tx.ExternalIdentity.Create().Set(
+			query.ExternalIdentity.UserId.Set(resolved.Id),
+			query.ExternalIdentity.ProviderId.Set(config.ID),
+			query.ExternalIdentity.Issuer.Set(issuer),
+			query.ExternalIdentity.Subject.Set(claims.Subject),
+			query.ExternalIdentity.Email.Set(identityEmail),
+		).Do(ctx)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return resolved, created, nil
+}
+
+func externalIdentityIssuer(config settings.AuthProviderConfig, claims externalClaims) string {
+	if config.Type == settings.AuthProviderOAuth2 {
+		return "provider:" + config.ID
+	}
+	return strings.TrimSpace(claims.Issuer)
+}
+
+func externalIdentityLockKey(providerID, issuer, subject string) (string, error) {
+	encoded, err := json.Marshal([]string{providerID, issuer, subject})
+	return string(encoded), err
 }
 
 func getProviderJSON(ctx context.Context, client *http.Client, endpoint string, target any) error {
@@ -401,4 +576,18 @@ func validReturnPath(value string) string {
 
 func externalAuthFailure(c *echo.Context, message string) error {
 	return c.Redirect(http.StatusFound, "/login?auth_error="+url.QueryEscape(message))
+}
+
+func externalAuthStartFailure(c *echo.Context, link bool, status int, message string) error {
+	if link {
+		return echo.NewHTTPError(status, message)
+	}
+	return externalAuthFailure(c, message)
+}
+
+func externalAuthFlowFailure(c *echo.Context, state authn.ExternalAuthState, message string) error {
+	if state.LinkUserID != "" {
+		return c.Redirect(http.StatusFound, "/settings?auth_error="+url.QueryEscape(message))
+	}
+	return externalAuthFailure(c, message)
 }

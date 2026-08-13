@@ -301,6 +301,19 @@ type DynamicSetting struct {
 	UpdatedAt   time.Time       `db:"updated_at" json:"updatedAt"`
 }
 
+// ExternalIdentity represents the ExternalIdentity model.
+type ExternalIdentity struct {
+	Id         string    `db:"id" json:"id"`
+	UserId     string    `db:"user_id" json:"userId"`
+	ProviderId string    `db:"provider_id" json:"providerId"`
+	Issuer     string    `db:"issuer" json:"issuer"`
+	Subject    string    `db:"subject" json:"subject"`
+	Email      string    `db:"email" json:"email"`
+	CreatedAt  time.Time `db:"created_at" json:"createdAt"`
+	UpdatedAt  time.Time `db:"updated_at" json:"updatedAt"`
+	User       *User     `db:"-" json:"user,omitempty"`
+}
+
 // InstallJob represents the InstallJob model.
 type InstallJob struct {
 	Id                string           `db:"id" json:"id"`
@@ -688,6 +701,7 @@ type User struct {
 	CreatedAt           time.Time             `db:"created_at" json:"createdAt"`
 	UpdatedAt           time.Time             `db:"updated_at" json:"updatedAt"`
 	Sessions            []*UserSession        `db:"-" json:"sessions,omitempty"`
+	ExternalIdentities  []*ExternalIdentity   `db:"-" json:"externalIdentities,omitempty"`
 	PasswordResetTokens []*PasswordResetToken `db:"-" json:"passwordResetTokens,omitempty"`
 	AuditLogs           []*AuditLog           `db:"-" json:"auditLogs,omitempty"`
 	CreatedClusters     []*Cluster            `db:"-" json:"createdClusters,omitempty"`
