@@ -77,7 +77,7 @@ func TestDialContextRevalidatesDNS(t *testing.T) {
 
 func TestClientRejectsRedirectToPrivateDestination(t *testing.T) {
 	policy := NewPolicy()
-	client := policy.Client()
+	client := policy.Client("https")
 	request := &http.Request{URL: &url.URL{Scheme: "https", Host: "127.0.0.1"}}
 	if err := client.CheckRedirect(request, nil); err == nil {
 		t.Fatal("redirect to a private destination was accepted")
@@ -86,9 +86,22 @@ func TestClientRejectsRedirectToPrivateDestination(t *testing.T) {
 
 func TestClientRejectsRedirectDowngrade(t *testing.T) {
 	policy := NewPolicy()
-	client := policy.Client()
+	client := policy.Client("https")
 	request := &http.Request{URL: &url.URL{Scheme: "http", Host: "8.8.8.8"}}
 	if err := client.CheckRedirect(request, nil); err == nil {
 		t.Fatal("redirect from HTTPS to HTTP was accepted")
+	}
+}
+
+func TestClientUsesConfiguredRedirectSchemes(t *testing.T) {
+	policy := NewPolicy()
+	policy.resolver = staticResolver{"public.example": {netip.MustParseAddr("8.8.8.8")}}
+	request := &http.Request{URL: &url.URL{Scheme: "http", Host: "public.example"}}
+
+	if err := policy.Client("https").CheckRedirect(request, nil); err == nil {
+		t.Fatal("HTTPS-only client accepted an HTTP redirect")
+	}
+	if err := policy.Client("http", "https").CheckRedirect(request, nil); err != nil {
+		t.Fatalf("client rejected an explicitly allowed HTTP redirect: %v", err)
 	}
 }

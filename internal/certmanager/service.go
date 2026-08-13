@@ -124,7 +124,7 @@ func (transport acmeRoundTripper) RoundTrip(request *http.Request) (*http.Respon
 }
 
 func newACMEHTTPClient(policy *outboundhttp.Policy) *http.Client {
-	httpClient := policy.Client()
+	httpClient := policy.Client("https")
 	httpClient.Transport = acmeRoundTripper{policy: policy, next: httpClient.Transport}
 	return httpClient
 }

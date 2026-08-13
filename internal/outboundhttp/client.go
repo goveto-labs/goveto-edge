@@ -148,8 +148,10 @@ func (p *Policy) DialContext(ctx context.Context, network, address string) (net.
 	return nil, fmt.Errorf("connect to destination: %w", errors.Join(failures...))
 }
 
-// Client returns an HTTP client that revalidates redirects and pins connections to checked IPs.
-func (p *Policy) Client() *http.Client {
+// Client returns an HTTP client that revalidates redirects against the allowed
+// schemes and pins connections to checked IPs.
+func (p *Policy) Client(schemes ...string) *http.Client {
+	allowedSchemes := append([]string(nil), schemes...)
 	transport := &http.Transport{
 		Proxy:                 nil,
 		DialContext:           p.DialContext,
@@ -167,7 +169,7 @@ func (p *Policy) Client() *http.Client {
 			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
 			}
-			return p.ValidateURL(request.Context(), request.URL, "https")
+			return p.ValidateURL(request.Context(), request.URL, allowedSchemes...)
 		},
 	}
 }

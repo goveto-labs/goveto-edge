@@ -33,7 +33,7 @@ const notificationResponseLimit = 1 << 20
 
 var (
 	notificationOutboundPolicy = outboundhttp.NewPolicy()
-	notificationHTTPClient     = notificationOutboundPolicy.Client()
+	notificationHTTPClient     = notificationOutboundPolicy.Client("https")
 	notificationSendSlots      = make(chan struct{}, 16)
 )
 
