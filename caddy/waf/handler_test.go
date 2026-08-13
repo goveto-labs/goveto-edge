@@ -657,7 +657,7 @@ func TestDistributedChallengeStateRejectsReplay(t *testing.T) {
 	h.distributed, h.distributedErr = store, nil
 	ip := "198.51.100.21"
 	base := captchaRequest("http://example.test/protected", ip)
-	cacheKey := h.challengeCacheKey("shield", base, ip)
+	cacheKey := h.challengeCacheKey("shield", ip)
 	powChallengeCache.Delete(cacheKey)
 	t.Cleanup(func() { powChallengeCache.Delete(cacheKey) })
 	token, err := h.challengeToken("shield", base, ip)
@@ -828,7 +828,7 @@ func TestPoWGenerationWaitHonorsCancellationAndQueueLimit(t *testing.T) {
 	}
 }
 
-func TestChallengeCacheKeyNormalizesControllableHeaders(t *testing.T) {
+func TestChallengeCacheKeyExcludesControllableHeaders(t *testing.T) {
 	h := &Handler{SiteID: "captcha-cache-key", challengeKey: []byte("0123456789abcdef0123456789abcdef")}
 	first := captchaRequest("http://example.test/protected", "192.0.2.1")
 	first.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/140.0.0.0 Safari/537.36")
@@ -836,8 +836,11 @@ func TestChallengeCacheKeyNormalizesControllableHeaders(t *testing.T) {
 	second := captchaRequest("http://example.test/protected", "192.0.2.1")
 	second.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0) Chrome/999.12.34.56 arbitrary")
 	second.Header.Set("Accept-Language", "attacker-controlled")
-	if firstKey, secondKey := h.challengeCacheKey("shield", first, "192.0.2.1"), h.challengeCacheKey("shield", second, "192.0.2.1"); firstKey != secondKey {
+	if firstKey, secondKey := h.challengeCacheKey("shield", "192.0.2.1"), h.challengeCacheKey("shield", "192.0.2.1"); firstKey != secondKey {
 		t.Fatalf("controllable header variants created different cache keys: %q != %q", firstKey, secondKey)
+	}
+	if firstKey, secondKey := h.challengeCacheKey("shield", "192.0.2.1"), h.challengeCacheKey("shield", "192.0.2.2"); firstKey == secondKey {
+		t.Fatal("different client IPs shared a challenge cache key")
 	}
 	if firstBinding, secondBinding := requestBinding(h.challengeKey, first, "192.0.2.1"), requestBinding(h.challengeKey, second, "192.0.2.1"); firstBinding == secondBinding {
 		t.Fatal("full challenge binding did not retain request-specific headers")

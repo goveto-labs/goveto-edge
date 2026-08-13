@@ -135,7 +135,7 @@ func (h Handler) hasCaptchaRule() bool {
 }
 
 func (h Handler) challengeToken(ruleID string, r *http.Request, ip string) (string, error) {
-	cacheKey := h.challengeCacheKey(ruleID, r, ip)
+	cacheKey := h.challengeCacheKey(ruleID, ip)
 	binding := requestBinding(h.challengeKey, r, ip)
 	now := time.Now()
 	if value, ok := powChallengeCache.Load(cacheKey); ok {
@@ -248,7 +248,7 @@ func acquirePoWGeneration(ctx context.Context, queue, slots chan struct{}) (func
 	}
 }
 
-func (h Handler) challengeCacheKey(ruleID string, r *http.Request, ip string) string {
+func (h Handler) challengeCacheKey(ruleID, ip string) string {
 	mac := hmac.New(sha256.New, h.challengeKey)
 	_, _ = io.WriteString(mac, "challenge-cache\x00")
 	_, _ = io.WriteString(mac, h.SiteID)
@@ -256,31 +256,7 @@ func (h Handler) challengeCacheKey(ruleID string, r *http.Request, ip string) st
 	_, _ = io.WriteString(mac, ruleID)
 	_, _ = io.WriteString(mac, "\x00")
 	_, _ = io.WriteString(mac, ip)
-	_, _ = io.WriteString(mac, "\x00")
-	_, _ = io.WriteString(mac, normalizedChallengeUserAgent(r.UserAgent()))
 	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
-}
-
-func normalizedChallengeUserAgent(value string) string {
-	value = strings.ToLower(value)
-	family := "other"
-	for _, candidate := range []string{"edg/", "opr/", "chrome/", "firefox/", "safari/"} {
-		if strings.Contains(value, candidate) {
-			family = strings.TrimSuffix(candidate, "/")
-			break
-		}
-	}
-	platform := "other"
-	for _, candidate := range []string{"android", "iphone", "ipad", "windows", "macintosh", "linux"} {
-		if strings.Contains(value, candidate) {
-			platform = candidate
-			break
-		}
-	}
-	if strings.Contains(value, "mobile") {
-		platform += "-mobile"
-	}
-	return family + ":" + platform
 }
 
 func (h Handler) pruneChallengeCache(now time.Time) {
@@ -344,7 +320,7 @@ func (h Handler) completeChallenge(w http.ResponseWriter, r *http.Request, ruleI
 			}
 			return false
 		}
-		powChallengeCache.Delete(h.challengeCacheKey(ruleID, r, ip))
+		powChallengeCache.Delete(h.challengeCacheKey(ruleID, ip))
 		if !consumed {
 			w.Header().Set("X-Goveto-WAF-Challenge", "replayed")
 			return false
