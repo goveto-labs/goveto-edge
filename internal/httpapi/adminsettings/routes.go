@@ -213,35 +213,31 @@ func update(settingStore *settings.Store, cipher settings.SecretCipher, restartC
 		}
 
 		restartRequired := currentAddress != address || !reflect.DeepEqual(currentProxy, input.HTTPProxy)
+		settingsUpdate := settings.AdminSettingsUpdate{
+			RequireTOTP:         input.Authentication.RequireTOTP,
+			AuthProviders:       storedProviders,
+			RegistrationEnabled: input.Authentication.Registration.Enabled,
+			Captcha:             captchaConfig,
+		}
 		if currentAddress != address {
-			if err = settingStore.SetAgentGatewayPublicAddress(c.Request().Context(), address); err != nil {
-				return err
-			}
+			settingsUpdate.AgentGatewayPublicAddress = &address
 		}
 		if !reflect.DeepEqual(currentProxy, input.HTTPProxy) {
-			if err = settingStore.SetHTTPProxy(c.Request().Context(), input.HTTPProxy); err != nil {
-				return err
-			}
+			settingsUpdate.HTTPProxy = &input.HTTPProxy
 		}
 		if currentLocalLogin != input.Authentication.LocalLoginEnabled {
-			if err = settingStore.SetLocalLoginEnabled(c.Request().Context(), input.Authentication.LocalLoginEnabled); err != nil {
-				return err
-			}
+			settingsUpdate.LocalLoginEnabled = &input.Authentication.LocalLoginEnabled
 		}
 		if currentRetention != input.JobRetention {
-			if err = settingStore.SetJobRetention(c.Request().Context(), input.JobRetention); err != nil {
-				return err
-			}
+			settingsUpdate.JobRetention = &input.JobRetention
 		}
-		if err = settingStore.SetRequireTOTP(c.Request().Context(), input.Authentication.RequireTOTP); err != nil {
+		prepared, err := settings.PrepareAdminSettingsUpdate(
+			settingsUpdate, currentProviders, currentCaptcha, cipher,
+		)
+		if err != nil {
 			return err
 		}
-		if err = settingStore.SetAuthProviders(c.Request().Context(), storedProviders, cipher); err != nil {
-			return err
-		}
-		if err = settingStore.SetRegistrationConfig(
-			c.Request().Context(), input.Authentication.Registration.Enabled, captchaConfig, cipher,
-		); err != nil {
+		if err = settingStore.ApplyAdminSettingsUpdate(c.Request().Context(), prepared); err != nil {
 			return err
 		}
 

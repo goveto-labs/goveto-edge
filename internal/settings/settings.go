@@ -113,6 +113,31 @@ type Store struct {
 	recorder audit.Recorder
 }
 
+type preparedSetting struct {
+	key         string
+	value       json.RawMessage
+	description string
+}
+
+// AdminSettingsUpdate contains one complete admin settings form submission.
+// Pointer fields are omitted when the corresponding value has not changed.
+type AdminSettingsUpdate struct {
+	AgentGatewayPublicAddress *string
+	HTTPProxy                 *HTTPProxyConfig
+	LocalLoginEnabled         *bool
+	JobRetention              *JobRetentionConfig
+	RequireTOTP               bool
+	AuthProviders             []AuthProviderConfig
+	RegistrationEnabled       bool
+	Captcha                   CaptchaConfig
+}
+
+// PreparedAdminSettingsUpdate contains validated, encrypted, and encoded
+// values that are ready to be persisted without further fallible preparation.
+type PreparedAdminSettingsUpdate struct {
+	settings []preparedSetting
+}
+
 func New(db *client.Client, recorder audit.Recorder) *Store {
 	return &Store{db: db, recorder: recorder}
 }
@@ -132,27 +157,39 @@ func (s *Store) Get(ctx context.Context, key string, target any) (bool, error) {
 }
 
 func (s *Store) Set(ctx context.Context, key string, value any, description string) error {
+	setting, err := prepareSetting(key, value, description)
+	if err != nil {
+		return err
+	}
+	return s.setPrepared(ctx, setting)
+}
+
+func prepareSetting(key string, value any, description string) (preparedSetting, error) {
 	encoded, err := json.Marshal(value)
 	if err != nil {
-		return fmt.Errorf("encode setting %q: %w", key, err)
+		return preparedSetting{}, fmt.Errorf("encode setting %q: %w", key, err)
 	}
-	previous, err := s.db.DynamicSetting.FindUnique(ctx, query.DynamicSetting.Key.Equals(key))
+	return preparedSetting{key: key, value: encoded, description: description}, nil
+}
+
+func (s *Store) setPrepared(ctx context.Context, setting preparedSetting) error {
+	previous, err := s.db.DynamicSetting.FindUnique(ctx, query.DynamicSetting.Key.Equals(setting.key))
 	if err != nil {
-		return fmt.Errorf("read setting %q before update: %w", key, err)
+		return fmt.Errorf("read setting %q before update: %w", setting.key, err)
 	}
 	now := time.Now().UTC()
 	_, err = s.db.DynamicSetting.UpsertOne(
 		ctx,
-		query.DynamicSetting.Key.Equals(key),
+		query.DynamicSetting.Key.Equals(setting.key),
 		[]query.DynamicSettingSetClause{
-			query.DynamicSetting.Key.Set(key),
-			query.DynamicSetting.ValueJson.Set(encoded),
-			query.DynamicSetting.Description.Set(description),
+			query.DynamicSetting.Key.Set(setting.key),
+			query.DynamicSetting.ValueJson.Set(setting.value),
+			query.DynamicSetting.Description.Set(setting.description),
 			query.DynamicSetting.UpdatedAt.Set(now),
 		},
 		[]query.DynamicSettingSetClause{
-			query.DynamicSetting.ValueJson.Set(encoded),
-			query.DynamicSetting.Description.Set(description),
+			query.DynamicSetting.ValueJson.Set(setting.value),
+			query.DynamicSetting.Description.Set(setting.description),
 			query.DynamicSetting.UpdatedAt.Set(now),
 		},
 	)
@@ -162,14 +199,114 @@ func (s *Store) Set(ctx context.Context, key string, value any, description stri
 			before = map[string]any{"value": previous.ValueJson, "description": previous.Description}
 		}
 		audit.RecordContext(
-			ctx, s.recorder, "system_setting.update", "dynamic_setting", key,
-			before, map[string]any{"value": json.RawMessage(encoded), "description": description}, err,
+			ctx, s.recorder, "system_setting.update", "dynamic_setting", setting.key,
+			before, map[string]any{"value": setting.value, "description": setting.description}, err,
 		)
 	}
 	if err != nil {
-		return fmt.Errorf("write setting %q: %w", key, err)
+		return fmt.Errorf("write setting %q: %w", setting.key, err)
 	}
 	return nil
+}
+
+// PrepareAdminSettingsUpdate performs all validation, secret encryption, and
+// JSON encoding required by an admin settings update before a transaction is
+// opened.
+func PrepareAdminSettingsUpdate(
+	input AdminSettingsUpdate,
+	currentProviders []AuthProviderConfig,
+	currentCaptcha CaptchaConfig,
+	cipher SecretCipher,
+) (*PreparedAdminSettingsUpdate, error) {
+	prepared := &PreparedAdminSettingsUpdate{}
+	appendSetting := func(key string, value any, description string) error {
+		setting, err := prepareSetting(key, value, description)
+		if err != nil {
+			return err
+		}
+		prepared.settings = append(prepared.settings, setting)
+		return nil
+	}
+
+	if input.AgentGatewayPublicAddress != nil {
+		address, err := ValidateAgentGatewayPublicAddress(*input.AgentGatewayPublicAddress)
+		if err != nil {
+			return nil, err
+		}
+		if err = appendSetting(AgentGatewayAddressKey, address, agentGatewayAddressDescription); err != nil {
+			return nil, err
+		}
+	}
+	if input.HTTPProxy != nil {
+		config := *input.HTTPProxy
+		config.ClientIPHeaders = append([]string(nil), input.HTTPProxy.ClientIPHeaders...)
+		if err := config.NormalizeAndValidate(); err != nil {
+			return nil, err
+		}
+		if err := appendSetting(HTTPProxyKey, config, httpProxyDescription); err != nil {
+			return nil, err
+		}
+	}
+	if input.LocalLoginEnabled != nil {
+		if err := appendSetting(LocalLoginEnabledKey, *input.LocalLoginEnabled, localLoginDescription); err != nil {
+			return nil, err
+		}
+	}
+	if input.JobRetention != nil {
+		if err := input.JobRetention.Validate(); err != nil {
+			return nil, err
+		}
+		if err := appendSetting(JobRetentionKey, *input.JobRetention, jobRetentionDescription); err != nil {
+			return nil, err
+		}
+	}
+	if err := appendSetting(RequireTOTPKey, input.RequireTOTP, "Require active users to enroll time-based one-time passwords"); err != nil {
+		return nil, err
+	}
+
+	providers, err := prepareAuthProviders(input.AuthProviders, currentProviders, cipher)
+	if err != nil {
+		return nil, err
+	}
+	if err = appendSetting(AuthProvidersKey, providers, authProvidersDescription); err != nil {
+		return nil, err
+	}
+
+	captcha, err := prepareRegistrationConfig(input.RegistrationEnabled, input.Captcha, currentCaptcha, cipher)
+	if err != nil {
+		return nil, err
+	}
+	if !input.RegistrationEnabled {
+		if err = appendSetting(RegistrationEnabledKey, false, registrationDescription); err != nil {
+			return nil, err
+		}
+	}
+	if err = appendSetting(CaptchaKey, captcha, captchaDescription); err != nil {
+		return nil, err
+	}
+	if input.RegistrationEnabled {
+		if err = appendSetting(RegistrationEnabledKey, true, registrationDescription); err != nil {
+			return nil, err
+		}
+	}
+	return prepared, nil
+}
+
+// ApplyAdminSettingsUpdate persists every prepared value and its audit record
+// in one transaction.
+func (s *Store) ApplyAdminSettingsUpdate(ctx context.Context, prepared *PreparedAdminSettingsUpdate) error {
+	if prepared == nil {
+		return errors.New("prepared admin settings update is required")
+	}
+	return s.db.Tx(ctx, func(tx *client.Client) error {
+		store := New(tx, audit.New(tx))
+		for _, setting := range prepared.settings {
+			if err := store.setPrepared(ctx, setting); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *Store) Initialized(ctx context.Context) (bool, error) {
@@ -301,6 +438,14 @@ func (s *Store) SetAuthProviders(ctx context.Context, providers []AuthProviderCo
 	if err != nil {
 		return err
 	}
+	stored, err := prepareAuthProviders(providers, existing, cipher)
+	if err != nil {
+		return err
+	}
+	return s.Set(ctx, AuthProvidersKey, stored, authProvidersDescription)
+}
+
+func prepareAuthProviders(providers, existing []AuthProviderConfig, cipher SecretCipher) ([]AuthProviderConfig, error) {
 	existingByID := make(map[string]AuthProviderConfig, len(existing))
 	for _, provider := range existing {
 		existingByID[provider.ID] = provider
@@ -312,10 +457,10 @@ func (s *Store) SetAuthProviders(ctx context.Context, providers []AuthProviderCo
 	for index, input := range providers {
 		input.ID = strings.TrimSpace(input.ID)
 		if input.ID == "" {
-			return errors.New("authentication provider ID is required")
+			return nil, errors.New("authentication provider ID is required")
 		}
 		if !validProviderID(input.ID) || seenIDs[input.ID] {
-			return fmt.Errorf("authentication provider ID %q is invalid or duplicated", input.ID)
+			return nil, fmt.Errorf("authentication provider ID %q is invalid or duplicated", input.ID)
 		}
 		seenIDs[input.ID] = true
 		newSecret := input.ClientSecret != ""
@@ -324,23 +469,24 @@ func (s *Store) SetAuthProviders(ctx context.Context, providers []AuthProviderCo
 			input.ClientSecret = previous.ClientSecret
 			input.ClientSecretValue = previous.ClientSecretValue
 		}
-		if err = input.NormalizeAndValidate(); err != nil {
-			return fmt.Errorf("authentication provider %q: %w", input.ProviderName, err)
+		if err := input.NormalizeAndValidate(); err != nil {
+			return nil, fmt.Errorf("authentication provider %q: %w", input.ProviderName, err)
 		}
 		nameKey := strings.ToLower(input.ProviderName)
 		if seenNames[nameKey] {
-			return fmt.Errorf("authentication provider name %q is duplicated", input.ProviderName)
+			return nil, fmt.Errorf("authentication provider name %q is duplicated", input.ProviderName)
 		}
 		seenNames[nameKey] = true
 
 		if newSecret {
 			if cipher == nil {
-				return errors.New("authentication provider secret cipher is unavailable")
+				return nil, errors.New("authentication provider secret cipher is unavailable")
 			}
-			input.ClientSecretValue, err = cipher.EncryptScoped(authProviderSecretScope(input.ID), input.ClientSecret)
+			encrypted, err := cipher.EncryptScoped(authProviderSecretScope(input.ID), input.ClientSecret)
 			if err != nil {
-				return fmt.Errorf("encrypt authentication provider %q client secret: %w", input.ProviderName, err)
+				return nil, fmt.Errorf("encrypt authentication provider %q client secret: %w", input.ProviderName, err)
 			}
+			input.ClientSecretValue = encrypted
 		} else if !existed {
 			input.ClientSecretValue = ""
 		}
@@ -349,9 +495,9 @@ func (s *Store) SetAuthProviders(ctx context.Context, providers []AuthProviderCo
 		stored[index] = input
 	}
 	if len(stored) > 20 {
-		return errors.New("at most 20 authentication providers may be configured")
+		return nil, errors.New("at most 20 authentication providers may be configured")
 	}
-	return s.Set(ctx, AuthProvidersKey, stored, authProvidersDescription)
+	return stored, nil
 }
 
 // RewrapAuthProviderSecrets upgrades encrypted client secrets in place while
@@ -664,37 +810,19 @@ func (s *Store) Captcha(ctx context.Context, cipher SecretCipher) (CaptchaConfig
 }
 
 func (s *Store) SetRegistrationConfig(ctx context.Context, enabled bool, config CaptchaConfig, cipher SecretCipher) error {
-	newSecret := strings.TrimSpace(config.SecretKey) != ""
-	if err := config.NormalizeAndValidate(false); err != nil {
-		return err
-	}
-	config.SecretConfigured = config.SecretKey != ""
-	if config.SecretKey == "" {
-		current, found, err := s.Captcha(ctx, cipher)
+	current := CaptchaConfig{}
+	if strings.TrimSpace(config.SecretKey) == "" {
+		stored, found, err := s.Captcha(ctx, cipher)
 		if err != nil {
 			return err
 		}
-		if found && current.Provider == config.Provider {
-			config.SecretKey = current.SecretKey
-			config.SecretConfigured = current.SecretConfigured
-			config.secretEncrypted = current.secretEncrypted
+		if found {
+			current = stored
 		}
 	}
-	if err := config.NormalizeAndValidate(enabled); err != nil {
+	stored, err := prepareRegistrationConfig(enabled, config, current, cipher)
+	if err != nil {
 		return err
-	}
-	stored := storedCaptchaConfig{Provider: config.Provider, SiteKey: config.SiteKey}
-	if !newSecret && config.secretEncrypted != "" {
-		stored.SecretKeyEncrypted = config.secretEncrypted
-	} else if config.SecretKey != "" {
-		if cipher == nil {
-			return errors.New("CAPTCHA secret cipher is unavailable")
-		}
-		encrypted, err := cipher.EncryptScoped(captchaSecretScope, config.SecretKey)
-		if err != nil {
-			return fmt.Errorf("encrypt CAPTCHA secret key: %w", err)
-		}
-		stored.SecretKeyEncrypted = encrypted
 	}
 
 	// Write the feature gate last when enabling and first when disabling so a
@@ -711,6 +839,36 @@ func (s *Store) SetRegistrationConfig(ctx context.Context, enabled bool, config 
 		return s.Set(ctx, RegistrationEnabledKey, true, registrationDescription)
 	}
 	return nil
+}
+
+func prepareRegistrationConfig(enabled bool, config, current CaptchaConfig, cipher SecretCipher) (storedCaptchaConfig, error) {
+	newSecret := strings.TrimSpace(config.SecretKey) != ""
+	if err := config.NormalizeAndValidate(false); err != nil {
+		return storedCaptchaConfig{}, err
+	}
+	config.SecretConfigured = config.SecretKey != ""
+	if config.SecretKey == "" && current.Provider == config.Provider {
+		config.SecretKey = current.SecretKey
+		config.SecretConfigured = current.SecretConfigured
+		config.secretEncrypted = current.secretEncrypted
+	}
+	if err := config.NormalizeAndValidate(enabled); err != nil {
+		return storedCaptchaConfig{}, err
+	}
+	stored := storedCaptchaConfig{Provider: config.Provider, SiteKey: config.SiteKey}
+	if !newSecret && config.secretEncrypted != "" {
+		stored.SecretKeyEncrypted = config.secretEncrypted
+	} else if config.SecretKey != "" {
+		if cipher == nil {
+			return storedCaptchaConfig{}, errors.New("CAPTCHA secret cipher is unavailable")
+		}
+		encrypted, err := cipher.EncryptScoped(captchaSecretScope, config.SecretKey)
+		if err != nil {
+			return storedCaptchaConfig{}, fmt.Errorf("encrypt CAPTCHA secret key: %w", err)
+		}
+		stored.SecretKeyEncrypted = encrypted
+	}
+	return stored, nil
 }
 
 type CaptchaSecretCipher interface {
