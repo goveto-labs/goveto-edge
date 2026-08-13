@@ -3,6 +3,7 @@ package auth
 import (
 	"encoding/base32"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"testing"
 
@@ -18,6 +19,52 @@ func testTOTPCipher(t *testing.T, key string, previous ...string) *node.Credenti
 		t.Fatal(err)
 	}
 	return cipher
+}
+
+func TestRewrapTOTPSecretRowsSkipsCorruptUsersAndContinues(t *testing.T) {
+	corrupt := "corrupt"
+	legacy := testTOTPSeed
+	persisted := map[string]string{}
+	result, err := rewrapTOTPSecretRows([]totpSecretRow{
+		{ID: "bad-user", Encrypted: &corrupt},
+		{ID: "good-user", Encrypted: &legacy},
+	}, func(userID, stored string) (string, bool, error) {
+		if userID == "bad-user" {
+			return "", false, errTOTPSecretUnavailable
+		}
+		return "wrapped:" + stored, true, nil
+	}, func(userID, _, wrapped string) error {
+		persisted[userID] = wrapped
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Skipped) != 1 || result.Skipped[0].UserID != "bad-user" ||
+		!errors.Is(result.Skipped[0].Err, errTOTPSecretUnavailable) {
+		t.Fatalf("unexpected skipped users: %#v", result.Skipped)
+	}
+	if persisted["good-user"] != "wrapped:"+testTOTPSeed {
+		t.Fatalf("valid user was not rewrapped after corrupt user: %#v", persisted)
+	}
+}
+
+func TestRewrapTOTPSecretRowsReturnsPersistenceErrors(t *testing.T) {
+	legacy := testTOTPSeed
+	persistErr := errors.New("database unavailable")
+	_, err := rewrapTOTPSecretRows([]totpSecretRow{{ID: "user-1", Encrypted: &legacy}},
+		func(_, stored string) (string, bool, error) { return "wrapped:" + stored, true, nil },
+		func(_, _, _ string) error { return persistErr },
+	)
+	if !errors.Is(err, persistErr) {
+		t.Fatalf("rewrap error = %v, want %v", err, persistErr)
+	}
+}
+
+func TestRewrapTOTPSecretsRejectsMissingCipher(t *testing.T) {
+	if _, err := RewrapTOTPSecrets(t.Context(), nil, nil); !errors.Is(err, errTOTPSecretUnavailable) {
+		t.Fatalf("RewrapTOTPSecrets() error = %v, want %v", err, errTOTPSecretUnavailable)
+	}
 }
 
 func TestTOTPSecretCiphertextDoesNotExposeSeed(t *testing.T) {

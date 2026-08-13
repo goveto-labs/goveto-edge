@@ -268,7 +268,11 @@ func main() {
 			err = certificateService.RewrapSecrets(rewrapCtx)
 		}
 		if err == nil {
-			err = auth.RewrapTOTPSecrets(rewrapCtx, orm, totpCipher)
+			var totpRewrap auth.TOTPRewrapResult
+			totpRewrap, err = auth.RewrapTOTPSecrets(rewrapCtx, orm, totpCipher)
+			for _, failure := range totpRewrap.Skipped {
+				slog.Warn("skip unavailable TOTP secret during startup rewrap", "user_id", failure.UserID, "error", failure.Err)
+			}
 		}
 	}
 	cancelRewrap()
