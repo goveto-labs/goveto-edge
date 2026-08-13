@@ -1216,15 +1216,10 @@ export default function SiteDetail() {
                                                         : 'text-muted hover:bg-surface-secondary hover:text-foreground'
                                                 }`;
                                             if (entry.kind === 'group') {
-                                                const expanded = entry.children.some(
-                                                    (child) => child.id === settingsPage
-                                                );
                                                 return (
                                                     <div key={entry.id}>
                                                         <button
-                                                            className={itemClassName(
-                                                                settingsPage === entry.id
-                                                            )}
+                                                            className={itemClassName(false)}
                                                             type='button'
                                                             onClick={() =>
                                                                 navigateTo('settings', entry.id)
@@ -1233,28 +1228,25 @@ export default function SiteDetail() {
                                                             <Icon className='h-4 w-4' />
                                                             {item.label}
                                                         </button>
-                                                        {expanded && (
-                                                            <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
-                                                                {entry.children.map((child) => (
-                                                                    <button
-                                                                        className={itemClassName(
-                                                                            settingsPage ===
-                                                                                child.id
-                                                                        )}
-                                                                        key={child.id}
-                                                                        type='button'
-                                                                        onClick={() =>
-                                                                            navigateTo(
-                                                                                'settings',
-                                                                                child.id
-                                                                            )
-                                                                        }
-                                                                    >
-                                                                        {child.label}
-                                                                    </button>
-                                                                ))}
-                                                            </div>
-                                                        )}
+                                                        <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
+                                                            {entry.children.map((child) => (
+                                                                <button
+                                                                    className={itemClassName(
+                                                                        settingsPage === child.id
+                                                                    )}
+                                                                    key={child.id}
+                                                                    type='button'
+                                                                    onClick={() =>
+                                                                        navigateTo(
+                                                                            'settings',
+                                                                            child.id
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    {child.label}
+                                                                </button>
+                                                            ))}
+                                                        </div>
                                                     </div>
                                                 );
                                             }
