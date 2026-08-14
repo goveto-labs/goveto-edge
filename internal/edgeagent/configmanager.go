@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -66,7 +67,7 @@ func (m *ConfigManager) SetNodeConfig(config NodeConfig) error {
 	if err != nil {
 		return err
 	}
-	if err = m.loadCaddy(encoded, true); err != nil {
+	if err = m.applyCaddyJSON(encoded, "node_config"); err != nil {
 		return err
 	}
 	m.nodeConfig = config
@@ -101,7 +102,29 @@ func (m *ConfigManager) load(sites map[string]SiteConfig) error {
 	if err != nil {
 		return err
 	}
-	return caddy.Load(encoded, true)
+	return m.applyCaddyJSON(encoded, "restore")
+}
+
+func (m *ConfigManager) applyCaddyJSON(encoded []byte, reason string) error {
+	slog.Info("caddy lifecycle",
+		"event", "caddy_load_begin",
+		"reason", reason,
+		"bytes", len(encoded),
+		"force_reload", true,
+		"idle_timeout", "30s",
+		"h3_handshake_idle_timeout", "quic-go-default-5s",
+		"h3_handshake_idle_configurable", false,
+	)
+	loader := m.loadCaddy
+	if loader == nil {
+		loader = caddy.Load
+	}
+	if err := loader(encoded, true); err != nil {
+		slog.Error("caddy lifecycle", "event", "caddy_load_err", "reason", reason, "error", err)
+		return err
+	}
+	slog.Info("caddy lifecycle", "event", "caddy_load_ok", "reason", reason, "bytes", len(encoded))
+	return nil
 }
 
 func (m *ConfigManager) ApplySite(config SiteConfig) error {
@@ -135,13 +158,13 @@ func (m *ConfigManager) ApplySite(config SiteConfig) error {
 		return fmt.Errorf("persist pending site config: %w", err)
 	}
 
-	if err := caddy.Load(encoded, true); err != nil {
+	if err := m.applyCaddyJSON(encoded, "apply_site"); err != nil {
 		_ = os.Remove(pending)
 		return fmt.Errorf("apply site config: %w", err)
 	}
 
 	if err := os.Rename(pending, m.path); err != nil {
-		if rollbackErr := caddy.Load(previousEncoded, true); rollbackErr != nil {
+		if rollbackErr := m.applyCaddyJSON(previousEncoded, "rollback"); rollbackErr != nil {
 			return fmt.Errorf("promote site config: %w; restore caddy config: %v", err, rollbackErr)
 		}
 		_ = os.Remove(pending)
@@ -178,7 +201,17 @@ func (m *ConfigManager) SiteVersions() map[string]uint64 {
 	return versions
 }
 
-func (m *ConfigManager) Stop() error { m.mu.Lock(); defer m.mu.Unlock(); return caddy.Stop() }
+func (m *ConfigManager) Stop() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	slog.Info("caddy lifecycle", "event", "caddy_stop_begin")
+	if err := caddy.Stop(); err != nil {
+		slog.Error("caddy lifecycle", "event", "caddy_stop_err", "error", err)
+		return err
+	}
+	slog.Info("caddy lifecycle", "event", "caddy_stop_ok")
+	return nil
+}
 
 // Reload reapplies all persisted sites after a managed node asset changes.
 func (m *ConfigManager) Reload() error {
@@ -188,7 +221,7 @@ func (m *ConfigManager) Reload() error {
 	if err != nil {
 		return err
 	}
-	return caddy.Load(encoded, true)
+	return m.applyCaddyJSON(encoded, "reload")
 }
 
 func (m *ConfigManager) Purge(_ context.Context, purge edgeprotocol.PurgeRequest) error {
@@ -334,8 +367,10 @@ func (builder *managedServerBuilder) config() map[string]any {
 		protocols = append(protocols, "h3")
 	}
 	server := map[string]any{
-		"listen":          []string{builder.listen},
-		"protocols":       protocols,
+		"listen":    []string{builder.listen},
+		"protocols": protocols,
+		// Shared HTTP-layer idle for H1/H2/H3. Caddy 2.11.4 has no separate
+		// H3 handshake / QUIC MaxIdleTimeout field; quic-go keeps 5s / 30s.
 		"idle_timeout":    durationMS(30_000),
 		"routes":          routes,
 		"automatic_https": map[string]any{"disable": true},

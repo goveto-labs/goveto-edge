@@ -703,6 +703,23 @@ func TestRejectsInterruptedResponseAndPurgeCountsObjects(t *testing.T) {
 	}
 }
 
+func TestWriteObjectReaderRejectsShortSource(t *testing.T) {
+	dir := t.TempDir()
+	_, _, err := writeObjectReader(filepath.Join(dir, "obj"), strings.NewReader("short"), 100)
+	if err == nil {
+		t.Fatal("short source was accepted")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp-") {
+			t.Fatalf("leftover encode temp %s", entry.Name())
+		}
+	}
+}
+
 func TestURLPurgeRequiresHostBoundary(t *testing.T) {
 	provider := newTestProvider(t, t.TempDir(), 0)
 	key := "GET-http-notexample.test-/asset"

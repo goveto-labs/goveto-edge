@@ -216,3 +216,24 @@ func TestRunStateClassifiesAllFailuresBeyondSamples(t *testing.T) {
 		t.Fatalf("metrics=%+v samples=%d counts=%v", metrics, len(samples), counts)
 	}
 }
+
+func TestClassifyFailureSeparatesConnectionRefused(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{errors.New("http3: parsing frame failed: CONNECTION_REFUSED (remote)"), "connection_refused"},
+		{errors.New("APPLICATION_ERROR: CONNECTION_REFUSED (remote)"), "connection_refused"},
+		{errors.New("dial tcp 127.0.0.1:443: connect: connection refused"), "dial"},
+		{errors.New("read response: unexpected EOF"), "response_read"},
+		{errors.New("i/o timeout"), "timeout"},
+		{errors.New("connection reset by peer"), "reset"},
+		{errors.New("tls: handshake failure"), "tls"},
+		{errors.New("status 502, want 200"), "http_5xx"},
+	}
+	for _, test := range cases {
+		if got := classifyFailure(test.err); got != test.want {
+			t.Fatalf("classifyFailure(%q)=%q, want %q", test.err, got, test.want)
+		}
+	}
+}

@@ -22,7 +22,7 @@ max_load_cpu="85"
 soak_protocols="h2"
 soak_duration="6h"
 cache_warmup="5s"
-cache_duration="15s"
+cache_duration="30s"
 cache_repeats="3"
 reuse_environment=false
 cleanup=false
@@ -71,7 +71,7 @@ Options:
   --soak-protocols "h2"       Full-mode stability protocols (default: h2)
   --soak-duration <duration>  Full-mode stability duration (default: 6h)
   --cache-warmup <duration>   Full/cache/waf matrix warmup per case (default: 5s)
-  --cache-duration <duration> Full/cache/waf measurement per repeat (default: 15s)
+  --cache-duration <duration> Full/cache/waf measurement per repeat (default: 30s)
   --cache-repeats <count>     Full/cache/waf measurement repeats (default: 3)
   --baseline-run <run-id>     Optional: compare each case with the same case from this run
   --establish-baseline        Optional: mark this run as a fresh baseline (no comparison)
@@ -205,11 +205,15 @@ capture_environment() {
 }
 
 capture_case_logs() {
-  local output="$1" since="$2"
+  local output="$1" since="$2" protocol="${3:-}"
   compose logs --no-color --since "$since" agent > "$output/agent.log" 2>&1 || true
   compose logs --no-color --since "$since" origin > "$output/origin.log" 2>&1 || true
   compose logs --no-color --since "$since" origin2 > "$output/origin2.log" 2>&1 || true
   compose logs --no-color --since "$since" gateway > "$output/gateway.log" 2>&1 || true
+  if [[ "$protocol" == "h3" && -d "${BENCH_QLOG_DIR:-}" ]]; then
+    mkdir -p "$output/qlogs"
+    find "$BENCH_QLOG_DIR" -name '*.sqlog' -newermt "$since" -exec mv {} "$output/qlogs/" \; 2>/dev/null || true
+  fi
 }
 
 report_status() {
@@ -315,7 +319,7 @@ run_case() {
     fi
     status="$(report_status "$output/report.json")"
   fi
-  capture_case_logs "$output" "$started"
+  capture_case_logs "$output" "$started" "$protocol"
   if [[ "$protocol" == "h3" ]] && h3_buffer_warning "$output/agent.log"; then
     status=ENV_INVALID
   fi
@@ -347,6 +351,17 @@ run_origin_screen() {
           fi
           run_case screen "$key" "$name" "$protocol" "${args[@]}"
         done
+        if [[ "$protocol" == "h3" && "$mode" == "new" ]]; then
+          for concurrency in 48 64 80 96 192 256; do
+            name="pure-origin-${size}b-new-${protocol}-c${concurrency}"
+            key="origin:$name"
+            args=(--suite pr --protocol "$protocol" --scenario "pure-origin-${size}b-new" \
+              --url "https://agent:8444/bytes/$size" --host benchmark.example.test --insecure-skip-verify \
+              --concurrency "$concurrency" --warmup 1s --duration 5s --repeats 1 --new-connection \
+              --cooldown 60s --expected-sha256 "$(sha256_zeros "$size")")
+            run_case screen "$key" "$name" "$protocol" "${args[@]}"
+          done
+        fi
         if [[ "$mode" == "new" ]]; then
           name="pure-origin-${size}b-new-${protocol}-c512"
           key="origin:$name"
@@ -1036,7 +1051,8 @@ setup_environment() {
 prepare_results() {
   result_dir="$RESULTS_ROOT/$run_id"
   summary_file="$result_dir/matrix.tsv"
-  mkdir -p "$result_dir"
+  mkdir -p "$result_dir/qlogs-live"
+  export BENCH_QLOG_DIR="$result_dir/qlogs-live"
   printf 'phase\tscenario\tprotocol\tstatus\treason\tresult_directory\n' > "$summary_file"
   [[ -n "$baseline_run" ]] || return
 

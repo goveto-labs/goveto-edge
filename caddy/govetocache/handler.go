@@ -212,9 +212,13 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 		captured.enableStreaming(func(header http.Header, status int) {
 			h.prepareResponse(header, status)
 			size := declaredResponseSize(header)
-			_, varyOK := h.variedHeaders(request, header)
+			varied, varyOK := h.variedHeaders(request, header)
 			if h.cacheable(request, status, header, size) && varyOK {
 				h.setResultHeaders(header, "MISS", baseRaw, h.ttl(status))
+				if originRequest.Method != http.MethodHead && status != http.StatusNoContent &&
+					size > 0 && !hasDeclaredTrailer(header) {
+					captured.startEncode(h, request, header, status, size, baseKey, varied)
+				}
 			} else {
 				h.setResultHeaders(header, "BYPASS", baseRaw, 0)
 			}
@@ -223,6 +227,9 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	err := callNext(captured, originRequest, next)
 	status := captured.Status()
 	incomplete := responseIncomplete(originRequest.Method, status, captured.Header(), captured.Size())
+	if captured.encode != nil {
+		return h.finishStreamEncode(w, request, captured, stale, metadata, baseRaw, err, incomplete)
+	}
 	if err != nil || incomplete || staleEligibleStatus(status) {
 		if stale != nil && withinStaleWindow(metadata.FreshUntil, h.StaleIfErrorTTL) {
 			return h.serveCached(w, stale, "STALE", baseRaw, metadata)
@@ -279,6 +286,32 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 			return h.serveCached(w, fresh, "MISS", baseRaw, storedMetadata)
 		}
 	}
+	captured.forwardTrailers()
+	return captured.WriteResponse(w)
+}
+
+func (h *Handler) finishStreamEncode(w http.ResponseWriter, request *http.Request, captured *capturedResponse, stale *http.Response, metadata simplefs.LookupMetadata, baseRaw string, originErr error, incomplete bool) error {
+	status := captured.Status()
+	if originErr != nil || incomplete || staleEligibleStatus(status) {
+		captured.abandonEncode()
+		if stale != nil && withinStaleWindow(metadata.FreshUntil, h.StaleIfErrorTTL) {
+			return h.serveCached(w, stale, "STALE", baseRaw, metadata)
+		}
+		if stale != nil {
+			_ = stale.Body.Close()
+		}
+		captured.forwardTrailers()
+		return nil
+	}
+	if stale != nil {
+		_ = stale.Body.Close()
+	}
+	if !h.cacheable(request, status, captured.Header(), uint64(captured.Size())) {
+		captured.abandonEncode()
+		captured.forwardTrailers()
+		return captured.WriteResponse(w)
+	}
+	_ = captured.finishEncode()
 	captured.forwardTrailers()
 	return captured.WriteResponse(w)
 }
@@ -906,6 +939,7 @@ type capturedResponse struct {
 	stream        func(http.Header, int)
 	captureErr    error
 	downstreamErr error
+	encode        *encodeSession
 }
 
 func newCapturedResponse(directory string, downstream http.ResponseWriter) (*capturedResponse, error) {
@@ -968,21 +1002,25 @@ func (w *capturedResponse) Write(value []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}
-	count, err := w.file.Write(value)
-	w.size += int64(count)
-	if err != nil {
-		w.captureErr = err
-	}
-	if w.streamed {
-		written, downstreamErr := w.downstream.Write(value)
-		if downstreamErr != nil {
-			w.downstreamErr = downstreamErr
-			return written, downstreamErr
+	if w.encode != nil {
+		w.encode.tryWrite(value)
+		w.size += int64(len(value))
+	} else {
+		count, err := w.file.Write(value)
+		w.size += int64(count)
+		if err != nil {
+			w.captureErr = err
+			if !w.streamed {
+				return count, err
+			}
 		}
-		// A cache-disk failure must not interrupt an otherwise healthy response.
-		return len(value), nil
 	}
-	return count, err
+	if w.streamed && w.downstream != nil {
+		if _, err := w.downstream.Write(value); err != nil {
+			w.downstreamErr = err
+		}
+	}
+	return len(value), nil
 }
 
 func (w *capturedResponse) Read(value []byte) (int, error) { return w.file.Read(value) }
@@ -1048,6 +1086,7 @@ func (w *capturedResponse) WriteResponse(target http.ResponseWriter) error {
 }
 
 func (w *capturedResponse) Close() error {
+	w.abandonEncode()
 	err := w.file.Close()
 	return errors.Join(err, os.Remove(w.path))
 }

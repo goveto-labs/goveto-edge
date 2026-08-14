@@ -13,7 +13,8 @@ script/run_agent_benchmark.sh waf [options]
 
 `quick` runs the complete functional screen. It covers all origin and CDN test
 items with short timings, including H1/H2/H3, reused and new connections,
-1 KiB/16 KiB/1 MiB payloads, concurrency 1/8/32/128/512, caching, coalescing,
+1 KiB/16 KiB/1 MiB payloads, concurrency 1/8/32/128/512 (H3 new also samples
+48/64/80/96/192/256), caching, coalescing,
 eviction, ranges, 16 MiB transfers, multiple domains and origins, origin
 resilience, throttling, and rate limiting. New-connection c512 cases run only
 after the matching c128 case passes and are explicitly classified as capacity
@@ -121,14 +122,14 @@ result directory, and `--cleanup` to stop containers after the run. Baseline
 comparison is optional: pass `--baseline-run RUN_ID` only when that prior run
 exists under `deploy/benchmark/results/`, or `--establish-baseline` to mark a
 fresh baseline without comparison. By default, `cache` and `full` run standalone
-and do not require any older result directory. New reports use schema 1.4.
-Baseline comparison accepts compatible schema 1.2, 1.3, and 1.4 reports and
+and do not require any older result directory. New reports use schema 1.5.
+Baseline comparison accepts compatible schema 1.2, 1.3, 1.4, and 1.5 reports and
 requires an exact runner, architecture, suite, scenario, protocol, concurrency,
 and connection-mode match. Run `script/run_agent_benchmark.sh --help` for all
 options.
 
 The cache matrix timings in `full` and `cache` default to a 5 second warmup,
-15 second measurement, and three repetitions. The `waf` matrix uses the same
+30 second measurement, and three repetitions. The `waf` matrix uses the same
 timings and the same overrides. Override them with `--cache-warmup`,
 `--cache-duration`, and `--cache-repeats`. The coalescing and eviction cases
 intentionally use one repeat because they depend on a freshly cold key or
@@ -169,7 +170,7 @@ and heap sample. Cache eviction gates RSS growth from the case baseline instead
 of absolute process RSS. Rate-limit screening requires every
 measured response to be 429. Its 120 second Capacity case accepts only 200/429,
 requires at least one 429, and permits at most 200 successful responses per
-repetition. Every HTTP status is counted in schema 1.4 reports. Cache reports
+repetition. Every HTTP status is counted in schema 1.5 reports. Cache reports
 also include write queue depth and bytes, queue rejections, batches, committed
 objects, average batch size, commit latency, inflight writes, total allocation,
 and allocated bytes per request. A run invalidated only by the fixed 5% RPS CV
@@ -205,6 +206,25 @@ The entry script checks these values in the Agent network namespace and rejects
 quic-go receive/send buffer warnings as `ENV_INVALID`. H3 new-connection load
 shares one UDP socket while still creating a fresh QUIC connection per request.
 The 1 KiB matrix also adds a reuse c512 probe after reuse c128 passes.
+
+On a 2-core Agent (`26c-agent2`), the H3 new-connection envelope is **c32
+stable, c64 compatible, c128 probe**. High-concurrency short connections should
+use H1/H2 or H3 reuse; H3's advantage is lossy WAN, not a localhost handshake
+flood. The origin screen adds H3-new-only intermediate points
+`48/64/80/96/192/256` (plus the existing 1/8/32/128 and the c512 capacity probe
+gated on c128). `CONNECTION_REFUSED` is counted as `connection_refused`, not
+generic `transport`, and is a product failure rather than `TARGET_SATURATED`.
+
+Caddy 2.11.4 already enables 0-RTT unless `allow_0rtt` is set to false. Pure
+new-connection cases have no session ticket, so enabling 0-RTT is not a fix.
+Handshake idle timeout is quic-go's 5s default and is not independently
+configurable in Caddy JSON today; do not fork quic-go to raise
+`MaxAcceptQueueSize` until qlog shows the accept queue is actually full.
+
+H3 cases collect quic-go qlogs (`QLOGDIR`) into each case directory's `qlogs/`
+folder, and Agent stderr records `caddy lifecycle` events around load, reload,
+and stop so listener-close refusals can be distinguished from a full accept
+queue.
 
 ## Environment
 

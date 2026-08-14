@@ -47,10 +47,12 @@ services:
       EDGE_AGENT_DATA_DIR: /data
       EDGE_USER_LISTEN: ":8080"
       EDGE_AGENT_BENCHMARK_LISTEN: ":9900"
+      QLOGDIR: /qlogs
     volumes:
       - ./state/identity.json:/state/identity.json:ro
       - agent-data:/data
       - agent-cache:/opt/goveto-edge/cache
+      - ${BENCH_QLOG_DIR:-./state/qlogs}:/qlogs
     ports:
       - "18080:8080/tcp"
       - "18444:8444/tcp"

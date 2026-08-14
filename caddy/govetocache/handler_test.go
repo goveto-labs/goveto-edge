@@ -1,8 +1,12 @@
 package govetocache
 
 import (
+	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"goveto-edge/caddy/simplefs"
+	"goveto-edge/internal/cacherange"
 	"goveto-edge/internal/policy"
 )
 
@@ -490,5 +495,332 @@ func TestFetchAndServeDoesNotRetryAfterStreamingOnCaptureError(t *testing.T) {
 	}
 	if len(downstream.writes) != 1 || downstream.writes[0].status != http.StatusOK {
 		t.Fatalf("downstream writes=%v", downstream.writes)
+	}
+}
+
+type failAfterWriter struct {
+	header http.Header
+	n      int
+}
+
+func (w *failAfterWriter) Header() http.Header { return w.header }
+func (w *failAfterWriter) WriteHeader(int)     {}
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	w.n++
+	if w.n > 1 {
+		return 0, errors.New("client gone")
+	}
+	return len(p), nil
+}
+
+func newTestCache(t *testing.T) (*simplefs.Storage, string) {
+	t.Helper()
+	dir := t.TempDir()
+	t.Cleanup(simplefs.OverrideDiskUsageForTesting(dir, 1<<40, 0))
+	storage, err := simplefs.Acquire(simplefs.Config{Path: dir, MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = storage.Close() })
+	return storage, dir
+}
+
+func lookupFresh(t *testing.T, storage *simplefs.Storage, baseKey string, req *http.Request) *http.Response {
+	t.Helper()
+	lookup := &http.Request{Method: req.Method, Host: req.Host, URL: req.URL, Header: http.Header{}}
+	fresh, stale, _ := storage.LookupEntry(baseKey, lookup)
+	if stale != nil {
+		_ = stale.Body.Close()
+	}
+	return fresh
+}
+
+func assertNoBodyObjects(t *testing.T, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if strings.HasPrefix(name, "body-") || strings.Contains(name, ".tmp-") || strings.HasPrefix(name, ".goveto-origin-") {
+			t.Fatalf("leftover cache file %s", name)
+		}
+	}
+}
+
+func TestEncodeSessionCommitsKnownLengthObject(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	headerBytes, err := serializedHeader(http.StatusOK, http.Header{"Content-Type": {"text/plain"}}, 4, http.MethodGet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := startEncodeSession(func(source io.Reader) error {
+		return storage.PutReader("base", "varied", source, uint64(len(headerBytes))+4, nil, nil, "", time.Minute, "real")
+	}, headerBytes)
+	sess.tryWrite([]byte("body"))
+	if err := sess.finish(); err != nil {
+		t.Fatalf("encode finish: %v", err)
+	}
+	fresh, stale, _ := storage.LookupEntry("base", &http.Request{Method: http.MethodGet, Header: http.Header{}})
+	if stale != nil {
+		_ = stale.Body.Close()
+	}
+	if fresh == nil {
+		t.Fatal("encode session did not publish an object")
+	}
+	defer fresh.Body.Close()
+	body, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "body" {
+		t.Fatalf("cached body=%q", body)
+	}
+}
+
+func TestServeHTTPStreamEncodeIsHitOnSecondRequest(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	var origin atomic.Int32
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		origin.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("body"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60, XCache: true}
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+	req.Host = "example.test"
+	first := httptest.NewRecorder()
+	if err := handler.ServeHTTP(first, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if first.Header().Get("X-Cache") != "MISS" || first.Body.String() != "body" {
+		t.Fatalf("first response cache=%q body=%q", first.Header().Get("X-Cache"), first.Body.String())
+	}
+	second := httptest.NewRecorder()
+	if err := handler.ServeHTTP(second, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if second.Header().Get("X-Cache") != "HIT" || second.Body.String() != "body" {
+		t.Fatalf("second response cache=%q body=%q origin=%d", second.Header().Get("X-Cache"), second.Body.String(), origin.Load())
+	}
+	if origin.Load() != 1 {
+		t.Fatalf("origin calls=%d, want 1", origin.Load())
+	}
+}
+
+func TestFetchAndServeDoesNotCommitIncompleteOrigin(t *testing.T) {
+	storage, dir := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("four"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	if err := handler.fetchAndServe(&recordingWriter{header: http.Header{}}, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if fresh := lookupFresh(t, storage, "base", req); fresh != nil {
+		_ = fresh.Body.Close()
+		t.Fatal("incomplete origin body was cached")
+	}
+	assertNoBodyObjects(t, dir)
+}
+
+func TestFetchAndServeCachesAfterDownstreamDisconnect(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("12345")); err != nil {
+			return err
+		}
+		_, err := w.Write([]byte("67890"))
+		return err
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	if err := handler.fetchAndServe(&failAfterWriter{header: http.Header{}}, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil && err.Error() != "client gone" {
+		t.Fatal(err)
+	}
+	fresh := lookupFresh(t, storage, "base", req)
+	if fresh == nil {
+		t.Fatal("complete origin response was not cached after client disconnect")
+	}
+	defer fresh.Body.Close()
+	body, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "1234567890" {
+		t.Fatalf("cached body=%q", body)
+	}
+}
+
+func TestFetchAndServeDoesNotCommitContentLengthMismatch(t *testing.T) {
+	storage, dir := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("toolong"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	if err := handler.fetchAndServe(&recordingWriter{header: http.Header{}}, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if fresh := lookupFresh(t, storage, "base", req); fresh != nil {
+		_ = fresh.Body.Close()
+		t.Fatal("overlong origin body was cached")
+	}
+	assertNoBodyObjects(t, dir)
+}
+
+func TestFetchAndServeForwardsTrailersWithoutStreamEncode(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "4")
+		w.Header().Set("Trailer", "X-Trace")
+		w.WriteHeader(http.StatusOK)
+		if _, err := w.Write([]byte("body")); err != nil {
+			return err
+		}
+		w.Header().Set(http.TrailerPrefix+"X-Trace", "abc")
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	downstream := &recordingWriter{header: http.Header{}}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	if err := handler.fetchAndServe(downstream, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := downstream.Header().Get(http.TrailerPrefix + "X-Trace"); got != "abc" {
+		if got = downstream.Header().Get("X-Trace"); got != "abc" {
+			t.Fatalf("trailer=%q", got)
+		}
+	}
+	fresh := lookupFresh(t, storage, "base", req)
+	if fresh == nil {
+		t.Fatal("trailer response was not cached on origin-temp path")
+	}
+	fresh.Body.Close()
+}
+
+func TestFetchAndServeRangeStillBuffersFullObject(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	var calls atomic.Int32
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		calls.Add(1)
+		if r.Header.Get("Range") != "" {
+			t.Fatal("range must be stripped before origin")
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "10")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("0123456789"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	req := &http.Request{
+		Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"},
+		Header: http.Header{"Range": {"bytes=0-3"}},
+	}
+	req = req.WithContext(cacherange.WithContext(req.Context(), cacherange.Spec{Start: 0, End: 3}))
+	downstream := &recordingWriter{header: http.Header{}}
+	if err := handler.fetchAndServe(downstream, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("origin calls=%d", calls.Load())
+	}
+	fresh := lookupFresh(t, storage, "base", req)
+	if fresh == nil {
+		t.Fatal("range miss did not store the full object")
+	}
+	defer fresh.Body.Close()
+	body, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "0123456789" {
+		t.Fatalf("stored body=%q", body)
+	}
+}
+
+func TestFetchAndServeDropsEncodeWhenQueueSaturated(t *testing.T) {
+	old := encodeQueueSlots
+	encodeQueueSlots = 0
+	t.Cleanup(func() { encodeQueueSlots = old })
+
+	storage, _ := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("Content-Length", "4")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("body"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	downstream := &recordingWriter{header: http.Header{}}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	started := time.Now()
+	if err := handler.fetchAndServe(downstream, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("saturated encode queue blocked the client")
+	}
+	if len(downstream.writes) != 1 || downstream.writes[0].status != http.StatusOK {
+		t.Fatalf("downstream writes=%v", downstream.writes)
+	}
+	if fresh := lookupFresh(t, storage, "base", req); fresh != nil {
+		_ = fresh.Body.Close()
+		t.Fatal("dropped encode must not publish an object")
+	}
+}
+
+func TestFetchAndServeCachesUnknownLengthViaOriginTemp(t *testing.T) {
+	storage, _ := newTestCache(t)
+
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("chunked"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+	req := &http.Request{Method: http.MethodGet, Host: "example.test", URL: &url.URL{Path: "/asset"}, Header: http.Header{}}
+	if err := handler.fetchAndServe(&recordingWriter{header: http.Header{}}, req, next, "raw", "base", nil, simplefs.LookupMetadata{}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := lookupFresh(t, storage, "base", req)
+	if fresh == nil {
+		t.Fatal("unknown-length response was not cached")
+	}
+	defer fresh.Body.Close()
+	body, err := io.ReadAll(fresh.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "chunked" {
+		t.Fatalf("cached body=%q", body)
 	}
 }

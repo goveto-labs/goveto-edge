@@ -827,6 +827,11 @@ func classifyFailure(err error) string {
 		return "tls"
 	case strings.Contains(message, "connection reset") || strings.Contains(message, "stream reset"):
 		return "reset"
+	case strings.Contains(message, "CONNECTION_REFUSED"):
+		// QUIC CONNECTION_REFUSED is a hard product error, not capacity
+		// saturation. TCP "connect: connection refused" still matches "dial "
+		// above and stays "dial".
+		return "connection_refused"
 	default:
 		return "transport"
 	}

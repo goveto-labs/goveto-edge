@@ -55,6 +55,14 @@ func TestValidateRunsDoesNotDowngradeProductFailureInCapacityProbe(t *testing.T)
 	}
 }
 
+func TestValidateRunsTreatsConnectionRefusedAsProductFailure(t *testing.T) {
+	runs := []Run{{Index: 1, Metrics: Metrics{Requests: 10, Successes: 9, Failures: 1, RPS: 10}, ErrorCounts: map[string]uint64{"connection_refused": 1}}}
+	validity := validateRuns(runs, 10, 85, true)
+	if validity.Valid || validity.Status != ResultProductFail {
+		t.Fatalf("CONNECTION_REFUSED must stay PRODUCT_FAIL, validity=%+v", validity)
+	}
+}
+
 func TestValidateResourceExpectationsEnforcesHeaderValueRatio(t *testing.T) {
 	runs := []Run{{Index: 1, Metrics: Metrics{ResponseHeaders: map[string]map[string]uint64{
 		"X-Cache": {"HIT": 98, "STALE": 2},

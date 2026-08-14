@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,6 +57,11 @@ func (a *Agent) Run(ctx context.Context) error {
 		return fmt.Errorf("start access log pipeline: %w", err)
 	}
 	agentlog.SetSink(agentLogSink{queue: a.logs})
+	slog.Info("caddy lifecycle",
+		"event", "agent_start",
+		"listen", envOr("EDGE_USER_LISTEN", ":80"),
+		"data_dir", a.dataDir,
+	)
 	if err := a.configs.SetNodeConfig(a.nodeConfigs.Get()); err != nil {
 		return errors.Join(fmt.Errorf("apply node cache config: %w", err), a.Stop())
 	}
