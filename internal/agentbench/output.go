@@ -119,12 +119,12 @@ func writeMarkdown(path string, report Report) error {
 	}
 	cacheActivity := false
 	for _, run := range report.Runs {
-		cacheActivity = cacheActivity || run.Resources.CacheHitsDelta > 0 || run.Resources.CacheMissesDelta > 0 || run.Resources.CacheEvictionsDelta > 0
+		cacheActivity = cacheActivity || run.Resources.CacheHitsDelta > 0 || run.Resources.CacheMissesDelta > 0 || run.Resources.CacheEvictionsDelta > 0 || run.Resources.StreamEncodeDropsDelta > 0
 	}
 	if cacheActivity {
-		_, _ = io.WriteString(file, "\n## Cache activity\n\n| Run | Hits | Misses | Evictions | Write batches | Objects | Avg batch | Rejects | Queue max | Alloc/request |\n|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+		_, _ = io.WriteString(file, "\n## Cache activity\n\n| Run | Hits | Misses | Evictions | Write batches | Objects | Avg batch | Rejects | Stream drops | Queue max | Alloc/request |\n|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
 		for _, run := range report.Runs {
-			_, _ = fmt.Fprintf(file, "| %d | %d | %d | %d | %d | %d | %.2f | %d | %d | %.2f |\n", run.Index, run.Resources.CacheHitsDelta, run.Resources.CacheMissesDelta, run.Resources.CacheEvictionsDelta, run.Resources.CacheWriteBatchesDelta, run.Resources.CacheWriteObjectsDelta, run.Resources.CacheAverageWriteBatchSize, run.Resources.CacheWriteRejectionsDelta, run.Resources.CacheWriteQueueDepthMax, run.Resources.AllocationBytesPerRequest)
+			_, _ = fmt.Fprintf(file, "| %d | %d | %d | %d | %d | %d | %.2f | %d | %d | %d | %.2f |\n", run.Index, run.Resources.CacheHitsDelta, run.Resources.CacheMissesDelta, run.Resources.CacheEvictionsDelta, run.Resources.CacheWriteBatchesDelta, run.Resources.CacheWriteObjectsDelta, run.Resources.CacheAverageWriteBatchSize, run.Resources.CacheWriteRejectionsDelta, run.Resources.StreamEncodeDropsDelta, run.Resources.CacheWriteQueueDepthMax, run.Resources.AllocationBytesPerRequest)
 		}
 	}
 	if report.Baseline != nil {
@@ -163,7 +163,7 @@ func writeCSV(path string, report Report) error {
 	defer file.Close()
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
-	if err := writer.Write([]string{"run", "at", "phase", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "heap_inuse_bytes", "heap_idle_bytes", "heap_released_bytes", "allocation_bytes_per_second", "total_alloc_bytes", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions", "cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_queue_depth_max", "cache_write_queue_bytes_max", "cache_write_rejections", "cache_write_batches", "cache_write_objects_committed", "cache_average_write_batch_size", "cache_write_commit_latency_ms", "cache_inflight_writes", "cache_body_entries", "cache_mapping_entries", "cache_expiration_entries", "cache_accounted_bytes", "cache_physical_bytes", "cache_index_bytes", "cache_index_free_pages", "cache_index_pending_pages", "log_buffer_bytes", "log_buffer_records", "memory_dropped_logs", "disk_dropped_logs", "committed_log_batches", "committed_log_records", "average_log_batch_size", "last_log_persist_error", "last_log_persist_success"}); err != nil {
+	if err := writer.Write([]string{"run", "at", "phase", "requests", "failures", "rps", "agent_cpu_percent", "agent_rss_bytes", "agent_fds", "agent_connections", "heap_bytes", "heap_inuse_bytes", "heap_idle_bytes", "heap_released_bytes", "allocation_bytes_per_second", "total_alloc_bytes", "gc_count", "goroutines", "log_queue_bytes", "log_queue_records", "dropped_logs", "cache_hits", "cache_misses", "cache_evictions", "cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_queue_depth_max", "cache_write_queue_bytes_max", "cache_write_rejections", "cache_stream_encode_drops", "cache_write_batches", "cache_write_objects_committed", "cache_average_write_batch_size", "cache_write_commit_latency_ms", "cache_inflight_writes", "cache_body_entries", "cache_mapping_entries", "cache_expiration_entries", "cache_accounted_bytes", "cache_physical_bytes", "cache_index_bytes", "cache_index_free_pages", "cache_index_pending_pages", "log_buffer_bytes", "log_buffer_records", "memory_dropped_logs", "disk_dropped_logs", "committed_log_batches", "committed_log_records", "average_log_batch_size", "last_log_persist_error", "last_log_persist_success"}); err != nil {
 		return err
 	}
 	for _, run := range report.Runs {
@@ -176,7 +176,7 @@ func writeCSV(path string, report Report) error {
 				strconv.FormatUint(point.QueueBytes, 10), strconv.FormatUint(point.QueueRecords, 10), strconv.FormatUint(point.DroppedLogs, 10),
 				strconv.FormatUint(point.CacheHits, 10), strconv.FormatUint(point.CacheMisses, 10), strconv.FormatUint(point.CacheEvictions, 10),
 				strconv.FormatUint(point.CacheWriteQueueDepth, 10), strconv.FormatUint(point.CacheWriteQueueBytes, 10), strconv.FormatUint(point.CacheWriteQueueDepthMax, 10),
-				strconv.FormatUint(point.CacheWriteQueueBytesMax, 10), strconv.FormatUint(point.CacheWriteRejections, 10),
+				strconv.FormatUint(point.CacheWriteQueueBytesMax, 10), strconv.FormatUint(point.CacheWriteRejections, 10), strconv.FormatUint(point.StreamEncodeDrops, 10),
 				strconv.FormatUint(point.CacheWriteBatches, 10), strconv.FormatUint(point.CacheWriteObjects, 10), formatFloat(point.CacheAverageWriteBatchSize),
 				formatFloat(point.CacheWriteCommitLatencyMS), strconv.FormatUint(point.CacheInflightWrites, 10),
 				strconv.FormatUint(point.CacheBodyEntries, 10), strconv.FormatUint(point.CacheMappingEntries, 10), strconv.FormatUint(point.CacheExpirationEntries, 10),

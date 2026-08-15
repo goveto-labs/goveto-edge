@@ -33,3 +33,20 @@ func TestParsePatternPath(t *testing.T) {
 		t.Fatalf("behavior=%+v size=%d error=%v", behavior, size, err)
 	}
 }
+
+func TestPatternSHA256SizeUsesHTTPPayloadBounds(t *testing.T) {
+	for _, test := range []struct {
+		value string
+		ok    bool
+	}{
+		{value: "0", ok: true},
+		{value: "16777216", ok: true},
+		{value: "-1"},
+		{value: "16777217"},
+	} {
+		_, err := parseSize(test.value)
+		if (err == nil) != test.ok {
+			t.Errorf("parseSize(%q) error=%v, want ok=%v", test.value, err, test.ok)
+		}
+	}
+}

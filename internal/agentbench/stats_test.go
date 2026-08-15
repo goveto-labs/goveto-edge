@@ -292,10 +292,11 @@ func TestApplyNaturalEndDoesNotEraseTelemetryAfterFailedCapture(t *testing.T) {
 	}
 
 	summary.totalAllocStart = 100
+	summary.streamEncodeDropsStart = 3
 	applyNaturalEnd(&summary, TimeSeriesPoint{
-		Requests: 4, TotalAllocBytes: 200, CacheWriteQueueDepthMax: 5, telemetryCaptured: true,
+		Requests: 4, TotalAllocBytes: 200, CacheWriteQueueDepthMax: 5, StreamEncodeDrops: 7, telemetryCaptured: true,
 	})
-	if summary.AllocatedBytes != 100 || summary.AllocationBytesPerRequest != 25 || summary.CacheWriteQueueDepthMax != 5 {
+	if summary.AllocatedBytes != 100 || summary.AllocationBytesPerRequest != 25 || summary.CacheWriteQueueDepthMax != 5 || summary.StreamEncodeDropsDelta != 4 {
 		t.Fatalf("successful telemetry capture was not applied: %+v", summary)
 	}
 }

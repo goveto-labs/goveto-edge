@@ -67,6 +67,7 @@ func benchmarkMetricsHandler(queue *LogQueue, configs *NodeConfigStore) http.Han
 			"cache_write_queue_depth_max":    cacheStats.WriteQueueDepthMax,
 			"cache_write_queue_bytes_max":    cacheStats.WriteQueueBytesMax,
 			"cache_write_queue_rejections":   cacheStats.WriteQueueRejections,
+			"cache_stream_encode_drops":      cacheStats.StreamEncodeDrops,
 			"cache_write_batches":            cacheStats.WriteBatches,
 			"cache_write_objects_committed":  cacheStats.WriteObjectsCommitted,
 			"cache_average_write_batch_size": cacheStats.AverageWriteBatchSize,

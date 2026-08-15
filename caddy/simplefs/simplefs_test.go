@@ -1070,6 +1070,20 @@ func TestWriteQueueRejectsAtObjectLimit(t *testing.T) {
 	provider.batchMu.Unlock()
 }
 
+func TestRecordStreamEncodeDropUpdatesStatistics(t *testing.T) {
+	directory := t.TempDir()
+	provider := newTestProvider(t, directory, 0)
+	providers.Store(provider.path, provider)
+	t.Cleanup(func() { providers.Delete(provider.path) })
+	storage := &Storage{provider: provider}
+
+	storage.RecordStreamEncodeDrop()
+	stats := Stats(directory)
+	if stats.StreamEncodeDrops != 1 || stats.RejectedWrites != 1 {
+		t.Fatalf("stream encode drop statistics=%+v", stats)
+	}
+}
+
 func TestResetPathClearsWriteStatisticsAfterCommit(t *testing.T) {
 	directory := t.TempDir()
 	provider := newTestProvider(t, directory, 0)
@@ -1085,6 +1099,7 @@ func TestResetPathClearsWriteStatisticsAfterCommit(t *testing.T) {
 	provider.objectsCommitted.Store(7)
 	provider.commitNanos.Store(8)
 	provider.inflightWrites.Store(9)
+	provider.streamEncodeDrops.Store(10)
 
 	if err := ResetPath(directory); err != nil {
 		t.Fatal(err)
@@ -1092,7 +1107,7 @@ func TestResetPathClearsWriteStatisticsAfterCommit(t *testing.T) {
 	stats := Stats(directory)
 	if stats.WriteQueueDepth != 0 || stats.WriteQueueBytes != 0 || stats.WriteQueueDepthMax != 0 || stats.WriteQueueBytesMax != 0 ||
 		stats.WriteQueueRejections != 0 || stats.WriteBatches != 0 || stats.WriteObjectsCommitted != 0 ||
-		stats.WriteCommitLatencyMS != 0 || stats.InflightWrites != 0 {
+		stats.WriteCommitLatencyMS != 0 || stats.InflightWrites != 0 || stats.StreamEncodeDrops != 0 {
 		t.Fatalf("write statistics were not reset: %+v", stats)
 	}
 }

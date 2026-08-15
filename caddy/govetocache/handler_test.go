@@ -558,7 +558,7 @@ func TestEncodeSessionCommitsKnownLengthObject(t *testing.T) {
 	}
 	sess := startEncodeSession(func(source io.Reader) error {
 		return storage.PutReader("base", "varied", source, uint64(len(headerBytes))+4, nil, nil, "", time.Minute, "real")
-	}, headerBytes)
+	}, headerBytes, nil)
 	sess.tryWrite([]byte("body"))
 	if err := sess.finish(); err != nil {
 		t.Fatalf("encode finish: %v", err)
@@ -769,7 +769,7 @@ func TestFetchAndServeDropsEncodeWhenQueueSaturated(t *testing.T) {
 	encodeQueueSlots = 0
 	t.Cleanup(func() { encodeQueueSlots = old })
 
-	storage, _ := newTestCache(t)
+	storage, dir := newTestCache(t)
 
 	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
 		w.Header().Set("Content-Type", "text/plain")
@@ -795,6 +795,7 @@ func TestFetchAndServeDropsEncodeWhenQueueSaturated(t *testing.T) {
 		_ = fresh.Body.Close()
 		t.Fatal("dropped encode must not publish an object")
 	}
+	assertNoBodyObjects(t, dir)
 }
 
 func TestFetchAndServeCachesUnknownLengthViaOriginTemp(t *testing.T) {

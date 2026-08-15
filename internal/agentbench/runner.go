@@ -920,6 +920,7 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 			summary.committedRecordsStart = telemetryBaseline.CommittedRecords
 			summary.totalAllocStart = telemetryBaseline.TotalAlloc
 			summary.cacheWriteRejectionsStart = telemetryBaseline.CacheWriteRejections
+			summary.streamEncodeDropsStart = telemetryBaseline.StreamEncodeDrops
 			summary.cacheWriteBatchesStart = telemetryBaseline.CacheWriteBatches
 			summary.cacheWriteObjectsStart = telemetryBaseline.CacheWriteObjects
 		}
@@ -1031,6 +1032,7 @@ func sampleResources(ctx context.Context, pid int32, metricsURL string, interval
 					point.CacheWriteQueueDepthMax = telemetry.CacheWriteQueueDepthMax
 					point.CacheWriteQueueBytesMax = telemetry.CacheWriteQueueBytesMax
 					point.CacheWriteRejections = telemetry.CacheWriteRejections
+					point.StreamEncodeDrops = telemetry.StreamEncodeDrops
 					point.CacheWriteBatches = telemetry.CacheWriteBatches
 					point.CacheWriteObjects = telemetry.CacheWriteObjects
 					point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
@@ -1120,6 +1122,7 @@ type telemetrySample struct {
 	CacheWriteQueueDepthMax    uint64    `json:"cache_write_queue_depth_max"`
 	CacheWriteQueueBytesMax    uint64    `json:"cache_write_queue_bytes_max"`
 	CacheWriteRejections       uint64    `json:"cache_write_queue_rejections"`
+	StreamEncodeDrops          uint64    `json:"cache_stream_encode_drops"`
 	CacheWriteBatches          uint64    `json:"cache_write_batches"`
 	CacheWriteObjects          uint64    `json:"cache_write_objects_committed"`
 	CacheAverageWriteBatchSize float64   `json:"cache_average_write_batch_size"`
@@ -1180,6 +1183,7 @@ func captureResourcePoint(pid int32, metricsURL string, state *runState, phase s
 			point.CacheWriteQueueDepthMax = telemetry.CacheWriteQueueDepthMax
 			point.CacheWriteQueueBytesMax = telemetry.CacheWriteQueueBytesMax
 			point.CacheWriteRejections = telemetry.CacheWriteRejections
+			point.StreamEncodeDrops = telemetry.StreamEncodeDrops
 			point.CacheWriteBatches = telemetry.CacheWriteBatches
 			point.CacheWriteObjects = telemetry.CacheWriteObjects
 			point.CacheAverageWriteBatchSize = telemetry.CacheAverageWriteBatchSize
@@ -1243,6 +1247,7 @@ func applyNaturalEnd(summary *ResourceSummary, point TimeSeriesPoint) {
 	summary.CacheWriteQueueDepthMax = max(summary.CacheWriteQueueDepthMax, point.CacheWriteQueueDepthMax)
 	summary.CacheWriteQueueBytesMax = max(summary.CacheWriteQueueBytesMax, point.CacheWriteQueueBytesMax)
 	summary.CacheWriteRejectionsDelta = counterDelta(point.CacheWriteRejections, summary.cacheWriteRejectionsStart)
+	summary.StreamEncodeDropsDelta = counterDelta(point.StreamEncodeDrops, summary.streamEncodeDropsStart)
 	summary.CacheWriteBatchesDelta = counterDelta(point.CacheWriteBatches, summary.cacheWriteBatchesStart)
 	summary.CacheWriteObjectsDelta = counterDelta(point.CacheWriteObjects, summary.cacheWriteObjectsStart)
 	if summary.CacheWriteBatchesDelta > 0 {

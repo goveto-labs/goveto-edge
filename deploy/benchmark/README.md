@@ -41,7 +41,9 @@ full cases additionally require complete, drained access logs.
 that is also included in `full`. For every selected protocol it
 measures hot reads at 1 KiB/16 KiB/1 MiB and c1/c8/c32/c128, unique-key cold
 writes, a bounded 256-key mixed workload, fixed range hits, and cold-request
-coalescing through c512. It also compares the first, 31st, and fallback routes
+coalescing through c512. H1 also repeats the 1 MiB hot-read and fixed-range
+shapes with incompressible pattern payloads to isolate LZ4 decode cost. The
+suite also compares the first, 31st, and fallback routes
 of a maximum-size 32-rule policy using extension, prefix, grouped regex, full
 cache-key, header-key, and hashed-key settings. H1 additionally exercises disk
 eviction under the configured cache capacity. Every case validates cache
@@ -161,6 +163,15 @@ the matrix, JSON/Markdown/CSV reports, per-service logs, resolved Compose and
 image details, Git state, Agent binary SHA-256, environment information, and
 complete error counts by type.
 
+Benchmark runs capture raw `.pprof` files from the agent's profiling HTTP
+endpoints. Symbolize them on the benchmark host or another Go development
+machine with `script/bench_pprof.sh [run-id]`, which writes `pprof-notes/<profile>.txt`
+(flat, cumulative, and application-frame views) next to the artifacts. Baseline
+runs for performance work must use the fixed 26-core amd64 runner, for example
+`script/run_agent_benchmark.sh cache --runner 26c-agent2 --establish-baseline`;
+runs on other hosts or architectures (such as a local `default` runner) are
+smoke validations only and never comparable baselines.
+
 Cache-hit Capacity and soak cases accept `HIT` and `STALE`, reject `MISS`, and
 limit `STALE` to 1% per repetition. Cache-miss keys include a per-run and
 per-repeat namespace. High-concurrency cases close their load-side transports
@@ -184,12 +195,12 @@ Direct `agent-bench` runs can add `--min-rps`, `--max-p99`,
 `--max-allocation-bytes-per-request`, `--require-cache-writes-drained`,
 `--min-baseline-rps-ratio`, and `--max-baseline-allocation-ratio` gates.
 
-WAF cases are new. Comparing a run that includes WAF cases against an older
-run that predates them will not fail: a missing WAF baseline report makes that
-case run standalone instead of aborting the comparison. The first run with WAF
-cases should therefore use `--establish-baseline` so the next run can regress
-the WAF cases with `--baseline-run`. The clean pass-through case is the
-reference for the WAF overhead; compare its summary against the matching
+WAF and incompressible cache-pattern cases are new. Comparing against an older
+run that predates either case family will not fail: a missing baseline report
+makes that case run standalone instead of aborting the comparison. The first
+run with these cases should therefore use `--establish-baseline` so the next
+run can regress them with `--baseline-run`. The clean pass-through case is the
+reference for WAF overhead; compare its summary against the matching
 `pure-origin-1024b-reuse-<proto>-c<conc>` Capacity case to quantify the
 per-request rule-evaluation cost.
 

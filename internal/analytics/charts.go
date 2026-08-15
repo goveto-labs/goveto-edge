@@ -30,29 +30,30 @@ type WAFPoint struct {
 }
 
 type NodeRuntimePoint struct {
-	Bucket              time.Time `json:"bucket"`
-	NodeID              string    `json:"node_id"`
-	CPU                 float32   `json:"cpu_usage_percent"`
-	MemoryUsed          uint64    `json:"memory_used_bytes"`
-	MemoryTotal         uint64    `json:"memory_total_bytes"`
-	Load1               float32   `json:"load_1"`
-	Load5               float32   `json:"load_5"`
-	Load15              float32   `json:"load_15"`
-	Connections         uint64    `json:"connections"`
-	CacheUsed           uint64    `json:"cache_used_bytes"`
-	CacheDirectory      string    `json:"cache_directory"`
-	CacheEntries        uint64    `json:"cache_entries"`
-	CacheHits           uint64    `json:"cache_hits"`
-	CacheMisses         uint64    `json:"cache_misses"`
-	CacheStaleHits      uint64    `json:"cache_stale_hits"`
-	CacheEvictions      uint64    `json:"cache_evictions"`
-	CacheRejectedWrites uint64    `json:"cache_rejected_writes"`
-	CacheCorruptions    uint64    `json:"cache_corruptions"`
-	CacheHitRate        float32   `json:"cache_hit_rate"`
-	CacheCapacityRatio  float32   `json:"cache_capacity_ratio"`
-	CacheAlerts         []string  `json:"cache_alerts"`
-	DiskUsed            uint64    `json:"disk_used_bytes"`
-	DiskTotal           uint64    `json:"disk_total_bytes"`
+	Bucket                 time.Time `json:"bucket"`
+	NodeID                 string    `json:"node_id"`
+	CPU                    float32   `json:"cpu_usage_percent"`
+	MemoryUsed             uint64    `json:"memory_used_bytes"`
+	MemoryTotal            uint64    `json:"memory_total_bytes"`
+	Load1                  float32   `json:"load_1"`
+	Load5                  float32   `json:"load_5"`
+	Load15                 float32   `json:"load_15"`
+	Connections            uint64    `json:"connections"`
+	CacheUsed              uint64    `json:"cache_used_bytes"`
+	CacheDirectory         string    `json:"cache_directory"`
+	CacheEntries           uint64    `json:"cache_entries"`
+	CacheHits              uint64    `json:"cache_hits"`
+	CacheMisses            uint64    `json:"cache_misses"`
+	CacheStaleHits         uint64    `json:"cache_stale_hits"`
+	CacheEvictions         uint64    `json:"cache_evictions"`
+	CacheRejectedWrites    uint64    `json:"cache_rejected_writes"`
+	CacheStreamEncodeDrops uint64    `json:"cache_stream_encode_drops"`
+	CacheCorruptions       uint64    `json:"cache_corruptions"`
+	CacheHitRate           float32   `json:"cache_hit_rate"`
+	CacheCapacityRatio     float32   `json:"cache_capacity_ratio"`
+	CacheAlerts            []string  `json:"cache_alerts"`
+	DiskUsed               uint64    `json:"disk_used_bytes"`
+	DiskTotal              uint64    `json:"disk_total_bytes"`
 }
 
 type NodeSnapshot struct {
@@ -67,14 +68,14 @@ type NodeSnapshot struct {
 const runtimeColumns = `minute, node_id::text, cpu_usage_percent, memory_used_bytes,
 	memory_total_bytes, load_1, load_5, load_15, connections, cache_used_bytes,
 	cache_directory, cache_entries, cache_hits, cache_misses, cache_stale_hits,
-	cache_evictions, cache_rejected_writes, cache_corruptions, cache_hit_rate,
+	cache_evictions, cache_rejected_writes, cache_stream_encode_drops, cache_corruptions, cache_hit_rate,
 	cache_capacity_ratio, cache_alerts, disk_used_bytes, disk_total_bytes`
 
 func scanRuntime(row interface{ Scan(...any) error }, x *NodeRuntimePoint) error {
 	return row.Scan(&x.Bucket, &x.NodeID, &x.CPU, &x.MemoryUsed, &x.MemoryTotal,
 		&x.Load1, &x.Load5, &x.Load15, &x.Connections, &x.CacheUsed, &x.CacheDirectory,
 		&x.CacheEntries, &x.CacheHits, &x.CacheMisses, &x.CacheStaleHits, &x.CacheEvictions,
-		&x.CacheRejectedWrites, &x.CacheCorruptions, &x.CacheHitRate, &x.CacheCapacityRatio,
+		&x.CacheRejectedWrites, &x.CacheStreamEncodeDrops, &x.CacheCorruptions, &x.CacheHitRate, &x.CacheCapacityRatio,
 		&x.CacheAlerts, &x.DiskUsed, &x.DiskTotal)
 }
 
@@ -540,7 +541,8 @@ func (s *Store) NodeRuntime(ctx context.Context, cluster, nodeID, period string)
 		avg(cache_used_bytes)::bigint, last(cache_directory, minute), last(cache_entries, minute)::bigint,
 		last(cache_hits, minute)::bigint, last(cache_misses, minute)::bigint,
 		last(cache_stale_hits, minute)::bigint, last(cache_evictions, minute)::bigint,
-		last(cache_rejected_writes, minute)::bigint, last(cache_corruptions, minute)::bigint,
+		last(cache_rejected_writes, minute)::bigint, last(cache_stream_encode_drops, minute)::bigint,
+		last(cache_corruptions, minute)::bigint,
 		last(cache_hit_rate, minute)::real, avg(cache_capacity_ratio)::real,
 		last(cache_alerts, minute), avg(disk_used_bytes)::bigint, avg(disk_total_bytes)::bigint
 		FROM analytics.node_runtime_metrics_minute WHERE cluster_id = $1 AND minute >= $2`

@@ -169,6 +169,7 @@ func appendMetrics(queue *LogQueue, config NodeConfig) error {
 		"disk_used_bytes":       diskUsed(usage),
 		"disk_total_bytes":      diskTotal(usage),
 	}
+	payloadMap["cache_stream_encode_drops"] = cacheStats.StreamEncodeDrops
 	if cpuErr != nil {
 		payloadMap["cpu_error"] = cpuErr.Error()
 	}
@@ -209,6 +210,7 @@ func cacheActivitySinceLast(path string, current cachefs.Statistics) cachefs.Sta
 		RejectedWrites: counterDelta(current.RejectedWrites, previous.RejectedWrites),
 		Corruptions:    counterDelta(current.Corruptions, previous.Corruptions),
 	}
+	activity.StreamEncodeDrops = counterDelta(current.StreamEncodeDrops, previous.StreamEncodeDrops)
 	if total := activity.Hits + activity.Misses; total > 0 {
 		activity.HitRate = float64(activity.Hits) / float64(total)
 	}

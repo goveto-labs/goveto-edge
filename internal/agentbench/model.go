@@ -233,6 +233,7 @@ type ResourceSummary struct {
 	CacheWriteQueueBytesEnd    uint64     `json:"cache_write_queue_bytes_end,omitempty"`
 	CacheInflightWritesEnd     uint64     `json:"cache_inflight_writes_end,omitempty"`
 	CacheWriteRejectionsDelta  uint64     `json:"cache_write_rejections_delta,omitempty"`
+	StreamEncodeDropsDelta     uint64     `json:"cache_stream_encode_drops_delta,omitempty"`
 	CacheWriteBatchesDelta     uint64     `json:"cache_write_batches_delta,omitempty"`
 	CacheWriteObjectsDelta     uint64     `json:"cache_write_objects_committed_delta,omitempty"`
 	CacheAverageWriteBatchSize float64    `json:"cache_average_write_batch_size,omitempty"`
@@ -275,6 +276,7 @@ type ResourceSummary struct {
 	committedRecordsStart      uint64
 	totalAllocStart            uint64
 	cacheWriteRejectionsStart  uint64
+	streamEncodeDropsStart     uint64
 	cacheWriteBatchesStart     uint64
 	cacheWriteObjectsStart     uint64
 	telemetryBaselineCaptured  bool
@@ -318,6 +320,7 @@ type TimeSeriesPoint struct {
 	CacheWriteQueueDepthMax    uint64     `json:"cache_write_queue_depth_max,omitempty"`
 	CacheWriteQueueBytesMax    uint64     `json:"cache_write_queue_bytes_max,omitempty"`
 	CacheWriteRejections       uint64     `json:"cache_write_rejections,omitempty"`
+	StreamEncodeDrops          uint64     `json:"cache_stream_encode_drops,omitempty"`
 	CacheWriteBatches          uint64     `json:"cache_write_batches,omitempty"`
 	CacheWriteObjects          uint64     `json:"cache_write_objects_committed,omitempty"`
 	CacheAverageWriteBatchSize float64    `json:"cache_average_write_batch_size,omitempty"`

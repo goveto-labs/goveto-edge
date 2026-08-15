@@ -311,7 +311,14 @@ func (h *Handler) finishStreamEncode(w http.ResponseWriter, request *http.Reques
 		captured.forwardTrailers()
 		return captured.WriteResponse(w)
 	}
-	_ = captured.finishEncode()
+	if encodeErr := captured.finishEncode(); encodeErr != nil && !errors.Is(encodeErr, errEncodeDropped) && h.logger != nil {
+		h.logger.Warn("cache stream commit failed",
+			zap.String("site_id", h.SiteID),
+			zap.String("host", request.Host),
+			zap.String("path", request.URL.Path),
+			zap.Error(encodeErr),
+		)
+	}
 	captured.forwardTrailers()
 	return captured.WriteResponse(w)
 }

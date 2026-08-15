@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -19,7 +21,24 @@ func main() {
 	delay := flag.Duration("delay", 0, "fixed response delay")
 	originID := flag.String("id", "origin-1", "value returned in X-Benchmark-Origin")
 	failPrefix := flag.String("fail-prefix", "", "return 503 for paths with this prefix")
+	patternSHA256 := 0
+	patternSHA256Set := false
+	flag.Func("pattern-sha256", "print the hex SHA-256 of the deterministic pattern payload of this size and exit", func(value string) error {
+		size, err := parseSize(value)
+		if err != nil {
+			return err
+		}
+		patternSHA256 = size
+		patternSHA256Set = true
+		return nil
+	})
 	flag.Parse()
+
+	if patternSHA256Set {
+		digest := sha256.Sum256(deterministicPayload(patternSHA256))
+		fmt.Println(hex.EncodeToString(digest[:]))
+		return
+	}
 	var requests atomic.Uint64
 	handler := http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == "/healthz" {

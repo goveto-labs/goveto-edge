@@ -106,6 +106,7 @@ func Stats(path string) Statistics {
 		result.StaleHits += provider.staleHits.Load()
 		result.Evictions += provider.evictions.Load()
 		result.RejectedWrites += provider.rejections.Load()
+		result.StreamEncodeDrops += provider.streamEncodeDrops.Load()
 		result.Corruptions += provider.corruptions.Load()
 		result.WriteQueueDepth += provider.queueDepth.Load()
 		result.WriteQueueBytes += provider.queueBytes.Load()
@@ -182,6 +183,7 @@ func (p *provider) resetWriteStatistics() {
 	p.objectsCommitted.Store(0)
 	p.commitNanos.Store(0)
 	p.inflightWrites.Store(0)
+	p.streamEncodeDrops.Store(0)
 }
 
 func providersForPath(path string) []*provider {
@@ -414,6 +416,7 @@ type Statistics struct {
 	StaleHits             uint64  `json:"stale_hits"`
 	Evictions             uint64  `json:"evictions"`
 	RejectedWrites        uint64  `json:"rejected_writes"`
+	StreamEncodeDrops     uint64  `json:"stream_encode_drops"`
 	Corruptions           uint64  `json:"corruptions"`
 	HitRate               float64 `json:"hit_rate"`
 	WriteQueueDepth       uint64  `json:"write_queue_depth"`
@@ -506,6 +509,7 @@ type provider struct {
 	objectsCommitted  atomic.Uint64
 	commitNanos       atomic.Uint64
 	inflightWrites    atomic.Uint64
+	streamEncodeDrops atomic.Uint64
 	nextVersion       uint64
 	refs              int
 }

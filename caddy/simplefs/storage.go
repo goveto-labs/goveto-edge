@@ -127,6 +127,16 @@ func (s *Storage) PutReader(baseKey, variedKey string, source io.Reader, size ui
 	return s.provider.SetMultiLevelStream(baseKey, variedKey, source, size, groups, varied, etag, ttl, realKey)
 }
 
+func (s *Storage) RecordStreamEncodeDrop() {
+	if s == nil || s.provider == nil {
+		return
+	}
+	// Stream drops are rejected cache writes and feed the aggregate
+	// WRITE_REJECTED alert. queueRejections only counts batch queue saturation.
+	s.provider.streamEncodeDrops.Add(1)
+	s.provider.rejections.Add(1)
+}
+
 func (s *Storage) Refresh(baseKey string, request *http.Request, ttl time.Duration, update http.Header) bool {
 	return s != nil && s.provider != nil && s.provider.Refresh(baseKey, request, ttl, update)
 }

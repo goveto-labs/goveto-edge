@@ -70,7 +70,7 @@ func TestWriteCSVKeepsCacheTelemetryColumnsAligned(t *testing.T) {
 	directory := t.TempDir()
 	path := filepath.Join(directory, "timeseries.csv")
 	report := Report{Runs: []Run{{Index: 1, Samples: []TimeSeriesPoint{{
-		At: time.Unix(1, 0), CacheWriteQueueDepthMax: 17, CacheWriteQueueBytesMax: 19,
+		At: time.Unix(1, 0), CacheWriteQueueDepthMax: 17, CacheWriteQueueBytesMax: 19, StreamEncodeDrops: 23,
 	}}}}}
 	if err := writeCSV(path, report); err != nil {
 		t.Fatal(err)
@@ -94,6 +94,7 @@ func TestWriteCSVKeepsCacheTelemetryColumnsAligned(t *testing.T) {
 	for name, want := range map[string]string{
 		"cache_write_queue_depth_max": "17",
 		"cache_write_queue_bytes_max": "19",
+		"cache_stream_encode_drops":   "23",
 	} {
 		index, ok := columns[name]
 		if !ok || records[1][index] != want {

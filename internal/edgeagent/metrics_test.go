@@ -79,7 +79,7 @@ func TestAppendMetricsWritesRuntimeRecord(t *testing.T) {
 	for _, key := range []string{
 		"minute", "cpu_usage_percent", "memory_used_bytes", "load_1", "connections",
 		"cache_directory", "cache_used_bytes", "cache_entries", "cache_hits", "cache_misses",
-		"cache_evictions", "cache_rejected_writes", "cache_corruptions", "cache_hit_rate",
+		"cache_evictions", "cache_rejected_writes", "cache_stream_encode_drops", "cache_corruptions", "cache_hit_rate",
 		"cache_capacity_ratio", "cache_alerts",
 	} {
 		if _, ok := payload[key]; !ok {

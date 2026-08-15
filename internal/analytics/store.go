@@ -227,19 +227,20 @@ func joinColumns(columns []string) string {
 }
 
 type NodeRuntimeMetric struct {
-	Minute                                                time.Time
-	ClusterID, NodeID                                     string
-	CPU                                                   float32
-	MemoryUsed, MemoryTotal                               uint64
-	Load1, Load5, Load15                                  float32
-	Connections                                           uint64
-	CacheUsed                                             uint64
-	CacheDirectory                                        string
-	CacheEntries, CacheHits, CacheMisses, CacheStaleHits  uint64
-	CacheEvictions, CacheRejectedWrites, CacheCorruptions uint64
-	CacheHitRate, CacheCapacityRatio                      float32
-	CacheAlerts                                           []string
-	DiskUsed, DiskTotal                                   uint64
+	Minute                                               time.Time
+	ClusterID, NodeID                                    string
+	CPU                                                  float32
+	MemoryUsed, MemoryTotal                              uint64
+	Load1, Load5, Load15                                 float32
+	Connections                                          uint64
+	CacheUsed                                            uint64
+	CacheDirectory                                       string
+	CacheEntries, CacheHits, CacheMisses, CacheStaleHits uint64
+	CacheEvictions, CacheRejectedWrites                  uint64
+	CacheStreamEncodeDrops, CacheCorruptions             uint64
+	CacheHitRate, CacheCapacityRatio                     float32
+	CacheAlerts                                          []string
+	DiskUsed, DiskTotal                                  uint64
 }
 
 type OriginHealthMetric struct {
@@ -271,9 +272,9 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		minute, cluster_id, node_id, cpu_usage_percent, memory_used_bytes, memory_total_bytes,
 		load_1, load_5, load_15, connections, cache_used_bytes, cache_directory,
 		cache_entries, cache_hits, cache_misses, cache_stale_hits, cache_evictions,
-		cache_rejected_writes, cache_corruptions, cache_hit_rate, cache_capacity_ratio,
+		cache_rejected_writes, cache_stream_encode_drops, cache_corruptions, cache_hit_rate, cache_capacity_ratio,
 		cache_alerts, disk_used_bytes, disk_total_bytes
-	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
+	) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25)
 	ON CONFLICT (minute, node_id) DO UPDATE SET
 		cluster_id=EXCLUDED.cluster_id, cpu_usage_percent=EXCLUDED.cpu_usage_percent,
 		memory_used_bytes=EXCLUDED.memory_used_bytes, memory_total_bytes=EXCLUDED.memory_total_bytes,
@@ -282,13 +283,14 @@ func (s *Store) InsertRuntime(ctx context.Context, m NodeRuntimeMetric) error {
 		cache_directory=EXCLUDED.cache_directory, cache_entries=EXCLUDED.cache_entries,
 		cache_hits=EXCLUDED.cache_hits, cache_misses=EXCLUDED.cache_misses,
 		cache_stale_hits=EXCLUDED.cache_stale_hits, cache_evictions=EXCLUDED.cache_evictions,
-		cache_rejected_writes=EXCLUDED.cache_rejected_writes, cache_corruptions=EXCLUDED.cache_corruptions,
+		cache_rejected_writes=EXCLUDED.cache_rejected_writes,
+		cache_stream_encode_drops=EXCLUDED.cache_stream_encode_drops, cache_corruptions=EXCLUDED.cache_corruptions,
 		cache_hit_rate=EXCLUDED.cache_hit_rate, cache_capacity_ratio=EXCLUDED.cache_capacity_ratio,
 		cache_alerts=EXCLUDED.cache_alerts, disk_used_bytes=EXCLUDED.disk_used_bytes,
 		disk_total_bytes=EXCLUDED.disk_total_bytes`,
 		m.Minute, m.ClusterID, m.NodeID, m.CPU, m.MemoryUsed, m.MemoryTotal, m.Load1, m.Load5,
 		m.Load15, m.Connections, m.CacheUsed, m.CacheDirectory, m.CacheEntries, m.CacheHits,
-		m.CacheMisses, m.CacheStaleHits, m.CacheEvictions, m.CacheRejectedWrites, m.CacheCorruptions,
+		m.CacheMisses, m.CacheStaleHits, m.CacheEvictions, m.CacheRejectedWrites, m.CacheStreamEncodeDrops, m.CacheCorruptions,
 		m.CacheHitRate, m.CacheCapacityRatio, m.CacheAlerts, m.DiskUsed, m.DiskTotal)
 	return err
 }

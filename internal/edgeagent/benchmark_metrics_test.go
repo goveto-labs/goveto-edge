@@ -20,7 +20,7 @@ func TestBenchmarkMetricsExposeCacheWriteTelemetry(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_batches", "cache_write_objects_committed", "cache_write_commit_latency_ms", "cache_inflight_writes"} {
+	for _, name := range []string{"cache_write_queue_depth", "cache_write_queue_bytes", "cache_write_batches", "cache_write_objects_committed", "cache_write_commit_latency_ms", "cache_inflight_writes", "cache_stream_encode_drops"} {
 		if _, ok := payload[name]; !ok {
 			t.Errorf("metrics payload is missing %q", name)
 		}

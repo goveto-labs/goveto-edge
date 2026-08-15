@@ -30,3 +30,13 @@ func TestInitialMigrationContainsTimescaleContracts(t *testing.T) {
 		t.Fatal("refresh policies must be configured from the runtime raw-retention setting")
 	}
 }
+
+func TestStreamEncodeDropMigrationAddsRuntimeMetric(t *testing.T) {
+	raw, err := fs.ReadFile(FS, "migrations/003_stream_encode_drops.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "cache_stream_encode_drops bigint NOT NULL DEFAULT 0") {
+		t.Fatal("stream encode drop migration is missing the runtime metric column")
+	}
+}

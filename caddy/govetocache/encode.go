@@ -13,25 +13,51 @@ import (
 var errEncodeDropped = errors.New("cache encode dropped")
 
 // encodeQueueSlots is the bounded number of in-flight origin chunks that may
-// wait on the encoder. Tests may set it to 0 to force a drop.
-var encodeQueueSlots = 4
+// wait on the encoder. For the ~32 KiB writes produced by Caddy's reverse proxy,
+// this is roughly 2 MiB per session; other handlers may use larger writes.
+// Tests may set it to 0 to force a drop on every write.
+var encodeQueueSlots = 64
+
+// encodeCleanupTimeout bounds synchronous cleanup after a session is
+// abandoned. Successful commits are not subject to this timeout.
+var encodeCleanupTimeout = 2 * time.Second
 
 type encodeSession struct {
-	mu      sync.Mutex
-	chunks  chan []byte
-	done    chan error
-	dropped bool
-	closed  bool
+	mu            sync.Mutex
+	sendMu        sync.Mutex
+	dropOnce      sync.Once
+	queueDropOnce sync.Once
+	chunks        chan []byte
+	stop          chan struct{}
+	pipe          *io.PipeWriter
+	onQueueFull   func()
+	dropped       bool
+	closed        bool
+	result        error
+	done          chan struct{}
 }
 
-func startEncodeSession(put func(io.Reader) error, headerBytes []byte) *encodeSession {
-	chunks := make(chan []byte, encodeQueueSlots)
+func startEncodeSession(put func(io.Reader) error, headerBytes []byte, onQueueFull func()) *encodeSession {
+	sess := &encodeSession{
+		chunks:      make(chan []byte, encodeQueueSlots),
+		stop:        make(chan struct{}),
+		onQueueFull: onQueueFull,
+		done:        make(chan struct{}),
+	}
 	pr, pw := io.Pipe()
-	sess := &encodeSession{chunks: chunks, done: make(chan error, 1)}
+	sess.pipe = pw
 	go func() {
 		defer pw.Close()
-		for chunk := range chunks {
-			if _, err := pw.Write(chunk); err != nil {
+		for {
+			select {
+			case chunk, ok := <-sess.chunks:
+				if !ok {
+					return
+				}
+				if _, err := pw.Write(chunk); err != nil {
+					return
+				}
+			case <-sess.stop:
 				return
 			}
 		}
@@ -39,7 +65,10 @@ func startEncodeSession(put func(io.Reader) error, headerBytes []byte) *encodeSe
 	go func() {
 		err := put(io.MultiReader(bytes.NewReader(headerBytes), pr))
 		_ = pr.Close()
-		sess.done <- err
+		sess.mu.Lock()
+		sess.result = err
+		sess.mu.Unlock()
+		close(sess.done)
 	}()
 	return sess
 }
@@ -48,33 +77,71 @@ func (s *encodeSession) tryWrite(p []byte) {
 	if s == nil || len(p) == 0 {
 		return
 	}
-	cp := bytes.Clone(p)
+	s.sendMu.Lock()
+	defer s.sendMu.Unlock()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.dropped || s.closed {
+		s.mu.Unlock()
 		return
 	}
+	s.mu.Unlock()
+	if cap(s.chunks) == 0 {
+		s.dropQueueFull()
+		return
+	}
+	cp := bytes.Clone(p)
 	select {
 	case s.chunks <- cp:
+	case <-s.stop:
 	default:
-		s.dropped = true
-		s.closed = true
-		close(s.chunks)
+		s.dropQueueFull()
 	}
+}
+
+func (s *encodeSession) dropQueueFull() {
+	s.queueDropOnce.Do(func() {
+		if s.onQueueFull != nil {
+			s.onQueueFull()
+		}
+	})
+	s.drop()
+}
+
+// drop aborts the session and closes the pipe from outside the drainer so a
+// blocked pipe write is interrupted instead of publishing a truncated object.
+func (s *encodeSession) drop() {
+	s.dropOnce.Do(func() {
+		s.mu.Lock()
+		s.dropped = true
+		s.mu.Unlock()
+		_ = s.pipe.CloseWithError(errEncodeDropped)
+		close(s.stop)
+	})
 }
 
 func (s *encodeSession) finish() error {
 	if s == nil {
 		return nil
 	}
+	s.sendMu.Lock()
 	s.mu.Lock()
+	if s.dropped {
+		s.mu.Unlock()
+		s.sendMu.Unlock()
+		return errEncodeDropped
+	}
 	if !s.closed {
 		s.closed = true
 		close(s.chunks)
 	}
-	dropped := s.dropped
 	s.mu.Unlock()
-	err := <-s.done
+	s.sendMu.Unlock()
+
+	<-s.done
+	s.mu.Lock()
+	dropped := s.dropped
+	err := s.result
+	s.mu.Unlock()
 	if dropped {
 		return errEncodeDropped
 	}
@@ -85,14 +152,13 @@ func (s *encodeSession) abandon() {
 	if s == nil {
 		return
 	}
-	s.mu.Lock()
-	s.dropped = true
-	if !s.closed {
-		s.closed = true
-		close(s.chunks)
+	s.drop()
+	timer := time.NewTimer(encodeCleanupTimeout)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+	case <-timer.C:
 	}
-	s.mu.Unlock()
-	<-s.done
 }
 
 func hasDeclaredTrailer(header http.Header) bool {
@@ -124,7 +190,7 @@ func (w *capturedResponse) startEncode(h *Handler, request *http.Request, header
 	logical := uint64(len(headerBytes)) + size
 	w.encode = startEncodeSession(func(source io.Reader) error {
 		return h.storage.PutReader(baseKey, variedKey, source, logical, groups, varied, etag, ttl, realKey)
-	}, headerBytes)
+	}, headerBytes, h.storage.RecordStreamEncodeDrop)
 }
 
 func (w *capturedResponse) finishEncode() error {
@@ -133,7 +199,11 @@ func (w *capturedResponse) finishEncode() error {
 	}
 	enc := w.encode
 	w.encode = nil
-	return enc.finish()
+	err := enc.finish()
+	if errors.Is(err, errEncodeDropped) {
+		enc.abandon()
+	}
+	return err
 }
 
 func (w *capturedResponse) abandonEncode() {

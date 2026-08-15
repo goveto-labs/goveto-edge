@@ -155,6 +155,27 @@ sha256_zeros() {
   fi
 }
 
+declare -A pattern_sha_cache=()
+pattern_sha256_result=""
+# Digest of the origin's deterministic incompressible (/pattern/N) payload.
+# The payload is seeded xorshift output, so the digest is stable per size, and
+# the first N bytes of any /pattern payload equal /pattern/N exactly.
+sha256_pattern() {
+  local size="$1" digest
+  if [[ -n "${pattern_sha_cache[$size]:-}" ]]; then
+    pattern_sha256_result="${pattern_sha_cache[$size]}"
+    return
+  fi
+  if $dry_run; then
+    digest="pattern-sha256-placeholder"
+  else
+    digest="$(cd "$REPO_ROOT" && go run ./cmd/agent-bench-origin --pattern-sha256 "$size")" || \
+      die "pattern payload digest failed for $size"
+  fi
+  pattern_sha_cache[$size]="$digest"
+  pattern_sha256_result="$digest"
+}
+
 wait_for_agent() {
   local ready=false
   for _attempt in $(seq 1 60); do
@@ -272,9 +293,9 @@ run_case() {
     container_baseline="/results/$run_id/baseline/$baseline_run/$phase/$name/report.json"
     if [[ -s "$baseline_report" ]]; then
       baseline_args=(--baseline-run "$container_baseline")
-    elif [[ "$phase" == "waf" ]]; then
-      # WAF cases are new; an older baseline run may not contain them. Fall back
-      # to a standalone measurement instead of failing the whole comparison.
+    elif [[ "$phase" == "waf" || ( "$phase" == "cache" && "$name" == cache-*pattern-* ) ]]; then
+      # Older baselines may not contain WAF or incompressible pattern cases, so
+      # run those cases standalone instead of failing the whole comparison.
       echo "[$phase] $name: baseline report missing, running standalone"
     else
       die "baseline case is missing: $baseline_report"
@@ -521,6 +542,41 @@ run_cache_benchmark() {
   done
 
   # Unique keys isolate cache write/miss throughput from hit throughput.
+  # Incompressible pattern (/pattern/N) variants decompose codec costs from
+  # disk and copy costs: the same hot and range shapes as above, but the
+  # payload is stored raw on disk, so no LZ4 decode runs on a hit. Compare
+  # against cache-hot-1048576b-* and cache-range-64k-of-1m-* to quantify the
+  # decode share of the hit path.
+  if has_protocol "$protocols" h1; then
+    for concurrency in 32 128; do
+      name="cache-hot-pattern-1048576b-h1-c${concurrency}"
+      key="cache:$name"
+      sha256_pattern 1048576
+      run_case cache "$key" "$name" h1 "${common_args[@]}" \
+        --protocol h1 --scenario "cache-hot-pattern-1048576b" \
+        --url "https://agent:8444/pattern/1048576?cache_bench=hot-pattern-$run_id" \
+        --host cache.benchmark.example.test --concurrency "$concurrency" \
+        --expected-sha256 "$pattern_sha256_result" \
+        --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1
+    done
+    for concurrency in 32 128; do
+      name="cache-range-64k-of-1m-pattern-h1-c${concurrency}"
+      key="cache:$name"
+      sha256_pattern 65536
+      run_case cache "$key" "$name" h1 "${common_args[@]}" \
+        --protocol h1 --scenario cache-range-64k-of-1m-pattern \
+        --url "https://agent:8444/pattern/1048576?cache_bench=range-pattern-$run_id" \
+        --host cache.benchmark.example.test --concurrency "$concurrency" \
+        --header Range=bytes=0-65535 --expected-status 206 \
+        --expected-header "Content-Range=bytes 0-65535/1048576" \
+        --expected-sha256 "$pattern_sha256_result" \
+        --allowed-header X-Cache=HIT --allowed-header X-Cache=STALE \
+        --max-header-ratio X-Cache=STALE:0.01 --capture-header X-Cache --min-cache-hits 1 \
+        --min-baseline-rps-ratio 0.9
+    done
+  fi
+
   restart_cache_agent_group cold
   for protocol in $protocols; do
     for size in 1024 16384 1048576; do
@@ -543,6 +599,24 @@ run_cache_benchmark() {
   done
 
   # A bounded key set starts cold on every repetition, then transitions to hits.
+  # Unique-key cold writes of the incompressible payload isolate the write
+  # path from compression decisions. No RPS/p99 gate: raw storage increases
+  # the disk volume per object roughly 3-4x versus the compressed /bytes
+  # variant, so the gate for that variant does not transfer; numbers are for
+  # decomposition and future write-path A/B comparisons.
+  if has_protocol "$protocols" h1; then
+    reset_benchmark_cache
+    name="cache-cold-pattern-1048576b-h1-c32"
+    key="cache:$name"
+    sha256_pattern 1048576
+    run_case cache "$key" "$name" h1 "${common_args[@]}" \
+      --protocol h1 --scenario "cache-cold-pattern-1048576b" \
+      --url "https://agent:8444/pattern/1048576?cache_bench=cold-pattern-$run_id" \
+      --host cache.benchmark.example.test --concurrency 32 --unique-query \
+      --expected-sha256 "$pattern_sha256_result" --expected-header X-Cache=MISS \
+      --capture-header X-Cache --min-cache-misses 1
+  fi
+
   restart_cache_agent_group mixed
   for protocol in $protocols; do
     for concurrency in 32 128; do
