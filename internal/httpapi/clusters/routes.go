@@ -36,6 +36,17 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, cre
 		cipher = credentialCipher[0]
 	}
 	registerNotificationChannels(group, db, cipher)
+	registerLogpushDestinations(group, db, cipher, logpushDispatcher)
+}
+
+// logpushDispatcher is set by the control plane at startup so CRUD writes
+// invalidate the dispatcher's destination cache immediately.
+var logpushDispatcher logpushInvalidator
+
+// ConfigureLogpushDispatcher wires the runtime dispatcher into the logpush
+// management API. Call once at startup before serving traffic.
+func ConfigureLogpushDispatcher(dispatcher logpushInvalidator) {
+	logpushDispatcher = dispatcher
 }
 
 // @summary List DNS lines

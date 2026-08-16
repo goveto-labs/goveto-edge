@@ -26,6 +26,7 @@ import (
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/query"
+	"goveto-edge/internal/telemetry"
 )
 
 const (
@@ -895,19 +896,27 @@ func (g *Gateway) releaseLeases(ctx context.Context, nodeID, owner string) {
 
 func (g *Gateway) register(nodeID string, current *session) {
 	g.mu.Lock()
+	replacing := g.sessions[nodeID] != nil
 	if previous := g.sessions[nodeID]; previous != nil {
 		previous.cancel()
 	}
 	g.sessions[nodeID] = current
 	g.mu.Unlock()
+	if !replacing {
+		telemetry.EdgeAgentsConnected.Inc()
+	}
 }
 
 func (g *Gateway) unregister(nodeID string, current *session) {
 	g.mu.Lock()
-	if g.sessions[nodeID] == current {
+	removed := g.sessions[nodeID] == current
+	if removed {
 		delete(g.sessions, nodeID)
 	}
 	g.mu.Unlock()
+	if removed {
+		telemetry.EdgeAgentsConnected.Dec()
+	}
 }
 
 func (g *Gateway) wakeLocal(nodeID string) {

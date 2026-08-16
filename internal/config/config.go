@@ -72,6 +72,10 @@ type Config struct {
 	GeoIPDatabasePath              string
 	GeoIPASNDatabasePath           string
 	GeoIPDatabasePollInterval      time.Duration
+	MetricsEnabled                 bool
+	LogpushEnabled                 bool
+	LogpushQueueSize               int
+	LogpushBatchLinger             time.Duration
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -137,6 +141,14 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	logpushQueueSize, err := envInt("LOGPUSH_QUEUE_SIZE", 4096)
+	if err != nil {
+		return Config{}, err
+	}
+	logpushBatchLinger, err := envDuration("LOGPUSH_BATCH_LINGER", 500*time.Millisecond)
+	if err != nil {
+		return Config{}, err
+	}
 
 	appEnv := envString("APP_ENV", "development")
 	geoIPPollInterval, err := envDuration("GEOIP_DATABASE_POLL_INTERVAL", 30*time.Second)
@@ -187,6 +199,10 @@ func Load() (Config, error) {
 		GeoIPASNDatabasePath:           strings.TrimSpace(envString("GEOIP_ASN_DATABASE_PATH", defaultGeoIPASNPath)),
 		GeoIPDatabasePollInterval:      geoIPPollInterval,
 		SessionCookieSecure:            envBool("SESSION_COOKIE_SECURE", false),
+		MetricsEnabled:                 envBool("METRICS_ENABLED", false),
+		LogpushEnabled:                 envBool("LOGPUSH_ENABLED", true),
+		LogpushQueueSize:               logpushQueueSize,
+		LogpushBatchLinger:             logpushBatchLinger,
 	}
 	if strings.EqualFold(appEnv, "production") {
 		cfg.SessionCookieSecure = true
@@ -227,6 +243,12 @@ func Load() (Config, error) {
 	}
 	if cfg.AnalyticsQueryTimeout <= 0 {
 		return Config{}, errors.New("ANALYTICS_QUERY_TIMEOUT must be positive")
+	}
+	if cfg.LogpushQueueSize < 1 || cfg.LogpushQueueSize > 65536 {
+		return Config{}, errors.New("LOGPUSH_QUEUE_SIZE must be between 1 and 65536")
+	}
+	if cfg.LogpushBatchLinger <= 0 {
+		return Config{}, errors.New("LOGPUSH_BATCH_LINGER must be positive")
 	}
 	if cfg.GeoIPDatabasePollInterval <= 0 {
 		return Config{}, errors.New("GEOIP_DATABASE_POLL_INTERVAL must be positive")

@@ -167,6 +167,7 @@ type Cluster struct {
 	SiteTemplates        []*SiteTemplate        `db:"-" json:"siteTemplates,omitempty"`
 	SshCredentials       []*SSHCredential       `db:"-" json:"sshCredentials,omitempty"`
 	NotificationChannels []*NotificationChannel `db:"-" json:"notificationChannels,omitempty"`
+	LogpushDestinations  []*LogpushDestination  `db:"-" json:"logpushDestinations,omitempty"`
 	ApiKeys              []*ClusterApiKey       `db:"-" json:"apiKeys,omitempty"`
 }
 
@@ -373,6 +374,24 @@ type JobExecution struct {
 	FinishedAt  *time.Time       `db:"finished_at" json:"finishedAt"`
 	ResultJson  *json.RawMessage `db:"result_json" json:"resultJson"`
 	Error       *string          `db:"error" json:"error"`
+}
+
+// LogpushDestination represents the LogpushDestination model.
+type LogpushDestination struct {
+	Id                   string          `db:"id" json:"id"`
+	ClusterId            string          `db:"cluster_id" json:"clusterId"`
+	Name                 string          `db:"name" json:"name"`
+	Type                 LogpushType     `db:"type" json:"type"`
+	Brokers              string          `db:"brokers" json:"brokers"`
+	Topic                string          `db:"topic" json:"topic"`
+	LogTypes             json.RawMessage `db:"log_types" json:"logTypes"`
+	TlsEnabled           bool            `db:"tls_enabled" json:"tlsEnabled"`
+	SaslMechanism        *string         `db:"sasl_mechanism" json:"saslMechanism"`
+	CredentialsEncrypted *string         `db:"credentials_encrypted" json:"credentialsEncrypted"`
+	Enabled              bool            `db:"enabled" json:"enabled"`
+	CreatedAt            time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt            time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster              *Cluster        `db:"-" json:"cluster,omitempty"`
 }
 
 // Node represents the Node model.

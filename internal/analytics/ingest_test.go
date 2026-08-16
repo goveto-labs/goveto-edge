@@ -22,6 +22,17 @@ func TestAccessLogHasTimestamp(t *testing.T) {
 	}
 }
 
+func TestMetricRecordTypeBoundsLabels(t *testing.T) {
+	for _, recordType := range []string{"access", "caddy", "node_runtime", "origin_health"} {
+		if got := metricRecordType(recordType); got != recordType {
+			t.Errorf("metricRecordType(%q) = %q", recordType, got)
+		}
+	}
+	if got := metricRecordType("arbitrary-agent-value"); got != "unknown" {
+		t.Errorf("metricRecordType(arbitrary) = %q, want unknown", got)
+	}
+}
+
 func TestDecodeOriginHealth(t *testing.T) {
 	now := time.Date(2026, 7, 25, 12, 2, 0, 0, time.UTC)
 	metric, ok := decodeOriginHealth([]byte(`{

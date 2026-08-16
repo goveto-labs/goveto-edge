@@ -1,0 +1,49 @@
+# Logpush + observability reference stack
+#
+# Single-host example for evaluating the control plane's external analysis
+# integrations: Redpanda stands in for Kafka (Logpush destination), Prometheus
+# scrapes the control plane's /metrics endpoint, and Grafana loads the bundled
+# dashboard. Not a production topology.
+#
+# Usage:
+#   docker compose -f deploy/compose/logpush-observability.yaml up -d
+#
+# Start the control plane with METRICS_ENABLED=true. Then in the console
+# (Settings -> Logpush) add a destination with brokers `localhost:19092`, TLS
+# off, and an access-log topic such as `goveto-access-logs`.
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.4
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ../../configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      # Lets Prometheus scrape a control plane running on the Docker host.
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ../../configs/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../configs/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus

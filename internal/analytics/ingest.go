@@ -15,6 +15,7 @@ import (
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
+	"goveto-edge/internal/telemetry"
 
 	"github.com/google/uuid"
 	"golang.org/x/net/http/httpguts"
@@ -27,15 +28,25 @@ const (
 	originHealthMaxAddress   = 512
 )
 
+// LogSink receives raw agent log records for best-effort fan-out to external
+// systems (e.g. Kafka logpush). Implementations must never block the caller
+// or fail the batch; drops are reported through their own metrics.
+type LogSink interface {
+	Enqueue(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord)
+}
+
 type Ingest struct {
 	db         *client.Client
 	store      *Store
 	concurrent chan struct{}
 	archive    LogArchive
+	logpush    LogSink
 	geoIP      *geoIPEnricher
 }
 
 func (i *Ingest) SetArchive(archive LogArchive) { i.archive = archive }
+
+func (i *Ingest) SetLogpush(sink LogSink) { i.logpush = sink }
 
 func (i *Ingest) ConfigureGeoIP(cityPath, asnPath string) {
 	i.geoIP = newGeoIPEnricher(cityPath, asnPath)
@@ -72,7 +83,19 @@ func (i *Ingest) Consume(ctx context.Context, nodeID string, records []edgeproto
 	return i.consume(ctx, nodeRecord.ClusterId, nodeID, records)
 }
 
-func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord) error {
+func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records []edgeprotocol.LogRecord) (err error) {
+	started := time.Now()
+	defer func() {
+		telemetry.IngestBatchDuration.Observe(time.Since(started).Seconds())
+		result := "success"
+		if err != nil {
+			result = "error"
+		}
+		telemetry.IngestBatchesTotal.WithLabelValues(result).Inc()
+	}()
+	for _, r := range records {
+		telemetry.IngestRecordsTotal.WithLabelValues(metricRecordType(r.Type)).Inc()
+	}
 	directSites, err := i.resolveSites(ctx, clusterID, records)
 	if err != nil {
 		return err
@@ -190,6 +213,9 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 			return err
 		}
 	}
+	if i.logpush != nil {
+		i.logpush.Enqueue(ctx, clusterID, nodeID, records)
+	}
 	i.geoIP.enrich(events)
 	inserted, err := i.store.Insert(ctx, events)
 	if err != nil {
@@ -197,6 +223,15 @@ func (i *Ingest) consume(ctx context.Context, clusterID, nodeID string, records 
 	}
 	i.store.publish(inserted)
 	return nil
+}
+
+func metricRecordType(recordType string) string {
+	switch recordType {
+	case "access", "caddy", "node_runtime", "origin_health":
+		return recordType
+	default:
+		return "unknown"
+	}
 }
 
 func accessLogHasTimestamp(payload []byte) bool {

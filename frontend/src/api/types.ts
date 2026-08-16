@@ -339,6 +339,35 @@ export interface NotificationChannelInput {
     enabled: boolean;
 }
 
+export type LogpushLogType = 'access' | 'caddy' | 'node_runtime' | 'origin_health';
+
+export interface LogpushDestination {
+    id: string;
+    name: string;
+    type: string;
+    brokers: string[];
+    topic: string;
+    log_types: LogpushLogType[];
+    tls_enabled: boolean;
+    sasl_mechanism: string;
+    credentials_configured: boolean;
+    enabled: boolean;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface LogpushDestinationInput {
+    name: string;
+    brokers?: string;
+    topic?: string;
+    log_types?: LogpushLogType[];
+    tls_enabled?: boolean;
+    sasl_mechanism?: string;
+    username?: string;
+    password?: string;
+    enabled: boolean;
+}
+
 export interface NodeAddress {
     id: string;
     address: string;

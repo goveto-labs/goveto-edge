@@ -17,6 +17,7 @@ import {
     ShieldCheck,
     ShieldCog,
     Users,
+    Waves,
     Waypoints,
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -69,6 +70,7 @@ function settingsNav(isPlatformAdmin: boolean, canManageAPIKeys: boolean): NavIt
         { path: '/settings', label: 'Security', icon: ShieldCheck },
         { path: '/settings/members', label: 'Cluster members', icon: Users },
         { path: '/settings/notifications', label: 'Notifications', icon: BellRing },
+        { path: '/settings/logpush', label: 'Logpush', icon: Waves },
     ];
     if (canManageAPIKeys) {
         children.push({ path: '/settings/api-keys', label: 'API keys', icon: KeyRound });

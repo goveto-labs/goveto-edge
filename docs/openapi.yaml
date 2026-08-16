@@ -7762,6 +7762,300 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/clusters/{cluster_id}/logpush-destinations:
+        get:
+            operationId: listLogpushDestinations
+            summary: List logpush destinations
+            description: List the cluster's logpush destinations without exposing credentials.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+                - bearer_api_key: []
+                - x_api_key: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/clusters_logpushDestinationResponse'
+        post:
+            operationId: createLogpushDestination
+            summary: Create logpush destination
+            description: Create a Kafka logpush destination scoped to the cluster; credentials are stored encrypted.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/clusters_logpushDestinationRequest'
+            responses:
+                "201":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        $ref: '#/components/schemas/clusters_logpushDestinationResponse'
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/logpush-destinations/{destination_id}:
+        put:
+            operationId: updateLogpushDestination
+            summary: Update logpush destination
+            description: Update destination metadata; omit brokers/topic/credentials to retain stored values. Set sasl_mechanism to "none" to clear authentication.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: destination_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/clusters_logpushDestinationRequest'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        $ref: '#/components/schemas/clusters_logpushDestinationResponse'
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+        delete:
+            operationId: deleteLogpushDestination
+            summary: Delete logpush destination
+            description: Delete a logpush destination from the cluster.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: destination_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: No Content
+    /api/v1/clusters/{cluster_id}/logpush-destinations/{destination_id}/test:
+        post:
+            operationId: testLogpushDestination
+            summary: Test logpush destination
+            description: Verify the stored destination's brokers are reachable and its credentials authenticate.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: destination_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            delivered:
+                                                type: boolean
+                                                enum:
+                                                    - true
+                                        required:
+                                            - delivered
+    /api/v1/clusters/{cluster_id}/logpush-destinations/test:
+        post:
+            operationId: testDraftLogpushDestination
+            summary: Test a draft logpush destination
+            description: Verify an unsaved Kafka destination configuration connects before saving it.
+            tags:
+                - clusters-logpush
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/clusters_logpushDestinationRequest'
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            delivered:
+                                                type: boolean
+                                                enum:
+                                                    - true
+                                        required:
+                                            - delivered
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/publish/events:
         get:
             operationId: clusterEvents
@@ -11842,6 +12136,77 @@ components:
                     example: "2026-01-02T15:04:05Z"
                 url_configured:
                     type: boolean
+        clusters_logpushDestinationRequest:
+            type: object
+            properties:
+                brokers:
+                    type: string
+                    description: Comma-separated host:port broker list.
+                enabled:
+                    type:
+                        - boolean
+                        - "null"
+                log_types:
+                    type: array
+                    items:
+                        type: string
+                        enum:
+                            - access
+                            - caddy
+                            - node_runtime
+                            - origin_health
+                name:
+                    type: string
+                password:
+                    type: string
+                sasl_mechanism:
+                    type:
+                        - string
+                        - "null"
+                    description: One of none, plain, scram-sha-256, scram-sha-512; "none" clears authentication on update.
+                tls_enabled:
+                    type:
+                        - boolean
+                        - "null"
+                topic:
+                    type: string
+                username:
+                    type: string
+        clusters_logpushDestinationResponse:
+            type: object
+            properties:
+                brokers:
+                    type: array
+                    items:
+                        type: string
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credentials_configured:
+                    type: boolean
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                log_types:
+                    type: array
+                    items:
+                        type: string
+                name:
+                    type: string
+                sasl_mechanism:
+                    type: string
+                tls_enabled:
+                    type: boolean
+                topic:
+                    type: string
+                type:
+                    type: string
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         dnsprovider_Domain:
             type: object
             properties:

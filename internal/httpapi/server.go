@@ -28,6 +28,7 @@ import (
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/initialization"
 	jobsapi "goveto-edge/internal/httpapi/jobs"
+	metricsapi "goveto-edge/internal/httpapi/metrics"
 	"goveto-edge/internal/httpapi/nodes"
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
@@ -64,6 +65,7 @@ func New(
 	redisClient *redis.Client,
 	securityOptions httpsecurity.Options,
 	restartControlPlane func(),
+	metricsEnabled bool,
 	analyticsStore ...*analytics.Store,
 ) *echo.Echo {
 	e := echo.New()
@@ -81,6 +83,9 @@ func New(
 	captchaVerifier := captcha.New()
 	limiter := httpsecurity.NewRateLimiter(redisClient)
 	apiKeyService := apikey.New(orm)
+	if metricsEnabled {
+		e.Use(metricsapi.Middleware())
+	}
 	e.Use(
 		httpsecurity.Middleware(securityOptions),
 		sessions.Session,
@@ -98,6 +103,9 @@ func New(
 	}
 
 	health.Register(e, db, analyticsData)
+	if metricsEnabled {
+		metricsapi.Register(e)
+	}
 	initialization.Register(e, orm, settingStore, limiter, authority, gateway)
 	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, secretCiphers.TOTP, captchaVerifier, limiter)
 	adminsettings.Register(e, orm, settingStore, secretCiphers.General, authority, gateway, restartControlPlane)

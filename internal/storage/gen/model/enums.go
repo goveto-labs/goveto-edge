@@ -281,6 +281,20 @@ func ValidJobStatusValues() []JobStatus {
 	}
 }
 
+// LogpushType represents the LogpushType enum type.
+type LogpushType string
+
+const (
+	LogpushTypeKAFKA LogpushType = "KAFKA"
+)
+
+// ValidLogpushTypeValues returns all valid values for the LogpushType enum.
+func ValidLogpushTypeValues() []LogpushType {
+	return []LogpushType{
+		LogpushTypeKAFKA,
+	}
+}
+
 // NodeStatus represents the NodeStatus enum type.
 type NodeStatus string
 

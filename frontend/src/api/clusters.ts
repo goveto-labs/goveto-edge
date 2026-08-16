@@ -7,6 +7,8 @@ import type {
     ClusterRegion,
     ClusterRole,
     DNSLine,
+    LogpushDestination,
+    LogpushDestinationInput,
     NotificationChannel,
     NotificationChannelInput,
 } from './types.ts';
@@ -66,4 +68,22 @@ export const clusterApi = (clusterId: string) => ({
             clusterPath(clusterId, '/notification-channels/test'),
             payload
         ),
+
+    logpushDestinations: () =>
+        get<LogpushDestination[]>(clusterPath(clusterId, '/logpush-destinations')),
+    createLogpushDestination: (payload: LogpushDestinationInput) =>
+        post<LogpushDestination>(clusterPath(clusterId, '/logpush-destinations'), payload),
+    updateLogpushDestination: (destinationId: string, payload: LogpushDestinationInput) =>
+        put<LogpushDestination>(
+            clusterPath(clusterId, `/logpush-destinations/${destinationId}`),
+            payload
+        ),
+    deleteLogpushDestination: (destinationId: string) =>
+        del(clusterPath(clusterId, `/logpush-destinations/${destinationId}`)),
+    testLogpushDestination: (destinationId: string) =>
+        post<{ delivered: boolean }>(
+            clusterPath(clusterId, `/logpush-destinations/${destinationId}/test`)
+        ),
+    testDraftLogpushDestination: (payload: LogpushDestinationInput) =>
+        post<{ delivered: boolean }>(clusterPath(clusterId, '/logpush-destinations/test'), payload),
 });

@@ -501,6 +501,25 @@ query.PostAuthorIdColumn
   - `Resultjson` (Json, optional)
   - `Error` (String, optional)
 
+### LogpushDestination
+
+- Client handle: `c.LogpushDestination`
+- Query namespace: `query.LogpushDestination`
+- Fields:
+  - `Id` (UUID, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Type` ()
+  - `Brokers` (String)
+  - `Topic` (String)
+  - `Logtypes` (Json)
+  - `Tlsenabled` (Boolean)
+  - `Saslmechanism` (String, optional)
+  - `Credentialsencrypted` (String, optional)
+  - `Enabled` (Boolean)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### Node
 
 - Client handle: `c.Node`

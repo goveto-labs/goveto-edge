@@ -1,0 +1,168 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "id": 1,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum by (route, code) (rate(goveto_control_http_requests_total[$__rate_interval]))",
+          "legendFormat": "{{route}} {{code}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP request rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(goveto_control_http_request_duration_seconds_bucket[$__rate_interval])))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "title": "HTTP p95 latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "orientation": "auto" },
+      "targets": [
+        { "expr": "sum(goveto_edge_agents_connected)", "refId": "A" }
+      ],
+      "title": "Edge agents connected",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 9, "x": 6, "y": 8 },
+      "id": 4,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum by (result) (rate(goveto_analytics_ingest_batches_total[$__rate_interval]))",
+          "legendFormat": "batches {{result}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Analytics ingest batches",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 6, "w": 9, "x": 15, "y": 8 },
+      "id": 5,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum by (type) (rate(goveto_analytics_ingest_records_total[$__rate_interval]))",
+          "legendFormat": "{{type}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Analytics ingest records",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "id": 6,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "sum by (cluster_id, destination_id, destination) (rate(goveto_logpush_records_delivered_total[$__rate_interval]))",
+          "legendFormat": "delivered {{cluster_id}} / {{destination}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum by (cluster_id, destination_id, destination) (rate(goveto_logpush_records_dropped_total[$__rate_interval]))",
+          "legendFormat": "dropped {{cluster_id}} / {{destination}}",
+          "refId": "B"
+        }
+      ],
+      "title": "Logpush delivery",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 14 },
+      "id": 7,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "goveto_logpush_queue_depth",
+          "legendFormat": "{{cluster_id}} / {{destination}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Logpush queue depth",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "options": { "0": { "color": "red", "text": "Down" }, "1": { "color": "green", "text": "Up" } }, "type": "value" }
+          ]
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 14 },
+      "id": 8,
+      "options": { "displayMode": "basic", "orientation": "vertical", "showUnfilled": false },
+      "targets": [
+        { "expr": "goveto_logpush_destination_up", "legendFormat": "{{cluster_id}} / {{destination}}", "refId": "A" }
+      ],
+      "title": "Logpush destination health",
+      "type": "bargauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 9,
+      "options": { "legend": { "displayMode": "table", "placement": "bottom" }, "tooltip": { "mode": "multi" } },
+      "targets": [
+        {
+          "expr": "goveto_db_pool_connections_open",
+          "legendFormat": "{{pool}} open",
+          "refId": "A"
+        },
+        {
+          "expr": "goveto_db_pool_connections_in_use",
+          "legendFormat": "{{pool}} in use",
+          "refId": "B"
+        }
+      ],
+      "title": "Database connection pools",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["goveto-edge"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "title": "Goveto Edge Control Plane",
+  "uid": "goveto-control-plane",
+  "version": 1
+}

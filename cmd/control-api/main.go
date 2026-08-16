@@ -27,12 +27,14 @@ import (
 	clusterapi "goveto-edge/internal/httpapi/clusters"
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/jobretention"
+	"goveto-edge/internal/logpush"
 	"goveto-edge/internal/node"
 	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage"
+	"goveto-edge/internal/telemetry"
 	"goveto-edge/schema"
 )
 
@@ -57,6 +59,9 @@ func main() {
 	}
 	defer db.Close()
 	defer orm.Close()
+	if cfg.MetricsEnabled {
+		telemetry.RegisterDBStats("control", db)
+	}
 
 	schemaCtx, cancelSchema := context.WithTimeout(ctx, 5*time.Minute)
 	schemaResult, err := storage.InitSchema(schemaCtx, db, schema.FS, cfg.DatabaseURL)
@@ -167,6 +172,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer analyticsPool.Close()
+	if cfg.MetricsEnabled {
+		telemetry.RegisterPGXPoolStats("analytics", analyticsPool)
+	}
 	analyticsSchemaCtx, cancelAnalyticsSchema := context.WithTimeout(ctx, 5*time.Minute)
 	migrationCount, err := storage.InitAnalyticsSchema(analyticsSchemaCtx, analyticsPool, analyticsschema.FS)
 	cancelAnalyticsSchema()
@@ -200,6 +208,13 @@ func main() {
 		analyticsIngest.SetArchive(analytics.NewGzipNDJSONArchive(
 			analytics.NewFileObjectStore(cfg.AnalyticsArchiveDir), "access-logs",
 		))
+	}
+
+	if cfg.LogpushEnabled {
+		logpushDispatcher := logpush.NewDispatcher(orm, notificationCipher, cfg.LogpushQueueSize, cfg.LogpushBatchLinger)
+		analyticsIngest.SetLogpush(logpushDispatcher)
+		clusterapi.ConfigureLogpushDispatcher(logpushDispatcher)
+		defer logpushDispatcher.Close()
 	}
 
 	var publishService *publisher.Service
@@ -264,6 +279,9 @@ func main() {
 		}
 		if err == nil {
 			err = clusterapi.RewrapNotificationSecrets(rewrapCtx, orm, notificationCipher)
+		}
+		if err == nil {
+			err = clusterapi.RewrapLogpushSecrets(rewrapCtx, orm, notificationCipher)
 		}
 		if err == nil {
 			err = certificateService.RewrapSecrets(rewrapCtx)
@@ -358,6 +376,7 @@ func main() {
 				slog.Info("control plane restart requested after admin settings update")
 				stop()
 			},
+			cfg.MetricsEnabled,
 			analyticsStore,
 		),
 		ReadHeaderTimeout: cfg.HTTPReadHeaderTimeout,

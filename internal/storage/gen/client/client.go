@@ -44,6 +44,7 @@ type Client struct {
 	ExternalIdentity      ExternalIdentityActions
 	InstallJob            InstallJobActions
 	JobExecution          JobExecutionActions
+	LogpushDestination    LogpushDestinationActions
 	Node                  NodeActions
 	NodeAddress           NodeAddressActions
 	NodeCacheConfig       NodeCacheConfigActions
@@ -97,6 +98,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.ExternalIdentity = ExternalIdentityActions{client: c}
 	c.InstallJob = InstallJobActions{client: c}
 	c.JobExecution = JobExecutionActions{client: c}
+	c.LogpushDestination = LogpushDestinationActions{client: c}
 	c.Node = NodeActions{client: c}
 	c.NodeAddress = NodeAddressActions{client: c}
 	c.NodeCacheConfig = NodeCacheConfigActions{client: c}
@@ -310,6 +312,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.ExternalIdentity = ExternalIdentityActions{client: txClient}
 	txClient.InstallJob = InstallJobActions{client: txClient}
 	txClient.JobExecution = JobExecutionActions{client: txClient}
+	txClient.LogpushDestination = LogpushDestinationActions{client: txClient}
 	txClient.Node = NodeActions{client: txClient}
 	txClient.NodeAddress = NodeAddressActions{client: txClient}
 	txClient.NodeCacheConfig = NodeCacheConfigActions{client: txClient}
@@ -20010,6 +20013,994 @@ func (a JobExecutionActions) GroupBy(ctx context.Context, fields []string, opts 
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("JobExecution.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedLogpushDestinationTable(c *Client) string {
+	return c.quoteIdentifier("logpush_destinations")
+}
+func quotedLogpushDestinationColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "type", "brokers", "topic", "log_types", "tls_enabled", "sasl_mechanism", "credentials_encrypted", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteLogpushDestinationField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "type":
+		return c.quoteIdentifier(field), nil
+	case "brokers":
+		return c.quoteIdentifier(field), nil
+	case "topic":
+		return c.quoteIdentifier(field), nil
+	case "log_types":
+		return c.quoteIdentifier(field), nil
+	case "tls_enabled":
+		return c.quoteIdentifier(field), nil
+	case "sasl_mechanism":
+		return c.quoteIdentifier(field), nil
+	case "credentials_encrypted":
+		return c.quoteIdentifier(field), nil
+	case "enabled":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown LogpushDestination field %q", field)
+	}
+}
+
+// buildLogpushDestinationWhere recursively builds a WHERE clause string and arguments.
+func buildLogpushDestinationWhere(c *Client, wheres []query.LogpushDestinationWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.LogpushDestinationWhereClause); ok {
+				sub, subArgs := buildLogpushDestinationWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.LogpushDestinationWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildLogpushDestinationWhere(c, []query.LogpushDestinationWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.LogpushDestinationWhereClause); ok {
+				sub, subArgs := buildLogpushDestinationWhere(c, []query.LogpushDestinationWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteLogpushDestinationField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// LogpushDestinationActions provides database operations for the LogpushDestination model.
+type LogpushDestinationActions struct {
+	client *Client
+}
+
+// LogpushDestinationCreateBuilder builds a LogpushDestination create operation incrementally.
+type LogpushDestinationCreateBuilder struct {
+	action LogpushDestinationActions
+	sets   []query.LogpushDestinationSetClause
+}
+
+// Create starts a staged LogpushDestination create operation.
+func (a LogpushDestinationActions) Create() LogpushDestinationCreateBuilder {
+	return LogpushDestinationCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b LogpushDestinationCreateBuilder) Set(sets ...query.LogpushDestinationSetClause) LogpushDestinationCreateBuilder {
+	next := LogpushDestinationCreateBuilder{
+		action: b.action,
+		sets:   make([]query.LogpushDestinationSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b LogpushDestinationCreateBuilder) Do(ctx context.Context) (*model.LogpushDestination, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// LogpushDestinationCreateManyBuilder builds a bulk LogpushDestination insert operation.
+type LogpushDestinationCreateManyBuilder struct {
+	action            LogpushDestinationActions
+	data              []query.LogpushDestinationCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk LogpushDestination insert operation.
+func (a LogpushDestinationActions) BulkCreate(data []query.LogpushDestinationCreateInput) LogpushDestinationCreateManyBuilder {
+	return LogpushDestinationCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b LogpushDestinationCreateManyBuilder) OnConflictDoNothing(columns ...string) LogpushDestinationCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b LogpushDestinationCreateManyBuilder) Returning(columns ...string) LogpushDestinationCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b LogpushDestinationCreateManyBuilder) BatchSize(n int) LogpushDestinationCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b LogpushDestinationCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildLogpushDestinationCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("LogpushDestination.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("LogpushDestination.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b LogpushDestinationCreateManyBuilder) DoReturning(ctx context.Context) ([]model.LogpushDestination, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.LogpushDestination
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildLogpushDestinationCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "type", "brokers", "topic", "log_types", "tls_enabled", "sasl_mechanism", "credentials_encrypted", "enabled", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.LogpushDestination
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b LogpushDestinationCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "type", "brokers", "topic", "log_types", "tls_enabled", "sasl_mechanism", "credentials_encrypted", "enabled", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildLogpushDestinationCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("LogpushDestination.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// LogpushDestinationQueryBuilder builds a LogpushDestination query incrementally.
+type LogpushDestinationQueryBuilder struct {
+	action LogpushDestinationActions
+	opts   []query.LogpushDestinationQueryOption
+}
+
+// Query starts a staged LogpushDestination query.
+func (a LogpushDestinationActions) Query() LogpushDestinationQueryBuilder {
+	return LogpushDestinationQueryBuilder{action: a}
+}
+
+func (b LogpushDestinationQueryBuilder) withOptions(opts ...query.LogpushDestinationQueryOption) LogpushDestinationQueryBuilder {
+	next := LogpushDestinationQueryBuilder{
+		action: b.action,
+		opts:   make([]query.LogpushDestinationQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b LogpushDestinationQueryBuilder) Where(clauses ...query.LogpushDestinationWhereClause) LogpushDestinationQueryBuilder {
+	opts := make([]query.LogpushDestinationQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b LogpushDestinationQueryBuilder) OrderBy(clause query.LogpushDestinationOrderByClause) LogpushDestinationQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b LogpushDestinationQueryBuilder) Include(clauses ...query.LogpushDestinationIncludeClause) LogpushDestinationQueryBuilder {
+	opts := make([]query.LogpushDestinationQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b LogpushDestinationQueryBuilder) Take(n int) LogpushDestinationQueryBuilder {
+	return b.withOptions(query.LogpushDestinationTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b LogpushDestinationQueryBuilder) Skip(n int) LogpushDestinationQueryBuilder {
+	return b.withOptions(query.LogpushDestinationSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b LogpushDestinationQueryBuilder) Do(ctx context.Context) ([]model.LogpushDestination, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b LogpushDestinationQueryBuilder) First(ctx context.Context) (*model.LogpushDestination, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b LogpushDestinationQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyLogpushDestinationOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// LogpushDestinationUpdateBuilder builds a LogpushDestination update operation incrementally.
+type LogpushDestinationUpdateBuilder struct {
+	action LogpushDestinationActions
+	wheres []query.LogpushDestinationWhereClause
+	sets   []query.LogpushDestinationSetClause
+}
+
+// Update starts a staged LogpushDestination update operation.
+func (a LogpushDestinationActions) Update() LogpushDestinationUpdateBuilder {
+	return LogpushDestinationUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b LogpushDestinationUpdateBuilder) Where(clauses ...query.LogpushDestinationWhereClause) LogpushDestinationUpdateBuilder {
+	next := LogpushDestinationUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.LogpushDestinationWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.LogpushDestinationSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b LogpushDestinationUpdateBuilder) Set(sets ...query.LogpushDestinationSetClause) LogpushDestinationUpdateBuilder {
+	next := LogpushDestinationUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.LogpushDestinationWhereClause(nil), b.wheres...),
+		sets:   make([]query.LogpushDestinationSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b LogpushDestinationUpdateBuilder) combinedWhere() (query.LogpushDestinationWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.LogpushDestinationWhereClause{}, fmt.Errorf("LogpushDestination.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.LogpushDestination.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b LogpushDestinationUpdateBuilder) Do(ctx context.Context) (*model.LogpushDestination, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b LogpushDestinationUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// LogpushDestinationDeleteBuilder builds a LogpushDestination delete operation incrementally.
+type LogpushDestinationDeleteBuilder struct {
+	action LogpushDestinationActions
+	wheres []query.LogpushDestinationWhereClause
+}
+
+// Delete starts a staged LogpushDestination delete operation.
+func (a LogpushDestinationActions) Delete() LogpushDestinationDeleteBuilder {
+	return LogpushDestinationDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b LogpushDestinationDeleteBuilder) Where(clauses ...query.LogpushDestinationWhereClause) LogpushDestinationDeleteBuilder {
+	next := LogpushDestinationDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.LogpushDestinationWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b LogpushDestinationDeleteBuilder) combinedWhere() (query.LogpushDestinationWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.LogpushDestinationWhereClause{}, fmt.Errorf("LogpushDestination.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.LogpushDestination.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b LogpushDestinationDeleteBuilder) Do(ctx context.Context) (*model.LogpushDestination, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b LogpushDestinationDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple LogpushDestination records.
+func (a LogpushDestinationActions) FindMany(ctx context.Context, opts ...query.LogpushDestinationQueryOption) ([]model.LogpushDestination, error) {
+	cfg := query.ApplyLogpushDestinationOptions(opts)
+	q := "SELECT " + quotedLogpushDestinationColumns(a.client) + " FROM " + quotedLogpushDestinationTable(a.client)
+	argIdx := 0
+	where, args := buildLogpushDestinationWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteLogpushDestinationField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.LogpushDestination
+	for rows.Next() {
+		var item model.LogpushDestination
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("LogpushDestination.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching LogpushDestination record.
+func (a LogpushDestinationActions) FindFirst(ctx context.Context, opts ...query.LogpushDestinationQueryOption) (*model.LogpushDestination, error) {
+	opts = append(opts, query.LogpushDestinationTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single LogpushDestination record by unique constraint.
+func (a LogpushDestinationActions) FindUnique(ctx context.Context, where query.LogpushDestinationWhereClause) (*model.LogpushDestination, error) {
+	argIdx := 0
+	whereSQL, args := buildLogpushDestinationWhere(a.client, []query.LogpushDestinationWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedLogpushDestinationColumns(a.client) + " FROM " + quotedLogpushDestinationTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.LogpushDestination
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("LogpushDestination.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single LogpushDestination record.
+func (a LogpushDestinationActions) CreateOne(ctx context.Context, sets ...query.LogpushDestinationSetClause) (*model.LogpushDestination, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("LogpushDestination.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteLogpushDestinationField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedLogpushDestinationTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedLogpushDestinationColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.LogpushDestination
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("LogpushDestination.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple LogpushDestination records.
+func (a LogpushDestinationActions) CreateMany(ctx context.Context, data []query.LogpushDestinationCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a LogpushDestinationActions) buildLogpushDestinationCreateManySQL(data []query.LogpushDestinationCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "type", "brokers", "topic", "log_types", "tls_enabled", "sasl_mechanism", "credentials_encrypted", "enabled", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedLogpushDestinationTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single LogpushDestination record matching the where clause.
+func (a LogpushDestinationActions) UpdateOne(ctx context.Context, where query.LogpushDestinationWhereClause, sets ...query.LogpushDestinationSetClause) (*model.LogpushDestination, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("LogpushDestination.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteLogpushDestinationField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildLogpushDestinationWhere(a.client, []query.LogpushDestinationWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedLogpushDestinationTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedLogpushDestinationColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.LogpushDestination
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("LogpushDestination.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple LogpushDestination records matching the where clauses.
+func (a LogpushDestinationActions) UpdateMany(ctx context.Context, wheres []query.LogpushDestinationWhereClause, sets ...query.LogpushDestinationSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("LogpushDestination.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteLogpushDestinationField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildLogpushDestinationWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedLogpushDestinationTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("LogpushDestination.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single LogpushDestination record.
+func (a LogpushDestinationActions) UpsertOne(ctx context.Context, where query.LogpushDestinationWhereClause, create []query.LogpushDestinationSetClause, update []query.LogpushDestinationSetClause) (*model.LogpushDestination, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("LogpushDestination.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteLogpushDestinationField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedLogpushDestinationTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteLogpushDestinationField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteLogpushDestinationField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteLogpushDestinationField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedLogpushDestinationColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.LogpushDestination
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("LogpushDestination.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single LogpushDestination record matching the where clause.
+func (a LogpushDestinationActions) DeleteOne(ctx context.Context, where query.LogpushDestinationWhereClause) (*model.LogpushDestination, error) {
+	argIdx := 0
+	whereSQL, args := buildLogpushDestinationWhere(a.client, []query.LogpushDestinationWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedLogpushDestinationTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedLogpushDestinationColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.LogpushDestination
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Type, &item.Brokers, &item.Topic, &item.LogTypes, &item.TlsEnabled, &item.SaslMechanism, &item.CredentialsEncrypted, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("LogpushDestination.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple LogpushDestination records matching the where clauses.
+func (a LogpushDestinationActions) DeleteMany(ctx context.Context, wheres ...query.LogpushDestinationWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildLogpushDestinationWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedLogpushDestinationTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("LogpushDestination.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of LogpushDestination records matching the where clauses.
+func (a LogpushDestinationActions) Count(ctx context.Context, wheres ...query.LogpushDestinationWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildLogpushDestinationWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedLogpushDestinationTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("LogpushDestination.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for LogpushDestination.
+func (a LogpushDestinationActions) Aggregate(ctx context.Context, opts ...query.LogpushDestinationAggregateOption) (*query.LogpushDestinationAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteLogpushDestinationField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedLogpushDestinationTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.LogpushDestinationAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("LogpushDestination.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on LogpushDestination.
+func (a LogpushDestinationActions) GroupBy(ctx context.Context, fields []string, opts ...query.LogpushDestinationAggregateOption) ([]query.LogpushDestinationGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteLogpushDestinationField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteLogpushDestinationField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedLogpushDestinationTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("LogpushDestination.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.LogpushDestinationGroupByResult
+	for rows.Next() {
+		r := query.LogpushDestinationGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("LogpushDestination.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

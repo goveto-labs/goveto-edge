@@ -133,6 +133,10 @@ export default function App() {
                                                     path='/settings/notifications'
                                                 />
                                                 <Route
+                                                    element={<lazyRoutes.Logpush />}
+                                                    path='/settings/logpush'
+                                                />
+                                                <Route
                                                     element={<lazyRoutes.AdminSettings />}
                                                     path='/settings/admin/*'
                                                 />

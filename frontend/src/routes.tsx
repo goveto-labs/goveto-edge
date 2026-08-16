@@ -24,6 +24,7 @@ const loaders = {
     Init: () => import('@/pages/Init.tsx'),
     Jobs: () => import('@/pages/Jobs.tsx'),
     Login: () => import('@/pages/Login.tsx'),
+    Logpush: () => import('@/pages/Logpush.tsx'),
     NodeDetail: () => import('@/pages/NodeDetail.tsx'),
     Nodes: () => import('@/pages/Nodes.tsx'),
     Notifications: () => import('@/pages/Notifications.tsx'),
@@ -51,6 +52,7 @@ export const lazyRoutes = {
     Init: lazy(loaders.Init),
     Jobs: lazy(loaders.Jobs),
     Login: lazy(loaders.Login),
+    Logpush: lazy(loaders.Logpush),
     NodeDetail: lazy(loaders.NodeDetail),
     Nodes: lazy(loaders.Nodes),
     Notifications: lazy(loaders.Notifications),
@@ -88,6 +90,7 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
     '/settings': loaders.Settings,
     '/settings/members': loaders.ClusterMembers,
     '/settings/notifications': loaders.Notifications,
+    '/settings/logpush': loaders.Logpush,
     '/settings/api-keys': loaders.ApiKeys,
     '/settings/admin': loaders.AdminSettings,
 };

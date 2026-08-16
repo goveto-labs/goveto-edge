@@ -52,6 +52,7 @@ type ClusterQuery struct {
 	SiteTemplates        clusterSiteTemplatesRelation
 	SshCredentials       clusterSshCredentialsRelation
 	NotificationChannels clusterNotificationChannelsRelation
+	LogpushDestinations  clusterLogpushDestinationsRelation
 	ApiKeys              clusterApiKeysRelation
 }
 
@@ -87,6 +88,7 @@ var Cluster = ClusterQuery{
 	SiteTemplates:        clusterSiteTemplatesRelation{},
 	SshCredentials:       clusterSshCredentialsRelation{},
 	NotificationChannels: clusterNotificationChannelsRelation{},
+	LogpushDestinations:  clusterLogpushDestinationsRelation{},
 	ApiKeys:              clusterApiKeysRelation{},
 }
 
@@ -693,6 +695,14 @@ func (clusterNotificationChannelsRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "notificationChannels"}
 }
 
+// LogpushDestinationsRelation provides relation query helpers for logpushDestinations.
+type clusterLogpushDestinationsRelation struct{}
+
+// Fetch creates an include clause to fetch related logpushDestinations.
+func (clusterLogpushDestinationsRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "logpushDestinations"}
+}
+
 // ApiKeysRelation provides relation query helpers for apiKeys.
 type clusterApiKeysRelation struct{}
 
@@ -756,6 +766,7 @@ type ClusterCreateInput struct {
 	SiteTemplates        *SiteTemplateCreateNestedInput
 	SshCredentials       *SSHCredentialCreateNestedInput
 	NotificationChannels *NotificationChannelCreateNestedInput
+	LogpushDestinations  *LogpushDestinationCreateNestedInput
 	ApiKeys              *ClusterApiKeyCreateNestedInput
 }
 

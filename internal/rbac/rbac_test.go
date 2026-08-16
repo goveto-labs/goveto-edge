@@ -17,6 +17,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 		PermissionMemberManage,
 		PermissionClusterTransfer,
 		PermissionNotificationManage,
+		PermissionLogpushManage,
 	}
 	tests := []struct {
 		role    Role
@@ -132,6 +133,7 @@ func TestKeyGrantablePermissionsWhitelist(t *testing.T) {
 		PermissionAPIKeyManage, PermissionCredentialManage, PermissionNodeManage,
 		PermissionNodeDelete, PermissionCertificateManage, PermissionMemberManage,
 		PermissionClusterTransfer, PermissionNotificationManage,
+		PermissionLogpushManage,
 		PermissionPlatformUserManage, PermissionPlatformClusterRead,
 		PermissionPlatformSettingsManage, PermissionPlatformAuditRead,
 		PermissionPlatformPolicyManage,

@@ -1,0 +1,13 @@
+# Prometheus scrape configuration for the Goveto Edge control plane.
+# The control API exposes /metrics without authentication (same trust model as
+# /health); restrict network access to the scrape path in production.
+scrape_configs:
+  - job_name: goveto-control
+    scrape_interval: 15s
+    metrics_path: /metrics
+    static_configs:
+      # Adjust to your control-plane address. When the control API runs on the
+      # Docker host and Prometheus runs in compose, host.docker.internal works
+      # with the extra_hosts mapping from logpush-observability.yaml.
+      - targets:
+          - host.docker.internal:8080
