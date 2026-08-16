@@ -75,6 +75,35 @@ func TestMiddlewareRejectsMissingCSRFForAuthenticatedMutation(t *testing.T) {
 	}
 }
 
+func TestMiddlewareExemptsExplicitAPIKeyFromCookieCSRFOnly(t *testing.T) {
+	exempt := func(request *http.Request) bool {
+		return strings.HasPrefix(request.Header.Get("Authorization"), "Bearer gve1_")
+	}
+	request := httptest.NewRequest(http.MethodPost, "https://control.example/api/v1/clusters/c/sites", strings.NewReader(`{}`))
+	request.Host = "control.example"
+	request.AddCookie(&http.Cookie{Name: "session", Value: "stale"})
+	request.Header.Set("Authorization", "Bearer gve1_token")
+	called := false
+	_, err := runMiddleware(t, request, Options{
+		SessionCookieName: "session", CSRFCookieName: "session_csrf", CSRFExempt: exempt,
+	}, func(*echo.Context) error {
+		called = true
+		return nil
+	})
+	if err != nil || !called {
+		t.Fatalf("api key csrf exemption: called=%v err=%v", called, err)
+	}
+
+	request = httptest.NewRequest(http.MethodPost, "https://control.example/api/v1/clusters/c/sites", strings.NewReader(`{}`))
+	request.Host = "control.example"
+	request.Header.Set("Origin", "https://attacker.example")
+	request.Header.Set("Authorization", "Bearer gve1_token")
+	_, err = runMiddleware(t, request, Options{CSRFExempt: exempt}, func(*echo.Context) error { return nil })
+	if statusFromError(err) != http.StatusForbidden {
+		t.Fatalf("api key exemption bypassed origin validation: %v", err)
+	}
+}
+
 func TestMiddlewareRejectsCrossOriginAndOversizedRequests(t *testing.T) {
 	request := httptest.NewRequest(http.MethodPost, "https://control.example/api/v1/auth/login", strings.NewReader(`{}`))
 	request.Host = "control.example"

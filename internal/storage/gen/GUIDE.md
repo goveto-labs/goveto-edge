@@ -291,6 +291,28 @@ query.PostAuthorIdColumn
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
+### ClusterApiKey
+
+- Client handle: `c.ClusterApiKey`
+- Query namespace: `query.ClusterApiKey`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Name` (String)
+  - `Prefix` (String)
+  - `Tokenhash` (String, unique)
+  - `Previoustokenhash` (String, optional, unique)
+  - `Previousexpiresat` (DateTime, optional)
+  - `Permissionsjson` (Json)
+  - `Status` ()
+  - `Expiresat` (DateTime, optional)
+  - `Revokedat` (DateTime, optional)
+  - `Lastusedat` (DateTime, optional)
+  - `Lastusedip` (String, optional)
+  - `Createdby` (String)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### ClusterGroup
 
 - Client handle: `c.ClusterGroup`

@@ -26,6 +26,7 @@ import { SelectField } from '@/components/SelectField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 interface NavItemConfig {
     path: string;
@@ -63,12 +64,15 @@ const nav: NavItemConfig[] = [
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 
-function settingsNav(isPlatformAdmin: boolean): NavItemConfig {
+function settingsNav(isPlatformAdmin: boolean, canManageAPIKeys: boolean): NavItemConfig {
     const children: NavItemConfig[] = [
         { path: '/settings', label: 'Security', icon: ShieldCheck },
         { path: '/settings/members', label: 'Cluster members', icon: Users },
         { path: '/settings/notifications', label: 'Notifications', icon: BellRing },
     ];
+    if (canManageAPIKeys) {
+        children.push({ path: '/settings/api-keys', label: 'API keys', icon: KeyRound });
+    }
     if (isPlatformAdmin) {
         children.push({ path: '/settings/admin', label: 'Admin settings', icon: ShieldCog });
     }
@@ -80,8 +84,8 @@ function settingsNav(isPlatformAdmin: boolean): NavItemConfig {
     };
 }
 
-export function navigationFor(isPlatformAdmin = false) {
-    return [...nav, settingsNav(isPlatformAdmin)];
+export function navigationFor(isPlatformAdmin = false, canManageAPIKeys = false) {
+    return [...nav, settingsNav(isPlatformAdmin, canManageAPIKeys)];
 }
 
 interface SidebarProps {
@@ -127,7 +131,9 @@ function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
 function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
     const location = useLocation();
     const { user } = useAuth();
-    const visibleNav = navigationFor(user?.role === 'ADMIN');
+    const { clusterId, clusters } = useCluster();
+    const clusterRole = clusters.find((cluster) => cluster.id === clusterId)?.role;
+    const visibleNav = navigationFor(user?.role === 'ADMIN', canManageCluster(clusterRole));
 
     return (
         <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>

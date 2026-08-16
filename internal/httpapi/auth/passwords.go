@@ -47,8 +47,8 @@ type passwordResetTokenResponse struct {
 }
 
 func registerPasswords(group *echo.Group, db *client.Client, sessions *authn.SessionStore, limiter *httpsecurity.RateLimiter, sensitive echo.MiddlewareFunc) {
-	group.PUT("/password", changePassword(db, sessions), authn.RequireAuth, sensitive)
-	group.POST("/password-reset/admin-token", issuePasswordReset(db), authn.RequireAuth)
+	group.PUT("/password", changePassword(db, sessions), authn.RequireUser, sensitive)
+	group.POST("/password-reset/admin-token", issuePasswordReset(db), authn.RequireUser)
 	group.POST("/password-reset", completePasswordReset(db, sessions), limiter.Limit("password-reset", 5, time.Hour))
 }
 

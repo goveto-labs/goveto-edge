@@ -35,6 +35,10 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id", "notification_channel.update", "notification_channel", "channel_id"},
 	{http.MethodDelete, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id", "notification_channel.delete", "notification_channel", "channel_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/notification-channels/:channel_id/test", "notification_channel.test", "notification_channel", "channel_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/api-keys", "api_key.create", "api_key", ""},
+	{http.MethodPatch, "/api/v1/clusters/:cluster_id/api-keys/:key_id", "api_key.update", "api_key", "key_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/api-keys/:key_id/rotate", "api_key.rotate", "api_key", "key_id"},
+	{http.MethodDelete, "/api/v1/clusters/:cluster_id/api-keys/:key_id", "api_key.revoke", "api_key", "key_id"},
 
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes", "node.create", "node", ""},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/ssh-credentials", "ssh_credential.create", "ssh_credential", ""},

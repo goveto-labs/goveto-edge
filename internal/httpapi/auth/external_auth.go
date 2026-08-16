@@ -73,7 +73,7 @@ var (
 func registerExternalAuth(group *echo.Group, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher settings.SecretCipher, limiter *httpsecurity.RateLimiter) {
 	group.GET("/methods", authMethods(settingStore, cipher), limiter.Limit("auth-methods", 60, time.Minute))
 	group.GET("/providers/:provider_id/start", externalAuthStart(sessions, settingStore, cipher, false), limiter.Limit("external-auth-start", 30, time.Minute))
-	group.POST("/providers/:provider_id/link", externalAuthStart(sessions, settingStore, cipher, true), authn.RequireAuth, limiter.Limit("external-auth-link", 10, time.Minute))
+	group.POST("/providers/:provider_id/link", externalAuthStart(sessions, settingStore, cipher, true), authn.RequireUser, limiter.Limit("external-auth-link", 10, time.Minute))
 	group.GET("/providers/callback", externalAuthCallback(db, sessions, settingStore, cipher), limiter.Limit("external-auth-callback", 60, time.Minute))
 }
 

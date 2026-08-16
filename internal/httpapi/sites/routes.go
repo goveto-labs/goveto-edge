@@ -274,7 +274,7 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 				Set(
 					query.Site.Id.Set(siteID),
 					query.Site.ClusterId.Set(c.Param("cluster_id")),
-					query.Site.CreatorId.Set(auth.CurrentUID(c)),
+					query.Site.CreatorId.Set(auth.CurrentResourceOwnerUserID(c)),
 					query.Site.Name.Set(input.Name),
 					query.Site.Status.Set(model.SiteStatusACTIVE),
 					query.Site.OriginPoolId.Set(poolID),

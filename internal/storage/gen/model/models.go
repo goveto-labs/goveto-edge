@@ -167,6 +167,29 @@ type Cluster struct {
 	SiteTemplates        []*SiteTemplate        `db:"-" json:"siteTemplates,omitempty"`
 	SshCredentials       []*SSHCredential       `db:"-" json:"sshCredentials,omitempty"`
 	NotificationChannels []*NotificationChannel `db:"-" json:"notificationChannels,omitempty"`
+	ApiKeys              []*ClusterApiKey       `db:"-" json:"apiKeys,omitempty"`
+}
+
+// ClusterApiKey represents the ClusterApiKey model.
+type ClusterApiKey struct {
+	Id                string          `db:"id" json:"id"`
+	ClusterId         string          `db:"cluster_id" json:"clusterId"`
+	Name              string          `db:"name" json:"name"`
+	Prefix            string          `db:"prefix" json:"prefix"`
+	TokenHash         string          `db:"token_hash" json:"tokenHash"`
+	PreviousTokenHash *string         `db:"previous_token_hash" json:"previousTokenHash"`
+	PreviousExpiresAt *time.Time      `db:"previous_expires_at" json:"previousExpiresAt"`
+	PermissionsJson   json.RawMessage `db:"permissions_json" json:"permissionsJson"`
+	Status            ApiKeyStatus    `db:"status" json:"status"`
+	ExpiresAt         *time.Time      `db:"expires_at" json:"expiresAt"`
+	RevokedAt         *time.Time      `db:"revoked_at" json:"revokedAt"`
+	LastUsedAt        *time.Time      `db:"last_used_at" json:"lastUsedAt"`
+	LastUsedIp        *string         `db:"last_used_ip" json:"lastUsedIp"`
+	CreatedBy         string          `db:"created_by" json:"createdBy"`
+	CreatedAt         time.Time       `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time       `db:"updated_at" json:"updatedAt"`
+	Cluster           *Cluster        `db:"-" json:"cluster,omitempty"`
+	Creator           *User           `db:"-" json:"creator,omitempty"`
 }
 
 // ClusterGroup represents the ClusterGroup model.
@@ -707,6 +730,7 @@ type User struct {
 	CreatedClusters     []*Cluster            `db:"-" json:"createdClusters,omitempty"`
 	ClusterMemberships  []*ClusterMember      `db:"-" json:"clusterMemberships,omitempty"`
 	CreatedSites        []*Site               `db:"-" json:"createdSites,omitempty"`
+	CreatedApiKeys      []*ClusterApiKey      `db:"-" json:"createdApiKeys,omitempty"`
 }
 
 // UserSession represents the UserSession model.

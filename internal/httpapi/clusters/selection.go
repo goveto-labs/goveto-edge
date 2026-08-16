@@ -79,11 +79,24 @@ func available(ctx context.Context, db *client.Client, uid string) ([]clusterCho
 }
 
 // @summary List clusters
-// @description List clusters the current user can access and the selected cluster id.
+// @description List clusters the current user can access and the selected cluster id. API key principals only see the cluster their key is bound to.
 // @Tags clusters
 func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
+	return listAvailableWithAPIKeyChoices(db, sessions, apiKeyClusterChoices)
+}
+
+type apiKeyClusterChoiceLoader func(context.Context, *client.Client, *auth.APIKeyPrincipal) ([]clusterChoice, error)
+
+func listAvailableWithAPIKeyChoices(db *client.Client, sessions *auth.SessionStore, loadAPIKeyChoices apiKeyClusterChoiceLoader) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		ctx := c.Request().Context()
+		if principal := auth.CurrentAPIKey(c); principal != nil {
+			items, err := loadAPIKeyChoices(ctx, db, principal)
+			if err != nil {
+				return err
+			}
+			return types.JSON(c, http.StatusOK, apiKeyClusterListResponse(principal, items))
+		}
 		items, err := available(ctx, db, auth.CurrentUID(c))
 		if err != nil {
 			return err
@@ -113,11 +126,35 @@ func listAvailable(db *client.Client, sessions *auth.SessionStore) echo.HandlerF
 	}
 }
 
+func apiKeyClusterListResponse(principal *auth.APIKeyPrincipal, items []clusterChoice) clusterListResponse {
+	selected := ""
+	if len(items) > 0 {
+		selected = principal.ClusterID
+	}
+	return clusterListResponse{Clusters: items, SelectedClusterID: selected, RequiresCluster: len(items) == 0}
+}
+
+// apiKeyClusterChoices exposes exactly the cluster the key is bound to, so
+// automation clients can bootstrap discovery without broader visibility.
+func apiKeyClusterChoices(ctx context.Context, db *client.Client, principal *auth.APIKeyPrincipal) ([]clusterChoice, error) {
+	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(principal.ClusterID))
+	if err != nil {
+		return nil, err
+	}
+	if cluster == nil {
+		return []clusterChoice{}, nil
+	}
+	return []clusterChoice{{ID: cluster.Id, Name: cluster.Name, Role: "API_KEY", CreatedAt: cluster.CreatedAt}}, nil
+}
+
 // @summary Create cluster
-// @description Create a new cluster owned by the current user and select it in session.
+// @description Create a new cluster owned by the current user and select it in session. Not available to API key principals.
 // @Tags clusters
 func create(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
+		if auth.CurrentAPIKey(c) != nil {
+			return echo.NewHTTPError(http.StatusForbidden, "api keys cannot create clusters")
+		}
 		var input nameRequest
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
@@ -148,10 +185,13 @@ type selectResponse struct {
 }
 
 // @summary Select cluster
-// @description Set the current session cluster context.
+// @description Set the current session cluster context. Not available to API key principals; keys address clusters through the URL path.
 // @Tags session
 func selectCurrent(db *client.Client, sessions *auth.SessionStore) echo.HandlerFunc {
 	return func(c *echo.Context) error {
+		if auth.CurrentAPIKey(c) != nil {
+			return echo.NewHTTPError(http.StatusForbidden, "api keys address clusters through the resource path")
+		}
 		var input selectRequest
 		if err := c.Bind(&input); err != nil || strings.TrimSpace(input.ClusterID) == "" {
 			return echo.NewHTTPError(http.StatusBadRequest, "cluster_id is required")

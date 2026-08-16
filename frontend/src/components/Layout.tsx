@@ -10,6 +10,7 @@ import { ClusterPicker, navigationFor, Sidebar } from '@/components/Sidebar.tsx'
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { preloadAllRoutes, scheduleIdle } from '@/routes.tsx';
+import { canManageCluster } from '@/utils/rbac.ts';
 
 function Greeting() {
     const { user } = useAuth();
@@ -26,9 +27,17 @@ function Greeting() {
     );
 }
 
-function PageTitle({ pathname, isPlatformAdmin }: { pathname: string; isPlatformAdmin: boolean }) {
+function PageTitle({
+    pathname,
+    isPlatformAdmin,
+    canManageAPIKeys,
+}: {
+    pathname: string;
+    isPlatformAdmin: boolean;
+    canManageAPIKeys: boolean;
+}) {
     const item = useMemo(() => {
-        const entries = navigationFor(isPlatformAdmin).flatMap((entry) => [
+        const entries = navigationFor(isPlatformAdmin, canManageAPIKeys).flatMap((entry) => [
             entry,
             ...(entry.children ?? []),
         ]);
@@ -38,7 +47,7 @@ function PageTitle({ pathname, isPlatformAdmin }: { pathname: string; isPlatform
                 .filter((entry) => entry.path !== '/' && pathname.startsWith(`${entry.path}/`))
                 .sort((left, right) => right.path.length - left.path.length)[0]
         );
-    }, [isPlatformAdmin, pathname]);
+    }, [canManageAPIKeys, isPlatformAdmin, pathname]);
     const title = item?.label ?? 'Dashboard';
 
     return <span className='text-lg font-semibold'>{title}</span>;
@@ -67,6 +76,7 @@ export function Layout() {
     const { user, logout } = useAuth();
     const {
         clusterId,
+        clusters,
         error: clusterError,
         ready: clustersReady,
         requiresCluster,
@@ -113,6 +123,9 @@ export function Layout() {
 
     const userLabel = user?.name || user?.email || user?.id || 'User';
     const userInitial = userLabel.slice(0, 1).toUpperCase();
+    const canManageAPIKeys = canManageCluster(
+        clusters.find((cluster) => cluster.id === clusterId)?.role
+    );
 
     return (
         <div className='flex h-full'>
@@ -156,6 +169,7 @@ export function Layout() {
                                 <span className='text-xs font-bold'>G</span>
                             </div>
                             <PageTitle
+                                canManageAPIKeys={canManageAPIKeys}
                                 isPlatformAdmin={user?.role === 'ADMIN'}
                                 pathname={location.pathname}
                             />

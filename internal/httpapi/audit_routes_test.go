@@ -17,6 +17,7 @@ import (
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/httpapi/adminsettings"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
+	apikeysapi "goveto-edge/internal/httpapi/apikeys"
 	"goveto-edge/internal/httpapi/audit"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
@@ -57,6 +58,7 @@ func collectRegisteredMutations(t *testing.T) map[string]bool {
 	authapi.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)
+	apikeysapi.Register(e, nil, nil, nil)
 	certificates.Register(e, nil, nil)
 	dnsapi.Register(e, nil, nil, nil)
 	nodes.Register(e, nil, nil, nil, nil, nil, nil)

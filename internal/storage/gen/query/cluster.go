@@ -52,6 +52,7 @@ type ClusterQuery struct {
 	SiteTemplates        clusterSiteTemplatesRelation
 	SshCredentials       clusterSshCredentialsRelation
 	NotificationChannels clusterNotificationChannelsRelation
+	ApiKeys              clusterApiKeysRelation
 }
 
 const ClusterTable = "clusters"
@@ -86,6 +87,7 @@ var Cluster = ClusterQuery{
 	SiteTemplates:        clusterSiteTemplatesRelation{},
 	SshCredentials:       clusterSshCredentialsRelation{},
 	NotificationChannels: clusterNotificationChannelsRelation{},
+	ApiKeys:              clusterApiKeysRelation{},
 }
 
 // ClusterWhereClause represents a WHERE condition for Cluster.
@@ -691,6 +693,14 @@ func (clusterNotificationChannelsRelation) Fetch() ClusterIncludeClause {
 	return ClusterIncludeClause{Relation: "notificationChannels"}
 }
 
+// ApiKeysRelation provides relation query helpers for apiKeys.
+type clusterApiKeysRelation struct{}
+
+// Fetch creates an include clause to fetch related apiKeys.
+func (clusterApiKeysRelation) Fetch() ClusterIncludeClause {
+	return ClusterIncludeClause{Relation: "apiKeys"}
+}
+
 // ClusterSetClause represents a field set operation for create/update.
 type ClusterSetClause struct {
 	Field string
@@ -746,6 +756,7 @@ type ClusterCreateInput struct {
 	SiteTemplates        *SiteTemplateCreateNestedInput
 	SshCredentials       *SSHCredentialCreateNestedInput
 	NotificationChannels *NotificationChannelCreateNestedInput
+	ApiKeys              *ClusterApiKeyCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/labstack/echo/v5"
+
+	"goveto-edge/internal/auth"
 )
 
 type memoryRecorder struct{ entries []Entry }
@@ -114,6 +116,18 @@ func TestSnapshotRedactsSensitiveHeaders(t *testing.T) {
 	assertRedacted(t, raw, "headers.Authorization")
 	assertRedacted(t, raw, "headers.X-API-Key")
 	assertRedacted(t, raw, "headers.Cookie")
+}
+
+func TestPopulatePrincipalIdentifiesAPIKeyWithoutImpersonatingCreator(t *testing.T) {
+	c := echo.New().NewContext(httptest.NewRequest(http.MethodPost, "/action", nil), httptest.NewRecorder())
+	auth.SetCurrentAPIKey(c, &auth.APIKeyPrincipal{
+		KeyID: "key-1", Prefix: "gve1_Ab12cDe", CreatedBy: "user-1",
+	})
+	entry := Entry{}
+	populatePrincipal(c, &entry)
+	if entry.Actor != "api_key:gve1_Ab12cDe:key-1" || entry.ActorID != "" {
+		t.Fatalf("api key principal was misattributed: %#v", entry)
+	}
 }
 
 func TestInvalidInboundRequestIDIsReplaced(t *testing.T) {

@@ -8,6 +8,7 @@ export type * from './types.ts';
 
 export { adminSettingsApi } from './adminSettings.ts';
 export { analyticsApi } from './analytics.ts';
+export { apiKeysApi } from './apiKeys.ts';
 export { auditApi } from './audit.ts';
 export { authApi } from './auth.ts';
 export { certificatesApi } from './certificates.ts';

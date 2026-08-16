@@ -54,6 +54,7 @@ type UserQuery struct {
 	CreatedClusters     userCreatedClustersRelation
 	ClusterMemberships  userClusterMembershipsRelation
 	CreatedSites        userCreatedSitesRelation
+	CreatedApiKeys      userCreatedApiKeysRelation
 }
 
 const UserTable = "users"
@@ -97,6 +98,7 @@ var User = UserQuery{
 	CreatedClusters:     userCreatedClustersRelation{},
 	ClusterMemberships:  userClusterMembershipsRelation{},
 	CreatedSites:        userCreatedSitesRelation{},
+	CreatedApiKeys:      userCreatedApiKeysRelation{},
 }
 
 // UserWhereClause represents a WHERE condition for User.
@@ -1209,6 +1211,14 @@ func (userCreatedSitesRelation) Fetch() UserIncludeClause {
 	return UserIncludeClause{Relation: "createdSites"}
 }
 
+// CreatedApiKeysRelation provides relation query helpers for createdApiKeys.
+type userCreatedApiKeysRelation struct{}
+
+// Fetch creates an include clause to fetch related createdApiKeys.
+func (userCreatedApiKeysRelation) Fetch() UserIncludeClause {
+	return UserIncludeClause{Relation: "createdApiKeys"}
+}
+
 // UserSetClause represents a field set operation for create/update.
 type UserSetClause struct {
 	Field string
@@ -1264,6 +1274,7 @@ type UserCreateInput struct {
 	CreatedClusters     *ClusterCreateNestedInput
 	ClusterMemberships  *ClusterMemberCreateNestedInput
 	CreatedSites        *SiteCreateNestedInput
+	CreatedApiKeys      *ClusterApiKeyCreateNestedInput
 }
 
 // ScalarValues returns the scalar field values in column order.

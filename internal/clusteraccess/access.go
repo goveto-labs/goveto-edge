@@ -43,7 +43,13 @@ func Check(ctx context.Context, db *client.Client, clusterID, uid string) (allow
 }
 
 // Authorize resolves the effective cluster role and evaluates a permission.
+// Requests authenticated with an API key are routed to the key path first:
+// the key must be bound to the requested cluster and the permission must be
+// in its grant scope.
 func Authorize(ctx context.Context, db *client.Client, clusterID, uid string, permission rbac.Permission) (allowed bool, role rbac.Role, err error) {
+	if principal := auth.CurrentAPIKeyFromContext(ctx); principal != nil {
+		return AuthorizeAPIKey(principal, clusterID, permission)
+	}
 	if clusterID == "" || uid == "" {
 		return false, "", nil
 	}
@@ -93,6 +99,19 @@ func Authorize(ctx context.Context, db *client.Client, clusterID, uid string, pe
 	return rbac.SubjectForRole(role).Allows(permission), role, nil
 }
 
+// AuthorizeAPIKey evaluates a permission for an API key principal. The key
+// is hard-bound to its cluster: a mismatched cluster_id in the route is
+// always denied regardless of the requested permission.
+func AuthorizeAPIKey(principal *auth.APIKeyPrincipal, clusterID string, permission rbac.Permission) (allowed bool, role rbac.Role, err error) {
+	if principal == nil || clusterID == "" || clusterID != principal.ClusterID {
+		return false, "", nil
+	}
+	// RoleOwner is only the carrier used to evaluate the grantable permission
+	// matrix. API keys do not hold an ownership role, so never expose it.
+	subject := rbac.ScopedSubject(rbac.RoleOwner, principal.Permissions...)
+	return subject.Allows(permission), "", nil
+}
+
 // RequirePlatform authorizes a platform-wide capability. Unlike
 // RequirePermission it does not scope to a cluster; ADMIN users hold the
 // platform.* permissions directly via the RBAC matrix, and everyone else is
@@ -114,8 +133,12 @@ func RequirePlatform(db *client.Client, permission rbac.Permission) echo.Middlew
 }
 
 // AuthorizePlatform resolves a platform-wide permission without cluster scope.
-// Only ADMIN users hold platform.* capabilities per the RBAC matrix.
+// Only ADMIN users hold platform.* capabilities per the RBAC matrix; API key
+// principals never hold platform capabilities.
 func AuthorizePlatform(ctx context.Context, db *client.Client, uid string, permission rbac.Permission) (bool, error) {
+	if auth.CurrentAPIKeyFromContext(ctx) != nil {
+		return false, nil
+	}
 	if uid == "" {
 		return false, nil
 	}

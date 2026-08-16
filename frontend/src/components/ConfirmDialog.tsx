@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { AlertDialog, Button, Input } from '@heroui/react';
 import { useEffect, useId, useState } from 'react';
 
+import { FormError } from '@/components/FormField.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
 
 interface ConfirmDialogProps {
@@ -18,6 +19,7 @@ interface ConfirmDialogProps {
     impact?: ReactNode;
     recoverability?: string;
     confirmationText?: string;
+    error?: string;
     onConfirm: () => void;
 }
 
@@ -34,6 +36,7 @@ export function ConfirmDialog({
     impact,
     recoverability,
     confirmationText,
+    error,
     onConfirm,
 }: ConfirmDialogProps) {
     const { clusterId, clusters } = useCluster();
@@ -105,6 +108,7 @@ export function ConfirmDialog({
                                         />
                                     </label>
                                 )}
+                                {error && <FormError message={error} />}
                             </div>
                         </AlertDialog.Body>
                         <AlertDialog.Footer>

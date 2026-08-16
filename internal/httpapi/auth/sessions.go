@@ -24,9 +24,9 @@ type sessionResponse struct {
 }
 
 func registerSessions(group *echo.Group, db *client.Client, sessions *authn.SessionStore) {
-	group.GET("/sessions", listSessions(db), authn.RequireAuth)
-	group.DELETE("/sessions/:session_id", revokeSession(sessions), authn.RequireAuth)
-	group.POST("/sessions/revoke-others", revokeOtherSessions(sessions), authn.RequireAuth)
+	group.GET("/sessions", listSessions(db), authn.RequireUser)
+	group.DELETE("/sessions/:session_id", revokeSession(sessions), authn.RequireUser)
+	group.POST("/sessions/revoke-others", revokeOtherSessions(sessions), authn.RequireUser)
 }
 
 func listSessions(db *client.Client) echo.HandlerFunc {

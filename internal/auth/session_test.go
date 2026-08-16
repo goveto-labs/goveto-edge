@@ -249,3 +249,40 @@ func TestSessionReissuesMissingCSRFCookie(t *testing.T) {
 		t.Fatalf("unexpected cookies on repeat request: %#v", cookies)
 	}
 }
+
+func TestRequireUserRejectsAPIKeyPrincipal(t *testing.T) {
+	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/account", nil), httptest.NewRecorder())
+	SetCurrentAPIKey(ctx, &APIKeyPrincipal{KeyID: "key-1", ClusterID: "cluster-1", CreatedBy: "user-1"})
+	called := false
+	if err := RequireAuth(func(*echo.Context) error {
+		called = true
+		return nil
+	})(ctx); err != nil || !called {
+		t.Fatalf("generic auth rejected api key: called=%v err=%v", called, err)
+	}
+	called = false
+	err := RequireUser(func(*echo.Context) error {
+		called = true
+		return nil
+	})(ctx)
+	httpError, ok := err.(*echo.HTTPError)
+	if !ok || httpError.Code != http.StatusUnauthorized || called {
+		t.Fatalf("user guard result: called=%v err=%v", called, err)
+	}
+}
+
+func TestCurrentResourceOwnerUserIDUsesKeyCreatorWithoutSessionIdentity(t *testing.T) {
+	ctx := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/resource", nil), httptest.NewRecorder())
+	SetCurrentAPIKey(ctx, &APIKeyPrincipal{CreatedBy: "key-creator"})
+	if got := CurrentResourceOwnerUserID(ctx); got != "key-creator" {
+		t.Fatalf("api key actor user = %q", got)
+	}
+	ctx.Set(currentUIDKey, "session-user")
+	if got := CurrentResourceOwnerUserID(ctx); got != "session-user" {
+		t.Fatalf("session actor user = %q", got)
+	}
+	ClearCurrentSessionPrincipal(ctx)
+	if CurrentUID(ctx) != "" || CurrentResourceOwnerUserID(ctx) != "key-creator" {
+		t.Fatal("clearing session principal removed or overrode the api key actor")
+	}
+}

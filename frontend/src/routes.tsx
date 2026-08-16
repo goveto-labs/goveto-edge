@@ -13,6 +13,7 @@ import { lazy } from 'react';
 const loaders = {
     AdminSettings: () => import('@/pages/AdminSettings.tsx'),
     Analytics: () => import('@/pages/Analytics.tsx'),
+    ApiKeys: () => import('@/pages/ApiKeys.tsx'),
     Certificates: () => import('@/pages/Certificates.tsx'),
     ClusterMembers: () => import('@/pages/ClusterMembers.tsx'),
     CreateNode: () => import('@/pages/CreateNode.tsx'),
@@ -39,6 +40,7 @@ const loaders = {
 export const lazyRoutes = {
     AdminSettings: lazy(loaders.AdminSettings),
     Analytics: lazy(loaders.Analytics),
+    ApiKeys: lazy(loaders.ApiKeys),
     Certificates: lazy(loaders.Certificates),
     ClusterMembers: lazy(loaders.ClusterMembers),
     CreateNode: lazy(loaders.CreateNode),
@@ -86,6 +88,7 @@ const routeLoaders: Record<string, () => Promise<unknown>> = {
     '/settings': loaders.Settings,
     '/settings/members': loaders.ClusterMembers,
     '/settings/notifications': loaders.Notifications,
+    '/settings/api-keys': loaders.ApiKeys,
     '/settings/admin': loaders.AdminSettings,
 };
 

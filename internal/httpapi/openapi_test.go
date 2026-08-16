@@ -18,6 +18,7 @@ import (
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/httpapi/adminsettings"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
+	apikeysapi "goveto-edge/internal/httpapi/apikeys"
 	"goveto-edge/internal/httpapi/audit"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
@@ -62,6 +63,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	authapi.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil, nil, nil)
 	clusters.Register(e, nil, nil)
+	apikeysapi.Register(e, nil, nil, nil)
 	certificates.Register(e, nil, nil)
 	dnsapi.Register(e, nil, nil, nil)
 	nodes.Register(e, nil, nil, nil, nil, nil, nil)
@@ -130,5 +132,52 @@ func TestOpenAPISpecMatchesRegisteredRoutes(t *testing.T) {
 	}
 	for _, route := range stale {
 		t.Errorf("docs/openapi.yaml documents unregistered route: %s", route)
+	}
+}
+
+func TestOpenAPIDocumentsAPIKeyAuthenticationOnSupportedRoutes(t *testing.T) {
+	data, err := os.ReadFile(openAPISpecPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var spec struct {
+		Components struct {
+			SecuritySchemes map[string]yaml.Node `yaml:"securitySchemes"`
+		} `yaml:"components"`
+		Paths map[string]map[string]struct {
+			Security []map[string][]string `yaml:"security"`
+		} `yaml:"paths"`
+	}
+	if err = yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatal(err)
+	}
+	for _, scheme := range []string{"cookie_goveto_session", "bearer_api_key", "x_api_key"} {
+		if _, found := spec.Components.SecuritySchemes[scheme]; !found {
+			t.Errorf("security scheme %q is missing", scheme)
+		}
+	}
+	assertSchemes := func(path, method string, want ...string) {
+		t.Helper()
+		operation, found := spec.Paths[path][method]
+		if !found {
+			t.Fatalf("operation %s %s is missing", strings.ToUpper(method), path)
+		}
+		got := make(map[string]bool)
+		for _, requirement := range operation.Security {
+			for scheme := range requirement {
+				got[scheme] = true
+			}
+		}
+		for _, scheme := range want {
+			if !got[scheme] {
+				t.Errorf("%s %s does not document %s authentication", strings.ToUpper(method), path, scheme)
+			}
+		}
+	}
+	assertSchemes("/api/v1/clusters/{cluster_id}/sites", "get",
+		"cookie_goveto_session", "bearer_api_key", "x_api_key")
+	assertSchemes("/api/v1/auth/me", "get", "cookie_goveto_session")
+	if operation := spec.Paths["/api/v1/auth/me"]["get"]; len(operation.Security) != 1 {
+		t.Errorf("user-only /auth/me advertises non-session credentials: %#v", operation.Security)
 	}
 }

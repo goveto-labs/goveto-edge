@@ -125,6 +125,10 @@ export default function App() {
                                                     path='/settings/members'
                                                 />
                                                 <Route
+                                                    element={<lazyRoutes.ApiKeys />}
+                                                    path='/settings/api-keys'
+                                                />
+                                                <Route
                                                     element={<lazyRoutes.Notifications />}
                                                     path='/settings/notifications'
                                                 />

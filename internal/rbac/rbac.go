@@ -19,6 +19,7 @@ const (
 	PermissionMemberManage       Permission = "cluster.member.manage"
 	PermissionClusterTransfer    Permission = "cluster.transfer"
 	PermissionNotificationManage Permission = "cluster.notification.manage"
+	PermissionAPIKeyManage       Permission = "cluster.apikey.manage"
 
 	PermissionPlatformUserManage     Permission = "platform.user.manage"
 	PermissionPlatformClusterRead    Permission = "platform.cluster.read"
@@ -94,6 +95,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionMemberManage,
 		PermissionClusterTransfer,
 		PermissionNotificationManage,
+		PermissionAPIKeyManage,
 	),
 	RoleAdmin: permissionSet(
 		PermissionClusterRead,
@@ -109,6 +111,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionMemberManage,
 		PermissionClusterTransfer,
 		PermissionNotificationManage,
+		PermissionAPIKeyManage,
 		PermissionPlatformUserManage,
 		PermissionPlatformClusterRead,
 		PermissionPlatformSettingsManage,
@@ -121,6 +124,35 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 func Allows(role Role, permission Permission) bool {
 	_, ok := rolePermissions[role][permission]
 	return ok
+}
+
+// keyGrantablePermissions is the closed whitelist of permissions a cluster
+// API key may hold. It deliberately excludes credential, node, member,
+// notification and platform capabilities: an automation key authenticates
+// resource operations (sites, publish, cache) and must never be able to
+// escalate to long-lived secrets or identity management.
+var keyGrantablePermissions = []Permission{
+	PermissionClusterRead,
+	PermissionSiteWrite,
+	PermissionSiteDelete,
+	PermissionPublish,
+	PermissionCacheOperate,
+}
+
+// KeyGrantablePermissions returns the permissions an API key may be granted.
+// The order is stable so UIs and OpenAPI docs can rely on it.
+func KeyGrantablePermissions() []Permission {
+	return append([]Permission(nil), keyGrantablePermissions...)
+}
+
+// KeyPermissionAllowed reports whether an API key may hold a permission.
+func KeyPermissionAllowed(permission Permission) bool {
+	for _, candidate := range keyGrantablePermissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
 }
 
 // Highest returns the more privileged of two recognized roles. Cluster access

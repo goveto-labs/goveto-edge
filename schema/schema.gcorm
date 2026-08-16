@@ -22,6 +22,11 @@ enum ACMEChallengeType {
   DNS_01
 }
 
+enum ApiKeyStatus {
+  ACTIVE
+  DISABLED
+}
+
 enum CertificateOperation {
   ISSUE
   RENEW
@@ -332,10 +337,36 @@ model Cluster {
   siteTemplates        SiteTemplate[]
   sshCredentials       SSHCredential[]
   notificationChannels NotificationChannel[]
+  apiKeys              ClusterApiKey[]
 
   @@unique([name])
   @@index([creatorId])
   @@map("clusters")
+}
+
+model ClusterApiKey {
+  id                String       @id @default(uuid())
+  clusterId         String       @map("cluster_id")
+  name              String
+  prefix            String
+  tokenHash         String       @unique @map("token_hash")
+  previousTokenHash String?      @unique @map("previous_token_hash")
+  previousExpiresAt DateTime?    @map("previous_expires_at")
+  permissionsJson   Json         @default("[]") @map("permissions_json")
+  status            ApiKeyStatus @default(ACTIVE)
+  expiresAt         DateTime?    @map("expires_at")
+  revokedAt         DateTime?    @map("revoked_at")
+  lastUsedAt        DateTime?    @map("last_used_at")
+  lastUsedIp        String?      @map("last_used_ip")
+  createdBy         String       @map("created_by")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at")
+  cluster           Cluster      @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  creator           User         @relation(fields: [createdBy], references: [id])
+
+  @@unique([clusterId, name])
+  @@index([clusterId, status])
+  @@map("cluster_api_keys")
 }
 
 model ClusterGroup {
@@ -980,6 +1011,7 @@ model User {
   createdClusters     Cluster[]
   clusterMemberships  ClusterMember[]
   createdSites        Site[]
+  createdApiKeys      ClusterApiKey[]
 
   @@index([status])
   @@index([role])

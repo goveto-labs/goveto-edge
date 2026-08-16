@@ -1534,7 +1534,6 @@ export function SiteSecuritySettings({
                 <div className='grid gap-3 border-b border-border px-5 py-4 sm:grid-cols-2'>
                     <NumericInput
                         label='Body inspection limit (bytes)'
-                        variant='secondary'
                         max={67108864}
                         min={1}
                         value={policy.waf.body_inspect_limit_bytes ?? 65536}

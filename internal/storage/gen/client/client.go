@@ -31,6 +31,7 @@ type Client struct {
 	Certificate           CertificateActions
 	CertificateJob        CertificateJobActions
 	Cluster               ClusterActions
+	ClusterApiKey         ClusterApiKeyActions
 	ClusterGroup          ClusterGroupActions
 	ClusterMember         ClusterMemberActions
 	ClusterRegion         ClusterRegionActions
@@ -83,6 +84,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.Certificate = CertificateActions{client: c}
 	c.CertificateJob = CertificateJobActions{client: c}
 	c.Cluster = ClusterActions{client: c}
+	c.ClusterApiKey = ClusterApiKeyActions{client: c}
 	c.ClusterGroup = ClusterGroupActions{client: c}
 	c.ClusterMember = ClusterMemberActions{client: c}
 	c.ClusterRegion = ClusterRegionActions{client: c}
@@ -295,6 +297,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.Certificate = CertificateActions{client: txClient}
 	txClient.CertificateJob = CertificateJobActions{client: txClient}
 	txClient.Cluster = ClusterActions{client: txClient}
+	txClient.ClusterApiKey = ClusterApiKeyActions{client: txClient}
 	txClient.ClusterGroup = ClusterGroupActions{client: txClient}
 	txClient.ClusterMember = ClusterMemberActions{client: txClient}
 	txClient.ClusterRegion = ClusterRegionActions{client: txClient}
@@ -7263,6 +7266,998 @@ func (a ClusterActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("Cluster.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedClusterApiKeyTable(c *Client) string { return c.quoteIdentifier("cluster_api_keys") }
+func quotedClusterApiKeyColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "name", "prefix", "token_hash", "previous_token_hash", "previous_expires_at", "permissions_json", "status", "expires_at", "revoked_at", "last_used_at", "last_used_ip", "created_by", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteClusterApiKeyField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "name":
+		return c.quoteIdentifier(field), nil
+	case "prefix":
+		return c.quoteIdentifier(field), nil
+	case "token_hash":
+		return c.quoteIdentifier(field), nil
+	case "previous_token_hash":
+		return c.quoteIdentifier(field), nil
+	case "previous_expires_at":
+		return c.quoteIdentifier(field), nil
+	case "permissions_json":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "expires_at":
+		return c.quoteIdentifier(field), nil
+	case "revoked_at":
+		return c.quoteIdentifier(field), nil
+	case "last_used_at":
+		return c.quoteIdentifier(field), nil
+	case "last_used_ip":
+		return c.quoteIdentifier(field), nil
+	case "created_by":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown ClusterApiKey field %q", field)
+	}
+}
+
+// buildClusterApiKeyWhere recursively builds a WHERE clause string and arguments.
+func buildClusterApiKeyWhere(c *Client, wheres []query.ClusterApiKeyWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.ClusterApiKeyWhereClause); ok {
+				sub, subArgs := buildClusterApiKeyWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.ClusterApiKeyWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildClusterApiKeyWhere(c, []query.ClusterApiKeyWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.ClusterApiKeyWhereClause); ok {
+				sub, subArgs := buildClusterApiKeyWhere(c, []query.ClusterApiKeyWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteClusterApiKeyField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// ClusterApiKeyActions provides database operations for the ClusterApiKey model.
+type ClusterApiKeyActions struct {
+	client *Client
+}
+
+// ClusterApiKeyCreateBuilder builds a ClusterApiKey create operation incrementally.
+type ClusterApiKeyCreateBuilder struct {
+	action ClusterApiKeyActions
+	sets   []query.ClusterApiKeySetClause
+}
+
+// Create starts a staged ClusterApiKey create operation.
+func (a ClusterApiKeyActions) Create() ClusterApiKeyCreateBuilder {
+	return ClusterApiKeyCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b ClusterApiKeyCreateBuilder) Set(sets ...query.ClusterApiKeySetClause) ClusterApiKeyCreateBuilder {
+	next := ClusterApiKeyCreateBuilder{
+		action: b.action,
+		sets:   make([]query.ClusterApiKeySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b ClusterApiKeyCreateBuilder) Do(ctx context.Context) (*model.ClusterApiKey, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// ClusterApiKeyCreateManyBuilder builds a bulk ClusterApiKey insert operation.
+type ClusterApiKeyCreateManyBuilder struct {
+	action            ClusterApiKeyActions
+	data              []query.ClusterApiKeyCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk ClusterApiKey insert operation.
+func (a ClusterApiKeyActions) BulkCreate(data []query.ClusterApiKeyCreateInput) ClusterApiKeyCreateManyBuilder {
+	return ClusterApiKeyCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b ClusterApiKeyCreateManyBuilder) OnConflictDoNothing(columns ...string) ClusterApiKeyCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b ClusterApiKeyCreateManyBuilder) Returning(columns ...string) ClusterApiKeyCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b ClusterApiKeyCreateManyBuilder) BatchSize(n int) ClusterApiKeyCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b ClusterApiKeyCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterApiKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("ClusterApiKey.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("ClusterApiKey.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b ClusterApiKeyCreateManyBuilder) DoReturning(ctx context.Context) ([]model.ClusterApiKey, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.ClusterApiKey
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterApiKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "prefix", "token_hash", "previous_token_hash", "previous_expires_at", "permissions_json", "status", "expires_at", "revoked_at", "last_used_at", "last_used_ip", "created_by", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.ClusterApiKey
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b ClusterApiKeyCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "name", "prefix", "token_hash", "previous_token_hash", "previous_expires_at", "permissions_json", "status", "expires_at", "revoked_at", "last_used_at", "last_used_ip", "created_by", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildClusterApiKeyCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("ClusterApiKey.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// ClusterApiKeyQueryBuilder builds a ClusterApiKey query incrementally.
+type ClusterApiKeyQueryBuilder struct {
+	action ClusterApiKeyActions
+	opts   []query.ClusterApiKeyQueryOption
+}
+
+// Query starts a staged ClusterApiKey query.
+func (a ClusterApiKeyActions) Query() ClusterApiKeyQueryBuilder {
+	return ClusterApiKeyQueryBuilder{action: a}
+}
+
+func (b ClusterApiKeyQueryBuilder) withOptions(opts ...query.ClusterApiKeyQueryOption) ClusterApiKeyQueryBuilder {
+	next := ClusterApiKeyQueryBuilder{
+		action: b.action,
+		opts:   make([]query.ClusterApiKeyQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b ClusterApiKeyQueryBuilder) Where(clauses ...query.ClusterApiKeyWhereClause) ClusterApiKeyQueryBuilder {
+	opts := make([]query.ClusterApiKeyQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b ClusterApiKeyQueryBuilder) OrderBy(clause query.ClusterApiKeyOrderByClause) ClusterApiKeyQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b ClusterApiKeyQueryBuilder) Include(clauses ...query.ClusterApiKeyIncludeClause) ClusterApiKeyQueryBuilder {
+	opts := make([]query.ClusterApiKeyQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b ClusterApiKeyQueryBuilder) Take(n int) ClusterApiKeyQueryBuilder {
+	return b.withOptions(query.ClusterApiKeyTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b ClusterApiKeyQueryBuilder) Skip(n int) ClusterApiKeyQueryBuilder {
+	return b.withOptions(query.ClusterApiKeySkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b ClusterApiKeyQueryBuilder) Do(ctx context.Context) ([]model.ClusterApiKey, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b ClusterApiKeyQueryBuilder) First(ctx context.Context) (*model.ClusterApiKey, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b ClusterApiKeyQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyClusterApiKeyOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// ClusterApiKeyUpdateBuilder builds a ClusterApiKey update operation incrementally.
+type ClusterApiKeyUpdateBuilder struct {
+	action ClusterApiKeyActions
+	wheres []query.ClusterApiKeyWhereClause
+	sets   []query.ClusterApiKeySetClause
+}
+
+// Update starts a staged ClusterApiKey update operation.
+func (a ClusterApiKeyActions) Update() ClusterApiKeyUpdateBuilder {
+	return ClusterApiKeyUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b ClusterApiKeyUpdateBuilder) Where(clauses ...query.ClusterApiKeyWhereClause) ClusterApiKeyUpdateBuilder {
+	next := ClusterApiKeyUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterApiKeyWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.ClusterApiKeySetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b ClusterApiKeyUpdateBuilder) Set(sets ...query.ClusterApiKeySetClause) ClusterApiKeyUpdateBuilder {
+	next := ClusterApiKeyUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.ClusterApiKeyWhereClause(nil), b.wheres...),
+		sets:   make([]query.ClusterApiKeySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b ClusterApiKeyUpdateBuilder) combinedWhere() (query.ClusterApiKeyWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterApiKeyWhereClause{}, fmt.Errorf("ClusterApiKey.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterApiKey.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b ClusterApiKeyUpdateBuilder) Do(ctx context.Context) (*model.ClusterApiKey, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b ClusterApiKeyUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// ClusterApiKeyDeleteBuilder builds a ClusterApiKey delete operation incrementally.
+type ClusterApiKeyDeleteBuilder struct {
+	action ClusterApiKeyActions
+	wheres []query.ClusterApiKeyWhereClause
+}
+
+// Delete starts a staged ClusterApiKey delete operation.
+func (a ClusterApiKeyActions) Delete() ClusterApiKeyDeleteBuilder {
+	return ClusterApiKeyDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b ClusterApiKeyDeleteBuilder) Where(clauses ...query.ClusterApiKeyWhereClause) ClusterApiKeyDeleteBuilder {
+	next := ClusterApiKeyDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.ClusterApiKeyWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b ClusterApiKeyDeleteBuilder) combinedWhere() (query.ClusterApiKeyWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.ClusterApiKeyWhereClause{}, fmt.Errorf("ClusterApiKey.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.ClusterApiKey.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b ClusterApiKeyDeleteBuilder) Do(ctx context.Context) (*model.ClusterApiKey, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b ClusterApiKeyDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple ClusterApiKey records.
+func (a ClusterApiKeyActions) FindMany(ctx context.Context, opts ...query.ClusterApiKeyQueryOption) ([]model.ClusterApiKey, error) {
+	cfg := query.ApplyClusterApiKeyOptions(opts)
+	q := "SELECT " + quotedClusterApiKeyColumns(a.client) + " FROM " + quotedClusterApiKeyTable(a.client)
+	argIdx := 0
+	where, args := buildClusterApiKeyWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteClusterApiKeyField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.ClusterApiKey
+	for rows.Next() {
+		var item model.ClusterApiKey
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching ClusterApiKey record.
+func (a ClusterApiKeyActions) FindFirst(ctx context.Context, opts ...query.ClusterApiKeyQueryOption) (*model.ClusterApiKey, error) {
+	opts = append(opts, query.ClusterApiKeyTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single ClusterApiKey record by unique constraint.
+func (a ClusterApiKeyActions) FindUnique(ctx context.Context, where query.ClusterApiKeyWhereClause) (*model.ClusterApiKey, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterApiKeyWhere(a.client, []query.ClusterApiKeyWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedClusterApiKeyColumns(a.client) + " FROM " + quotedClusterApiKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.ClusterApiKey
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("ClusterApiKey.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single ClusterApiKey record.
+func (a ClusterApiKeyActions) CreateOne(ctx context.Context, sets ...query.ClusterApiKeySetClause) (*model.ClusterApiKey, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterApiKey.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteClusterApiKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterApiKeyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedClusterApiKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.ClusterApiKey
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple ClusterApiKey records.
+func (a ClusterApiKeyActions) CreateMany(ctx context.Context, data []query.ClusterApiKeyCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a ClusterApiKeyActions) buildClusterApiKeyCreateManySQL(data []query.ClusterApiKeyCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "name", "prefix", "token_hash", "previous_token_hash", "previous_expires_at", "permissions_json", "status", "expires_at", "revoked_at", "last_used_at", "last_used_ip", "created_by", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedClusterApiKeyTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single ClusterApiKey record matching the where clause.
+func (a ClusterApiKeyActions) UpdateOne(ctx context.Context, where query.ClusterApiKeyWhereClause, sets ...query.ClusterApiKeySetClause) (*model.ClusterApiKey, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("ClusterApiKey.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteClusterApiKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterApiKeyWhere(a.client, []query.ClusterApiKeyWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterApiKeyTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedClusterApiKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterApiKey
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterApiKey.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple ClusterApiKey records matching the where clauses.
+func (a ClusterApiKeyActions) UpdateMany(ctx context.Context, wheres []query.ClusterApiKeyWhereClause, sets ...query.ClusterApiKeySetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("ClusterApiKey.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteClusterApiKeyField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildClusterApiKeyWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedClusterApiKeyTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterApiKey.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single ClusterApiKey record.
+func (a ClusterApiKeyActions) UpsertOne(ctx context.Context, where query.ClusterApiKeyWhereClause, create []query.ClusterApiKeySetClause, update []query.ClusterApiKeySetClause) (*model.ClusterApiKey, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("ClusterApiKey.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteClusterApiKeyField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedClusterApiKeyTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteClusterApiKeyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteClusterApiKeyField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteClusterApiKeyField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedClusterApiKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterApiKey
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single ClusterApiKey record matching the where clause.
+func (a ClusterApiKeyActions) DeleteOne(ctx context.Context, where query.ClusterApiKeyWhereClause) (*model.ClusterApiKey, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterApiKeyWhere(a.client, []query.ClusterApiKeyWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedClusterApiKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedClusterApiKeyColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.ClusterApiKey
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Prefix, &item.TokenHash, &item.PreviousTokenHash, &item.PreviousExpiresAt, &item.PermissionsJson, &item.Status, &item.ExpiresAt, &item.RevokedAt, &item.LastUsedAt, &item.LastUsedIp, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("ClusterApiKey.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple ClusterApiKey records matching the where clauses.
+func (a ClusterApiKeyActions) DeleteMany(ctx context.Context, wheres ...query.ClusterApiKeyWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterApiKeyWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedClusterApiKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("ClusterApiKey.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of ClusterApiKey records matching the where clauses.
+func (a ClusterApiKeyActions) Count(ctx context.Context, wheres ...query.ClusterApiKeyWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildClusterApiKeyWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedClusterApiKeyTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("ClusterApiKey.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for ClusterApiKey.
+func (a ClusterApiKeyActions) Aggregate(ctx context.Context, opts ...query.ClusterApiKeyAggregateOption) (*query.ClusterApiKeyAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterApiKeyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedClusterApiKeyTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.ClusterApiKeyAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on ClusterApiKey.
+func (a ClusterApiKeyActions) GroupBy(ctx context.Context, fields []string, opts ...query.ClusterApiKeyAggregateOption) ([]query.ClusterApiKeyGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteClusterApiKeyField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteClusterApiKeyField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedClusterApiKeyTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("ClusterApiKey.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.ClusterApiKeyGroupByResult
+	for rows.Next() {
+		r := query.ClusterApiKeyGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("ClusterApiKey.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))

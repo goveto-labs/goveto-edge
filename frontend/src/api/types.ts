@@ -256,6 +256,41 @@ export interface PlatformUserList {
     page_size: number;
 }
 
+export type ApiKeyPermission =
+    | 'cluster.read'
+    | 'site.write'
+    | 'site.delete'
+    | 'site.publish'
+    | 'cache.operate';
+
+export type ApiKeyStatus = 'ACTIVE' | 'DISABLED';
+
+export interface ClusterApiKey {
+    id: string;
+    name: string;
+    prefix: string;
+    permissions: ApiKeyPermission[];
+    status: ApiKeyStatus;
+    expires_at?: string;
+    revoked_at?: string;
+    last_used_at?: string;
+    last_used_ip?: string;
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+}
+
+export interface ClusterApiKeyList {
+    items: ClusterApiKey[];
+    total: number;
+    page: number;
+    page_size: number;
+}
+
+export interface ClusterApiKeyCreated extends ClusterApiKey {
+    token: string;
+}
+
 export interface AuditUserSummary {
     id: string;
     email: string;

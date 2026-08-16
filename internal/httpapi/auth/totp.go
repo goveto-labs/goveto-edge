@@ -48,13 +48,13 @@ type securityPolicyResponse struct {
 }
 
 func registerTOTP(group *echo.Group, db *client.Client, sessions *authn.SessionStore, settingStore *settings.Store, cipher *node.CredentialCipher, sensitive echo.MiddlewareFunc) {
-	group.POST("/totp/setup", setupTOTP(db), authn.RequireAuth)
-	group.POST("/totp/enable", enableTOTP(db, sessions, cipher), authn.RequireAuth, sensitive)
-	group.POST("/totp/reset", resetTOTP(db, sessions, cipher), authn.RequireAuth, sensitive)
-	group.POST("/totp/recovery-codes", regenerateRecoveryCodes(db, sessions, cipher), authn.RequireAuth, sensitive)
-	group.DELETE("/totp", disableTOTP(db, sessions, settingStore, cipher), authn.RequireAuth, sensitive)
-	group.GET("/security-policy", getSecurityPolicy(settingStore), authn.RequireAuth)
-	group.PUT("/security-policy", updateSecurityPolicy(settingStore), authn.RequireAuth, clusteraccess.RequirePlatform(db, rbac.PermissionPlatformPolicyManage))
+	group.POST("/totp/setup", setupTOTP(db), authn.RequireUser)
+	group.POST("/totp/enable", enableTOTP(db, sessions, cipher), authn.RequireUser, sensitive)
+	group.POST("/totp/reset", resetTOTP(db, sessions, cipher), authn.RequireUser, sensitive)
+	group.POST("/totp/recovery-codes", regenerateRecoveryCodes(db, sessions, cipher), authn.RequireUser, sensitive)
+	group.DELETE("/totp", disableTOTP(db, sessions, settingStore, cipher), authn.RequireUser, sensitive)
+	group.GET("/security-policy", getSecurityPolicy(settingStore), authn.RequireUser)
+	group.PUT("/security-policy", updateSecurityPolicy(settingStore), authn.RequireUser, clusteraccess.RequirePlatform(db, rbac.PermissionPlatformPolicyManage))
 }
 
 func setupTOTP(db *client.Client) echo.HandlerFunc {

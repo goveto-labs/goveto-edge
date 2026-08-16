@@ -95,3 +95,57 @@ func all(permissions ...Permission) map[Permission]bool {
 	}
 	return result
 }
+
+func TestAPIKeyManagePermissionRoles(t *testing.T) {
+	for _, role := range []Role{RoleOwner, RoleAdmin} {
+		if !Allows(role, PermissionAPIKeyManage) {
+			t.Errorf("%s must manage api keys", role)
+		}
+	}
+	for _, role := range []Role{RoleViewer, RoleOperator} {
+		if Allows(role, PermissionAPIKeyManage) {
+			t.Errorf("%s must not manage api keys", role)
+		}
+	}
+}
+
+func TestKeyGrantablePermissionsWhitelist(t *testing.T) {
+	grantable := KeyGrantablePermissions()
+	want := []Permission{
+		PermissionClusterRead,
+		PermissionSiteWrite,
+		PermissionSiteDelete,
+		PermissionPublish,
+		PermissionCacheOperate,
+	}
+	if len(grantable) != len(want) {
+		t.Fatalf("grantable set %v drifted from the expected whitelist %v", grantable, want)
+	}
+	for index := range want {
+		if grantable[index] != want[index] {
+			t.Fatalf("grantable set %v drifted from the expected whitelist %v", grantable, want)
+		}
+	}
+	// The whitelist must never leak capabilities that would let an api key
+	// persist itself or reach secrets and identity management.
+	forbidden := []Permission{
+		PermissionAPIKeyManage, PermissionCredentialManage, PermissionNodeManage,
+		PermissionNodeDelete, PermissionCertificateManage, PermissionMemberManage,
+		PermissionClusterTransfer, PermissionNotificationManage,
+		PermissionPlatformUserManage, PermissionPlatformClusterRead,
+		PermissionPlatformSettingsManage, PermissionPlatformAuditRead,
+		PermissionPlatformPolicyManage,
+	}
+	for _, permission := range forbidden {
+		if KeyPermissionAllowed(permission) {
+			t.Errorf("permission %q must not be grantable to an api key", permission)
+		}
+	}
+	// Every grantable permission must be a subset of the OWNER matrix so a
+	// scoped OWNER subject is the correct carrier for key authorization.
+	for _, permission := range grantable {
+		if !Allows(RoleOwner, permission) {
+			t.Errorf("grantable permission %q is missing from the OWNER matrix", permission)
+		}
+	}
+}

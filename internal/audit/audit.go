@@ -238,6 +238,13 @@ func populatePrincipal(c *echo.Context, entry *Entry) {
 	if entry.Actor != "" {
 		return
 	}
+	// Identify API key requests by the key itself. CreatedBy is ownership
+	// attribution, not the caller, so the nullable users FK remains empty. The
+	// key ID disambiguates the deliberately non-unique display prefix.
+	if key := auth.CurrentAPIKey(c); key != nil {
+		entry.Actor = "api_key:" + key.Prefix + ":" + key.KeyID
+		return
+	}
 	uid := auth.CurrentUID(c)
 	if uid == "" {
 		entry.Actor = "anonymous"

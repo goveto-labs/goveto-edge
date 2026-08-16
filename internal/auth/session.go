@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
+	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
@@ -25,6 +26,7 @@ import (
 const currentUIDKey = "auth.current_uid"
 const currentSessionTokenKey = "auth.current_session_token"
 const currentSessionIDKey = "auth.current_session_id"
+const currentAPIKeyEchoKey = "auth.current_api_key"
 
 var ErrSessionNotFound = errors.New("session not found")
 
@@ -35,6 +37,62 @@ var ErrExternalAuthBindingMismatch = errors.New("external authentication browser
 const externalAuthStateTTL = 10 * time.Minute
 
 type currentUserContextKey struct{}
+
+// APIKeyPrincipal is the authenticated principal of a cluster API key. An
+// explicit API key credential clears any cookie session identity so exactly
+// one principal authorizes the request.
+type APIKeyPrincipal struct {
+	KeyID       string
+	ClusterID   string
+	Prefix      string
+	CreatedBy   string
+	Permissions []rbac.Permission
+}
+
+type apiKeyContextKey struct{}
+
+// SetCurrentAPIKey loads the API key principal into the Echo context and the
+// request context so both handler-level and context-level lookups work.
+func SetCurrentAPIKey(c *echo.Context, principal *APIKeyPrincipal) {
+	c.Set(currentAPIKeyEchoKey, principal)
+	ctx := context.WithValue(c.Request().Context(), apiKeyContextKey{}, principal)
+	c.SetRequest(c.Request().WithContext(ctx))
+}
+
+// CurrentAPIKey returns the API key principal loaded by the apikey
+// middleware, or nil for session-authenticated and anonymous requests.
+func CurrentAPIKey(c *echo.Context) *APIKeyPrincipal {
+	principal, _ := c.Get(currentAPIKeyEchoKey).(*APIKeyPrincipal)
+	return principal
+}
+
+// CurrentAPIKeyFromContext resolves the API key principal from a request
+// context, mirroring CurrentUser for service-layer authorization.
+func CurrentAPIKeyFromContext(ctx context.Context) *APIKeyPrincipal {
+	principal, _ := ctx.Value(apiKeyContextKey{}).(*APIKeyPrincipal)
+	return principal
+}
+
+// ClearCurrentSessionPrincipal removes the loaded session identity when an
+// explicit non-session credential takes precedence for the request.
+func ClearCurrentSessionPrincipal(c *echo.Context) {
+	c.Set(currentUIDKey, "")
+	c.Set(currentSessionTokenKey, "")
+	c.Set(currentSessionIDKey, "")
+}
+
+// CurrentResourceOwnerUserID returns the active user row used by resources
+// whose ownership schema predates non-user principals. The API key remains the
+// audit actor; its creator only owns resources created through that key.
+func CurrentResourceOwnerUserID(c *echo.Context) string {
+	if uid := CurrentUID(c); uid != "" {
+		return uid
+	}
+	if principal := CurrentAPIKey(c); principal != nil {
+		return principal.CreatedBy
+	}
+	return ""
+}
 
 type SessionStore struct {
 	redis      redisStore
@@ -372,11 +430,22 @@ func (s *SessionStore) SetSelectedCluster(ctx context.Context, c *echo.Context, 
 	return s.redis.Set(ctx, selectedClusterKey(token), clusterID, s.ttl).Err()
 }
 
-// RequireAuth rejects requests without a UID loaded by Session.
+// RequireAuth rejects requests without a session user or API key principal.
 func RequireAuth(next echo.HandlerFunc) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		if CurrentUID(c) == "" {
+		if CurrentUID(c) == "" && CurrentAPIKey(c) == nil {
 			return echo.NewHTTPError(http.StatusUnauthorized, "authentication required")
+		}
+		return next(c)
+	}
+}
+
+// RequireUser rejects principals that are not backed by an active user
+// session. Account, session and identity-management routes must use this guard.
+func RequireUser(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		if CurrentUID(c) == "" {
+			return echo.NewHTTPError(http.StatusUnauthorized, "user session required")
 		}
 		return next(c)
 	}

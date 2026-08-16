@@ -39,6 +39,22 @@ func ValidACMEChallengeTypeValues() []ACMEChallengeType {
 	}
 }
 
+// ApiKeyStatus represents the ApiKeyStatus enum type.
+type ApiKeyStatus string
+
+const (
+	ApiKeyStatusACTIVE   ApiKeyStatus = "ACTIVE"
+	ApiKeyStatusDISABLED ApiKeyStatus = "DISABLED"
+)
+
+// ValidApiKeyStatusValues returns all valid values for the ApiKeyStatus enum.
+func ValidApiKeyStatusValues() []ApiKeyStatus {
+	return []ApiKeyStatus{
+		ApiKeyStatusACTIVE,
+		ApiKeyStatusDISABLED,
+	}
+}
+
 // CertificateOperation represents the CertificateOperation enum type.
 type CertificateOperation string
 

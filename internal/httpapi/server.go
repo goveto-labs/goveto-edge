@@ -2,12 +2,15 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
+	"net/http"
 
 	"github.com/labstack/echo/v5"
 	"github.com/redis/go-redis/v9"
 
 	"goveto-edge/internal/analytics"
+	"goveto-edge/internal/apikey"
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
@@ -16,6 +19,7 @@ import (
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/adminsettings"
 	analyticsapi "goveto-edge/internal/httpapi/analytics"
+	apikeysapi "goveto-edge/internal/httpapi/apikeys"
 	"goveto-edge/internal/httpapi/audit"
 	authapi "goveto-edge/internal/httpapi/auth"
 	"goveto-edge/internal/httpapi/certificates"
@@ -71,16 +75,23 @@ func New(
 	settingStore := settings.New(orm, auditRecorder)
 	securityOptions.SessionCookieName = sessions.CookieName()
 	securityOptions.CSRFCookieName = sessions.CSRFCookieName()
+	securityOptions.CSRFExempt = func(request *http.Request) bool {
+		return apikey.ExtractToken(request) != ""
+	}
+	captchaVerifier := captcha.New()
+	limiter := httpsecurity.NewRateLimiter(redisClient)
+	apiKeyService := apikey.New(orm)
 	e.Use(
 		httpsecurity.Middleware(securityOptions),
 		sessions.Session,
+		// Explicit API key credentials take precedence over a loaded cookie
+		// session; malformed or invalid keys never fall back to that session.
+		apiKeyService.Middleware(limiter, apiKeyAuthFailureRecorder(auditRecorder)),
 		sessions.RequireActiveUser(orm),
 		authapi.RequireTOTPEnrollment(settingStore),
 		audit.Middleware(auditRecorder, audit.ControlPlaneRoutes),
 	)
 
-	captchaVerifier := captcha.New()
-	limiter := httpsecurity.NewRateLimiter(redisClient)
 	var analyticsData *analytics.Store
 	if len(analyticsStore) > 0 {
 		analyticsData = analyticsStore[0]
@@ -91,6 +102,7 @@ func New(
 	authapi.Register(e, orm, sessions, settingStore, secretCiphers.General, secretCiphers.TOTP, captchaVerifier, limiter)
 	adminsettings.Register(e, orm, settingStore, secretCiphers.General, authority, gateway, restartControlPlane)
 	clusters.Register(e, orm, sessions, secretCiphers.Notification)
+	apikeysapi.Register(e, orm, apiKeyService, limiter)
 	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, secretCiphers.DNS, dnsService)
 	nodes.Register(e, orm, installQueue, secretCiphers.General, authority, gateway, dnsService)
@@ -106,4 +118,15 @@ func New(
 	}
 
 	return e
+}
+
+func apiKeyAuthFailureRecorder(recorder audit.Recorder) apikey.AuthFailureRecorder {
+	return func(ctx context.Context, event apikey.AuthFailureEvent) error {
+		actor := "api_key:" + event.Prefix
+		return recorder.Record(ctx, audit.Entry{
+			Actor: actor, SourceIP: event.SourceIP, UserAgent: event.UserAgent,
+			Action: "auth.api_key", ResourceType: "api_key", ResourceID: event.Prefix,
+			RequestID: event.RequestID, Result: audit.ResultFailure, FailureReason: event.FailureCode,
+		})
+	}
 }

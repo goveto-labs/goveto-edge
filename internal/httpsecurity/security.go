@@ -30,6 +30,7 @@ const RequestIDHeader = "X-Request-ID"
 type Options struct {
 	SessionCookieName string
 	CSRFCookieName    string
+	CSRFExempt        func(*http.Request) bool
 	MaxBodyBytes      int64
 	MaxUploadBytes    int64
 	MaxHeaderCount    int
@@ -166,6 +167,9 @@ func validateBrowserRequest(request *http.Request, options Options) error {
 	}
 	if origin := strings.TrimSpace(request.Header.Get("Origin")); origin != "" && !sameOrigin(request, origin) {
 		return echo.NewHTTPError(http.StatusForbidden, "request origin rejected")
+	}
+	if options.CSRFExempt != nil && options.CSRFExempt(request) {
+		return nil
 	}
 	if options.SessionCookieName == "" || options.CSRFCookieName == "" {
 		return nil
@@ -356,9 +360,7 @@ func (l *RateLimiter) LimitKeyed(name string, maximum int64, window time.Duratio
 			if l == nil {
 				return echo.NewHTTPError(http.StatusServiceUnavailable, "rate limiting unavailable")
 			}
-			bucket := time.Now().UTC().Unix() / max(int64(window.Seconds()), 1)
-			key := fmt.Sprintf("control-api:rate:%s:%s:%d", name, keyFunc(c), bucket)
-			count := l.incr(c.Request().Context(), key, window)
+			count := l.incr(c.Request().Context(), rateLimitKey(name, keyFunc(c), window), window)
 			remaining := max(maximum-count, 0)
 			c.Response().Header().Set("X-RateLimit-Limit", strconv.FormatInt(maximum, 10))
 			c.Response().Header().Set("X-RateLimit-Remaining", strconv.FormatInt(remaining, 10))
@@ -369,6 +371,24 @@ func (l *RateLimiter) LimitKeyed(name string, maximum int64, window time.Duratio
 			return next(c)
 		}
 	}
+}
+
+// rateLimitKey builds the shared fixed-window bucket key.
+func rateLimitKey(name, key string, window time.Duration) string {
+	bucket := time.Now().UTC().Unix() / max(int64(window.Seconds()), 1)
+	return fmt.Sprintf("control-api:rate:%s:%s:%d", name, key, bucket)
+}
+
+// Take increments the fixed-window counter for key and reports whether the
+// request stays within maximum. Unlike LimitKeyed it is designed for inline
+// use inside middlewares that cannot wrap a whole route, such as per-key
+// limits applied after credential verification.
+func (l *RateLimiter) Take(ctx context.Context, name, key string, maximum int64, window time.Duration) bool {
+	if l == nil {
+		return true
+	}
+	count := l.incr(ctx, rateLimitKey(name, key, window), window)
+	return count <= maximum
 }
 
 func Delay(ctx context.Context, duration time.Duration) error {

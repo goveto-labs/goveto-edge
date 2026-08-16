@@ -91,7 +91,7 @@ func TestExternalAuthStartFailureUsesAPIErrorForLink(t *testing.T) {
 
 func TestExternalAuthLinkRequiresAuthenticatedUser(t *testing.T) {
 	e := echo.New()
-	e.POST("/providers/:provider_id/link", externalAuthStart(nil, nil, nil, true), authn.RequireAuth)
+	e.POST("/providers/:provider_id/link", externalAuthStart(nil, nil, nil, true), authn.RequireUser)
 	request := httptest.NewRequest(http.MethodPost, "/providers/provider-1/link", nil)
 	recorder := httptest.NewRecorder()
 	e.ServeHTTP(recorder, request)

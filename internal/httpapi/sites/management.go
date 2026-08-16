@@ -106,7 +106,7 @@ func cloneSite(db *client.Client, publishService *publisher.Service) echo.Handle
 		if bundle.Name == "" || len(bundle.Domains) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "name and domains are required")
 		}
-		id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentUID(c), bundle)
+		id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
 		if err != nil {
 			return err
 		}
@@ -131,7 +131,7 @@ func importSites(db *client.Client, publishService *publisher.Service) echo.Hand
 		}
 		results := make([]bulkResult, 0, len(input.Sites))
 		for _, bundle := range input.Sites {
-			id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentUID(c), bundle)
+			id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
 			if err == nil {
 				_, err = publishService.Enqueue(c.Request().Context(), id)
 			}
