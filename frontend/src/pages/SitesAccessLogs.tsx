@@ -201,7 +201,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
     const [pageSize, setPageSize] = useState(25);
     const [total, setTotal] = useState(0);
     const [selected, setSelected] = useState<NodeRequestLog | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const activeSiteId = embeddedSiteId || siteId;
 
@@ -375,7 +375,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         : 'Requests received across all sites will appear here.'
                 }
                 emptyTitle='No matching access logs'
-                loading={loading}
+                loading={loading && Boolean(clusterId && (!embeddedSiteId || activeSiteId))}
                 title={`${total.toLocaleString()} requests`}
             >
                 <thead>

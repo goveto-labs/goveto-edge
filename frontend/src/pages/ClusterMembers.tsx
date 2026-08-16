@@ -23,7 +23,7 @@ export default function ClusterMembers() {
     const api = useMemo(() => clusterApi(clusterId), [clusterId]);
     const canManage = canManageCluster(clusters.find((item) => item.id === clusterId)?.role);
     const [members, setMembers] = useState<ClusterMember[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');

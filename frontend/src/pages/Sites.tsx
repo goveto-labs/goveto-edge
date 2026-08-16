@@ -32,7 +32,7 @@ export default function Sites() {
     const [templates, setTemplates] = useState<SiteTemplate[]>([]);
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const importRef = useRef<HTMLInputElement>(null);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
     const loadSites = useCallback(

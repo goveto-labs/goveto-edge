@@ -27,7 +27,7 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
     const [search, setSearch] = useState('');
     const [role, setRole] = useState('');
     const [status, setStatus] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
     const [target, setTarget] = useState<PlatformUser | null>(null);
@@ -55,6 +55,7 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
     }, [currentUser?.role, page, role, search, status]);
 
     useEffect(() => {
+        setLoading(true);
         const timeout = window.setTimeout(() => void load(), 250);
         return () => window.clearTimeout(timeout);
     }, [load]);

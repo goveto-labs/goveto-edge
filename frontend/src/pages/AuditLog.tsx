@@ -35,7 +35,7 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
     const [result, setResult] = useState('');
     const [from, setFrom] = useState('');
     const [to, setTo] = useState('');
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [selected, setSelected] = useState<AuditEvent | null>(null);
     const pageSize = 50;
@@ -65,6 +65,7 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
     }, [action, actor, from, page, resourceType, result, to, user?.role]);
 
     useEffect(() => {
+        setLoading(true);
         const timeout = window.setTimeout(() => void load(), 250);
         return () => window.clearTimeout(timeout);
     }, [load]);

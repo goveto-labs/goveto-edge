@@ -455,7 +455,7 @@ export default function Jobs() {
     const [selected, setSelected] = useState<ManagedJob | null>(null);
     const [selectedDetail, setSelectedDetail] = useState<ManagedJob | null>(null);
     const [executions, setExecutions] = useState<JobExecution[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [detailLoading, setDetailLoading] = useState(false);
     const [historyLoading, setHistoryLoading] = useState(false);
     const [mutating, setMutating] = useState('');
@@ -532,7 +532,7 @@ export default function Jobs() {
         setSelected(null);
         setSelectedDetail(null);
         setExecutions([]);
-        setLoading(false);
+        setLoading(Boolean(clusterId));
         setDetailLoading(false);
         setHistoryLoading(false);
         setLoadError('');

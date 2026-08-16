@@ -121,7 +121,7 @@ export default function ApiKeys() {
     const canManage = canManageCluster(clusters.find((item) => item.id === clusterId)?.role);
 
     const [keys, setKeys] = useState<ClusterApiKey[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
@@ -162,11 +162,10 @@ export default function ApiKeys() {
         }
     }, [api, clusterId]);
 
-    // biome-ignore lint/correctness/useExhaustiveDependencies: cluster changes must clear cluster-scoped UI state
     useEffect(() => {
         clusterGeneration.current += 1;
         setKeys([]);
-        setLoading(false);
+        setLoading(Boolean(clusterId));
         setBusy('');
         setError('');
         setSuccess('');
