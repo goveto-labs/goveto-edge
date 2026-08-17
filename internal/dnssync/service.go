@@ -9,7 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"goveto-edge/internal/dnsprovider"
@@ -39,10 +41,75 @@ type Service struct {
 	cipher     *node.CredentialCipher
 	httpClient *http.Client
 	jobs       *jobqueue.Manager
+	policy     SchedulerPolicy
+
+	providerMu    sync.Mutex
+	providerCache map[string]cachedDNSProvider
 }
 
-func New(db *client.Client, cipher *node.CredentialCipher) *Service {
-	return &Service{db: db, cipher: cipher, httpClient: &http.Client{Timeout: 20 * time.Second}, jobs: jobqueue.New(db)}
+// Options configures optional service behavior. The zero value applies
+// production defaults.
+type Options struct {
+	// Scheduler overrides the DNS node scheduling guardrails. Unset fields
+	// (zero values and nil pointers) fall back to DefaultSchedulerPolicy;
+	// placement is always taken from the per-cluster DNS configuration.
+	Scheduler SchedulerPolicy
+}
+
+// cachedDNSProvider reuses a constructed provider while the encrypted
+// credentials and configuration revision are unchanged. This avoids repeated
+// secret decryption on the periodic reconciliation path, where every enabled
+// cluster builds a provider every five minutes.
+type cachedDNSProvider struct {
+	credentials string
+	updatedAt   time.Time
+	provider    dnsprovider.Provider
+}
+
+func New(db *client.Client, cipher *node.CredentialCipher, options ...Options) *Service {
+	service := &Service{
+		db:            db,
+		cipher:        cipher,
+		httpClient:    &http.Client{Timeout: 20 * time.Second},
+		jobs:          jobqueue.New(db),
+		providerCache: map[string]cachedDNSProvider{},
+		policy:        DefaultSchedulerPolicy(),
+	}
+	if len(options) > 0 {
+		service.policy = options[0].Scheduler.WithDefaults()
+	}
+	return service
+}
+
+// providerFor returns a provider for the configuration, reusing the cached
+// instance while the stored credentials and configuration revision are
+// unchanged. Provider structs are stateless, so sharing an instance across
+// goroutines is safe.
+func (s *Service) providerFor(config *model.DNSProviderConfig) (dnsprovider.Provider, error) {
+	if config == nil {
+		return nil, errors.New("DNS provider is not configured")
+	}
+	s.providerMu.Lock()
+	defer s.providerMu.Unlock()
+	if entry, ok := s.providerCache[config.Id]; ok && entry.provider != nil &&
+		entry.credentials == config.CredentialsEncrypted &&
+		entry.updatedAt.Equal(config.UpdatedAt) {
+		return entry.provider, nil
+	}
+	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt DNS credentials: %w", err)
+	}
+	provider, err := dnsprovider.New(config.Provider, config.Zone, value(config.ZoneId), []byte(plain), s.httpClient)
+	if err != nil {
+		return nil, err
+	}
+	s.providerCache[config.Id] = cachedDNSProvider{
+		credentials: config.CredentialsEncrypted,
+		updatedAt:   config.UpdatedAt,
+		provider:    provider,
+	}
+	return provider, nil
 }
 
 func (s *Service) RewrapSecrets(ctx context.Context) error {
@@ -107,7 +174,8 @@ func (s *Service) EnqueueLatestTx(
 
 // EnqueueTx creates at most one pending follow-up job for a cluster. A new
 // pending job is allowed while another job is running so changes that happen
-// during reconciliation cannot be lost.
+// during reconciliation cannot be lost. Rollback requests are exempt from
+// coalescing: each one walks one snapshot back and needs its own job.
 func (s *Service) EnqueueTx(
 	ctx context.Context,
 	db *client.Client,
@@ -146,26 +214,31 @@ func (s *Service) enqueueTx(
 			return nil, nil
 		}
 	}
-	active, err := client.Raw[pendingDNSJob](ctx, db, `SELECT id, site_id, action
-		FROM dns_sync_jobs WHERE cluster_id=$1 AND status='PENDING'
-		ORDER BY created_at ASC FOR UPDATE LIMIT 1`, clusterID)
-	if err != nil {
-		return nil, err
-	}
-	if len(active) > 0 {
-		current := active[0]
-		coalescedAction, pendingSiteID, changed := coalescePendingAction(
-			model.DNSSyncJob{Action: current.Action, SiteId: current.SiteID},
-			siteID,
-			action,
-		)
-		if !changed && !refreshPending {
-			return db.DNSSyncJob.FindUnique(ctx, query.DNSSyncJob.Id.Equals(current.ID))
+	// Rollback is a relative operation: two identical requests mean "go back
+	// two steps", so a rollback never coalesces with pending work and always
+	// creates its own job.
+	if action != model.DNSSyncActionROLLBACK_CLUSTER {
+		active, err := client.Raw[pendingDNSJob](ctx, db, `SELECT id, site_id, action
+			FROM dns_sync_jobs WHERE cluster_id=$1 AND status='PENDING'
+			ORDER BY created_at ASC FOR UPDATE LIMIT 1`, clusterID)
+		if err != nil {
+			return nil, err
 		}
-		return db.DNSSyncJob.Update().
-			Where(query.DNSSyncJob.Id.Equals(current.ID)).
-			Set(refreshPendingJobSets(coalescedAction, pendingSiteID, time.Now())...).
-			Do(ctx)
+		if len(active) > 0 {
+			current := active[0]
+			coalescedAction, pendingSiteID, changed := coalescePendingAction(
+				model.DNSSyncJob{Action: current.Action, SiteId: current.SiteID},
+				siteID,
+				action,
+			)
+			if !changed && !refreshPending {
+				return db.DNSSyncJob.FindUnique(ctx, query.DNSSyncJob.Id.Equals(current.ID))
+			}
+			return db.DNSSyncJob.Update().
+				Where(query.DNSSyncJob.Id.Equals(current.ID)).
+				Set(refreshPendingJobSets(coalescedAction, pendingSiteID, time.Now())...).
+				Do(ctx)
+		}
 	}
 
 	now := time.Now()
@@ -182,7 +255,9 @@ func (s *Service) enqueueTx(
 }
 
 func isClusterAction(action model.DNSSyncAction) bool {
-	return action == model.DNSSyncActionUPSERT_CLUSTER || action == model.DNSSyncActionDELETE_CLUSTER
+	return action == model.DNSSyncActionUPSERT_CLUSTER ||
+		action == model.DNSSyncActionDELETE_CLUSTER ||
+		action == model.DNSSyncActionROLLBACK_CLUSTER
 }
 
 func resolveClusterAction(
@@ -194,6 +269,11 @@ func resolveClusterAction(
 	}
 	if config == nil {
 		return "", false
+	}
+	// Rollback is independent of the enabled flag: it restores a previously
+	// published state and only requires an existing configuration.
+	if requested == model.DNSSyncActionROLLBACK_CLUSTER {
+		return requested, true
 	}
 	if config.Enabled {
 		return model.DNSSyncActionUPSERT_CLUSTER, true
@@ -291,21 +371,11 @@ func (s *Service) EnqueueNodeIPIfChanged(
 			return s.Enqueue(ctx, clusterID, nil, model.DNSSyncActionUPSERT_CLUSTER)
 		}
 	}
-	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
-	if err != nil {
-		return nil, fmt.Errorf("decrypt DNS credentials: %w", err)
-	}
-	provider, err := dnsprovider.New(
-		config.Provider,
-		config.Zone,
-		value(config.ZoneId),
-		[]byte(plain),
-		s.httpClient,
-	)
+	provider, err := s.providerFor(config)
 	if err != nil {
 		return nil, err
 	}
-	desired, err := s.desiredNodeRecords(ctx, cluster, config, provider.SupportsLines())
+	desired, err := s.desiredNodeRecords(ctx, cluster, config, dnsprovider.SupportsLines(provider))
 	if err != nil {
 		return nil, err
 	}
@@ -336,17 +406,7 @@ func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) err
 	if config == nil {
 		return ErrDNSNotConfigured
 	}
-	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
-	if err != nil {
-		return fmt.Errorf("decrypt DNS credentials: %w", err)
-	}
-	provider, err := dnsprovider.New(
-		config.Provider,
-		config.Zone,
-		value(config.ZoneId),
-		[]byte(plain),
-		s.httpClient,
-	)
+	provider, err := s.providerFor(config)
 	if err != nil {
 		return err
 	}
@@ -374,7 +434,7 @@ func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) err
 		}
 	}
 
-	return s.db.Tx(ctx, func(tx *client.Client) error {
+	err = s.db.Tx(ctx, func(tx *client.Client) error {
 		now := time.Now()
 		payload, _ := json.Marshal(map[string]string{"error": "DNS configuration deleted"})
 		if _, err := tx.DNSSyncJob.Update().
@@ -422,6 +482,15 @@ func (s *Service) DeleteConfiguration(ctx context.Context, clusterID string) err
 			Do(ctx)
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	// The configuration is gone; a cached provider built from it must never
+	// be reused.
+	s.providerMu.Lock()
+	delete(s.providerCache, config.Id)
+	s.providerMu.Unlock()
+	return nil
 }
 
 func (s *Service) lockCluster(ctx context.Context, clusterID string) (func(), error) {
@@ -466,10 +535,23 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ticker.C:
 			s.runOne(ctx)
 		case <-reconcile.C:
-			s.enqueuePeriodic(ctx)
+			// Probing every enabled cluster can take a while; run it beside
+			// the job loop instead of blocking job processing.
+			go s.enqueuePeriodic(ctx)
 		}
 	}
 }
+
+// periodicProbeTimeout bounds a single cluster's provider comparison so one
+// slow vendor API cannot stall the whole periodic sweep.
+const periodicProbeTimeout = 45 * time.Second
+
+// periodicProbeConcurrency limits how many clusters are probed in parallel.
+const periodicProbeConcurrency = 4
+
+// removalPaceInterval is the delay before the follow-up pass that finishes
+// removals deferred by MaxRemovalRatio pacing.
+const removalPaceInterval = time.Minute
 
 func (s *Service) enqueuePeriodic(ctx context.Context) {
 	configs, err := s.db.DNSProviderConfig.Query().
@@ -481,9 +563,22 @@ func (s *Service) enqueuePeriodic(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	semaphore := make(chan struct{}, periodicProbeConcurrency)
+	var group sync.WaitGroup
 	for _, config := range configs {
-		_, _ = s.EnqueueNodeIPIfChanged(ctx, config.ClusterId)
+		group.Add(1)
+		semaphore <- struct{}{}
+		go func(clusterID string) {
+			defer group.Done()
+			defer func() { <-semaphore }()
+			probeCtx, cancel := context.WithTimeout(ctx, periodicProbeTimeout)
+			defer cancel()
+			if _, err := s.EnqueueNodeIPIfChanged(probeCtx, clusterID); err != nil && ctx.Err() == nil {
+				slog.Warn("periodic DNS drift check", "cluster_id", clusterID, "error", err)
+			}
+		}(config.ClusterId)
 	}
+	group.Wait()
 }
 
 func (s *Service) runOne(ctx context.Context) {
@@ -507,13 +602,41 @@ func (s *Service) runOne(ctx context.Context) {
 		}
 		defer unlock()
 		var executionErr error
+		var requeueAfter time.Duration
 		switch job.Action {
 		case model.DNSSyncActionDELETE_CLUSTER:
 			executionErr = s.deleteAll(runCtx, job.ClusterId)
+		case model.DNSSyncActionROLLBACK_CLUSTER:
+			executionErr = s.rollback(runCtx, job.ClusterId)
 		default:
-			executionErr = s.reconcile(runCtx, job.ClusterId)
+			var deferred bool
+			deferred, executionErr = s.reconcile(runCtx, job.ClusterId)
+			if executionErr == nil && deferred {
+				// Removal pacing kept some dropped nodes published for this
+				// pass. Requeue directly instead of relying on drift
+				// detection: the deferred records are part of the desired
+				// set, so no drift will ever be observed for them.
+				requeueAfter = removalPaceInterval
+			}
 		}
-		return jobqueue.Outcome{Result: map[string]any{"cluster_id": job.ClusterId, "action": job.Action}, Err: executionErr, Retryable: executionErr != nil}
+		outcome := jobqueue.Outcome{
+			Result:       map[string]any{"cluster_id": job.ClusterId, "action": job.Action},
+			Err:          executionErr,
+			Retryable:    executionErr != nil,
+			RequeueAfter: requeueAfter,
+		}
+		if executionErr != nil {
+			// Rejected credentials are permanent: retrying with the same
+			// secrets cannot succeed, so fail immediately for visibility.
+			if dnsprovider.IsInvalidCredentials(executionErr) {
+				outcome.Retryable = false
+			} else if retryAfter := dnsprovider.RateLimitRetryAfter(executionErr); retryAfter > 0 {
+				// Honor the provider's retry hint instead of the default
+				// exponential backoff so throttled jobs stop hammering the API.
+				outcome.RetryAfter = retryAfter
+			}
+		}
+		return outcome
 	})
 	if err != nil && !errors.Is(err, context.Canceled) {
 		slog.Warn("DNS job worker", "error", err)
@@ -558,52 +681,38 @@ type desiredRecord struct {
 	DNSLineID, NodeID *string
 }
 
-func (s *Service) desiredNodeRecords(
+// scheduledRecords computes the desired node record set for the cluster,
+// applying scheduling policy (admission hysteresis, placement, removal
+// limiting) on top of the DNS-eligible candidates. The boolean result reports
+// whether removal pacing deferred nodes to a follow-up pass.
+func (s *Service) scheduledRecords(
 	ctx context.Context,
 	cluster *model.Cluster,
 	config *model.DNSProviderConfig,
 	supportsLines bool,
-) ([]dnsprovider.Record, error) {
-	result := make([]dnsprovider.Record, 0)
-	seen := map[string]bool{}
-	nodes, err := s.dnsEligibleNodes(ctx, cluster.Id, time.Now())
+) ([]desiredRecord, bool, error) {
+	candidates, err := s.dnsCandidates(ctx, cluster.Id, supportsLines)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	for _, currentNode := range nodes {
-		addresses, err := s.db.NodeAddress.Query().
-			Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
-			OrderBy(query.NodeAddress.CreatedAt.Asc()).
-			Do(ctx)
-		if err != nil {
-			return nil, err
-		}
-		lineCodes := []string{"default"}
-		if supportsLines {
-			links, err := s.db.NodeDNSLine.Query().
-				Where(query.NodeDNSLine.NodeId.Equals(currentNode.Id)).
-				Do(ctx)
-			if err != nil {
-				return nil, err
-			}
-			if len(links) > 0 {
-				lineCodes = make([]string, 0, len(links))
-				for _, link := range links {
-					line, err := s.db.DNSLine.FindUnique(
-						ctx,
-						query.DNSLine.Id.Equals(link.DnsLineId),
-					)
-					if err != nil {
-						return nil, err
-					}
-					if line == nil {
-						return nil, fmt.Errorf("DNS line %q not found", link.DnsLineId)
-					}
-					lineCodes = append(lineCodes, normalizeLineKey(line.ProviderCode))
-				}
-			}
-		}
-		for _, address := range addresses {
+	published, err := s.publishedNodeIDs(ctx, cluster.Id)
+	if err != nil {
+		return nil, false, err
+	}
+	policy := s.policy
+	policy.Placement = config.Placement
+	selected := Select(candidates, published, policy, time.Now())
+	selected, deferred, err := s.paceRemovals(ctx, candidates, selected, published, policy, supportsLines)
+	if err != nil {
+		return nil, false, err
+	}
+
+	result := make([]desiredRecord, 0)
+	seen := map[string]bool{}
+	// Iterate in selection order for stable output: Select keeps candidate
+	// order and paceRemovals appends deferred nodes at the end.
+	for _, item := range selected {
+		for _, address := range item.Addresses {
 			if net.ParseIP(address.Address) == nil {
 				continue
 			}
@@ -611,21 +720,220 @@ func (s *Service) desiredNodeRecords(
 			if strings.Contains(address.Address, ":") {
 				recordType = model.DNSRecordTypeAAAA
 			}
-			for _, lineCode := range lineCodes {
+			lines := item.Lines
+			if len(lines) == 0 {
+				lines = []*model.DNSLine{nil}
+			}
+			for _, line := range lines {
+				var lineID *string
+				lineCode := "default"
+				if line != nil {
+					lineID = &line.Id
+					lineCode = normalizeLineKey(line.ProviderCode)
+				}
 				record := dnsprovider.Record{
 					Hostname: *cluster.PrimaryHostname,
 					Type:     recordType,
-					Value:    address.Address,
+					Value:    dnsprovider.CanonicalValue(recordType, address.Address),
 					Line:     lineCode,
 					TTL:      config.DefaultTtl,
 					Proxied:  config.Proxied,
 				}
 				key := nodeRecordKey(record)
-				if !seen[key] {
-					seen[key] = true
-					result = append(result, record)
+				if seen[key] {
+					continue
 				}
+				seen[key] = true
+				nodeID := item.Node.Id
+				result = append(result, desiredRecord{Record: record, DNSLineID: lineID, NodeID: &nodeID})
 			}
+		}
+	}
+
+	// Site domains are customer-owned DNS names. They are intentionally not
+	// managed through the cluster provider; customers point them at the cluster
+	// primary hostname with CNAME or an equivalent apex alias record.
+	return result, deferred, nil
+}
+
+// paceRemovals reapplies removal pacing after Select: at most
+// MaxRemovalRatio of the currently published nodes may leave DNS in one pass.
+// Every published node missing from the selection counts toward the cap,
+// whether it was evicted by placement or left the eligible set entirely
+// (offline beyond the grace period, disabled, or revoked). Dropped-but-
+// deferred nodes are re-added to the selection for this pass so traffic
+// drains in bounded steps. When no eligible node remains at all, the
+// deferral is skipped: records pointing at dead nodes must always be removed.
+//
+// The boolean result reports whether any removal was deferred. The caller
+// must schedule a follow-up pass in that case: deferred nodes are part of the
+// desired set, so drift detection alone would see no change and the deferral
+// would never complete.
+func (s *Service) paceRemovals(
+	ctx context.Context,
+	candidates []NodeCandidate,
+	selected []NodeCandidate,
+	published map[string]bool,
+	policy SchedulerPolicy,
+	supportsLines bool,
+) ([]NodeCandidate, bool, error) {
+	if len(selected) == 0 || len(published) == 0 {
+		return selected, false, nil
+	}
+	policy = policy.WithDefaults()
+	candidateByID := make(map[string]NodeCandidate, len(candidates))
+	for _, item := range candidates {
+		candidateByID[item.Node.Id] = item
+	}
+	droppedIDs := droppedFromSelection(published, selected)
+	if len(droppedIDs) == 0 {
+		return selected, false, nil
+	}
+	allowed := allowedRemovals(len(published), policy.MaxRemovalRatio)
+	if len(droppedIDs) <= allowed {
+		return selected, false, nil
+	}
+	dropped, err := s.droppedNodes(ctx, droppedIDs, candidateByID)
+	if err != nil {
+		return nil, false, err
+	}
+	deferred := deferredRemovals(dropped, len(dropped)-allowed)
+	if len(deferred) == 0 {
+		return selected, false, nil
+	}
+	result := append([]NodeCandidate(nil), selected...)
+	for _, node := range deferred {
+		item, ok := candidateByID[node.Id]
+		if !ok {
+			// The node left the eligible set, so its addresses and lines are
+			// loaded directly to keep its records published for one more pass.
+			item, err = s.nodeCandidate(ctx, node, supportsLines)
+			if err != nil {
+				return nil, false, err
+			}
+		}
+		result = append(result, item)
+	}
+	return result, true, nil
+}
+
+// droppedFromSelection returns the sorted ids that are published but absent
+// from the selection. Every one counts toward the MaxRemovalRatio pacing cap,
+// whether the node was evicted by placement or left the eligible candidate
+// set entirely (offline beyond the grace period, disabled, or revoked). The
+// order is sorted so the deferral choice is deterministic on equal UpdatedAt
+// values.
+func droppedFromSelection(published map[string]bool, selected []NodeCandidate) []string {
+	selectedIDs := make(map[string]bool, len(selected))
+	for _, item := range selected {
+		selectedIDs[item.Node.Id] = true
+	}
+	dropped := make([]string, 0, len(published))
+	for id := range published {
+		if !selectedIDs[id] {
+			dropped = append(dropped, id)
+		}
+	}
+	sort.Strings(dropped)
+	return dropped
+}
+
+// droppedNodes resolves dropped published ids to nodes, loading the ones that
+// are no longer part of the eligible candidate set.
+func (s *Service) droppedNodes(
+	ctx context.Context,
+	droppedIDs []string,
+	candidateByID map[string]NodeCandidate,
+) ([]model.Node, error) {
+	dropped := make([]model.Node, 0, len(droppedIDs))
+	missing := make([]string, 0)
+	for _, id := range droppedIDs {
+		if item, ok := candidateByID[id]; ok {
+			dropped = append(dropped, item.Node)
+		} else {
+			missing = append(missing, id)
+		}
+	}
+	if len(missing) == 0 {
+		return dropped, nil
+	}
+	// A published id without a node row means the node was deleted outright;
+	// it simply never enters the deferred set, so its records are removed
+	// immediately instead of blocking reconciliation.
+	nodes, err := s.db.Node.Query().Where(query.Node.Id.In(missing...)).Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(dropped, nodes...), nil
+}
+
+// dnsCandidates loads DNS-eligible nodes with their addresses and lines.
+func (s *Service) dnsCandidates(ctx context.Context, clusterID string, supportsLines bool) ([]NodeCandidate, error) {
+	nodes, err := s.dnsEligibleNodes(ctx, clusterID, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]NodeCandidate, 0, len(nodes))
+	for _, currentNode := range nodes {
+		candidate, err := s.nodeCandidate(ctx, currentNode, supportsLines)
+		if err != nil {
+			return nil, err
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates, nil
+}
+
+// nodeCandidate loads the addresses and DNS lines of a single node.
+func (s *Service) nodeCandidate(ctx context.Context, currentNode model.Node, supportsLines bool) (NodeCandidate, error) {
+	addresses, err := s.db.NodeAddress.Query().
+		Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
+		OrderBy(query.NodeAddress.CreatedAt.Asc()).
+		Do(ctx)
+	if err != nil {
+		return NodeCandidate{}, err
+	}
+	lines := []*model.DNSLine{nil}
+	if supportsLines {
+		links, err := s.db.NodeDNSLine.Query().
+			Where(query.NodeDNSLine.NodeId.Equals(currentNode.Id)).
+			Do(ctx)
+		if err != nil {
+			return NodeCandidate{}, err
+		}
+		if len(links) > 0 {
+			lines = nil
+			for _, link := range links {
+				line, err := s.db.DNSLine.FindUnique(
+					ctx,
+					query.DNSLine.Id.Equals(link.DnsLineId),
+				)
+				if err != nil {
+					return NodeCandidate{}, err
+				}
+				if line == nil {
+					return NodeCandidate{}, fmt.Errorf("DNS line %q not found", link.DnsLineId)
+				}
+				lines = append(lines, line)
+			}
+		}
+	}
+	return NodeCandidate{Node: currentNode, Addresses: addresses, Lines: lines}, nil
+}
+
+// publishedNodeIDs returns the distinct node ids currently tracked by managed
+// DNS records.
+func (s *Service) publishedNodeIDs(ctx context.Context, clusterID string) (map[string]bool, error) {
+	records, err := s.db.DNSManagedRecord.Query().
+		Where(query.DNSManagedRecord.ClusterId.Equals(clusterID)).
+		Do(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]bool, len(records))
+	for _, record := range records {
+		if record.NodeId != nil {
+			result[*record.NodeId] = true
 		}
 	}
 	return result, nil
@@ -699,11 +1007,8 @@ func syncRemoteNodeRecords(
 	provider dnsprovider.Provider,
 	hostname string,
 	desired []dnsprovider.Record,
+	remote []dnsprovider.Record,
 ) error {
-	remote, err := provider.ListRecords(ctx, hostname)
-	if err != nil {
-		return err
-	}
 	desiredSet := map[string]bool{}
 	for _, record := range desired {
 		desiredSet[nodeRecordKey(record)] = true
@@ -735,47 +1040,48 @@ func nodeRecordKey(record dnsprovider.Record) string {
 	}, "\x00")
 }
 
-func (s *Service) reconcile(ctx context.Context, clusterID string) error {
+// reconcile publishes the desired record set. The boolean result reports
+// whether removal pacing deferred any node, in which case the caller must
+// schedule a follow-up pass to finish draining.
+func (s *Service) reconcile(ctx context.Context, clusterID string) (bool, error) {
 	cluster, err := s.db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
 	if err != nil {
-		return err
+		return false, err
 	}
 	if cluster == nil {
-		return fmt.Errorf("cluster %q not found", clusterID)
+		return false, fmt.Errorf("cluster %q not found", clusterID)
 	}
 	if cluster.PrimaryHostname == nil || *cluster.PrimaryHostname == "" {
-		return errors.New("cluster primary hostname is not configured")
+		return false, errors.New("cluster primary hostname is not configured")
 	}
 	config, err := EndpointConfig(ctx, s.db, clusterID)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if config == nil {
-		return errors.New("DNS provider is not configured")
+		return false, errors.New("DNS provider is not configured")
 	}
 	if !config.Enabled {
-		return errors.New("DNS provider is disabled")
+		return false, errors.New("DNS provider is disabled")
 	}
-	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
+	provider, err := s.providerFor(config)
 	if err != nil {
-		return fmt.Errorf("decrypt DNS credentials: %w", err)
+		return false, err
 	}
-	provider, err := dnsprovider.New(
-		config.Provider,
-		config.Zone,
-		value(config.ZoneId),
-		[]byte(plain),
-		s.httpClient,
-	)
+	desired, deferred, err := s.desired(ctx, cluster, config, dnsprovider.SupportsLines(provider))
 	if err != nil {
-		return err
+		return false, err
 	}
-	desired, err := s.desired(ctx, cluster, config, provider.SupportsLines())
+	// One remote listing drives both the diff in apply and stale-record
+	// cleanup, halving the read API calls per reconciliation. Keys deleted by
+	// apply are filtered out of the listing before the cleanup pass.
+	remote, err := provider.ListRecords(ctx, *cluster.PrimaryHostname)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if err := s.apply(ctx, clusterID, provider, desired); err != nil {
-		return err
+	deletedKeys, err := s.apply(ctx, clusterID, provider, desired, remote)
+	if err != nil {
+		return false, err
 	}
 	nodeRecords := make([]dnsprovider.Record, 0)
 	for _, record := range desired {
@@ -783,7 +1089,26 @@ func (s *Service) reconcile(ctx context.Context, clusterID string) error {
 			nodeRecords = append(nodeRecords, record.Record)
 		}
 	}
-	return syncRemoteNodeRecords(ctx, provider, *cluster.PrimaryHostname, nodeRecords)
+	if err := syncRemoteNodeRecords(ctx, provider, *cluster.PrimaryHostname, nodeRecords, remainingRemote(remote, deletedKeys)); err != nil {
+		return false, err
+	}
+	// Persist the published state so a bad change can be rolled back.
+	return deferred, s.writeSnapshot(ctx, clusterID, desired)
+}
+
+// remainingRemote drops the remote records apply already deleted, so stale
+// record cleanup does not issue a second delete for them.
+func remainingRemote(remote []dnsprovider.Record, deletedKeys map[string]bool) []dnsprovider.Record {
+	if len(deletedKeys) == 0 {
+		return remote
+	}
+	remaining := make([]dnsprovider.Record, 0, len(remote))
+	for _, record := range remote {
+		if !deletedKeys[nodeRecordKey(record)] {
+			remaining = append(remaining, record)
+		}
+	}
+	return remaining
 }
 
 func (s *Service) deleteAll(ctx context.Context, clusterID string) error {
@@ -796,17 +1121,7 @@ func (s *Service) deleteAll(ctx context.Context, clusterID string) error {
 	if config == nil || config.Enabled {
 		return nil
 	}
-	plain, err := s.cipher.Decrypt(config.CredentialsEncrypted)
-	if err != nil {
-		return fmt.Errorf("decrypt DNS credentials: %w", err)
-	}
-	provider, err := dnsprovider.New(
-		config.Provider,
-		config.Zone,
-		value(config.ZoneId),
-		[]byte(plain),
-		s.httpClient,
-	)
+	provider, err := s.providerFor(config)
 	if err != nil {
 		return err
 	}
@@ -859,95 +1174,44 @@ func (s *Service) desired(
 	cluster *model.Cluster,
 	config *model.DNSProviderConfig,
 	supportsLines bool,
-) ([]desiredRecord, error) {
-	result := []desiredRecord{}
-	nodes, err := s.dnsEligibleNodes(ctx, cluster.Id, time.Now())
+) ([]desiredRecord, bool, error) {
+	return s.scheduledRecords(ctx, cluster, config, supportsLines)
+}
+
+// desiredNodeRecords is the record-only projection of scheduledRecords, used
+// to compare the desired set against the provider without sync metadata.
+func (s *Service) desiredNodeRecords(
+	ctx context.Context,
+	cluster *model.Cluster,
+	config *model.DNSProviderConfig,
+	supportsLines bool,
+) ([]dnsprovider.Record, error) {
+	records, _, err := s.scheduledRecords(ctx, cluster, config, supportsLines)
 	if err != nil {
 		return nil, err
 	}
-	for _, currentNode := range nodes {
-		addresses, err := s.db.NodeAddress.Query().
-			Where(query.NodeAddress.NodeId.Equals(currentNode.Id)).
-			OrderBy(query.NodeAddress.CreatedAt.Asc()).
-			Do(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		lines := []*model.DNSLine{nil}
-		if supportsLines {
-			links, linkErr := s.db.NodeDNSLine.Query().
-				Where(query.NodeDNSLine.NodeId.Equals(currentNode.Id)).
-				Do(ctx)
-			if linkErr != nil {
-				return nil, linkErr
-			}
-			if len(links) > 0 {
-				lines = nil
-				for _, link := range links {
-					line, lineErr := s.db.DNSLine.FindUnique(
-						ctx,
-						query.DNSLine.Id.Equals(link.DnsLineId),
-					)
-					if lineErr != nil {
-						return nil, lineErr
-					}
-					if line == nil {
-						return nil, fmt.Errorf("DNS line %q not found", link.DnsLineId)
-					}
-					lines = append(lines, line)
-				}
-			}
-		}
-		for _, address := range addresses {
-			if net.ParseIP(address.Address) == nil {
-				continue
-			}
-			recordType := model.DNSRecordTypeA
-			if strings.Contains(address.Address, ":") {
-				recordType = model.DNSRecordTypeAAAA
-			}
-			for _, line := range lines {
-				var lineID *string
-				lineCode := "default"
-				if line != nil {
-					lineID = &line.Id
-					lineCode = normalizeLineKey(line.ProviderCode)
-				}
-				nodeID := currentNode.Id
-				result = append(result, desiredRecord{
-					Record: dnsprovider.Record{
-						Hostname: *cluster.PrimaryHostname,
-						Type:     recordType,
-						Value:    dnsprovider.CanonicalValue(recordType, address.Address),
-						Line:     lineCode,
-						TTL:      config.DefaultTtl,
-						Proxied:  config.Proxied,
-					},
-					DNSLineID: lineID,
-					NodeID:    &nodeID,
-				})
-			}
-		}
+	result := make([]dnsprovider.Record, 0, len(records))
+	for _, record := range records {
+		result = append(result, record.Record)
 	}
-
-	// Site domains are customer-owned DNS names. They are intentionally not
-	// managed through the cluster provider; customers point them at the cluster
-	// primary hostname with CNAME or an equivalent apex alias record.
 	return result, nil
 }
 
+// apply converges the managed-record table and the provider toward the
+// desired set. It returns the node-record keys whose remote records were
+// deleted, so the caller can exclude them from further cleanup passes.
 func (s *Service) apply(
 	ctx context.Context,
 	clusterID string,
 	provider dnsprovider.Provider,
 	desired []desiredRecord,
-) error {
+	remote []dnsprovider.Record,
+) (map[string]bool, error) {
 	existing, err := s.db.DNSManagedRecord.Query().
 		Where(query.DNSManagedRecord.ClusterId.Equals(clusterID)).
 		Do(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	byKey := map[string]*model.DNSManagedRecord{}
 	for index := range existing {
@@ -958,9 +1222,20 @@ func (s *Service) apply(
 			byKey[k] = item
 		}
 	}
+	// Index the remote records once so unchanged entries skip provider calls
+	// entirely instead of paying a find + rewrite per record.
+	remoteByKey := make(map[string]dnsprovider.Record, len(remote))
+	for _, record := range remote {
+		remoteKey := nodeRecordKey(record)
+		if _, seen := remoteByKey[remoteKey]; !seen {
+			remoteByKey[remoteKey] = record
+		}
+	}
 
 	processed := map[string]struct{}{}
 	retained := map[string]struct{}{}
+	deletedKeys := map[string]bool{}
+	proxiedAware := provider.Capabilities().Proxied
 	var errs []error
 	for _, item := range desired {
 		lineKey := normalizeLineKey(item.Line)
@@ -997,7 +1272,25 @@ func (s *Service) apply(
 		retained[current.Id] = struct{}{}
 
 		item.ID = value(current.ProviderRecordId)
-		externalID, syncErr := provider.Upsert(ctx, item.Record)
+		var externalID string
+		var syncErr error
+		if remoteRecord, remoteExists := remoteByKey[nodeRecordKey(item.Record)]; remoteExists && remoteRecord.ID != "" {
+			tracked := current.ProviderRecordId != nil && *current.ProviderRecordId == remoteRecord.ID
+			untracked := current.ProviderRecordId == nil
+			// The proxied flag only distinguishes records when the provider
+			// supports it; other providers never serve proxied records.
+			sameProxy := !proxiedAware || remoteRecord.Proxied == item.Record.Proxied
+			if (tracked || untracked) && sameProxy && remoteRecord.TTL == dnsprovider.ExpectedTTL(item.Record) {
+				// The provider already serves exactly this record; adopt or keep
+				// it without a write. Adoption also covers records created before
+				// they were tracked locally.
+				externalID = remoteRecord.ID
+			} else {
+				externalID, syncErr = provider.Upsert(ctx, item.Record)
+			}
+		} else {
+			externalID, syncErr = provider.Upsert(ctx, item.Record)
+		}
 		if syncErr == nil && strings.TrimSpace(externalID) == "" {
 			syncErr = errors.New("DNS provider returned an empty record ID")
 		}
@@ -1091,13 +1384,14 @@ func (s *Service) apply(
 			errs = append(errs, fmt.Errorf("delete DNS record %s: %w", item.Hostname, deleteErr))
 			continue
 		}
+		deletedKeys[nodeRecordKey(record)] = true
 		if _, deleteErr := s.db.DNSManagedRecord.Delete().
 			Where(query.DNSManagedRecord.Id.Equals(item.Id)).
 			Do(ctx); deleteErr != nil {
 			errs = append(errs, deleteErr)
 		}
 	}
-	return errors.Join(errs...)
+	return deletedKeys, errors.Join(errs...)
 }
 
 func normalizeLineKey(line string) string {

@@ -141,6 +141,7 @@ export interface DNSLine {
 
 export type DNSProviderType = 'ALIYUN' | 'CLOUDFLARE';
 export type DNSProviderKind = 'ENDPOINT' | 'ACME';
+export type DNSPlacement = 'ALL' | 'PRIMARY_BACKUP';
 
 export interface DNSProviderDomain {
     name: string;
@@ -155,6 +156,7 @@ export interface DNSZone {
     zone_id: string | null;
     default_ttl: number;
     proxied: boolean;
+    placement: DNSPlacement;
     enabled: boolean;
     credentials_configured: boolean;
     created_at: string;
@@ -171,6 +173,7 @@ export interface DNSConfigResponse {
         zone_id: string | null;
         default_ttl: number;
         proxied: boolean;
+        placement: DNSPlacement;
         enabled: boolean;
         credentials_configured: boolean;
     } | null;
@@ -470,6 +473,8 @@ export interface Node {
     sshHostKey?: NodeSSHHostKey;
     redisAvailable?: boolean;
     redisStatusError?: string;
+    dnsPriority: number;
+    onlineSince?: string;
     addresses: NodeAddress[];
     dnsLines?: Array<{ nodeId: string; dnsLineId: string }>;
     groupMemberships?: Array<{ nodeId: string; groupId: string }>;
@@ -487,6 +492,10 @@ export interface NodeStatusResponse {
 export interface NodeDNSLinesResponse {
     node_id: string;
     dns_line_ids: string[];
+}
+export interface NodeDNSPriorityResponse {
+    node_id: string;
+    priority: number;
 }
 export interface NodeCacheUpdateResponse {
     cache_config: NodeCacheConfig;

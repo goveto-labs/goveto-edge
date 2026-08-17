@@ -6,6 +6,7 @@ import type {
     NodeCacheConfig,
     NodeCacheUpdateResponse,
     NodeDNSLinesResponse,
+    NodeDNSPriorityResponse,
     NodeInstallationInfo,
     NodeSSH,
     NodeSSHHostKey,
@@ -48,6 +49,10 @@ export const nodesApi = (clusterId: string) => ({
     updateDNSLines: (nodeId: string, dnsLineIds: string[]) =>
         put<NodeDNSLinesResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-lines`), {
             dns_line_ids: dnsLineIds,
+        }),
+    updateDNSPriority: (nodeId: string, priority: number) =>
+        put<NodeDNSPriorityResponse>(clusterPath(clusterId, `/nodes/${nodeId}/dns-priority`), {
+            priority,
         }),
     enable: (nodeId: string) =>
         post<NodeStatusResponse>(clusterPath(clusterId, `/nodes/${nodeId}/enable`)),

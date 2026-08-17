@@ -27,6 +27,7 @@ import (
 	"goveto-edge/internal/httpapi/health"
 	"goveto-edge/internal/httpapi/initialization"
 	jobsapi "goveto-edge/internal/httpapi/jobs"
+	metricsapi "goveto-edge/internal/httpapi/metrics"
 	"goveto-edge/internal/httpapi/nodes"
 	publishapi "goveto-edge/internal/httpapi/publish"
 	purgeapi "goveto-edge/internal/httpapi/purge"
@@ -59,6 +60,9 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	// Registration only wires handlers as closures, so nil dependencies are
 	// safe here: nothing dereferences them until a request is served.
 	health.Register(e, nil)
+	// /metrics is registered only when metrics are enabled (server.go), but the
+	// specification documents it, so include it in the registered set.
+	metricsapi.Register(e)
 	initialization.Register(e, nil, nil, nil, nil, nil)
 	authapi.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	adminsettings.Register(e, nil, nil, nil, nil, nil, nil)

@@ -40,6 +40,7 @@ type DNSProviderConfigQuery struct {
 	CredentialsEncrypted dNSProviderConfigCredentialsEncryptedField
 	DefaultTtl           dNSProviderConfigDefaultTtlField
 	Proxied              dNSProviderConfigProxiedField
+	Placement            dNSProviderConfigPlacementField
 	Enabled              dNSProviderConfigEnabledField
 	CreatedAt            dNSProviderConfigCreatedAtField
 	UpdatedAt            dNSProviderConfigUpdatedAtField
@@ -56,6 +57,7 @@ const DNSProviderConfigZoneIdColumn = "zone_id"
 const DNSProviderConfigCredentialsEncryptedColumn = "credentials_encrypted"
 const DNSProviderConfigDefaultTtlColumn = "default_ttl"
 const DNSProviderConfigProxiedColumn = "proxied"
+const DNSProviderConfigPlacementColumn = "placement"
 const DNSProviderConfigEnabledColumn = "enabled"
 const DNSProviderConfigCreatedAtColumn = "created_at"
 const DNSProviderConfigUpdatedAtColumn = "updated_at"
@@ -71,6 +73,7 @@ var DNSProviderConfig = DNSProviderConfigQuery{
 	CredentialsEncrypted: dNSProviderConfigCredentialsEncryptedField{},
 	DefaultTtl:           dNSProviderConfigDefaultTtlField{},
 	Proxied:              dNSProviderConfigProxiedField{},
+	Placement:            dNSProviderConfigPlacementField{},
 	Enabled:              dNSProviderConfigEnabledField{},
 	CreatedAt:            dNSProviderConfigCreatedAtField{},
 	UpdatedAt:            dNSProviderConfigUpdatedAtField{},
@@ -685,6 +688,52 @@ func (dNSProviderConfigProxiedField) Desc() DNSProviderConfigOrderByClause {
 	return DNSProviderConfigOrderByClause{Field: "proxied", Direction: "DESC"}
 }
 
+// PlacementField provides query operations for the placement field.
+type dNSProviderConfigPlacementField struct{}
+
+// Equals creates an equality condition.
+func (dNSProviderConfigPlacementField) Equals(v model.DNSPlacement) DNSProviderConfigWhereClause {
+	return DNSProviderConfigWhereClause{Field: "placement", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (dNSProviderConfigPlacementField) Not(v model.DNSPlacement) DNSProviderConfigWhereClause {
+	return DNSProviderConfigWhereClause{Field: "placement", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (dNSProviderConfigPlacementField) In(vals ...model.DNSPlacement) DNSProviderConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSProviderConfigWhereClause{Field: "placement", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (dNSProviderConfigPlacementField) NotIn(vals ...model.DNSPlacement) DNSProviderConfigWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return DNSProviderConfigWhereClause{Field: "placement", Operator: "NOT IN", Value: iVals}
+}
+
+// Set creates a set operation for create/update.
+func (dNSProviderConfigPlacementField) Set(v model.DNSPlacement) DNSProviderConfigSetClause {
+	return DNSProviderConfigSetClause{Field: "placement", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (dNSProviderConfigPlacementField) Asc() DNSProviderConfigOrderByClause {
+	return DNSProviderConfigOrderByClause{Field: "placement", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (dNSProviderConfigPlacementField) Desc() DNSProviderConfigOrderByClause {
+	return DNSProviderConfigOrderByClause{Field: "placement", Direction: "DESC"}
+}
+
 // EnabledField provides query operations for the enabled field.
 type dNSProviderConfigEnabledField struct{}
 
@@ -913,6 +962,7 @@ type DNSProviderConfigCreateInput struct {
 	CredentialsEncrypted string
 	DefaultTtl           int
 	Proxied              bool
+	Placement            model.DNSPlacement
 	Enabled              bool
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
@@ -921,7 +971,7 @@ type DNSProviderConfigCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d DNSProviderConfigCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Kind, d.Provider, d.Zone, d.ZoneId, d.CredentialsEncrypted, d.DefaultTtl, d.Proxied, d.Enabled, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Kind, d.Provider, d.Zone, d.ZoneId, d.CredentialsEncrypted, d.DefaultTtl, d.Proxied, d.Placement, d.Enabled, d.CreatedAt, d.UpdatedAt}
 }
 
 // DNSProviderConfigCreateNestedInput supports nested creates and connects.

@@ -160,6 +160,7 @@ type Cluster struct {
 	DnsProviders         []*DNSProviderConfig   `db:"-" json:"dnsProviders,omitempty"`
 	DnsRecords           []*DNSManagedRecord    `db:"-" json:"dnsRecords,omitempty"`
 	DnsSyncJobs          []*DNSSyncJob          `db:"-" json:"dnsSyncJobs,omitempty"`
+	DnsSyncSnapshots     []*DNSSyncSnapshot     `db:"-" json:"dnsSyncSnapshots,omitempty"`
 	Certificates         []*Certificate         `db:"-" json:"certificates,omitempty"`
 	AcmeAccounts         []*ACMEAccount         `db:"-" json:"acmeAccounts,omitempty"`
 	OriginPools          []*OriginPool          `db:"-" json:"originPools,omitempty"`
@@ -286,6 +287,7 @@ type DNSProviderConfig struct {
 	CredentialsEncrypted string          `db:"credentials_encrypted" json:"credentialsEncrypted"`
 	DefaultTtl           int             `db:"default_ttl" json:"defaultTtl"`
 	Proxied              bool            `db:"proxied" json:"proxied"`
+	Placement            DNSPlacement    `db:"placement" json:"placement"`
 	Enabled              bool            `db:"enabled" json:"enabled"`
 	CreatedAt            time.Time       `db:"created_at" json:"createdAt"`
 	UpdatedAt            time.Time       `db:"updated_at" json:"updatedAt"`
@@ -315,6 +317,15 @@ type DNSSyncJob struct {
 	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
 	Cluster           *Cluster         `db:"-" json:"cluster,omitempty"`
 	Site              *Site            `db:"-" json:"site,omitempty"`
+}
+
+// DNSSyncSnapshot represents the DNSSyncSnapshot model.
+type DNSSyncSnapshot struct {
+	Id          string          `db:"id" json:"id"`
+	ClusterId   string          `db:"cluster_id" json:"clusterId"`
+	RecordsJson json.RawMessage `db:"records_json" json:"recordsJson"`
+	CreatedAt   time.Time       `db:"created_at" json:"createdAt"`
+	Cluster     *Cluster        `db:"-" json:"cluster,omitempty"`
 }
 
 // DynamicSetting represents the DynamicSetting model.
@@ -408,6 +419,8 @@ type Node struct {
 	SshCredentialId    *string                  `db:"ssh_credential_id" json:"sshCredentialId"`
 	SshHost            *string                  `db:"ssh_host" json:"sshHost"`
 	SshPort            *int                     `db:"ssh_port" json:"sshPort"`
+	DnsPriority        int                      `db:"dns_priority" json:"dnsPriority"`
+	OnlineSince        *time.Time               `db:"online_since" json:"onlineSince"`
 	CreatedAt          time.Time                `db:"created_at" json:"createdAt"`
 	UpdatedAt          time.Time                `db:"updated_at" json:"updatedAt"`
 	Cluster            *Cluster                 `db:"-" json:"cluster,omitempty"`

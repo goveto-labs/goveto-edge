@@ -494,3 +494,27 @@ func TestPurposeMasterKeyBackfillsLegacyCompanionFile(t *testing.T) {
 		t.Fatalf("companion source file was not backfilled: %v", err)
 	}
 }
+
+func TestEnvFloatRejectsNonFiniteValues(t *testing.T) {
+	for _, value := range []string{"NaN", "+Inf", "-Inf"} {
+		t.Setenv("GOVETO_TEST_FLOAT", value)
+		if _, err := envFloat("GOVETO_TEST_FLOAT", 0.34); err == nil {
+			t.Fatalf("%q must be rejected as non-finite", value)
+		}
+	}
+	t.Setenv("GOVETO_TEST_FLOAT", "0.5")
+	if got, err := envFloat("GOVETO_TEST_FLOAT", 0.34); err != nil || got != 0.5 {
+		t.Fatalf("finite value must parse, got %v, %v", got, err)
+	}
+}
+
+func TestEnvOptionalDurationDistinguishesUnsetFromExplicitZero(t *testing.T) {
+	if got, err := envOptionalDuration("GOVETO_TEST_OPTIONAL_DURATION"); err != nil || got != nil {
+		t.Fatalf("unset variable must yield nil, got %v, %v", got, err)
+	}
+	t.Setenv("GOVETO_TEST_OPTIONAL_DURATION", "0")
+	got, err := envOptionalDuration("GOVETO_TEST_OPTIONAL_DURATION")
+	if err != nil || got == nil || *got != 0 {
+		t.Fatalf("explicit zero must be preserved, got %v, %v", got, err)
+	}
+}

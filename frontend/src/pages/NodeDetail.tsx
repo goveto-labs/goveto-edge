@@ -311,6 +311,7 @@ export default function NodeDetail() {
     const previousDetailPathRef = useRef(detailPath);
     const [node, setNode] = useState<Node | null>(null);
     const [dnsLines, setDnsLines] = useState<DNSLine[]>([]);
+    const [dnsPriorityInput, setDnsPriorityInput] = useState('0');
     const [groups, setGroups] = useState<ClusterGroup[]>([]);
     const [regions, setRegions] = useState<ClusterRegion[]>([]);
     const [sshCredentials, setSSHCredentials] = useState<SSHCredential[]>([]);
@@ -372,6 +373,7 @@ export default function NodeDetail() {
     const applyNode = useCallback((value: Node) => {
         setNode(value);
         setDnsLineIds(new Set((value.dnsLines || []).map((line) => line.dnsLineId)));
+        setDnsPriorityInput(String(value.dnsPriority ?? 0));
         setCache(
             value.cacheConfig
                 ? { ...value.cacheConfig, debug_mode: Boolean(value.cacheConfig.debug_mode) }
@@ -614,6 +616,29 @@ export default function NodeDetail() {
         } catch (saveError) {
             setError(
                 saveError instanceof ApiError ? saveError.message : 'Failed to update DNS lines'
+            );
+        } finally {
+            setDnsSaving(false);
+        }
+    };
+
+    const dnsPriorityValue = Number(dnsPriorityInput);
+    const dnsPriorityValid =
+        dnsPriorityInput.trim() !== '' &&
+        Number.isInteger(dnsPriorityValue) &&
+        dnsPriorityValue >= 0 &&
+        dnsPriorityValue <= 1000;
+
+    const saveDNSPriority = async () => {
+        if (!node || !dnsPriorityValid) return;
+        setDnsSaving(true);
+        setError('');
+        try {
+            await api.updateDNSPriority(node.id, dnsPriorityValue);
+            await refreshNode();
+        } catch (saveError) {
+            setError(
+                saveError instanceof ApiError ? saveError.message : 'Failed to update DNS priority'
             );
         } finally {
             setDnsSaving(false);
@@ -1138,6 +1163,14 @@ export default function NodeDetail() {
                                         <span>{dnsLineIds.size || 'Default'}</span>
                                     </span>
                                     <span className='flex items-center gap-2'>
+                                        <span className='text-xs text-muted'>DNS priority</span>
+                                        <span>
+                                            {node.dnsPriority === 0
+                                                ? 'Primary'
+                                                : `Backup tier ${node.dnsPriority}`}
+                                        </span>
+                                    </span>
+                                    <span className='flex items-center gap-2'>
                                         <span className='text-xs text-muted'>Site configs</span>
                                         <span>{node.siteConfigVersions?.length || 0}</span>
                                     </span>
@@ -1584,6 +1617,58 @@ export default function NodeDetail() {
                                                         ? 'Saving…'
                                                         : 'Save DNS configuration'}
                                                 </Button>
+                                            </div>
+                                        </div>
+                                    </ContentCard>
+
+                                    <ContentCard className='overflow-visible p-0' noPadding>
+                                        <SectionTitle
+                                            description='Nodes with the lowest priority tier are published first; higher tiers only join when backups are needed.'
+                                            icon={Globe2}
+                                            title='DNS scheduling priority'
+                                        />
+                                        <div className='space-y-4 p-5'>
+                                            <div className='flex flex-wrap items-end gap-3'>
+                                                <div className='flex flex-col gap-1'>
+                                                    <label
+                                                        className='text-sm'
+                                                        htmlFor='dns-priority-input'
+                                                    >
+                                                        Priority tier
+                                                    </label>
+                                                    <input
+                                                        id='dns-priority-input'
+                                                        className='w-32 rounded-lg border bg-background px-3 py-2 text-sm'
+                                                        disabled={dnsSaving}
+                                                        max={1000}
+                                                        min={0}
+                                                        type='number'
+                                                        value={dnsPriorityInput}
+                                                        onChange={(event) =>
+                                                            setDnsPriorityInput(event.target.value)
+                                                        }
+                                                    />
+                                                    {!dnsPriorityValid && (
+                                                        <p className='text-xs text-danger'>
+                                                            Enter an integer between 0 and 1000.
+                                                        </p>
+                                                    )}
+                                                </div>
+                                                <Button
+                                                    isDisabled={
+                                                        dnsSaving ||
+                                                        !dnsPriorityValid ||
+                                                        dnsPriorityValue === node.dnsPriority
+                                                    }
+                                                    onPress={() => void saveDNSPriority()}
+                                                >
+                                                    <Save className='mr-1.5 h-4 w-4' />
+                                                    {dnsSaving ? 'Saving…' : 'Save priority'}
+                                                </Button>
+                                                <p className='text-xs text-muted'>
+                                                    0 is the primary tier. Requires the cluster DNS
+                                                    placement to be Primary/backup.
+                                                </p>
                                             </div>
                                         </div>
                                     </ContentCard>

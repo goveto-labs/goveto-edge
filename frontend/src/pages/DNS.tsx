@@ -1,13 +1,23 @@
 import type {
     DNSManagedRecord,
+    DNSPlacement,
     DNSProviderDomain,
     DNSProviderType,
     DNSSyncJob,
     UpdateDNSConfig,
 } from '@/api';
 
-import { Button, Card, Input, Label, Spinner } from '@heroui/react';
-import { Globe2, Pencil, Plus, RefreshCw, Save, Trash2 } from 'lucide-react';
+import { Button, Card, Dropdown, Input, Label, Spinner } from '@heroui/react';
+import {
+    Globe2,
+    MoreHorizontal,
+    Pencil,
+    Plus,
+    RefreshCw,
+    RotateCcw,
+    Save,
+    Trash2,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { ApiError, dnsApi } from '@/api';
@@ -42,6 +52,7 @@ export default function DNS() {
     const [apiToken, setApiToken] = useState('');
     const [ttl, setTtl] = useState(300);
     const [proxied, setProxied] = useState(false);
+    const [placement, setPlacement] = useState<DNSPlacement>('ALL');
     const [enabled, setEnabled] = useState(false);
     const [credentialsConfigured, setCredentialsConfigured] = useState(false);
     const [records, setRecords] = useState<DNSManagedRecord[]>([]);
@@ -77,6 +88,7 @@ export default function DNS() {
         setApiToken('');
         setTtl(300);
         setProxied(false);
+        setPlacement('ALL');
         setEnabled(false);
         setCredentialsConfigured(false);
         setRecords([]);
@@ -116,6 +128,7 @@ export default function DNS() {
                     setZoneId(config.provider.zone_id ?? '');
                     setTtl(config.provider.default_ttl);
                     setProxied(config.provider.proxied);
+                    setPlacement(config.provider.placement ?? 'ALL');
                     setEnabled(config.provider.enabled);
                     setCredentialsConfigured(config.provider.credentials_configured);
                 } else {
@@ -125,6 +138,7 @@ export default function DNS() {
                     setZoneId('');
                     setTtl(300);
                     setProxied(false);
+                    setPlacement('ALL');
                     setEnabled(false);
                     setCredentialsConfigured(false);
                 }
@@ -261,6 +275,7 @@ export default function DNS() {
             credentials,
             default_ttl: ttl,
             proxied: provider === 'CLOUDFLARE' && proxied,
+            placement,
             enabled: true,
         };
         if (provider === 'CLOUDFLARE') payload.zone_id = zoneId;
@@ -347,6 +362,19 @@ export default function DNS() {
         await mutate(() => api.sync(), 'Failed to enqueue DNS sync', undefined, refreshStatus);
     };
 
+    const rollback = async () => {
+        if (hasActiveJobs) {
+            setError('Wait for the active DNS job to finish before rolling back.');
+            return;
+        }
+        await mutate(
+            () => api.rollback(),
+            'Failed to roll back DNS changes',
+            undefined,
+            refreshStatus
+        );
+    };
+
     const refreshDomain = async () => {
         await mutate(() => api.refresh(), 'Failed to refresh CDN endpoint');
     };
@@ -375,9 +403,14 @@ export default function DNS() {
                 subtitle='Publish the cluster scheduling hostname to edge node IP addresses.'
                 title='DNS'
             >
-                <Button isDisabled={loading || busy} variant='ghost' onPress={() => void load()}>
-                    <RefreshCw className='mr-2 h-4 w-4' />
-                    Refresh
+                <Button
+                    isIconOnly
+                    aria-label='Refresh DNS data'
+                    isDisabled={loading || busy}
+                    variant='ghost'
+                    onPress={() => void load()}
+                >
+                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
                 </Button>
                 {isOwner && !configured && (
                     <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
@@ -386,34 +419,71 @@ export default function DNS() {
                     </Button>
                 )}
                 {configured && isOwner && (
-                    <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
+                    <Button
+                        className='hidden sm:inline-flex'
+                        isDisabled={!canEdit}
+                        variant='secondary'
+                        onPress={() => setDomainDialogOpen(true)}
+                    >
                         <Pencil className='mr-2 h-4 w-4' />
                         Edit endpoint
                     </Button>
                 )}
                 {configured && isOwner && (
-                    <Button isDisabled={!canEdit} variant='secondary' onPress={refreshDomain}>
+                    <Button isDisabled={!canEdit || !enabled} onPress={sync}>
                         <RefreshCw className='mr-2 h-4 w-4' />
-                        Refresh endpoint
+                        Sync now
                     </Button>
                 )}
-                <Button
-                    isDisabled={!canEdit || !configured || !enabled}
-                    variant='secondary'
-                    onPress={sync}
-                >
-                    <RefreshCw className='mr-2 h-4 w-4' />
-                    Sync now
-                </Button>
                 {configured && isOwner && (
-                    <Button
-                        isDisabled={!canEdit}
-                        variant='danger'
-                        onPress={() => setDeleteConfirmOpen(true)}
-                    >
-                        <Trash2 className='mr-2 h-4 w-4' />
-                        Delete endpoint
-                    </Button>
+                    <Dropdown>
+                        <Dropdown.Trigger
+                            aria-label='More DNS actions'
+                            className='inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50'
+                            isDisabled={!ready || loading || busy}
+                        >
+                            <MoreHorizontal className='h-5 w-5' />
+                        </Dropdown.Trigger>
+                        <Dropdown.Popover placement='bottom end'>
+                            <Dropdown.Menu aria-label='DNS endpoint actions'>
+                                <Dropdown.Item
+                                    className='sm:hidden'
+                                    id='edit-endpoint'
+                                    textValue='Edit endpoint'
+                                    onAction={() => setDomainDialogOpen(true)}
+                                >
+                                    <Pencil className='h-4 w-4' />
+                                    Edit endpoint
+                                </Dropdown.Item>
+                                <Dropdown.Item
+                                    id='refresh-endpoint'
+                                    textValue='Refresh endpoint'
+                                    onAction={() => void refreshDomain()}
+                                >
+                                    <RefreshCw className='h-4 w-4' />
+                                    Refresh endpoint
+                                </Dropdown.Item>
+                                <Dropdown.Item
+                                    id='rollback'
+                                    isDisabled={!enabled || hasActiveJobs}
+                                    textValue='Roll back'
+                                    onAction={() => void rollback()}
+                                >
+                                    <RotateCcw className='h-4 w-4' />
+                                    Roll back
+                                </Dropdown.Item>
+                                <Dropdown.Item
+                                    id='delete-endpoint'
+                                    textValue='Delete endpoint'
+                                    variant='danger'
+                                    onAction={() => setDeleteConfirmOpen(true)}
+                                >
+                                    <Trash2 className='h-4 w-4' />
+                                    Delete endpoint
+                                </Dropdown.Item>
+                            </Dropdown.Menu>
+                        </Dropdown.Popover>
+                    </Dropdown>
                 )}
             </PageHeader>
 
@@ -598,6 +668,28 @@ export default function DNS() {
                                 Enable Cloudflare proxy
                             </label>
                         )}
+                        <div className='flex flex-col gap-1'>
+                            <Label htmlFor='dns-placement'>Node placement</Label>
+                            <select
+                                id='dns-placement'
+                                className='rounded-lg border bg-background px-3 py-2 text-sm'
+                                disabled={!canEdit}
+                                value={placement}
+                                onChange={(event) =>
+                                    setPlacement(event.target.value as DNSPlacement)
+                                }
+                            >
+                                <option value='ALL'>Publish all eligible nodes</option>
+                                <option value='PRIMARY_BACKUP'>
+                                    Primary tier with backup expansion
+                                </option>
+                            </select>
+                            <p className='text-xs text-foreground/60'>
+                                {placement === 'ALL'
+                                    ? 'Every eligible node address is published.'
+                                    : 'Nodes with the lowest DNS priority are published first; further tiers are added only until the configured minimum is covered.'}
+                            </p>
+                        </div>
                         {error && (
                             <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground md:col-span-2'>
                                 {error}

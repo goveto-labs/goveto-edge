@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -76,6 +77,11 @@ type Config struct {
 	LogpushEnabled                 bool
 	LogpushQueueSize               int
 	LogpushBatchLinger             time.Duration
+	// DNSMinHealthyTime is nil when DNS_MIN_HEALTHY_TIME is unset, so the DNS
+	// scheduler applies its default; an explicit zero disables the guard.
+	DNSMinHealthyTime    *time.Duration
+	DNSMaxRemovalRatio   float64
+	DNSMinPublishedNodes int
 }
 
 // Load reads .env when present, then reads configuration from the process
@@ -204,6 +210,21 @@ func Load() (Config, error) {
 		LogpushQueueSize:               logpushQueueSize,
 		LogpushBatchLinger:             logpushBatchLinger,
 	}
+	dnsMinHealthyTime, err := envOptionalDuration("DNS_MIN_HEALTHY_TIME")
+	if err != nil {
+		return Config{}, err
+	}
+	dnsMaxRemovalRatio, err := envFloat("DNS_MAX_REMOVAL_RATIO", 0.34)
+	if err != nil {
+		return Config{}, err
+	}
+	dnsMinPublishedNodes, err := envInt("DNS_MIN_PUBLISHED_NODES", 2)
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.DNSMinHealthyTime = dnsMinHealthyTime
+	cfg.DNSMaxRemovalRatio = dnsMaxRemovalRatio
+	cfg.DNSMinPublishedNodes = dnsMinPublishedNodes
 	if strings.EqualFold(appEnv, "production") {
 		cfg.SessionCookieSecure = true
 	}
@@ -252,6 +273,15 @@ func Load() (Config, error) {
 	}
 	if cfg.GeoIPDatabasePollInterval <= 0 {
 		return Config{}, errors.New("GEOIP_DATABASE_POLL_INTERVAL must be positive")
+	}
+	if cfg.DNSMinHealthyTime != nil && *cfg.DNSMinHealthyTime < 0 {
+		return Config{}, errors.New("DNS_MIN_HEALTHY_TIME must not be negative")
+	}
+	if cfg.DNSMaxRemovalRatio <= 0 || cfg.DNSMaxRemovalRatio > 1 {
+		return Config{}, errors.New("DNS_MAX_REMOVAL_RATIO must be between 0 (exclusive) and 1 (inclusive)")
+	}
+	if cfg.DNSMinPublishedNodes < 1 {
+		return Config{}, errors.New("DNS_MIN_PUBLISHED_NODES must be at least 1")
 	}
 	if cfg.AnalyticsArchiveS3Endpoint != "" {
 		if cfg.AnalyticsArchiveDir != "" {
@@ -633,6 +663,35 @@ func envDuration(key string, fallback time.Duration) (time.Duration, error) {
 	parsed, err := time.ParseDuration(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a duration: %w", key, err)
+	}
+	return parsed, nil
+}
+
+// envOptionalDuration parses a duration env var and returns nil when it is
+// unset, so callers can distinguish "not configured" from an explicit zero.
+func envOptionalDuration(key string) (*time.Duration, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return nil, nil
+	}
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return nil, fmt.Errorf("%s must be a duration: %w", key, err)
+	}
+	return &parsed, nil
+}
+
+func envFloat(key string, fallback float64) (float64, error) {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a number: %w", key, err)
+	}
+	if math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+		return 0, fmt.Errorf("%s must be a finite number", key)
 	}
 	return parsed, nil
 }

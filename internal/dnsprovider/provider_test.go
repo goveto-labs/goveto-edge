@@ -82,7 +82,7 @@ func TestCloudflareUpsertCreatesRecord(t *testing.T) {
 	if got == nil || got.Method != http.MethodPost || got.Header.Get("Authorization") != "Bearer secret" {
 		t.Fatalf("unexpected request: %#v", got)
 	}
-	if provider.SupportsLines() {
+	if SupportsLines(provider) {
 		t.Fatal("Cloudflare must not advertise regional line support")
 	}
 }
@@ -159,7 +159,7 @@ func TestAliyunRequestIsSigned(t *testing.T) {
 	if err != nil || id != "record-2" || requests != 2 {
 		t.Fatalf("id=%q requests=%d err=%v", id, requests, err)
 	}
-	if !provider.SupportsLines() {
+	if !SupportsLines(provider) {
 		t.Fatal("Aliyun should support regional lines")
 	}
 }
@@ -174,6 +174,10 @@ func TestAliyunUpsertAdoptsDuplicateRecord(t *testing.T) {
 			body = `{"Code":"DomainRecordDuplicate","Message":"The DNS record already exists."}`
 		case 3:
 			body = `{"TotalCount":1,"DomainRecords":{"Record":[{"RecordId":"record-existing","RR":"edge","Value":"2001:db8::1","Line":"default"}]}}`
+		case 4:
+			// Supported-lines lookup triggered lazily while comparing the
+			// recovered listing against the desired line.
+			body = `{"RecordLines":{"RecordLine":[{"LineCode":"default","LineDisplayName":"默认"}]}}`
 		}
 		return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
 	})}
@@ -185,7 +189,7 @@ func TestAliyunUpsertAdoptsDuplicateRecord(t *testing.T) {
 		Hostname: "edge.example.com", Type: model.DNSRecordTypeAAAA,
 		Value: "2001:0db8:0:0::1", Line: "default", TTL: 300,
 	})
-	if err != nil || id != "record-existing" || requests != 3 {
+	if err != nil || id != "record-existing" || requests != 4 {
 		t.Fatalf("id=%q requests=%d err=%v", id, requests, err)
 	}
 }
@@ -193,6 +197,10 @@ func TestAliyunUpsertAdoptsDuplicateRecord(t *testing.T) {
 func TestAliyunListsNodeRecords(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		query := request.URL.Query()
+		if query.Get("Action") == "DescribeSupportLines" {
+			body := `{"RecordLines":{"RecordLine":[{"LineCode":"default","LineDisplayName":"默认"},{"LineCode":"telecom","LineDisplayName":"中国电信"}]}}`
+			return &http.Response{StatusCode: 200, Status: "200 OK", Body: io.NopCloser(strings.NewReader(body)), Header: http.Header{}}, nil
+		}
 		if query.Get("Action") != "DescribeDomainRecords" || query.Get("RRKeyWord") != "edge" {
 			t.Fatalf("unexpected request: %s", request.URL.String())
 		}

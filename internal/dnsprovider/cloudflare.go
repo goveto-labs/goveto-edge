@@ -10,6 +10,8 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
 	"goveto-edge/internal/storage/gen/model"
 )
@@ -19,7 +21,49 @@ type cloudflare struct {
 	client              *http.Client
 }
 
-func (*cloudflare) SupportsLines() bool { return false }
+func init() {
+	Register(model.DNSProviderTypeCLOUDFLARE, &Descriptor{
+		Name: "Cloudflare",
+		CredentialFields: []CredentialField{
+			{Name: "api_token", Label: "API Token", Required: true, Secret: true},
+		},
+		RequiresZoneID: true,
+		Capabilities:   Capabilities{Proxied: true},
+		Factory: func(config Config) (Provider, error) {
+			return &cloudflare{
+				zone: config.Zone, zoneID: config.ZoneID,
+				token: config.Credentials.APIToken, client: config.Client,
+			}, nil
+		},
+		Validate: func(config Config) error {
+			if config.ZoneID == "" {
+				return fmt.Errorf("Cloudflare zone_id is required")
+			}
+			return nil
+		},
+		ValidateCredentials: func(credentials Credentials) error {
+			if credentials.APIToken == "" {
+				return fmt.Errorf("Cloudflare api_token is required")
+			}
+			return nil
+		},
+		ParseCredentials: func(input map[string]string) (Credentials, error) {
+			apiToken := strings.TrimSpace(input["api_token"])
+			if apiToken == "" {
+				return Credentials{}, fmt.Errorf("Cloudflare api_token is required")
+			}
+			return Credentials{APIToken: apiToken}, nil
+		},
+	})
+}
+
+// ListLines reports the single default line. Cloudflare has no regional line
+// concept, so zone credentials are irrelevant here.
+func (*cloudflare) ListLines(context.Context) ([]Line, error) {
+	return []Line{{Name: "Default", Code: "default", SortOrder: 0}}, nil
+}
+
+func (*cloudflare) Capabilities() Capabilities { return Capabilities{Proxied: true} }
 
 func (c *cloudflare) ListRecords(ctx context.Context, hostname string) ([]Record, error) {
 	if _, err := RelativeName(hostname, c.zone); err != nil {
@@ -96,9 +140,7 @@ func (c *cloudflare) Upsert(ctx context.Context, record Record) (string, error) 
 	if _, err := RelativeName(record.Hostname, c.zone); err != nil {
 		return "", err
 	}
-	if record.Proxied {
-		record.TTL = 1
-	}
+	record.TTL = ExpectedTTL(record)
 	record.Value = CanonicalValue(record.Type, record.Value)
 	id := record.ID
 	if id == "" {
@@ -182,6 +224,31 @@ func (c *cloudflare) find(ctx context.Context, record Record) (string, error) {
 	return "", nil
 }
 
+// classifyCloudflareError translates known Cloudflare API failures into
+// package sentinel errors so callers never match vendor strings.
+func classifyCloudflareError(res *http.Response, apiErr *APIError) error {
+	switch {
+	case apiErr.Code == "81057" || apiErr.Code == "81058":
+		return fmt.Errorf("%w: %w", ErrRecordExists, apiErr)
+	case apiErr.Code == "81044":
+		return fmt.Errorf("%w: %w", ErrRecordNotFound, apiErr)
+	case res.StatusCode == http.StatusTooManyRequests:
+		return &RateLimitedError{
+			Provider:   "Cloudflare",
+			RetryAfter: parseRetryAfter(res.Header.Get("Retry-After"), time.Now()),
+			Err:        apiErr,
+		}
+	case res.StatusCode == http.StatusUnauthorized ||
+		apiErr.Code == "9103" || apiErr.Code == "9104" || apiErr.Code == "9105" ||
+		// 9109 is "Invalid access token" (returned with HTTP 403) and 6003 is
+		// "Invalid request headers" (malformed authentication headers, with an
+		// error chain such as 6103 or 6111); both are credential failures.
+		apiErr.Code == "9109" || apiErr.Code == "6003":
+		return fmt.Errorf("%w: %w", ErrInvalidCredentials, apiErr)
+	}
+	return apiErr
+}
+
 func (c *cloudflare) do(ctx context.Context, method, path string, payload any, output any) error {
 	var body io.Reader
 	if payload != nil {
@@ -223,7 +290,7 @@ func (c *cloudflare) do(ctx context.Context, method, path string, payload any, o
 		if apiError.Message == "" {
 			apiError.Message = string(data)
 		}
-		return apiError
+		return classifyCloudflareError(res, apiError)
 	}
 	if output != nil {
 		return json.Unmarshal(data, output)

@@ -102,6 +102,58 @@ func updateDNSLines(db *client.Client, dnsService *dnssync.Service) echo.Handler
 	}
 }
 
+type dnsPriorityRequest struct {
+	Priority int `json:"priority"`
+}
+
+type dnsPriorityResponse struct {
+	NodeID   string `json:"node_id"`
+	Priority int    `json:"priority"`
+}
+
+// @summary Update node DNS priority
+// @description Set the node DNS scheduling priority (0 is the primary tier; higher values are backup tiers) and enqueue DNS reconciliation.
+// @Tags nodes
+func updateDNSPriority(db *client.Client, dnsService *dnssync.Service) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		node, err := nodeInCluster(ctx, db, c.Param("cluster_id"), c.Param("node_id"))
+		if err != nil {
+			return err
+		}
+		var input dnsPriorityRequest
+		if err := c.Bind(&input); err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
+		}
+		if input.Priority < 0 || input.Priority > 1000 {
+			return echo.NewHTTPError(http.StatusBadRequest, "priority must be between 0 and 1000")
+		}
+		if input.Priority == node.DnsPriority {
+			return types.JSON(c, http.StatusOK, dnsPriorityResponse{NodeID: node.Id, Priority: node.DnsPriority})
+		}
+		err = withDNSReconciliationTx(ctx, db, dnsService, node.ClusterId, func(tx *client.Client) error {
+			_, err := tx.Node.Update().
+				Where(query.Node.Id.Equals(node.Id)).
+				Set(
+					query.Node.DnsPriority.Set(input.Priority),
+					query.Node.UpdatedAt.Set(time.Now()),
+				).
+				Do(ctx)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		after := dnsPriorityResponse{NodeID: node.Id, Priority: input.Priority}
+		audit.SetChange(
+			c,
+			dnsPriorityResponse{NodeID: node.Id, Priority: node.DnsPriority},
+			after,
+		)
+		return types.JSON(c, http.StatusOK, after)
+	}
+}
+
 // @summary Enable node
 // @description Re-enable a disabled node and wait for its management channel.
 // @Tags nodes

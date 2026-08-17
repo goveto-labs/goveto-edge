@@ -43,6 +43,8 @@ type NodeQuery struct {
 	SshCredentialId    nodeSshCredentialIdField
 	SshHost            nodeSshHostField
 	SshPort            nodeSshPortField
+	DnsPriority        nodeDnsPriorityField
+	OnlineSince        nodeOnlineSinceField
 	CreatedAt          nodeCreatedAtField
 	UpdatedAt          nodeUpdatedAtField
 	Cluster            nodeClusterRelation
@@ -74,6 +76,8 @@ const NodeRedisStatusErrorColumn = "redis_status_error"
 const NodeSshCredentialIdColumn = "ssh_credential_id"
 const NodeSshHostColumn = "ssh_host"
 const NodeSshPortColumn = "ssh_port"
+const NodeDnsPriorityColumn = "dns_priority"
+const NodeOnlineSinceColumn = "online_since"
 const NodeCreatedAtColumn = "created_at"
 const NodeUpdatedAtColumn = "updated_at"
 
@@ -91,6 +95,8 @@ var Node = NodeQuery{
 	SshCredentialId:    nodeSshCredentialIdField{},
 	SshHost:            nodeSshHostField{},
 	SshPort:            nodeSshPortField{},
+	DnsPriority:        nodeDnsPriorityField{},
+	OnlineSince:        nodeOnlineSinceField{},
 	CreatedAt:          nodeCreatedAtField{},
 	UpdatedAt:          nodeUpdatedAtField{},
 	Cluster:            nodeClusterRelation{},
@@ -960,6 +966,148 @@ func (nodeSshPortField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "ssh_port", Direction: "DESC"}
 }
 
+// DnsPriorityField provides query operations for the dnsPriority field.
+type nodeDnsPriorityField struct{}
+
+// Equals creates an equality condition.
+func (nodeDnsPriorityField) Equals(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeDnsPriorityField) Not(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeDnsPriorityField) In(vals ...int) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dns_priority", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeDnsPriorityField) NotIn(vals ...int) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dns_priority", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeDnsPriorityField) Lt(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeDnsPriorityField) Lte(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeDnsPriorityField) Gt(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeDnsPriorityField) Gte(v int) NodeWhereClause {
+	return NodeWhereClause{Field: "dns_priority", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (nodeDnsPriorityField) Set(v int) NodeSetClause {
+	return NodeSetClause{Field: "dns_priority", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeDnsPriorityField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dns_priority", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeDnsPriorityField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dns_priority", Direction: "DESC"}
+}
+
+// OnlineSinceField provides query operations for the onlineSince field.
+type nodeOnlineSinceField struct{}
+
+// Equals creates an equality condition.
+func (nodeOnlineSinceField) Equals(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeOnlineSinceField) Not(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeOnlineSinceField) In(vals ...*time.Time) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "online_since", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeOnlineSinceField) NotIn(vals ...*time.Time) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "online_since", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeOnlineSinceField) Lt(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeOnlineSinceField) Lte(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeOnlineSinceField) Gt(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeOnlineSinceField) Gte(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeOnlineSinceField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "online_since", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeOnlineSinceField) Set(v time.Time) NodeSetClause {
+	return NodeSetClause{Field: "online_since", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeOnlineSinceField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "online_since", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeOnlineSinceField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "online_since", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeOnlineSinceField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "online_since", Direction: "DESC"}
+}
+
 // CreatedAtField provides query operations for the createdAt field.
 type nodeCreatedAtField struct{}
 
@@ -1249,6 +1397,8 @@ type NodeCreateInput struct {
 	SshCredentialId    **string
 	SshHost            **string
 	SshPort            **int
+	DnsPriority        int
+	OnlineSince        **time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	Cluster            *ClusterCreateNestedInput
@@ -1269,7 +1419,7 @@ type NodeCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.RedisAvailable, d.RedisStatusError, d.SshCredentialId, d.SshHost, d.SshPort, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.RedisAvailable, d.RedisStatusError, d.SshCredentialId, d.SshHost, d.SshPort, d.DnsPriority, d.OnlineSince, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

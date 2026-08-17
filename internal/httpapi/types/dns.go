@@ -46,6 +46,7 @@ type DNSProviderConfig struct {
 	ZoneID                *string               `json:"zone_id"`
 	DefaultTTL            int                   `json:"default_ttl"`
 	Proxied               bool                  `json:"proxied"`
+	Placement             model.DNSPlacement    `json:"placement"`
 	Enabled               bool                  `json:"enabled"`
 	CredentialsConfigured bool                  `json:"credentials_configured"`
 }
@@ -59,6 +60,7 @@ type DNSZone struct {
 	ZoneID                *string               `json:"zone_id"`
 	DefaultTTL            int                   `json:"default_ttl"`
 	Proxied               bool                  `json:"proxied"`
+	Placement             model.DNSPlacement    `json:"placement"`
 	Enabled               bool                  `json:"enabled"`
 	CredentialsConfigured bool                  `json:"credentials_configured"`
 	CreatedAt             time.Time             `json:"created_at"`
@@ -74,6 +76,7 @@ func NewDNSZone(provider *model.DNSProviderConfig) DNSZone {
 		ZoneID:                provider.ZoneId,
 		DefaultTTL:            provider.DefaultTtl,
 		Proxied:               provider.Proxied,
+		Placement:             provider.Placement,
 		Enabled:               provider.Enabled,
 		CredentialsConfigured: provider.CredentialsEncrypted != "",
 		CreatedAt:             provider.CreatedAt,
@@ -93,6 +96,7 @@ func NewDNSProviderConfig(provider *model.DNSProviderConfig) *DNSProviderConfig 
 		ZoneID:                provider.ZoneId,
 		DefaultTTL:            provider.DefaultTtl,
 		Proxied:               provider.Proxied,
+		Placement:             provider.Placement,
 		Enabled:               provider.Enabled,
 		CredentialsConfigured: provider.CredentialsEncrypted != "",
 	}

@@ -195,6 +195,22 @@ func ValidDNSProviderTypeValues() []DNSProviderType {
 	}
 }
 
+// DNSPlacement represents the DNSPlacement enum type.
+type DNSPlacement string
+
+const (
+	DNSPlacementALL            DNSPlacement = "ALL"
+	DNSPlacementPRIMARY_BACKUP DNSPlacement = "PRIMARY_BACKUP"
+)
+
+// ValidDNSPlacementValues returns all valid values for the DNSPlacement enum.
+func ValidDNSPlacementValues() []DNSPlacement {
+	return []DNSPlacement{
+		DNSPlacementALL,
+		DNSPlacementPRIMARY_BACKUP,
+	}
+}
+
 // DNSRecordStatus represents the DNSRecordStatus enum type.
 type DNSRecordStatus string
 
@@ -239,11 +255,12 @@ func ValidDNSRecordTypeValues() []DNSRecordType {
 type DNSSyncAction string
 
 const (
-	DNSSyncActionRECONCILE      DNSSyncAction = "RECONCILE"
-	DNSSyncActionUPSERT_CLUSTER DNSSyncAction = "UPSERT_CLUSTER"
-	DNSSyncActionUPSERT_SITE    DNSSyncAction = "UPSERT_SITE"
-	DNSSyncActionDELETE_CLUSTER DNSSyncAction = "DELETE_CLUSTER"
-	DNSSyncActionDELETE_SITE    DNSSyncAction = "DELETE_SITE"
+	DNSSyncActionRECONCILE        DNSSyncAction = "RECONCILE"
+	DNSSyncActionUPSERT_CLUSTER   DNSSyncAction = "UPSERT_CLUSTER"
+	DNSSyncActionUPSERT_SITE      DNSSyncAction = "UPSERT_SITE"
+	DNSSyncActionDELETE_CLUSTER   DNSSyncAction = "DELETE_CLUSTER"
+	DNSSyncActionDELETE_SITE      DNSSyncAction = "DELETE_SITE"
+	DNSSyncActionROLLBACK_CLUSTER DNSSyncAction = "ROLLBACK_CLUSTER"
 )
 
 // ValidDNSSyncActionValues returns all valid values for the DNSSyncAction enum.
@@ -254,6 +271,7 @@ func ValidDNSSyncActionValues() []DNSSyncAction {
 		DNSSyncActionUPSERT_SITE,
 		DNSSyncActionDELETE_CLUSTER,
 		DNSSyncActionDELETE_SITE,
+		DNSSyncActionROLLBACK_CLUSTER,
 	}
 }
 

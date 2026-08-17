@@ -40,6 +40,7 @@ type Client struct {
 	DNSManagedRecord      DNSManagedRecordActions
 	DNSProviderConfig     DNSProviderConfigActions
 	DNSSyncJob            DNSSyncJobActions
+	DNSSyncSnapshot       DNSSyncSnapshotActions
 	DynamicSetting        DynamicSettingActions
 	ExternalIdentity      ExternalIdentityActions
 	InstallJob            InstallJobActions
@@ -94,6 +95,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.DNSManagedRecord = DNSManagedRecordActions{client: c}
 	c.DNSProviderConfig = DNSProviderConfigActions{client: c}
 	c.DNSSyncJob = DNSSyncJobActions{client: c}
+	c.DNSSyncSnapshot = DNSSyncSnapshotActions{client: c}
 	c.DynamicSetting = DynamicSettingActions{client: c}
 	c.ExternalIdentity = ExternalIdentityActions{client: c}
 	c.InstallJob = InstallJobActions{client: c}
@@ -308,6 +310,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.DNSManagedRecord = DNSManagedRecordActions{client: txClient}
 	txClient.DNSProviderConfig = DNSProviderConfigActions{client: txClient}
 	txClient.DNSSyncJob = DNSSyncJobActions{client: txClient}
+	txClient.DNSSyncSnapshot = DNSSyncSnapshotActions{client: txClient}
 	txClient.DynamicSetting = DynamicSettingActions{client: txClient}
 	txClient.ExternalIdentity = ExternalIdentityActions{client: txClient}
 	txClient.InstallJob = InstallJobActions{client: txClient}
@@ -14135,7 +14138,7 @@ func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, o
 
 func quotedDNSProviderConfigTable(c *Client) string { return c.quoteIdentifier("dns_provider_configs") }
 func quotedDNSProviderConfigColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "placement", "enabled", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -14161,6 +14164,8 @@ func quoteDNSProviderConfigField(c *Client, field string) (string, error) {
 	case "default_ttl":
 		return c.quoteIdentifier(field), nil
 	case "proxied":
+		return c.quoteIdentifier(field), nil
+	case "placement":
 		return c.quoteIdentifier(field), nil
 	case "enabled":
 		return c.quoteIdentifier(field), nil
@@ -14377,14 +14382,14 @@ func (b DNSProviderConfigCreateManyBuilder) DoReturning(ctx context.Context) ([]
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"})
+		q, args := b.action.buildDNSProviderConfigCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "placement", "enabled", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.DNSProviderConfig
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("DNSProviderConfig.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -14411,7 +14416,7 @@ func (b DNSProviderConfigCreateManyBuilder) DoReturningValues(ctx context.Contex
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "placement", "enabled", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -14663,7 +14668,7 @@ func (a DNSProviderConfigActions) FindMany(ctx context.Context, opts ...query.DN
 	var results []model.DNSProviderConfig
 	for rows.Next() {
 		var item model.DNSProviderConfig
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -14695,7 +14700,7 @@ func (a DNSProviderConfigActions) FindUnique(ctx context.Context, where query.DN
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.DNSProviderConfig
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -14726,7 +14731,7 @@ func (a DNSProviderConfigActions) CreateOne(ctx context.Context, sets ...query.D
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -14745,7 +14750,7 @@ func (a DNSProviderConfigActions) CreateMany(ctx context.Context, data []query.D
 }
 
 func (a DNSProviderConfigActions) buildDNSProviderConfigCreateManySQL(data []query.DNSProviderConfigCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "enabled", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "kind", "provider", "zone", "zone_id", "credentials_encrypted", "default_ttl", "proxied", "placement", "enabled", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -14818,7 +14823,7 @@ func (a DNSProviderConfigActions) UpdateOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -14923,7 +14928,7 @@ func (a DNSProviderConfigActions) UpsertOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("DNSProviderConfig.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -14947,7 +14952,7 @@ func (a DNSProviderConfigActions) DeleteOne(ctx context.Context, where query.DNS
 		q += " RETURNING " + quotedDNSProviderConfigColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.DNSProviderConfig
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Provider, &item.Zone, &item.ZoneId, &item.CredentialsEncrypted, &item.DefaultTtl, &item.Proxied, &item.Placement, &item.Enabled, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -16091,6 +16096,974 @@ func (a DNSSyncJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("DNSSyncJob.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedDNSSyncSnapshotTable(c *Client) string { return c.quoteIdentifier("dns_sync_snapshots") }
+func quotedDNSSyncSnapshotColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "records_json", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteDNSSyncSnapshotField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "records_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown DNSSyncSnapshot field %q", field)
+	}
+}
+
+// buildDNSSyncSnapshotWhere recursively builds a WHERE clause string and arguments.
+func buildDNSSyncSnapshotWhere(c *Client, wheres []query.DNSSyncSnapshotWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.DNSSyncSnapshotWhereClause); ok {
+				sub, subArgs := buildDNSSyncSnapshotWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.DNSSyncSnapshotWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildDNSSyncSnapshotWhere(c, []query.DNSSyncSnapshotWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.DNSSyncSnapshotWhereClause); ok {
+				sub, subArgs := buildDNSSyncSnapshotWhere(c, []query.DNSSyncSnapshotWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteDNSSyncSnapshotField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// DNSSyncSnapshotActions provides database operations for the DNSSyncSnapshot model.
+type DNSSyncSnapshotActions struct {
+	client *Client
+}
+
+// DNSSyncSnapshotCreateBuilder builds a DNSSyncSnapshot create operation incrementally.
+type DNSSyncSnapshotCreateBuilder struct {
+	action DNSSyncSnapshotActions
+	sets   []query.DNSSyncSnapshotSetClause
+}
+
+// Create starts a staged DNSSyncSnapshot create operation.
+func (a DNSSyncSnapshotActions) Create() DNSSyncSnapshotCreateBuilder {
+	return DNSSyncSnapshotCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b DNSSyncSnapshotCreateBuilder) Set(sets ...query.DNSSyncSnapshotSetClause) DNSSyncSnapshotCreateBuilder {
+	next := DNSSyncSnapshotCreateBuilder{
+		action: b.action,
+		sets:   make([]query.DNSSyncSnapshotSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b DNSSyncSnapshotCreateBuilder) Do(ctx context.Context) (*model.DNSSyncSnapshot, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// DNSSyncSnapshotCreateManyBuilder builds a bulk DNSSyncSnapshot insert operation.
+type DNSSyncSnapshotCreateManyBuilder struct {
+	action            DNSSyncSnapshotActions
+	data              []query.DNSSyncSnapshotCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk DNSSyncSnapshot insert operation.
+func (a DNSSyncSnapshotActions) BulkCreate(data []query.DNSSyncSnapshotCreateInput) DNSSyncSnapshotCreateManyBuilder {
+	return DNSSyncSnapshotCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b DNSSyncSnapshotCreateManyBuilder) OnConflictDoNothing(columns ...string) DNSSyncSnapshotCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b DNSSyncSnapshotCreateManyBuilder) Returning(columns ...string) DNSSyncSnapshotCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b DNSSyncSnapshotCreateManyBuilder) BatchSize(n int) DNSSyncSnapshotCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b DNSSyncSnapshotCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncSnapshotCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("DNSSyncSnapshot.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("DNSSyncSnapshot.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b DNSSyncSnapshotCreateManyBuilder) DoReturning(ctx context.Context) ([]model.DNSSyncSnapshot, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.DNSSyncSnapshot
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncSnapshotCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "records_json", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.DNSSyncSnapshot
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b DNSSyncSnapshotCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "records_json", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildDNSSyncSnapshotCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// DNSSyncSnapshotQueryBuilder builds a DNSSyncSnapshot query incrementally.
+type DNSSyncSnapshotQueryBuilder struct {
+	action DNSSyncSnapshotActions
+	opts   []query.DNSSyncSnapshotQueryOption
+}
+
+// Query starts a staged DNSSyncSnapshot query.
+func (a DNSSyncSnapshotActions) Query() DNSSyncSnapshotQueryBuilder {
+	return DNSSyncSnapshotQueryBuilder{action: a}
+}
+
+func (b DNSSyncSnapshotQueryBuilder) withOptions(opts ...query.DNSSyncSnapshotQueryOption) DNSSyncSnapshotQueryBuilder {
+	next := DNSSyncSnapshotQueryBuilder{
+		action: b.action,
+		opts:   make([]query.DNSSyncSnapshotQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b DNSSyncSnapshotQueryBuilder) Where(clauses ...query.DNSSyncSnapshotWhereClause) DNSSyncSnapshotQueryBuilder {
+	opts := make([]query.DNSSyncSnapshotQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b DNSSyncSnapshotQueryBuilder) OrderBy(clause query.DNSSyncSnapshotOrderByClause) DNSSyncSnapshotQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b DNSSyncSnapshotQueryBuilder) Include(clauses ...query.DNSSyncSnapshotIncludeClause) DNSSyncSnapshotQueryBuilder {
+	opts := make([]query.DNSSyncSnapshotQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b DNSSyncSnapshotQueryBuilder) Take(n int) DNSSyncSnapshotQueryBuilder {
+	return b.withOptions(query.DNSSyncSnapshotTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b DNSSyncSnapshotQueryBuilder) Skip(n int) DNSSyncSnapshotQueryBuilder {
+	return b.withOptions(query.DNSSyncSnapshotSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b DNSSyncSnapshotQueryBuilder) Do(ctx context.Context) ([]model.DNSSyncSnapshot, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b DNSSyncSnapshotQueryBuilder) First(ctx context.Context) (*model.DNSSyncSnapshot, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b DNSSyncSnapshotQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyDNSSyncSnapshotOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// DNSSyncSnapshotUpdateBuilder builds a DNSSyncSnapshot update operation incrementally.
+type DNSSyncSnapshotUpdateBuilder struct {
+	action DNSSyncSnapshotActions
+	wheres []query.DNSSyncSnapshotWhereClause
+	sets   []query.DNSSyncSnapshotSetClause
+}
+
+// Update starts a staged DNSSyncSnapshot update operation.
+func (a DNSSyncSnapshotActions) Update() DNSSyncSnapshotUpdateBuilder {
+	return DNSSyncSnapshotUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b DNSSyncSnapshotUpdateBuilder) Where(clauses ...query.DNSSyncSnapshotWhereClause) DNSSyncSnapshotUpdateBuilder {
+	next := DNSSyncSnapshotUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.DNSSyncSnapshotWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.DNSSyncSnapshotSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b DNSSyncSnapshotUpdateBuilder) Set(sets ...query.DNSSyncSnapshotSetClause) DNSSyncSnapshotUpdateBuilder {
+	next := DNSSyncSnapshotUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.DNSSyncSnapshotWhereClause(nil), b.wheres...),
+		sets:   make([]query.DNSSyncSnapshotSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b DNSSyncSnapshotUpdateBuilder) combinedWhere() (query.DNSSyncSnapshotWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSSyncSnapshotWhereClause{}, fmt.Errorf("DNSSyncSnapshot.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSSyncSnapshot.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b DNSSyncSnapshotUpdateBuilder) Do(ctx context.Context) (*model.DNSSyncSnapshot, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b DNSSyncSnapshotUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// DNSSyncSnapshotDeleteBuilder builds a DNSSyncSnapshot delete operation incrementally.
+type DNSSyncSnapshotDeleteBuilder struct {
+	action DNSSyncSnapshotActions
+	wheres []query.DNSSyncSnapshotWhereClause
+}
+
+// Delete starts a staged DNSSyncSnapshot delete operation.
+func (a DNSSyncSnapshotActions) Delete() DNSSyncSnapshotDeleteBuilder {
+	return DNSSyncSnapshotDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b DNSSyncSnapshotDeleteBuilder) Where(clauses ...query.DNSSyncSnapshotWhereClause) DNSSyncSnapshotDeleteBuilder {
+	next := DNSSyncSnapshotDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.DNSSyncSnapshotWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b DNSSyncSnapshotDeleteBuilder) combinedWhere() (query.DNSSyncSnapshotWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.DNSSyncSnapshotWhereClause{}, fmt.Errorf("DNSSyncSnapshot.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.DNSSyncSnapshot.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b DNSSyncSnapshotDeleteBuilder) Do(ctx context.Context) (*model.DNSSyncSnapshot, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b DNSSyncSnapshotDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple DNSSyncSnapshot records.
+func (a DNSSyncSnapshotActions) FindMany(ctx context.Context, opts ...query.DNSSyncSnapshotQueryOption) ([]model.DNSSyncSnapshot, error) {
+	cfg := query.ApplyDNSSyncSnapshotOptions(opts)
+	q := "SELECT " + quotedDNSSyncSnapshotColumns(a.client) + " FROM " + quotedDNSSyncSnapshotTable(a.client)
+	argIdx := 0
+	where, args := buildDNSSyncSnapshotWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteDNSSyncSnapshotField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.DNSSyncSnapshot
+	for rows.Next() {
+		var item model.DNSSyncSnapshot
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching DNSSyncSnapshot record.
+func (a DNSSyncSnapshotActions) FindFirst(ctx context.Context, opts ...query.DNSSyncSnapshotQueryOption) (*model.DNSSyncSnapshot, error) {
+	opts = append(opts, query.DNSSyncSnapshotTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single DNSSyncSnapshot record by unique constraint.
+func (a DNSSyncSnapshotActions) FindUnique(ctx context.Context, where query.DNSSyncSnapshotWhereClause) (*model.DNSSyncSnapshot, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncSnapshotWhere(a.client, []query.DNSSyncSnapshotWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedDNSSyncSnapshotColumns(a.client) + " FROM " + quotedDNSSyncSnapshotTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.DNSSyncSnapshot
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("DNSSyncSnapshot.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single DNSSyncSnapshot record.
+func (a DNSSyncSnapshotActions) CreateOne(ctx context.Context, sets ...query.DNSSyncSnapshotSetClause) (*model.DNSSyncSnapshot, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSSyncSnapshot.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSSyncSnapshotTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedDNSSyncSnapshotColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.DNSSyncSnapshot
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple DNSSyncSnapshot records.
+func (a DNSSyncSnapshotActions) CreateMany(ctx context.Context, data []query.DNSSyncSnapshotCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a DNSSyncSnapshotActions) buildDNSSyncSnapshotCreateManySQL(data []query.DNSSyncSnapshotCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "records_json", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedDNSSyncSnapshotTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single DNSSyncSnapshot record matching the where clause.
+func (a DNSSyncSnapshotActions) UpdateOne(ctx context.Context, where query.DNSSyncSnapshotWhereClause, sets ...query.DNSSyncSnapshotSetClause) (*model.DNSSyncSnapshot, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("DNSSyncSnapshot.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSSyncSnapshotWhere(a.client, []query.DNSSyncSnapshotWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSSyncSnapshotTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedDNSSyncSnapshotColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncSnapshot
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSSyncSnapshot.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple DNSSyncSnapshot records matching the where clauses.
+func (a DNSSyncSnapshotActions) UpdateMany(ctx context.Context, wheres []query.DNSSyncSnapshotWhereClause, sets ...query.DNSSyncSnapshotSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("DNSSyncSnapshot.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildDNSSyncSnapshotWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedDNSSyncSnapshotTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSSyncSnapshot.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single DNSSyncSnapshot record.
+func (a DNSSyncSnapshotActions) UpsertOne(ctx context.Context, where query.DNSSyncSnapshotWhereClause, create []query.DNSSyncSnapshotSetClause, update []query.DNSSyncSnapshotSetClause) (*model.DNSSyncSnapshot, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("DNSSyncSnapshot.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedDNSSyncSnapshotTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteDNSSyncSnapshotField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteDNSSyncSnapshotField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedDNSSyncSnapshotColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncSnapshot
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single DNSSyncSnapshot record matching the where clause.
+func (a DNSSyncSnapshotActions) DeleteOne(ctx context.Context, where query.DNSSyncSnapshotWhereClause) (*model.DNSSyncSnapshot, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncSnapshotWhere(a.client, []query.DNSSyncSnapshotWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedDNSSyncSnapshotTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedDNSSyncSnapshotColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.DNSSyncSnapshot
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.RecordsJson, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("DNSSyncSnapshot.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple DNSSyncSnapshot records matching the where clauses.
+func (a DNSSyncSnapshotActions) DeleteMany(ctx context.Context, wheres ...query.DNSSyncSnapshotWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncSnapshotWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedDNSSyncSnapshotTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("DNSSyncSnapshot.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of DNSSyncSnapshot records matching the where clauses.
+func (a DNSSyncSnapshotActions) Count(ctx context.Context, wheres ...query.DNSSyncSnapshotWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildDNSSyncSnapshotWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedDNSSyncSnapshotTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("DNSSyncSnapshot.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for DNSSyncSnapshot.
+func (a DNSSyncSnapshotActions) Aggregate(ctx context.Context, opts ...query.DNSSyncSnapshotAggregateOption) (*query.DNSSyncSnapshotAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSSyncSnapshotField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedDNSSyncSnapshotTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.DNSSyncSnapshotAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on DNSSyncSnapshot.
+func (a DNSSyncSnapshotActions) GroupBy(ctx context.Context, fields []string, opts ...query.DNSSyncSnapshotAggregateOption) ([]query.DNSSyncSnapshotGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteDNSSyncSnapshotField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteDNSSyncSnapshotField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedDNSSyncSnapshotTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("DNSSyncSnapshot.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.DNSSyncSnapshotGroupByResult
+	for rows.Next() {
+		r := query.DNSSyncSnapshotGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("DNSSyncSnapshot.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -21027,7 +22000,7 @@ func (a LogpushDestinationActions) GroupBy(ctx context.Context, fields []string,
 
 func quotedNodeTable(c *Client) string { return c.quoteIdentifier("nodes") }
 func quotedNodeColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -21059,6 +22032,10 @@ func quoteNodeField(c *Client, field string) (string, error) {
 	case "ssh_host":
 		return c.quoteIdentifier(field), nil
 	case "ssh_port":
+		return c.quoteIdentifier(field), nil
+	case "dns_priority":
+		return c.quoteIdentifier(field), nil
+	case "online_since":
 		return c.quoteIdentifier(field), nil
 	case "created_at":
 		return c.quoteIdentifier(field), nil
@@ -21273,14 +22250,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -21307,7 +22284,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -21559,7 +22536,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -21591,7 +22568,7 @@ func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -21622,7 +22599,7 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -21641,7 +22618,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -21714,7 +22691,7 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -21819,7 +22796,7 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -21843,7 +22820,7 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

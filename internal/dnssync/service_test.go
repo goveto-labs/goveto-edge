@@ -1,6 +1,8 @@
 package dnssync
 
 import (
+	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -172,5 +174,72 @@ func TestResolveClusterActionUsesLockedConfigState(t *testing.T) {
 				t.Fatalf("resolveClusterAction() = (%q, %v); want (%q, %v)", got, configured, test.want, test.configured)
 			}
 		})
+	}
+}
+
+func TestDroppedFromSelectionCountsNodesBeyondCandidateSet(t *testing.T) {
+	selected := []NodeCandidate{candidate("a", 0, time.Now(), time.Now())}
+	published := map[string]bool{"a": true, "b": true, "gone": true}
+	got := droppedFromSelection(published, selected)
+	want := []string{"b", "gone"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("droppedFromSelection() = %v, want %v", got, want)
+	}
+}
+
+func TestPaceRemovalsDefersAndDrainsOverFollowUpPasses(t *testing.T) {
+	service := &Service{}
+	now := time.Now()
+	policy := DefaultSchedulerPolicy()
+	published := map[string]bool{}
+	candidates := make([]NodeCandidate, 0, 10)
+	for i := 0; i < 10; i++ {
+		id := fmt.Sprintf("node-%02d", i)
+		published[id] = true
+		// Older UpdatedAt values are removed first when pacing defers.
+		candidates = append(candidates, candidate(id, 0, now.Add(time.Duration(i)*time.Minute), now.Add(-time.Hour)))
+	}
+	selected := candidates[:6]
+
+	// First pass: 4 dropped, at most floor(0.34*10)=3 may leave, so the
+	// freshest dropped node stays published and a follow-up pass is required.
+	result, deferred, err := service.paceRemovals(context.Background(), candidates, selected, published, policy, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !deferred {
+		t.Fatal("pacing beyond the removal cap must report a deferral")
+	}
+	if got := selectedIDs(result); len(got) != 7 || got[6] != "node-09" {
+		t.Fatalf("freshest dropped node must be deferred, got %v", got)
+	}
+
+	// The follow-up pass observes the three removals from the first pass and
+	// drains the rest without another deferral.
+	for _, id := range []string{"node-06", "node-07", "node-08"} {
+		delete(published, id)
+	}
+	result, deferred, err = service.paceRemovals(context.Background(), candidates, selected, published, policy, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deferred {
+		t.Fatalf("remaining removals must fit the cap, got %v", selectedIDs(result))
+	}
+	if got := selectedIDs(result); len(got) != 6 {
+		t.Fatalf("deferred node must drain on the follow-up pass, got %v", got)
+	}
+}
+
+func TestPaceRemovalsSkipsDeferralWhenNothingEligibleRemains(t *testing.T) {
+	service := &Service{}
+	published := map[string]bool{"a": true, "b": true}
+	// No selected node: records pointing at dead nodes must leave at once.
+	result, deferred, err := service.paceRemovals(context.Background(), nil, nil, published, SchedulerPolicy{}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deferred || len(result) != 0 {
+		t.Fatalf("empty selection must bypass pacing, got %v deferred=%v", selectedIDs(result), deferred)
 	}
 }

@@ -42,6 +42,9 @@ gco migrate diff --name init
 gco migrate init-sql --output init.sql
 ```
 
+Note: adding a new value to a schema enum requires PostgreSQL >= 12, because
+`gco db push` executes `ALTER TYPE ... ADD VALUE` inside a single transaction.
+
 Useful flags (accepted by many commands):
 
 - `--schema <path>` — schema directory or file
@@ -407,6 +410,7 @@ query.PostAuthorIdColumn
   - `Credentialsencrypted` (String)
   - `Defaultttl` (Int)
   - `Proxied` (Boolean)
+  - `Placement` ()
   - `Enabled` (Boolean)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
@@ -435,6 +439,16 @@ query.PostAuthorIdColumn
   - `Error` (String, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
+
+### DNSSyncSnapshot
+
+- Client handle: `c.DNSSyncSnapshot`
+- Query namespace: `query.DNSSyncSnapshot`
+- Fields:
+  - `Id` (String, id)
+  - `Clusterid` (String)
+  - `Recordsjson` (Json)
+  - `Createdat` (DateTime)
 
 ### DynamicSetting
 
@@ -537,6 +551,8 @@ query.PostAuthorIdColumn
   - `Sshcredentialid` (UUID, optional)
   - `Sshhost` (String, optional)
   - `Sshport` (Int, optional)
+  - `Dnspriority` (Int)
+  - `Onlinesince` (DateTime, optional)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 

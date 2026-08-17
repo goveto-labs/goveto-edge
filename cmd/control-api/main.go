@@ -218,7 +218,13 @@ func main() {
 	}
 
 	var publishService *publisher.Service
-	dnsService := dnssync.New(orm, dnsCipher)
+	dnsService := dnssync.New(orm, dnsCipher, dnssync.Options{
+		Scheduler: dnssync.SchedulerPolicy{
+			MinHealthyTime:  cfg.DNSMinHealthyTime,
+			MaxRemovalRatio: cfg.DNSMaxRemovalRatio,
+			MinPublished:    cfg.DNSMinPublishedNodes,
+		},
+	})
 	var consumeAgentLogs edgecontrol.LogConsumer = analyticsIngest.Consume
 	onNodeStatusChange := func(callbackCtx context.Context, clusterID string) {
 		callbackCtx = context.WithoutCancel(callbackCtx)

@@ -54,6 +54,7 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", "node.address.update", "node", "node_id"},
 	{http.MethodDelete, "/api/v1/clusters/:cluster_id/nodes/:node_id/addresses/:address_id", "node.address.delete", "node", "node_id"},
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/dns-lines", "node.dns_lines.update", "node", "node_id"},
+	{http.MethodPut, "/api/v1/clusters/:cluster_id/nodes/:node_id/dns-priority", "node.dns_priority.update", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/enable", "node.enable", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/disable", "node.disable", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", "node.credential.revoke", "node", "node_id"},
@@ -74,6 +75,7 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPut, "/api/v1/clusters/:cluster_id/dns/zones/:zone_config_id", "dns_zone.update", "dns_zone", "zone_config_id"},
 	{http.MethodDelete, "/api/v1/clusters/:cluster_id/dns/zones/:zone_config_id", "dns_zone.delete", "dns_zone", "zone_config_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/sync", "dns_record.sync", "dns_record", "cluster_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/rollback", "dns_record.rollback", "dns_record", "cluster_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/dns/lines", "dns_line.create", "dns_line", ""},
 	{http.MethodDelete, "/api/v1/clusters/:cluster_id/dns/lines/:line_id", "dns_line.delete", "dns_line", "line_id"},
 

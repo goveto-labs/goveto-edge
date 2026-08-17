@@ -2,6 +2,7 @@ import type { AxiosRequestConfig } from 'axios';
 import type {
     DNSConfigResponse,
     DNSManagedRecord,
+    DNSPlacement,
     DNSProviderDomain,
     DNSProviderType,
     DNSSyncJob,
@@ -18,6 +19,7 @@ export interface UpdateDNSConfig {
     credentials?: Record<string, string>;
     default_ttl: number;
     proxied: boolean;
+    placement: DNSPlacement;
     enabled: boolean;
 }
 
@@ -60,6 +62,7 @@ export const dnsApi = (clusterId: string) => {
         records: () => get<DNSManagedRecord[]>(`${base}/records`),
         jobs: () => get<DNSSyncJob[]>(`${base}/jobs`),
         sync: () => post<DNSSyncJob | null>(`${base}/sync`),
+        rollback: () => post<DNSSyncJob>(`${base}/rollback`),
         discoverDomains: (payload: DNSDiscoveryRequest) =>
             post<DNSProviderDomain[]>(`${base}/discovery/domains`, payload),
     };

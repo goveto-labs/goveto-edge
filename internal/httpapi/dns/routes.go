@@ -37,6 +37,7 @@ type configRequest struct {
 	Credentials     map[string]string     `json:"credentials"`
 	DefaultTTL      int                   `json:"default_ttl"`
 	Proxied         bool                  `json:"proxied"`
+	Placement       model.DNSPlacement    `json:"placement"`
 	Enabled         *bool                 `json:"enabled"`
 }
 
@@ -91,6 +92,7 @@ func Register(
 	group.GET("/records", listRecords(db), read)
 	group.GET("/jobs", listJobs(db), read)
 	group.POST("/sync", syncNow(db, service), credentials)
+	group.POST("/rollback", rollbackDNS(db, service), credentials)
 	group.POST("/discovery/domains", discoverDomains(db, cipher), credentials)
 	group.POST("/lines", createLine(db), nodeManage)
 	group.DELETE("/lines/:line_id", deleteLine(db), nodeManage)
@@ -109,11 +111,11 @@ func discoverDomains(db *client.Client, cipher *node.CredentialCipher) echo.Hand
 		if err != nil {
 			return err
 		}
-		items, err := dnsprovider.ListDomains(c.Request().Context(), input.Provider, raw, nil)
+		result, err := dnsprovider.Probe(c.Request().Context(), input.Provider, raw, nil)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "failed to list provider domains: "+err.Error())
 		}
-		return types.JSON(c, http.StatusOK, items)
+		return types.JSON(c, http.StatusOK, result.Zones)
 	}
 }
 
@@ -123,8 +125,7 @@ func discoveryCredentials(
 	cipher *node.CredentialCipher,
 	input discoveryRequest,
 ) ([]byte, error) {
-	if input.Provider != model.DNSProviderTypeALIYUN &&
-		input.Provider != model.DNSProviderTypeCLOUDFLARE {
+	if _, err := dnsprovider.DescriptorFor(input.Provider); err != nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
 	}
 	if len(input.Credentials) > 0 {
@@ -231,16 +232,22 @@ func updateConfig(
 		if host != zone && !strings.HasSuffix(host, "."+zone) {
 			return echo.NewHTTPError(http.StatusBadRequest, "primary_hostname must belong to zone")
 		}
-		if input.Provider != model.DNSProviderTypeALIYUN &&
-			input.Provider != model.DNSProviderTypeCLOUDFLARE {
+		descriptor, err := dnsprovider.DescriptorFor(input.Provider)
+		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
 		}
 		zoneID := strings.TrimSpace(input.ZoneID)
-		if input.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id is required")
+		if descriptor.RequiresZoneID && zoneID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, descriptor.Name+" zone_id is required")
 		}
 		if input.DefaultTTL == 0 {
 			input.DefaultTTL = 300
+		}
+		if input.Placement == "" {
+			input.Placement = model.DNSPlacementALL
+		}
+		if input.Placement != model.DNSPlacementALL && input.Placement != model.DNSPlacementPRIMARY_BACKUP {
+			return echo.NewHTTPError(http.StatusBadRequest, "placement must be ALL or PRIMARY_BACKUP")
 		}
 		if input.DefaultTTL < 60 || input.DefaultTTL > 86400 {
 			return echo.NewHTTPError(
@@ -403,8 +410,9 @@ func updateConfig(
 				query.DNSProviderConfig.CredentialsEncrypted.Set(encrypted),
 				query.DNSProviderConfig.DefaultTtl.Set(input.DefaultTTL),
 				query.DNSProviderConfig.Proxied.Set(
-					input.Provider == model.DNSProviderTypeCLOUDFLARE && input.Proxied,
+					descriptor.Capabilities.Proxied && input.Proxied,
 				),
+				query.DNSProviderConfig.Placement.Set(input.Placement),
 				query.DNSProviderConfig.Enabled.Set(enabled),
 				query.DNSProviderConfig.UpdatedAt.Set(now),
 			}
@@ -487,15 +495,20 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 		if config == nil {
 			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
 		}
+		descriptor, err := dnsprovider.DescriptorFor(config.Provider)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadGateway, err.Error())
+		}
 		plain, err := cipher.Decrypt(config.CredentialsEncrypted)
 		if err != nil {
 			return err
 		}
 		raw := []byte(plain)
-		domains, err := dnsprovider.ListDomains(ctx, config.Provider, raw, nil)
+		result, err := dnsprovider.Probe(ctx, config.Provider, raw, nil)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadGateway, "failed to list provider domains: "+err.Error())
 		}
+		domains := result.Zones
 		var domain *dnsprovider.Domain
 		for index := range domains {
 			if strings.EqualFold(domains[index].Name, config.Zone) {
@@ -507,7 +520,7 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 			return echo.NewHTTPError(http.StatusNotFound, "configured domain is no longer available from the provider")
 		}
 		zoneID := value(config.ZoneId)
-		if config.Provider == model.DNSProviderTypeCLOUDFLARE {
+		if descriptor.RequiresZoneID {
 			zoneID = domain.ID
 		}
 		providerLines, err := dnsprovider.ListLines(
@@ -529,7 +542,7 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 			if err := storeProviderLines(ctx, tx, clusterID, providerLines, now); err != nil {
 				return err
 			}
-			if config.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID != value(config.ZoneId) {
+			if descriptor.RequiresZoneID && zoneID != value(config.ZoneId) {
 				_, err = tx.DNSProviderConfig.Update().
 					Where(query.DNSProviderConfig.Id.Equals(config.Id)).
 					Set(
@@ -550,6 +563,47 @@ func refreshConfig(db *client.Client, cipher *node.CredentialCipher) echo.Handle
 		}
 		audit.SetChange(c, before, response)
 		return types.JSON(c, http.StatusOK, response)
+	}
+}
+
+// @summary Roll back DNS changes
+// @description Restore the DNS record set from the snapshot before the latest one by enqueuing a rollback job.
+// @Tags dns
+func rollbackDNS(db *client.Client, service *dnssync.Service) echo.HandlerFunc {
+	return func(c *echo.Context) error {
+		ctx := c.Request().Context()
+		clusterID := c.Param("cluster_id")
+		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(clusterID))
+		if err != nil {
+			return err
+		}
+		if cluster == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "cluster not found")
+		}
+		config, err := dnssync.EndpointConfig(ctx, db, clusterID)
+		if err != nil {
+			return err
+		}
+		if config == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
+		}
+		available, err := service.RollbackAvailable(ctx, clusterID)
+		if err != nil {
+			return err
+		}
+		if !available {
+			return echo.NewHTTPError(http.StatusConflict, "no earlier DNS snapshot to roll back to")
+		}
+		job, err := service.Enqueue(ctx, clusterID, nil, model.DNSSyncActionROLLBACK_CLUSTER)
+		if err != nil {
+			return err
+		}
+		if job == nil {
+			return echo.NewHTTPError(http.StatusNotFound, "DNS provider is not configured")
+		}
+		response := types.NewDNSJob(job)
+		audit.SetChange(c, nil, map[string]any{"rollback_job_id": job.Id})
+		return types.JSON(c, http.StatusAccepted, response)
 	}
 }
 
@@ -584,6 +638,7 @@ func listJobs(db *client.Client) echo.HandlerFunc {
 				query.DNSSyncJob.Action.In(
 					model.DNSSyncActionUPSERT_CLUSTER,
 					model.DNSSyncActionDELETE_CLUSTER,
+					model.DNSSyncActionROLLBACK_CLUSTER,
 				),
 				query.DNSSyncJob.SiteId.IsNull(),
 			).
@@ -788,12 +843,13 @@ func createZone(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFu
 		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid DNS zone")
 		}
-		if input.Provider != model.DNSProviderTypeALIYUN && input.Provider != model.DNSProviderTypeCLOUDFLARE {
+		descriptor, err := dnsprovider.DescriptorFor(input.Provider)
+		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
 		}
 		zoneID := strings.TrimSpace(input.ZoneID)
-		if input.Provider == model.DNSProviderTypeCLOUDFLARE && zoneID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id is required")
+		if descriptor.RequiresZoneID && zoneID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, descriptor.Name+" zone_id is required")
 		}
 		raw, err := encodeProviderCredentials(input.Provider, input.Credentials)
 		if err != nil {
@@ -887,7 +943,8 @@ func updateZone(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFu
 		if input.Provider != "" {
 			provider = input.Provider
 		}
-		if provider != model.DNSProviderTypeALIYUN && provider != model.DNSProviderTypeCLOUDFLARE {
+		descriptor, err := dnsprovider.DescriptorFor(provider)
+		if err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
 		}
 		zone := config.Zone
@@ -901,8 +958,8 @@ func updateZone(db *client.Client, cipher *node.CredentialCipher) echo.HandlerFu
 		if strings.TrimSpace(input.ZoneID) != "" {
 			zoneID = strings.TrimSpace(input.ZoneID)
 		}
-		if provider == model.DNSProviderTypeCLOUDFLARE && zoneID == "" {
-			return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id is required")
+		if descriptor.RequiresZoneID && zoneID == "" {
+			return echo.NewHTTPError(http.StatusBadRequest, descriptor.Name+" zone_id is required")
 		}
 		enabled := config.Enabled
 		if input.Enabled != nil {
@@ -1048,39 +1105,32 @@ func encodeProviderCredentials(provider model.DNSProviderType, credentials map[s
 	if len(credentials) == 0 {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "DNS provider credentials are required")
 	}
-	sanitized := map[string]string{}
-	switch provider {
-	case model.DNSProviderTypeALIYUN:
-		accessKeyID := strings.TrimSpace(credentials["access_key_id"])
-		accessKeySecret := strings.TrimSpace(credentials["access_key_secret"])
-		if accessKeyID == "" || accessKeySecret == "" {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "Aliyun access_key_id and access_key_secret are required")
-		}
-		sanitized["access_key_id"] = accessKeyID
-		sanitized["access_key_secret"] = accessKeySecret
-	case model.DNSProviderTypeCLOUDFLARE:
-		apiToken := strings.TrimSpace(credentials["api_token"])
-		if apiToken == "" {
-			return nil, echo.NewHTTPError(http.StatusBadRequest, "Cloudflare api_token is required")
-		}
-		sanitized["api_token"] = apiToken
-	default:
+	descriptor, err := dnsprovider.DescriptorFor(provider)
+	if err != nil || descriptor.ParseCredentials == nil {
 		return nil, echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
 	}
-	return json.Marshal(sanitized)
+	parsed, err := descriptor.ParseCredentials(credentials)
+	if err != nil {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, err.Error())
+	}
+	return json.Marshal(parsed)
 }
 
 func validateZoneCredentials(ctx context.Context, provider model.DNSProviderType, zone, zoneID string, raw []byte) error {
-	domains, err := dnsprovider.ListDomains(ctx, provider, raw, nil)
+	result, err := dnsprovider.Probe(ctx, provider, raw, nil)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, "failed to validate DNS credentials: "+err.Error())
 	}
+	descriptor, err := dnsprovider.DescriptorFor(provider)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "unsupported DNS provider")
+	}
 	found := false
-	for _, domain := range domains {
+	for _, domain := range result.Zones {
 		if strings.EqualFold(domain.Name, zone) {
 			found = true
-			if provider == model.DNSProviderTypeCLOUDFLARE && zoneID != "" && domain.ID != "" && domain.ID != zoneID {
-				return echo.NewHTTPError(http.StatusBadRequest, "Cloudflare zone_id does not match the selected zone")
+			if descriptor.RequiresZoneID && zoneID != "" && domain.ID != "" && domain.ID != zoneID {
+				return echo.NewHTTPError(http.StatusBadRequest, descriptor.Name+" zone_id does not match the selected zone")
 			}
 			break
 		}

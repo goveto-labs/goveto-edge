@@ -76,6 +76,11 @@ enum DNSProviderType {
   CLOUDFLARE
 }
 
+enum DNSPlacement {
+  ALL
+  PRIMARY_BACKUP
+}
+
 enum DNSRecordStatus {
   PENDING
   SYNCED
@@ -96,6 +101,7 @@ enum DNSSyncAction {
   UPSERT_SITE
   DELETE_CLUSTER
   DELETE_SITE
+  ROLLBACK_CLUSTER
 }
 
 enum JobStatus {
@@ -334,6 +340,7 @@ model Cluster {
   dnsProviders         DNSProviderConfig[]
   dnsRecords           DNSManagedRecord[]
   dnsSyncJobs          DNSSyncJob[]
+  dnsSyncSnapshots     DNSSyncSnapshot[]
   certificates         Certificate[]
   acmeAccounts         ACMEAccount[]
   originPools          OriginPool[]
@@ -488,6 +495,7 @@ model DNSProviderConfig {
   credentialsEncrypted String          @map("credentials_encrypted") @db.Text
   defaultTtl           Int             @default(300) @map("default_ttl")
   proxied              Boolean         @default(false)
+  placement            DNSPlacement    @default(ALL) @map("placement")
   enabled              Boolean         @default(true)
   createdAt            DateTime        @default(now()) @map("created_at")
   updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at")
@@ -517,8 +525,8 @@ model DNSSyncJob {
   resultJson        Json?         @map("result_json")
   compensationJson  Json?         @map("compensation_json")
   error             String?       @db.Text
-  createdAt         DateTime      @default(now()) @map("created_at")
-  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at")
   cluster           Cluster       @relation(fields: [clusterId], references: [id])
   site              Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
@@ -528,6 +536,19 @@ model DNSSyncJob {
   @@index([clusterId, createdAt])
   @@index([siteId, createdAt])
   @@map("dns_sync_jobs")
+}
+
+// DNSSyncSnapshot stores the record set published by a successful cluster
+// reconciliation so a bad change can be rolled back to the previous state.
+model DNSSyncSnapshot {
+  id          String   @id @default(uuid())
+  clusterId   String   @map("cluster_id")
+  recordsJson Json     @map("records_json")
+  createdAt   DateTime @default(now()) @map("created_at")
+  cluster     Cluster  @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@index([clusterId, createdAt])
+  @@map("dns_sync_snapshots")
 }
 
 model DynamicSetting {
@@ -634,6 +655,8 @@ model Node {
   sshCredentialId    UUID?                   @map("ssh_credential_id")
   sshHost            String?                 @map("ssh_host")
   sshPort            Int?                    @map("ssh_port")
+  dnsPriority        Int                     @default(0) @map("dns_priority")
+  onlineSince        DateTime?               @map("online_since")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @default(now()) @updatedAt @map("updated_at")
   cluster            Cluster                 @relation(fields: [clusterId], references: [id])

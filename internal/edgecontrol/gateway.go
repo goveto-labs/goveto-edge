@@ -512,7 +512,8 @@ func (g *Gateway) recordHeartbeat(
 			WHERE id = $1 AND status <> 'DISABLED' FOR UPDATE
 		)
 		UPDATE nodes n SET status = 'ONLINE', heartbeat_at = NOW(), install_error = NULL,
-			version = CASE WHEN $2 <> '' THEN $2 ELSE n.version END, updated_at = NOW()
+			version = CASE WHEN $2 <> '' THEN $2 ELSE n.version END, updated_at = NOW(),
+			online_since = CASE WHEN c.status <> 'ONLINE' THEN NOW() ELSE n.online_since END
 		FROM candidate c WHERE n.id = c.id RETURNING c.cluster_id, c.status`, nodeID, agentVersion)
 		if err != nil {
 			return err
