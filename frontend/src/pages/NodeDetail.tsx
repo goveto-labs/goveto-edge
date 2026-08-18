@@ -19,6 +19,7 @@ import type { DonutSlice } from '@/components/DonutChart.tsx';
 
 import { Button, Input } from '@heroui/react';
 import {
+    ArrowDownWideNarrow,
     ArrowLeft,
     Bug,
     Check,
@@ -1624,36 +1625,35 @@ export default function NodeDetail() {
                                     <ContentCard className='overflow-visible p-0' noPadding>
                                         <SectionTitle
                                             description='Nodes with the lowest priority tier are published first; higher tiers only join when backups are needed.'
-                                            icon={Globe2}
+                                            icon={ArrowDownWideNarrow}
                                             title='DNS scheduling priority'
                                         />
                                         <div className='space-y-4 p-5'>
-                                            <div className='flex flex-wrap items-end gap-3'>
-                                                <div className='flex flex-col gap-1'>
-                                                    <label
-                                                        className='text-sm'
-                                                        htmlFor='dns-priority-input'
-                                                    >
-                                                        Priority tier
-                                                    </label>
-                                                    <input
-                                                        id='dns-priority-input'
-                                                        className='w-32 rounded-lg border bg-background px-3 py-2 text-sm'
-                                                        disabled={dnsSaving}
-                                                        max={1000}
-                                                        min={0}
-                                                        type='number'
-                                                        value={dnsPriorityInput}
-                                                        onChange={(event) =>
-                                                            setDnsPriorityInput(event.target.value)
-                                                        }
-                                                    />
-                                                    {!dnsPriorityValid && (
-                                                        <p className='text-xs text-danger'>
-                                                            Enter an integer between 0 and 1000.
-                                                        </p>
-                                                    )}
-                                                </div>
+                                            <FormField
+                                                className='max-w-xs'
+                                                error={
+                                                    dnsPriorityValid
+                                                        ? undefined
+                                                        : 'Enter an integer between 0 and 1000.'
+                                                }
+                                                hint='0 is the primary tier. Requires the cluster DNS placement to be Primary/backup.'
+                                                htmlFor='dns-priority-input'
+                                                label='Priority tier'
+                                            >
+                                                <Input
+                                                    id='dns-priority-input'
+                                                    disabled={dnsSaving}
+                                                    max={1000}
+                                                    min={0}
+                                                    type='number'
+                                                    value={dnsPriorityInput}
+                                                    variant='secondary'
+                                                    onChange={(event) =>
+                                                        setDnsPriorityInput(event.target.value)
+                                                    }
+                                                />
+                                            </FormField>
+                                            <div className='flex justify-end border-t border-border pt-4'>
                                                 <Button
                                                     isDisabled={
                                                         dnsSaving ||
@@ -1665,10 +1665,6 @@ export default function NodeDetail() {
                                                     <Save className='mr-1.5 h-4 w-4' />
                                                     {dnsSaving ? 'Saving…' : 'Save priority'}
                                                 </Button>
-                                                <p className='text-xs text-muted'>
-                                                    0 is the primary tier. Requires the cluster DNS
-                                                    placement to be Primary/backup.
-                                                </p>
                                             </div>
                                         </div>
                                     </ContentCard>

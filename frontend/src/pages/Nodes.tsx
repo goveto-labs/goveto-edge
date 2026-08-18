@@ -1,7 +1,7 @@
 import type { DNSLine, Node, NodeSnapshot } from '@/api';
 
 import { Button, Input } from '@heroui/react';
-import { Check, Eye, Globe2, Plus, Search, Trash2 } from 'lucide-react';
+import { Check, Eye, Globe2, Plus, Power, PowerOff, Search, Trash2 } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -55,6 +55,8 @@ export default function Nodes() {
     const [error, setError] = useState('');
     const [editingNode, setEditingNode] = useState<Node | null>(null);
     const [pendingDelete, setPendingDelete] = useState<Node | null>(null);
+    const [pendingDisable, setPendingDisable] = useState<Node | null>(null);
+    const [statusUpdatingNodeId, setStatusUpdatingNodeId] = useState<string | null>(null);
     const [dnsLineDraft, setDnsLineDraft] = useState<Set<string>>(new Set());
     const [dnsLineQuery, setDnsLineQuery] = useState('');
     const [dnsLineSaving, setDnsLineSaving] = useState(false);
@@ -97,6 +99,29 @@ export default function Nodes() {
             setError(
                 deleteError instanceof ApiError ? deleteError.message : 'Failed to delete node'
             );
+        }
+    };
+
+    const handleToggleStatus = async (node: Node) => {
+        setStatusUpdatingNodeId(node.id);
+        try {
+            const response =
+                node.status === 'DISABLED'
+                    ? await nodeApi.enable(node.id)
+                    : await nodeApi.disable(node.id);
+            setNodes((current) =>
+                current.map((item) =>
+                    item.id === node.id ? { ...item, status: response.status } : item
+                )
+            );
+        } catch (statusError) {
+            setError(
+                statusError instanceof ApiError
+                    ? statusError.message
+                    : 'Failed to update node status'
+            );
+        } finally {
+            setStatusUpdatingNodeId(null);
         }
     };
 
@@ -298,6 +323,33 @@ export default function Nodes() {
                                             <Eye className='mr-1.5 h-3.5 w-3.5' />
                                             View
                                         </Button>
+                                        {canManage && node.status === 'DISABLED' && (
+                                            <Button
+                                                isDisabled={statusUpdatingNodeId === node.id}
+                                                size='sm'
+                                                variant='secondary'
+                                                onPress={() => void handleToggleStatus(node)}
+                                            >
+                                                <Power className='mr-1.5 h-3.5 w-3.5' />
+                                                {statusUpdatingNodeId === node.id
+                                                    ? 'Enabling…'
+                                                    : 'Enable'}
+                                            </Button>
+                                        )}
+                                        {canManage &&
+                                            (node.status === 'ONLINE' ||
+                                                node.status === 'OFFLINE' ||
+                                                node.status === 'INSTALL_FAILED') && (
+                                                <Button
+                                                    isDisabled={statusUpdatingNodeId === node.id}
+                                                    size='sm'
+                                                    variant='secondary'
+                                                    onPress={() => setPendingDisable(node)}
+                                                >
+                                                    <PowerOff className='mr-1.5 h-3.5 w-3.5' />
+                                                    Disable
+                                                </Button>
+                                            )}
                                         {canManage && (
                                             <Button
                                                 size='sm'
@@ -424,6 +476,24 @@ export default function Nodes() {
                     </Button>
                 </DialogFooter>
             </DialogShell>
+
+            <ConfirmDialog
+                confirmLabel='Disable'
+                danger
+                description={pendingDisable ? `Disable node "${pendingDisable.name}"?` : undefined}
+                impact='The node is removed from DNS scheduling and stops serving managed traffic.'
+                isOpen={pendingDisable !== null}
+                recoverability='Recoverable. Enable the node to return it to rotation.'
+                title='Disable node?'
+                onConfirm={() => {
+                    const node = pendingDisable;
+                    setPendingDisable(null);
+                    if (node) void handleToggleStatus(node);
+                }}
+                onOpenChange={(open) => {
+                    if (!open) setPendingDisable(null);
+                }}
+            />
 
             <ConfirmDialog
                 confirmLabel='Delete'
