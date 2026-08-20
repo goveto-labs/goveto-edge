@@ -39,6 +39,7 @@ type Config struct {
 	AgentGatewayHost               string
 	AgentGatewayPort               int
 	ShutdownTimeout                time.Duration
+	AlertEvalInterval              time.Duration
 	DatabaseURL                    string
 	RedisURL                       string
 	AnalyticsDatabaseURL           string
@@ -131,6 +132,13 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	alertEvalInterval, err := envDuration("ALERT_EVAL_INTERVAL", 30*time.Second)
+	if err != nil {
+		return Config{}, err
+	}
+	if alertEvalInterval < 5*time.Second || alertEvalInterval > 10*time.Minute {
+		return Config{}, errors.New("ALERT_EVAL_INTERVAL must be between 5s and 10m")
+	}
 	analyticsIngestConcurrency, err := envInt("ANALYTICS_INGEST_CONCURRENCY", 4)
 	if err != nil {
 		return Config{}, err
@@ -186,6 +194,7 @@ func Load() (Config, error) {
 		AgentGatewayHost:               envString("AGENT_GATEWAY_HOST", "0.0.0.0"),
 		AgentGatewayPort:               agentGatewayPort,
 		ShutdownTimeout:                shutdownTimeout,
+		AlertEvalInterval:              alertEvalInterval,
 		DatabaseURL:                    os.Getenv("DATABASE_URL"),
 		RedisURL:                       os.Getenv("REDIS_URL"),
 		AnalyticsDatabaseURL:           strings.TrimSpace(os.Getenv("ANALYTICS_DATABASE_URL")),

@@ -40,6 +40,10 @@ type NodeQuery struct {
 	InstallError       nodeInstallErrorField
 	RedisAvailable     nodeRedisAvailableField
 	RedisStatusError   nodeRedisStatusErrorField
+	QueueRecords       nodeQueueRecordsField
+	QueueBytes         nodeQueueBytesField
+	DroppedLogs        nodeDroppedLogsField
+	DroppedLogsAt      nodeDroppedLogsAtField
 	SshCredentialId    nodeSshCredentialIdField
 	SshHost            nodeSshHostField
 	SshPort            nodeSshPortField
@@ -73,6 +77,10 @@ const NodeStatusColumn = "status"
 const NodeInstallErrorColumn = "install_error"
 const NodeRedisAvailableColumn = "redis_available"
 const NodeRedisStatusErrorColumn = "redis_status_error"
+const NodeQueueRecordsColumn = "queue_records"
+const NodeQueueBytesColumn = "queue_bytes"
+const NodeDroppedLogsColumn = "dropped_logs"
+const NodeDroppedLogsAtColumn = "dropped_logs_at"
 const NodeSshCredentialIdColumn = "ssh_credential_id"
 const NodeSshHostColumn = "ssh_host"
 const NodeSshPortColumn = "ssh_port"
@@ -92,6 +100,10 @@ var Node = NodeQuery{
 	InstallError:       nodeInstallErrorField{},
 	RedisAvailable:     nodeRedisAvailableField{},
 	RedisStatusError:   nodeRedisStatusErrorField{},
+	QueueRecords:       nodeQueueRecordsField{},
+	QueueBytes:         nodeQueueBytesField{},
+	DroppedLogs:        nodeDroppedLogsField{},
+	DroppedLogsAt:      nodeDroppedLogsAtField{},
 	SshCredentialId:    nodeSshCredentialIdField{},
 	SshHost:            nodeSshHostField{},
 	SshPort:            nodeSshPortField{},
@@ -763,6 +775,280 @@ func (nodeRedisStatusErrorField) Desc() NodeOrderByClause {
 	return NodeOrderByClause{Field: "redis_status_error", Direction: "DESC"}
 }
 
+// QueueRecordsField provides query operations for the queueRecords field.
+type nodeQueueRecordsField struct{}
+
+// Equals creates an equality condition.
+func (nodeQueueRecordsField) Equals(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeQueueRecordsField) Not(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeQueueRecordsField) In(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "queue_records", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeQueueRecordsField) NotIn(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "queue_records", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeQueueRecordsField) Lt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeQueueRecordsField) Lte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeQueueRecordsField) Gt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeQueueRecordsField) Gte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_records", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (nodeQueueRecordsField) Set(v int64) NodeSetClause {
+	return NodeSetClause{Field: "queue_records", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeQueueRecordsField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "queue_records", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeQueueRecordsField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "queue_records", Direction: "DESC"}
+}
+
+// QueueBytesField provides query operations for the queueBytes field.
+type nodeQueueBytesField struct{}
+
+// Equals creates an equality condition.
+func (nodeQueueBytesField) Equals(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeQueueBytesField) Not(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeQueueBytesField) In(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "queue_bytes", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeQueueBytesField) NotIn(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "queue_bytes", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeQueueBytesField) Lt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeQueueBytesField) Lte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeQueueBytesField) Gt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeQueueBytesField) Gte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "queue_bytes", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (nodeQueueBytesField) Set(v int64) NodeSetClause {
+	return NodeSetClause{Field: "queue_bytes", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeQueueBytesField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "queue_bytes", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeQueueBytesField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "queue_bytes", Direction: "DESC"}
+}
+
+// DroppedLogsField provides query operations for the droppedLogs field.
+type nodeDroppedLogsField struct{}
+
+// Equals creates an equality condition.
+func (nodeDroppedLogsField) Equals(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeDroppedLogsField) Not(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeDroppedLogsField) In(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dropped_logs", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeDroppedLogsField) NotIn(vals ...int64) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dropped_logs", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeDroppedLogsField) Lt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeDroppedLogsField) Lte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeDroppedLogsField) Gt(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeDroppedLogsField) Gte(v int64) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs", Operator: ">=", Value: v}
+}
+
+// Set creates a set operation for create/update.
+func (nodeDroppedLogsField) Set(v int64) NodeSetClause {
+	return NodeSetClause{Field: "dropped_logs", Value: v}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeDroppedLogsField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dropped_logs", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeDroppedLogsField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dropped_logs", Direction: "DESC"}
+}
+
+// DroppedLogsAtField provides query operations for the droppedLogsAt field.
+type nodeDroppedLogsAtField struct{}
+
+// Equals creates an equality condition.
+func (nodeDroppedLogsAtField) Equals(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "=", Value: v}
+}
+
+// Not creates a not-equal condition.
+func (nodeDroppedLogsAtField) Not(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "!=", Value: v}
+}
+
+// In creates an IN condition.
+func (nodeDroppedLogsAtField) In(vals ...*time.Time) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "IN", Value: iVals}
+}
+
+// NotIn creates a NOT IN condition.
+func (nodeDroppedLogsAtField) NotIn(vals ...*time.Time) NodeWhereClause {
+	iVals := make([]any, len(vals))
+	for i, v := range vals {
+		iVals[i] = v
+	}
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "NOT IN", Value: iVals}
+}
+
+// Lt creates a less-than condition.
+func (nodeDroppedLogsAtField) Lt(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "<", Value: v}
+}
+
+// Lte creates a less-than-or-equal condition.
+func (nodeDroppedLogsAtField) Lte(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "<=", Value: v}
+}
+
+// Gt creates a greater-than condition.
+func (nodeDroppedLogsAtField) Gt(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: ">", Value: v}
+}
+
+// Gte creates a greater-than-or-equal condition.
+func (nodeDroppedLogsAtField) Gte(v *time.Time) NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: ">=", Value: v}
+}
+
+// IsNull creates an IS NULL condition.
+func (nodeDroppedLogsAtField) IsNull() NodeWhereClause {
+	return NodeWhereClause{Field: "dropped_logs_at", Operator: "IS NULL", Value: nil}
+}
+
+// Set creates a set operation for create/update.
+func (nodeDroppedLogsAtField) Set(v time.Time) NodeSetClause {
+	return NodeSetClause{Field: "dropped_logs_at", Value: v}
+}
+
+// SetNull sets the field to NULL.
+func (nodeDroppedLogsAtField) SetNull() NodeSetClause {
+	return NodeSetClause{Field: "dropped_logs_at", Value: nil}
+}
+
+// Asc returns an ascending order clause for this field.
+func (nodeDroppedLogsAtField) Asc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dropped_logs_at", Direction: "ASC"}
+}
+
+// Desc returns a descending order clause for this field.
+func (nodeDroppedLogsAtField) Desc() NodeOrderByClause {
+	return NodeOrderByClause{Field: "dropped_logs_at", Direction: "DESC"}
+}
+
 // SshCredentialIdField provides query operations for the sshCredentialId field.
 type nodeSshCredentialIdField struct{}
 
@@ -1394,6 +1680,10 @@ type NodeCreateInput struct {
 	InstallError       **string
 	RedisAvailable     **bool
 	RedisStatusError   **string
+	QueueRecords       int64
+	QueueBytes         int64
+	DroppedLogs        int64
+	DroppedLogsAt      **time.Time
 	SshCredentialId    **string
 	SshHost            **string
 	SshPort            **int
@@ -1419,7 +1709,7 @@ type NodeCreateInput struct {
 
 // ScalarValues returns the scalar field values in column order.
 func (d NodeCreateInput) ScalarValues() []any {
-	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.RedisAvailable, d.RedisStatusError, d.SshCredentialId, d.SshHost, d.SshPort, d.DnsPriority, d.OnlineSince, d.CreatedAt, d.UpdatedAt}
+	return []any{d.Id, d.ClusterId, d.Name, d.Version, d.HeartbeatAt, d.Status, d.InstallError, d.RedisAvailable, d.RedisStatusError, d.QueueRecords, d.QueueBytes, d.DroppedLogs, d.DroppedLogsAt, d.SshCredentialId, d.SshHost, d.SshPort, d.DnsPriority, d.OnlineSince, d.CreatedAt, d.UpdatedAt}
 }
 
 // NodeCreateNestedInput supports nested creates and connects.

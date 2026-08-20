@@ -4,6 +4,7 @@ package clusteraccess
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -13,6 +14,90 @@ import (
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
+
+// AuthorizedCluster is a cluster visible to the current request principal for
+// a specific permission.
+type AuthorizedCluster struct {
+	ID        string    `db:"id" json:"id"`
+	Name      string    `db:"name" json:"name"`
+	Role      string    `db:"role" json:"role"`
+	CreatedAt time.Time `db:"created_at" json:"created_at"`
+}
+
+// ListAuthorizedClusters returns only clusters for which the current request
+// principal passes Authorize. API keys are restricted to their bound cluster.
+func ListAuthorizedClusters(ctx context.Context, db *client.Client, uid string, permission rbac.Permission) ([]AuthorizedCluster, error) {
+	if principal := auth.CurrentAPIKeyFromContext(ctx); principal != nil {
+		allowed, _, err := AuthorizeAPIKey(principal, principal.ClusterID, permission)
+		if err != nil || !allowed {
+			return []AuthorizedCluster{}, err
+		}
+		cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(principal.ClusterID))
+		if err != nil {
+			return nil, err
+		}
+		if cluster == nil {
+			return []AuthorizedCluster{}, nil
+		}
+		return []AuthorizedCluster{{
+			ID: cluster.Id, Name: cluster.Name, Role: "API_KEY", CreatedAt: cluster.CreatedAt,
+		}}, nil
+	}
+	if uid == "" {
+		return []AuthorizedCluster{}, nil
+	}
+	user, cached := auth.CurrentUser(ctx, uid)
+	if !cached {
+		var err error
+		user, err = db.User.FindUnique(ctx, query.User.Id.Equals(uid))
+		if err != nil {
+			return nil, err
+		}
+	}
+	if user == nil || user.Status != model.UserStatusACTIVE {
+		return []AuthorizedCluster{}, nil
+	}
+	type candidate struct {
+		ID        string    `db:"id"`
+		Name      string    `db:"name"`
+		Role      string    `db:"role"`
+		CreatedAt time.Time `db:"created_at"`
+	}
+	var candidates []candidate
+	var err error
+	if user.Role == model.UserRoleADMIN {
+		candidates, err = client.Raw[candidate](ctx, db,
+			`SELECT id, name, 'ADMIN' AS role, created_at FROM clusters ORDER BY created_at, name`)
+	} else {
+		candidates, err = client.Raw[candidate](ctx, db, `SELECT id, name, role, created_at FROM (
+			SELECT DISTINCT ON (c.id) c.id, c.name, c.created_at,
+				CASE WHEN c.creator_id=$1 THEN 'OWNER' ELSE cm.permission::text END AS role
+			FROM clusters c LEFT JOIN cluster_members cm ON cm.cluster_id=c.id AND cm.user_id=$1
+			WHERE c.creator_id=$1 OR cm.user_id=$1 ORDER BY c.id
+		) visible ORDER BY created_at, name`, uid)
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := make([]AuthorizedCluster, 0, len(candidates))
+	for _, item := range candidates {
+		role := rbac.RoleAdmin
+		if user.Role != model.UserRoleADMIN {
+			var valid bool
+			role, valid = membershipRole(model.ClusterPermission(item.Role))
+			if !valid {
+				continue
+			}
+			role = rbac.Highest(role, rbac.Role(user.Role))
+		}
+		if rbac.SubjectForRole(role).Allows(permission) {
+			result = append(result, AuthorizedCluster{
+				ID: item.ID, Name: item.Name, Role: string(role), CreatedAt: item.CreatedAt,
+			})
+		}
+	}
+	return result, nil
+}
 
 // Require keeps the legacy read-access middleware behavior.
 func Require(db *client.Client) echo.MiddlewareFunc {
@@ -84,19 +169,26 @@ func Authorize(ctx context.Context, db *client.Client, clusterID, uid string, pe
 	if member == nil {
 		return false, "", nil
 	}
-	switch member.Permission {
-	case model.ClusterPermissionOWNER:
-		role = rbac.RoleOwner
-	case model.ClusterPermissionOPERATOR:
-		role = rbac.RoleOperator
-	case model.ClusterPermissionVIEWER:
-		role = rbac.RoleViewer
-	default:
+	role, valid := membershipRole(member.Permission)
+	if !valid {
 		return false, "", nil
 	}
 	// A platform role is a minimum role in every cluster the user can access.
 	role = rbac.Highest(role, rbac.Role(user.Role))
 	return rbac.SubjectForRole(role).Allows(permission), role, nil
+}
+
+func membershipRole(permission model.ClusterPermission) (rbac.Role, bool) {
+	switch permission {
+	case model.ClusterPermissionOWNER:
+		return rbac.RoleOwner, true
+	case model.ClusterPermissionOPERATOR:
+		return rbac.RoleOperator, true
+	case model.ClusterPermissionVIEWER:
+		return rbac.RoleViewer, true
+	default:
+		return "", false
+	}
 }
 
 // AuthorizeAPIKey evaluates a permission for an API key principal. The key

@@ -63,6 +63,84 @@ type AgentTask struct {
 	Node              *Node            `db:"-" json:"node,omitempty"`
 }
 
+// AlertDelivery represents the AlertDelivery model.
+type AlertDelivery struct {
+	Id          string              `db:"id" json:"id"`
+	InstanceId  string              `db:"instance_id" json:"instanceId"`
+	EventId     *string             `db:"event_id" json:"eventId"`
+	ChannelId   string              `db:"channel_id" json:"channelId"`
+	Kind        string              `db:"kind" json:"kind"`
+	Status      AlertDeliveryStatus `db:"status" json:"status"`
+	Attempts    int                 `db:"attempts" json:"attempts"`
+	LastError   *string             `db:"last_error" json:"lastError"`
+	NextRetryAt *time.Time          `db:"next_retry_at" json:"nextRetryAt"`
+	SentAt      *time.Time          `db:"sent_at" json:"sentAt"`
+	CreatedAt   time.Time           `db:"created_at" json:"createdAt"`
+	UpdatedAt   time.Time           `db:"updated_at" json:"updatedAt"`
+	Instance    *AlertInstance      `db:"-" json:"instance,omitempty"`
+	Event       *AlertEvent         `db:"-" json:"event,omitempty"`
+}
+
+// AlertEvent represents the AlertEvent model.
+type AlertEvent struct {
+	Id          string           `db:"id" json:"id"`
+	InstanceId  string           `db:"instance_id" json:"instanceId"`
+	Type        AlertEventType   `db:"type" json:"type"`
+	FromStatus  *string          `db:"from_status" json:"fromStatus"`
+	ToStatus    *string          `db:"to_status" json:"toStatus"`
+	PayloadJson json.RawMessage  `db:"payload_json" json:"payloadJson"`
+	CreatedAt   time.Time        `db:"created_at" json:"createdAt"`
+	Instance    *AlertInstance   `db:"-" json:"instance,omitempty"`
+	Deliveries  []*AlertDelivery `db:"-" json:"deliveries,omitempty"`
+}
+
+// AlertInstance represents the AlertInstance model.
+type AlertInstance struct {
+	Id                   string           `db:"id" json:"id"`
+	RuleId               string           `db:"rule_id" json:"ruleId"`
+	ClusterId            string           `db:"cluster_id" json:"clusterId"`
+	Kind                 string           `db:"kind" json:"kind"`
+	Fingerprint          string           `db:"fingerprint" json:"fingerprint"`
+	Status               AlertStatus      `db:"status" json:"status"`
+	Severity             AlertSeverity    `db:"severity" json:"severity"`
+	Title                string           `db:"title" json:"title"`
+	DetailJson           json.RawMessage  `db:"detail_json" json:"detailJson"`
+	FirstSeenAt          time.Time        `db:"first_seen_at" json:"firstSeenAt"`
+	LastSeenAt           time.Time        `db:"last_seen_at" json:"lastSeenAt"`
+	FiredAt              *time.Time       `db:"fired_at" json:"firedAt"`
+	AckedAt              *time.Time       `db:"acked_at" json:"ackedAt"`
+	AckedBy              *string          `db:"acked_by" json:"ackedBy"`
+	ResolvedAt           *time.Time       `db:"resolved_at" json:"resolvedAt"`
+	ResolvedReason       *string          `db:"resolved_reason" json:"resolvedReason"`
+	SuppressedUntilClear bool             `db:"suppressed_until_clear" json:"suppressedUntilClear"`
+	NotifyCount          int              `db:"notify_count" json:"notifyCount"`
+	LastNotifiedAt       *time.Time       `db:"last_notified_at" json:"lastNotifiedAt"`
+	CreatedAt            time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt            time.Time        `db:"updated_at" json:"updatedAt"`
+	Rule                 *AlertRule       `db:"-" json:"rule,omitempty"`
+	Acker                *User            `db:"-" json:"acker,omitempty"`
+	Events               []*AlertEvent    `db:"-" json:"events,omitempty"`
+	Deliveries           []*AlertDelivery `db:"-" json:"deliveries,omitempty"`
+}
+
+// AlertRule represents the AlertRule model.
+type AlertRule struct {
+	Id              string           `db:"id" json:"id"`
+	ClusterId       string           `db:"cluster_id" json:"clusterId"`
+	Kind            string           `db:"kind" json:"kind"`
+	Enabled         bool             `db:"enabled" json:"enabled"`
+	Severity        AlertSeverity    `db:"severity" json:"severity"`
+	ParamsJson      json.RawMessage  `db:"params_json" json:"paramsJson"`
+	ForSeconds      int              `db:"for_seconds" json:"forSeconds"`
+	CooldownSeconds int              `db:"cooldown_seconds" json:"cooldownSeconds"`
+	MutedUntil      *time.Time       `db:"muted_until" json:"mutedUntil"`
+	ChannelsJson    json.RawMessage  `db:"channels_json" json:"channelsJson"`
+	CreatedAt       time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt       time.Time        `db:"updated_at" json:"updatedAt"`
+	Cluster         *Cluster         `db:"-" json:"cluster,omitempty"`
+	Instances       []*AlertInstance `db:"-" json:"instances,omitempty"`
+}
+
 // AuditLog represents the AuditLog model.
 type AuditLog struct {
 	Id            string           `db:"id" json:"id"`
@@ -170,6 +248,7 @@ type Cluster struct {
 	NotificationChannels []*NotificationChannel `db:"-" json:"notificationChannels,omitempty"`
 	LogpushDestinations  []*LogpushDestination  `db:"-" json:"logpushDestinations,omitempty"`
 	ApiKeys              []*ClusterApiKey       `db:"-" json:"apiKeys,omitempty"`
+	AlertRules           []*AlertRule           `db:"-" json:"alertRules,omitempty"`
 }
 
 // ClusterApiKey represents the ClusterApiKey model.
@@ -416,6 +495,10 @@ type Node struct {
 	InstallError       *string                  `db:"install_error" json:"installError"`
 	RedisAvailable     *bool                    `db:"redis_available" json:"redisAvailable"`
 	RedisStatusError   *string                  `db:"redis_status_error" json:"redisStatusError"`
+	QueueRecords       int64                    `db:"queue_records" json:"queueRecords"`
+	QueueBytes         int64                    `db:"queue_bytes" json:"queueBytes"`
+	DroppedLogs        int64                    `db:"dropped_logs" json:"droppedLogs"`
+	DroppedLogsAt      *time.Time               `db:"dropped_logs_at" json:"droppedLogsAt"`
 	SshCredentialId    *string                  `db:"ssh_credential_id" json:"sshCredentialId"`
 	SshHost            *string                  `db:"ssh_host" json:"sshHost"`
 	SshPort            *int                     `db:"ssh_port" json:"sshPort"`
@@ -763,6 +846,7 @@ type User struct {
 	ClusterMemberships  []*ClusterMember      `db:"-" json:"clusterMemberships,omitempty"`
 	CreatedSites        []*Site               `db:"-" json:"createdSites,omitempty"`
 	CreatedApiKeys      []*ClusterApiKey      `db:"-" json:"createdApiKeys,omitempty"`
+	AckedAlerts         []*AlertInstance      `db:"-" json:"ackedAlerts,omitempty"`
 }
 
 // UserSession represents the UserSession model.

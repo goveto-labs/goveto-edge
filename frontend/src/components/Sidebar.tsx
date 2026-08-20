@@ -16,6 +16,7 @@ import {
     Settings,
     ShieldCheck,
     ShieldCog,
+    Siren,
     Users,
     Waves,
     Waypoints,
@@ -62,6 +63,7 @@ const nav: NavItemConfig[] = [
         children: [{ path: '/dns/zones', label: 'DNS zones', icon: Waypoints }],
     },
     { path: '/jobs', label: 'Jobs', icon: ListTodo },
+    { path: '/alerts', label: 'Alerts', icon: Siren },
     { path: '/analytics', label: 'Analytics', icon: BarChart3 },
 ];
 

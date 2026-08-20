@@ -1,8 +1,9 @@
 import { Alert, Avatar, Button, Drawer, Input, useOverlayState, useTheme } from '@heroui/react';
-import { Bell, ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import { AlertBell } from '@/components/AlertBell.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { PageTransition } from '@/components/PageTransition.tsx';
@@ -210,9 +211,7 @@ export function Layout() {
                             )}
                         </Button>
 
-                        <Button isIconOnly className='hidden sm:flex' size='sm' variant='ghost'>
-                            <Bell className='h-4 w-4' />
-                        </Button>
+                        <AlertBell />
 
                         <Avatar className='h-8 w-8 text-xs md:hidden'>
                             <Avatar.Fallback>{userInitial}</Avatar.Fallback>

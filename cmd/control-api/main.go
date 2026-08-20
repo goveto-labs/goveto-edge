@@ -16,6 +16,7 @@ import (
 	"time"
 
 	analyticsschema "goveto-edge/configs/analytics"
+	"goveto-edge/internal/alerting"
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
@@ -29,6 +30,7 @@ import (
 	"goveto-edge/internal/jobretention"
 	"goveto-edge/internal/logpush"
 	"goveto-edge/internal/node"
+	"goveto-edge/internal/notify"
 	"goveto-edge/internal/outboundhttp"
 	"goveto-edge/internal/publisher"
 	"goveto-edge/internal/purge"
@@ -354,9 +356,16 @@ func main() {
 		}
 	}()
 
-	clusterapi.ConfigureNotificationOutbound(outboundhttp.NewPolicyWithAllowlist(cfg.OutboundPrivateAllowlist))
+	notify.ConfigureOutbound(outboundhttp.NewPolicyWithAllowlist(cfg.OutboundPrivateAllowlist))
 	slog.Info("notification destination allowlist configured", "cidrs", cfg.OutboundPrivateAllowlist,
 		"note", "loopback/link-local (cloud metadata) always blocked")
+
+	alertEngine := alerting.New(orm, alerting.AnalyticsPool(analyticsPool), notificationCipher, cfg.AlertEvalInterval)
+	alertEngineDone := make(chan struct{})
+	go func() {
+		defer close(alertEngineDone)
+		alertEngine.Run(ctx)
+	}()
 
 	server := &http.Server{
 		Addr: cfg.HTTPAddress(),
@@ -405,5 +414,13 @@ func main() {
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("serve control API", "error", err)
 		os.Exit(1)
+	}
+	stop()
+	engineTimer := time.NewTimer(cfg.ShutdownTimeout)
+	defer engineTimer.Stop()
+	select {
+	case <-alertEngineDone:
+	case <-engineTimer.C:
+		slog.Warn("timed out waiting for alert engine shutdown")
 	}
 }

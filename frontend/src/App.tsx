@@ -5,6 +5,7 @@ import { Route, Routes } from 'react-router-dom';
 import { Layout } from '@/components/Layout.tsx';
 import { ProtectedRoute } from '@/components/ProtectedRoute.tsx';
 import { RouteErrorBoundary } from '@/components/RouteErrorBoundary.tsx';
+import { AlertOverviewProvider } from '@/hooks/useAlertOverview.tsx';
 import { ApiLoadingProvider } from '@/hooks/useApiLoading.tsx';
 import { AuthProvider } from '@/hooks/useAuth.ts';
 import { ClusterProvider } from '@/hooks/useCluster.ts';
@@ -37,117 +38,135 @@ export default function App() {
                 <InitializationGate>
                     <AuthProvider>
                         <ClusterProvider>
-                            <UnsavedChangesProvider>
-                                <RouteErrorBoundary>
-                                    <Suspense fallback={<BootFallback />}>
-                                        <Routes>
-                                            <Route element={<lazyRoutes.Init />} path='/init' />
-                                            <Route element={<lazyRoutes.Login />} path='/login' />
-                                            <Route
-                                                element={<lazyRoutes.Register />}
-                                                path='/register'
-                                            />
-                                            <Route
-                                                element={
-                                                    <ProtectedRoute>
-                                                        <Layout />
-                                                    </ProtectedRoute>
-                                                }
-                                            >
+                            <AlertOverviewProvider>
+                                <UnsavedChangesProvider>
+                                    <RouteErrorBoundary>
+                                        <Suspense fallback={<BootFallback />}>
+                                            <Routes>
+                                                <Route element={<lazyRoutes.Init />} path='/init' />
                                                 <Route
-                                                    element={<lazyRoutes.Dashboard />}
-                                                    path='/'
+                                                    element={<lazyRoutes.Login />}
+                                                    path='/login'
                                                 />
                                                 <Route
-                                                    element={<lazyRoutes.Nodes />}
-                                                    path='/nodes'
+                                                    element={<lazyRoutes.Register />}
+                                                    path='/register'
                                                 />
                                                 <Route
-                                                    element={<lazyRoutes.CreateNode />}
-                                                    path='/nodes/create'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.NodeDetail />}
-                                                    path='/nodes/:nodeId/*'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.SSHCredentials />}
-                                                    path='/nodes/ssh-credentials'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Sites />}
-                                                    path='/sites'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.CreateSite />}
-                                                    path='/sites/create'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.SitesAccessLogs />}
-                                                    path='/sites/logs'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Certificates />}
-                                                    path='/sites/certificates'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.PurgeJobs />}
-                                                    path='/sites/cache'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.SiteDetail />}
-                                                    path='/sites/:siteId/*'
-                                                />
-                                                <Route element={<lazyRoutes.DNS />} path='/dns' />
-                                                <Route
-                                                    element={<lazyRoutes.DNSZones />}
-                                                    path='/dns/zones'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Certificates />}
-                                                    path='/certificates'
-                                                />
-                                                <Route element={<lazyRoutes.Jobs />} path='/jobs' />
-                                                <Route
-                                                    element={<lazyRoutes.PurgeJobs />}
-                                                    path='/purge'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Analytics />}
-                                                    path='/analytics'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Settings />}
-                                                    path='/settings'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.ClusterMembers />}
-                                                    path='/settings/members'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.ApiKeys />}
-                                                    path='/settings/api-keys'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Notifications />}
-                                                    path='/settings/notifications'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.Logpush />}
-                                                    path='/settings/logpush'
-                                                />
-                                                <Route
-                                                    element={<lazyRoutes.AdminSettings />}
-                                                    path='/settings/admin/*'
-                                                />
+                                                    element={
+                                                        <ProtectedRoute>
+                                                            <Layout />
+                                                        </ProtectedRoute>
+                                                    }
+                                                >
+                                                    <Route
+                                                        element={<lazyRoutes.Dashboard />}
+                                                        path='/'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Nodes />}
+                                                        path='/nodes'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.CreateNode />}
+                                                        path='/nodes/create'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.NodeDetail />}
+                                                        path='/nodes/:nodeId/*'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.SSHCredentials />}
+                                                        path='/nodes/ssh-credentials'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Sites />}
+                                                        path='/sites'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.CreateSite />}
+                                                        path='/sites/create'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.SitesAccessLogs />}
+                                                        path='/sites/logs'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Certificates />}
+                                                        path='/sites/certificates'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.PurgeJobs />}
+                                                        path='/sites/cache'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.SiteDetail />}
+                                                        path='/sites/:siteId/*'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.DNS />}
+                                                        path='/dns'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.DNSZones />}
+                                                        path='/dns/zones'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Certificates />}
+                                                        path='/certificates'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Jobs />}
+                                                        path='/jobs'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Alerts />}
+                                                        path='/alerts'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.PurgeJobs />}
+                                                        path='/purge'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Analytics />}
+                                                        path='/analytics'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Settings />}
+                                                        path='/settings'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.ClusterMembers />}
+                                                        path='/settings/members'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.ApiKeys />}
+                                                        path='/settings/api-keys'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Notifications />}
+                                                        path='/settings/notifications'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.Logpush />}
+                                                        path='/settings/logpush'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.AdminSettings />}
+                                                        path='/settings/admin/*'
+                                                    />
+                                                    <Route
+                                                        element={<lazyRoutes.NotFound />}
+                                                        path='*'
+                                                    />
+                                                </Route>
                                                 <Route element={<lazyRoutes.NotFound />} path='*' />
-                                            </Route>
-                                            <Route element={<lazyRoutes.NotFound />} path='*' />
-                                        </Routes>
-                                    </Suspense>
-                                </RouteErrorBoundary>
-                                <Toast.Provider placement='bottom end' />
-                            </UnsavedChangesProvider>
+                                            </Routes>
+                                        </Suspense>
+                                    </RouteErrorBoundary>
+                                    <Toast.Provider placement='bottom end' />
+                                </UnsavedChangesProvider>
+                            </AlertOverviewProvider>
                         </ClusterProvider>
                     </AuthProvider>
                 </InitializationGate>

@@ -36,7 +36,9 @@ func Register(e *echo.Echo, db *client.Client, sessions *authn.SessionStore, cre
 		cipher = credentialCipher[0]
 	}
 	registerNotificationChannels(group, db, cipher)
+	registerAlerts(group, db)
 	registerLogpushDestinations(group, db, cipher, logpushDispatcher)
+	registerAlertOverview(e, db)
 }
 
 // logpushDispatcher is set by the control plane at startup so CRUD writes

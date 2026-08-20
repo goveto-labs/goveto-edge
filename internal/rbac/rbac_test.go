@@ -18,6 +18,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 		PermissionClusterTransfer,
 		PermissionNotificationManage,
 		PermissionLogpushManage,
+		PermissionAlertManage,
 	}
 	tests := []struct {
 		role    Role
@@ -31,6 +32,7 @@ func TestRolePermissionMatrix(t *testing.T) {
 			PermissionSiteWrite:    true,
 			PermissionPublish:      true,
 			PermissionCacheOperate: true,
+			PermissionAlertManage:  true,
 		}},
 		{RoleOwner, all(clusterPermissions...)},
 		{RoleAdmin, all(clusterPermissions...)},

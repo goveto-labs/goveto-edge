@@ -12,6 +12,7 @@ import { lazy } from 'react';
 
 const loaders = {
     AdminSettings: () => import('@/pages/AdminSettings.tsx'),
+    Alerts: () => import('@/pages/Alerts.tsx'),
     Analytics: () => import('@/pages/Analytics.tsx'),
     ApiKeys: () => import('@/pages/ApiKeys.tsx'),
     Certificates: () => import('@/pages/Certificates.tsx'),
@@ -40,6 +41,7 @@ const loaders = {
 
 export const lazyRoutes = {
     AdminSettings: lazy(loaders.AdminSettings),
+    Alerts: lazy(loaders.Alerts),
     Analytics: lazy(loaders.Analytics),
     ApiKeys: lazy(loaders.ApiKeys),
     Certificates: lazy(loaders.Certificates),
@@ -73,6 +75,7 @@ export const lazyRoutes = {
  */
 const routeLoaders: Record<string, () => Promise<unknown>> = {
     '/': loaders.Dashboard,
+    '/alerts': loaders.Alerts,
     '/nodes': loaders.Nodes,
     '/nodes/create': loaders.CreateNode,
     '/nodes/ssh-credentials': loaders.SSHCredentials,

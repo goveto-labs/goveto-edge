@@ -21,6 +21,7 @@ const (
 	PermissionNotificationManage Permission = "cluster.notification.manage"
 	PermissionLogpushManage      Permission = "cluster.logpush.manage"
 	PermissionAPIKeyManage       Permission = "cluster.apikey.manage"
+	PermissionAlertManage        Permission = "cluster.alert.manage"
 
 	PermissionPlatformUserManage     Permission = "platform.user.manage"
 	PermissionPlatformClusterRead    Permission = "platform.cluster.read"
@@ -81,6 +82,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionSiteWrite,
 		PermissionPublish,
 		PermissionCacheOperate,
+		PermissionAlertManage,
 	),
 	RoleOwner: permissionSet(
 		PermissionClusterRead,
@@ -98,6 +100,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionNotificationManage,
 		PermissionLogpushManage,
 		PermissionAPIKeyManage,
+		PermissionAlertManage,
 	),
 	RoleAdmin: permissionSet(
 		PermissionClusterRead,
@@ -115,6 +118,7 @@ var rolePermissions = map[Role]map[Permission]struct{}{
 		PermissionNotificationManage,
 		PermissionLogpushManage,
 		PermissionAPIKeyManage,
+		PermissionAlertManage,
 		PermissionPlatformUserManage,
 		PermissionPlatformClusterRead,
 		PermissionPlatformSettingsManage,

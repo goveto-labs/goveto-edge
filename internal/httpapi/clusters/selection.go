@@ -14,7 +14,6 @@ import (
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
-	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
@@ -43,37 +42,15 @@ func registerSelection(e *echo.Echo, db *client.Client, sessions *auth.SessionSt
 }
 
 func available(ctx context.Context, db *client.Client, uid string) ([]clusterChoice, error) {
-	user, cached := auth.CurrentUser(ctx, uid)
-	if !cached {
-		var err error
-		user, err = db.User.FindUnique(ctx, query.User.Id.Equals(uid))
-		if err != nil {
-			return nil, err
-		}
-	}
-	if user == nil || user.Status != model.UserStatusACTIVE {
-		return nil, nil
-	}
-	platformAccess, err := clusteraccess.AuthorizePlatform(ctx, db, uid, rbac.PermissionPlatformClusterRead)
+	authorized, err := clusteraccess.ListAuthorizedClusters(ctx, db, uid, rbac.PermissionClusterRead)
 	if err != nil {
 		return nil, err
 	}
-	if platformAccess {
-		return client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name, 'ADMIN' AS role, c.created_at
-			FROM clusters c ORDER BY c.created_at, c.name`)
-	}
-	items, err := client.Raw[clusterChoice](ctx, db, `SELECT c.id, c.name,
-		CASE WHEN c.creator_id = $1 THEN 'OWNER' ELSE cm.permission::text END AS role,
-		c.created_at
-		FROM clusters c
-		LEFT JOIN cluster_members cm ON cm.cluster_id = c.id AND cm.user_id = $1
-		WHERE c.creator_id = $1 OR cm.user_id = $1
-		ORDER BY c.created_at, c.name`, uid)
-	if err != nil {
-		return nil, err
-	}
-	for index := range items {
-		items[index].Role = string(rbac.Highest(rbac.Role(items[index].Role), rbac.Role(user.Role)))
+	items := make([]clusterChoice, 0, len(authorized))
+	for _, item := range authorized {
+		items = append(items, clusterChoice{
+			ID: item.ID, Name: item.Name, Role: item.Role, CreatedAt: item.CreatedAt,
+		})
 	}
 	return items, nil
 }
@@ -137,6 +114,9 @@ func apiKeyClusterListResponse(principal *auth.APIKeyPrincipal, items []clusterC
 // apiKeyClusterChoices exposes exactly the cluster the key is bound to, so
 // automation clients can bootstrap discovery without broader visibility.
 func apiKeyClusterChoices(ctx context.Context, db *client.Client, principal *auth.APIKeyPrincipal) ([]clusterChoice, error) {
+	if principal == nil || principal.ClusterID == "" {
+		return []clusterChoice{}, nil
+	}
 	cluster, err := db.Cluster.FindUnique(ctx, query.Cluster.Id.Equals(principal.ClusterID))
 	if err != nil {
 		return nil, err
@@ -144,7 +124,9 @@ func apiKeyClusterChoices(ctx context.Context, db *client.Client, principal *aut
 	if cluster == nil {
 		return []clusterChoice{}, nil
 	}
-	return []clusterChoice{{ID: cluster.Id, Name: cluster.Name, Role: "API_KEY", CreatedAt: cluster.CreatedAt}}, nil
+	return []clusterChoice{{
+		ID: cluster.Id, Name: cluster.Name, Role: "API_KEY", CreatedAt: cluster.CreatedAt,
+	}}, nil
 }
 
 // @summary Create cluster

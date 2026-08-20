@@ -39,6 +39,84 @@ func ValidACMEChallengeTypeValues() []ACMEChallengeType {
 	}
 }
 
+// AlertDeliveryStatus represents the AlertDeliveryStatus enum type.
+type AlertDeliveryStatus string
+
+const (
+	AlertDeliveryStatusPENDING AlertDeliveryStatus = "PENDING"
+	AlertDeliveryStatusSENT    AlertDeliveryStatus = "SENT"
+	AlertDeliveryStatusFAILED  AlertDeliveryStatus = "FAILED"
+)
+
+// ValidAlertDeliveryStatusValues returns all valid values for the AlertDeliveryStatus enum.
+func ValidAlertDeliveryStatusValues() []AlertDeliveryStatus {
+	return []AlertDeliveryStatus{
+		AlertDeliveryStatusPENDING,
+		AlertDeliveryStatusSENT,
+		AlertDeliveryStatusFAILED,
+	}
+}
+
+// AlertEventType represents the AlertEventType enum type.
+type AlertEventType string
+
+const (
+	AlertEventTypeSTATE_CHANGE AlertEventType = "STATE_CHANGE"
+	AlertEventTypeNOTIFY       AlertEventType = "NOTIFY"
+	AlertEventTypeACK          AlertEventType = "ACK"
+	AlertEventTypeRESOLVE      AlertEventType = "RESOLVE"
+	AlertEventTypeREARM        AlertEventType = "REARM"
+)
+
+// ValidAlertEventTypeValues returns all valid values for the AlertEventType enum.
+func ValidAlertEventTypeValues() []AlertEventType {
+	return []AlertEventType{
+		AlertEventTypeSTATE_CHANGE,
+		AlertEventTypeNOTIFY,
+		AlertEventTypeACK,
+		AlertEventTypeRESOLVE,
+		AlertEventTypeREARM,
+	}
+}
+
+// AlertSeverity represents the AlertSeverity enum type.
+type AlertSeverity string
+
+const (
+	AlertSeverityINFO     AlertSeverity = "INFO"
+	AlertSeverityWARNING  AlertSeverity = "WARNING"
+	AlertSeverityCRITICAL AlertSeverity = "CRITICAL"
+)
+
+// ValidAlertSeverityValues returns all valid values for the AlertSeverity enum.
+func ValidAlertSeverityValues() []AlertSeverity {
+	return []AlertSeverity{
+		AlertSeverityINFO,
+		AlertSeverityWARNING,
+		AlertSeverityCRITICAL,
+	}
+}
+
+// AlertStatus represents the AlertStatus enum type.
+type AlertStatus string
+
+const (
+	AlertStatusPENDING      AlertStatus = "PENDING"
+	AlertStatusFIRING       AlertStatus = "FIRING"
+	AlertStatusACKNOWLEDGED AlertStatus = "ACKNOWLEDGED"
+	AlertStatusRESOLVED     AlertStatus = "RESOLVED"
+)
+
+// ValidAlertStatusValues returns all valid values for the AlertStatus enum.
+func ValidAlertStatusValues() []AlertStatus {
+	return []AlertStatus{
+		AlertStatusPENDING,
+		AlertStatusFIRING,
+		AlertStatusACKNOWLEDGED,
+		AlertStatusRESOLVED,
+	}
+}
+
 // ApiKeyStatus represents the ApiKeyStatus enum type.
 type ApiKeyStatus string
 

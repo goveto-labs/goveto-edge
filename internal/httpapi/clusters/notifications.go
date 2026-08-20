@@ -1,18 +1,13 @@
 package clusters
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
-	"github.com/containrrr/shoutrrr"
-	shoutrrrtypes "github.com/containrrr/shoutrrr/pkg/types"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v5"
 
@@ -20,35 +15,14 @@ import (
 	"goveto-edge/internal/clusteraccess"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/node"
-	"goveto-edge/internal/outboundhttp"
+	"goveto-edge/internal/notify"
 	"goveto-edge/internal/rbac"
 	"goveto-edge/internal/storage/gen/client"
 	"goveto-edge/internal/storage/gen/model"
 	"goveto-edge/internal/storage/gen/query"
 )
 
-const notificationURLLimit = 8192
-
-const notificationResponseLimit = 1 << 20
-
-var (
-	notificationOutboundPolicy = outboundhttp.NewPolicy()
-	notificationHTTPClient     = notificationOutboundPolicy.Client("http", "https")
-	notificationSendSlots      = make(chan struct{}, 16)
-)
-
-// ConfigureNotificationOutbound replaces the outbound policy used to deliver
-// notifications. Pass a policy built with NewPolicyWithAllowlist to permit a
-// curated set of private destinations (e.g. an internal gotify SMTP host); the
-// default policy only permits public destinations. Call once at startup before
-// serving traffic.
-func ConfigureNotificationOutbound(policy *outboundhttp.Policy) {
-	if policy == nil {
-		return
-	}
-	notificationOutboundPolicy = policy
-	notificationHTTPClient = policy.Client("http", "https")
-}
+const notificationURLLimit = notify.URLLimit
 
 type notificationChannelRequest struct {
 	Name    string `json:"name"`
@@ -295,141 +269,17 @@ func testDraftNotificationChannel() echo.HandlerFunc {
 }
 
 func deliverTestNotification(ctx context.Context, rawURL, clusterID, channelName string) error {
-	select {
-	case notificationSendSlots <- struct{}{}:
-		defer func() { <-notificationSendSlots }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnprocessableEntity, "notification URL is invalid")
-	}
-	service := strings.ToLower(strings.SplitN(parsed.Scheme, "+", 2)[0])
-	message := fmt.Sprintf("Goveto notification test\nCluster: %s\nChannel: %s", clusterID, channelName)
-	switch service {
-	case "bark", "gotify", "ntfy", "smtp":
-		if err = deliverCustomHostNotification(ctx, service, parsed, message, "Goveto notification test"); err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
-		}
-		return nil
-	case "generic":
-		if err = deliverGenericNotification(ctx, parsed, message, "Goveto notification test"); err != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
-		}
+	err := notify.Send(ctx, rawURL, notify.Message{
+		Title: "Goveto notification test",
+		Body:  fmt.Sprintf("Goveto notification test\nCluster: %s\nChannel: %s", clusterID, channelName),
+	})
+	if err == nil {
 		return nil
 	}
-	sender, err := shoutrrr.CreateSender(rawURL)
-	if err != nil {
+	if errors.Is(err, notify.ErrInvalidURL) {
 		return echo.NewHTTPError(http.StatusUnprocessableEntity, "notification URL is invalid")
 	}
-	sender.Timeout = 10 * time.Second
-	for _, sendErr := range sender.Send(message, &shoutrrrtypes.Params{"title": "Goveto notification test"}) {
-		if sendErr != nil {
-			return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
-		}
-	}
-	return nil
-}
-
-func deliverGenericNotification(ctx context.Context, serviceURL *url.URL, message, title string) error {
-	return deliverGenericNotificationWithClient(ctx, notificationHTTPClient, serviceURL, message, title)
-}
-
-func deliverGenericNotificationWithClient(ctx context.Context, httpClient *http.Client, serviceURL *url.URL, message, title string) error {
-	target := *serviceURL
-	switch {
-	case strings.HasPrefix(strings.ToLower(target.Scheme), "generic+"):
-		target.Scheme = target.Scheme[len("generic+"):]
-	case strings.EqualFold(target.Scheme, "generic"):
-		target.Scheme = "https"
-	default:
-		return errors.New("invalid generic webhook scheme")
-	}
-	query := target.Query()
-	method := strings.ToUpper(strings.TrimSpace(query.Get("method")))
-	if method == "" {
-		method = http.MethodPost
-	}
-	if method != http.MethodPost {
-		return errors.New("generic webhooks only support POST")
-	}
-	contentType := strings.TrimSpace(query.Get("contenttype"))
-	if contentType == "" {
-		contentType = "application/json"
-	}
-	body := []byte(message)
-	if strings.EqualFold(query.Get("template"), "json") {
-		messageKey := strings.TrimSpace(query.Get("messagekey"))
-		if messageKey == "" {
-			messageKey = "message"
-		}
-		titleKey := strings.TrimSpace(query.Get("titlekey"))
-		if titleKey == "" {
-			titleKey = "title"
-		}
-		payload := map[string]string{messageKey: message, titleKey: title}
-		for key, values := range query {
-			if strings.HasPrefix(key, "$") && len(values) > 0 {
-				payload[strings.TrimPrefix(key, "$")] = values[0]
-			}
-		}
-		var err error
-		body, err = json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-	} else if template := strings.TrimSpace(query.Get("template")); template != "" {
-		return fmt.Errorf("generic webhook template %q is not supported", template)
-	}
-	for key := range query {
-		switch {
-		case strings.HasPrefix(key, "@"), strings.HasPrefix(key, "$"), isGenericConfigKey(key):
-			query.Del(key)
-		case strings.HasPrefix(key, "__"):
-			values := query[key]
-			query.Del(key)
-			query[strings.TrimPrefix(key, "__")] = values
-		}
-	}
-	target.RawQuery = query.Encode()
-	if err := notificationOutboundPolicy.ValidateURL(ctx, &target, "http", "https"); err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", contentType)
-	request.Header.Set("Accept", contentType)
-	for key, values := range serviceURL.Query() {
-		if strings.HasPrefix(key, "@") && len(values) > 0 {
-			name := http.CanonicalHeaderKey(strings.TrimPrefix(key, "@"))
-			if isForbiddenWebhookHeader(name) {
-				return fmt.Errorf("generic webhook header %q is not allowed", name)
-			}
-			request.Header.Set(name, values[0])
-		}
-	}
-	return sendBoundedNotificationRequest(httpClient, request)
-}
-
-func isForbiddenWebhookHeader(name string) bool {
-	switch name {
-	case "Connection", "Content-Length", "Host", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
-		return true
-	default:
-		return false
-	}
-}
-
-func isGenericConfigKey(key string) bool {
-	switch strings.ToLower(key) {
-	case "contenttype", "disabletls", "messagekey", "method", "template", "title", "titlekey":
-		return true
-	default:
-		return false
-	}
+	return echo.NewHTTPError(http.StatusBadGateway, "notification delivery failed")
 }
 
 func validateNotificationChannelInput(input notificationChannelRequest, requireURL bool) (name, rawURL, service string, err error) {
@@ -458,77 +308,7 @@ func validateNotificationChannelInput(input notificationChannelRequest, requireU
 }
 
 func validateNotificationURL(rawURL string) (string, error) {
-	if len(rawURL) > notificationURLLimit {
-		return "", errors.New("url is too long")
-	}
-	parsed, parseErr := url.Parse(rawURL)
-	if parseErr != nil || parsed.Scheme == "" {
-		return "", errors.New("url must be a valid Shoutrrr URL")
-	}
-	service := strings.ToLower(strings.SplitN(parsed.Scheme, "+", 2)[0])
-	if !isSupportedNotificationService(service) {
-		return "", errors.New("notification service is not supported")
-	}
-	if service == "generic" {
-		targetScheme := strings.ToLower(strings.TrimPrefix(parsed.Scheme, "generic+"))
-		if targetScheme != "http" && targetScheme != "https" && !strings.EqualFold(parsed.Scheme, "generic") {
-			return "", errors.New("generic webhook must use HTTP or HTTPS")
-		}
-		if method := strings.ToUpper(strings.TrimSpace(parsed.Query().Get("method"))); method != "" && method != http.MethodPost {
-			return "", errors.New("generic webhook only supports POST")
-		}
-	}
-	// bark/gotify/ntfy/smtp/generic are delivered through a dedicated client, so
-	// validate their host and scheme directly. Shoutrrr's per-service parameter
-	// names differ (e.g. ntfy has no disabletls flag) and would otherwise reject
-	// valid internal HTTP destinations. Remaining SaaS services keep Shoutrrr
-	// validation since their hosts are fixed.
-	if isCustomDeliveryService(service) {
-		if err := validateCustomDeliveryURL(parsed, service); err != nil {
-			return "", err
-		}
-		return service, nil
-	}
-	if _, createErr := shoutrrr.CreateSender(rawURL); createErr != nil {
-		return "", errors.New("url must be a valid Shoutrrr URL")
-	}
-	return service, nil
-}
-
-func isCustomDeliveryService(service string) bool {
-	switch service {
-	case "bark", "generic", "gotify", "ntfy", "smtp":
-		return true
-	default:
-		return false
-	}
-}
-
-func validateCustomDeliveryURL(parsed *url.URL, service string) error {
-	if parsed.Host == "" || strings.TrimSpace(parsed.Hostname()) == "" {
-		return errors.New("notification host is required")
-	}
-	scheme := customHostScheme(parsed)
-	if service != "smtp" && scheme != "http" && scheme != "https" {
-		return errors.New("notification URL must use HTTP or HTTPS")
-	}
-	// Reuse the delivery builder to confirm required per-service fields (Gotify
-	// token, Bark device key, Ntfy topic) are present; the request is discarded.
-	if service != "generic" && service != "smtp" {
-		if _, _, _, err := customHostHTTPRequest(service, parsed, "", ""); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func isSupportedNotificationService(service string) bool {
-	switch service {
-	case "bark", "discord", "generic", "gotify", "logger", "ntfy", "pushover", "slack", "smtp", "telegram":
-		return true
-	default:
-		return false
-	}
+	return notify.ValidateURL(rawURL)
 }
 
 func ensureUniqueNotificationChannelName(ctx context.Context, db *client.Client, clusterID, name, excludeID string) error {
@@ -572,5 +352,5 @@ func newNotificationChannelResponse(item *model.NotificationChannel) notificatio
 }
 
 func notificationChannelScope(clusterID, channelID string) string {
-	return "notification-channel:" + clusterID + ":" + channelID
+	return notify.ChannelScope(clusterID, channelID)
 }

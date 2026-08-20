@@ -1,4 +1,18 @@
 export type {
+    AlertDelivery,
+    AlertDetail,
+    AlertEvent,
+    AlertHistoryPage,
+    AlertInstance,
+    AlertListFilters,
+    AlertOverview,
+    AlertRule,
+    AlertRuleParameterSpec,
+    AlertRuleUpdate,
+    AlertSeverity,
+    AlertStatus,
+} from './alerts.ts';
+export type {
     CreateDNSZoneRequest,
     DNSDiscoveryRequest,
     UpdateDNSConfig,
@@ -7,6 +21,7 @@ export type {
 export type * from './types.ts';
 
 export { adminSettingsApi } from './adminSettings.ts';
+export { alertOverviewApi, alertsApi } from './alerts.ts';
 export { analyticsApi } from './analytics.ts';
 export { apiKeysApi } from './apiKeys.ts';
 export { auditApi } from './audit.ts';

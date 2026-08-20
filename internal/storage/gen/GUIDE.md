@@ -42,9 +42,6 @@ gco migrate diff --name init
 gco migrate init-sql --output init.sql
 ```
 
-Note: adding a new value to a schema enum requires PostgreSQL >= 12, because
-`gco db push` executes `ALTER TYPE ... ADD VALUE` inside a single transaction.
-
 Useful flags (accepted by many commands):
 
 - `--schema <path>` — schema directory or file
@@ -199,6 +196,82 @@ query.PostAuthorIdColumn
   - `Resultjson` (Json, optional)
   - `Compensationjson` (Json, optional)
   - `Error` (String, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### AlertDelivery
+
+- Client handle: `c.AlertDelivery`
+- Query namespace: `query.AlertDelivery`
+- Fields:
+  - `Id` (UUID, id)
+  - `Instanceid` (UUID)
+  - `Eventid` (UUID, optional)
+  - `Channelid` (UUID)
+  - `Kind` (String)
+  - `Status` ()
+  - `Attempts` (Int)
+  - `Lasterror` (String, optional)
+  - `Nextretryat` (DateTime, optional)
+  - `Sentat` (DateTime, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### AlertEvent
+
+- Client handle: `c.AlertEvent`
+- Query namespace: `query.AlertEvent`
+- Fields:
+  - `Id` (UUID, id)
+  - `Instanceid` (UUID)
+  - `Type` ()
+  - `Fromstatus` (String, optional)
+  - `Tostatus` (String, optional)
+  - `Payloadjson` (Json)
+  - `Createdat` (DateTime)
+
+### AlertInstance
+
+- Client handle: `c.AlertInstance`
+- Query namespace: `query.AlertInstance`
+- Fields:
+  - `Id` (UUID, id)
+  - `Ruleid` (UUID)
+  - `Clusterid` (String)
+  - `Kind` (String)
+  - `Fingerprint` (String)
+  - `Status` ()
+  - `Severity` ()
+  - `Title` (String)
+  - `Detailjson` (Json)
+  - `Firstseenat` (DateTime)
+  - `Lastseenat` (DateTime)
+  - `Firedat` (DateTime, optional)
+  - `Ackedat` (DateTime, optional)
+  - `Ackedby` (String, optional)
+  - `Resolvedat` (DateTime, optional)
+  - `Resolvedreason` (String, optional)
+  - `Suppresseduntilclear` (Boolean)
+  - `Notifycount` (Int)
+  - `Lastnotifiedat` (DateTime, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
+### AlertRule
+
+- Client handle: `c.AlertRule`
+- Query namespace: `query.AlertRule`
+- Fields:
+  - `Id` (UUID, id)
+  - `Clusterid` (String)
+  - `Kind` (String)
+  - `Enabled` (Boolean)
+  - `Severity` ()
+  - `Paramsjson` (Json)
+  - `Forseconds` (Int)
+  - `Cooldownseconds` (Int)
+  - `Muteduntil` (DateTime, optional)
+  - `Channelsjson` (Json)
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
@@ -548,6 +621,10 @@ query.PostAuthorIdColumn
   - `Installerror` (String, optional)
   - `Redisavailable` (Boolean, optional)
   - `Redisstatuserror` (String, optional)
+  - `Queuerecords` (BigInt)
+  - `Queuebytes` (BigInt)
+  - `Droppedlogs` (BigInt)
+  - `Droppedlogsat` (DateTime, optional)
   - `Sshcredentialid` (UUID, optional)
   - `Sshhost` (String, optional)
   - `Sshport` (Int, optional)

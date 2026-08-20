@@ -8,6 +8,7 @@ servers:
 tags:
     - name: .well-known-acme-challenge
     - name: admin-settings
+    - name: alerts
     - name: analytics
     - name: audit
     - name: auth
@@ -20,6 +21,7 @@ tags:
     - name: auth-totp
     - name: certificates
     - name: clusters
+    - name: clusters-alerts
     - name: clusters-analytics
     - name: clusters-api-keys
     - name: clusters-certificates
@@ -191,6 +193,47 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/alerts/overview:
+        get:
+            operationId: alertOverview
+            summary: Alert overview
+            description: Firing alert counts per accessible cluster plus the most recent unresolved alerts.
+            tags:
+                - alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - auth.RequireAuth
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            clusters:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_alertOverviewCluster'
+                                            firingTotal:
+                                                type: integer
+                                                format: int64
+                                            recent:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_alertOverviewItem'
     /api/v1/audit/events:
         get:
             operationId: listEvents
@@ -402,8 +445,6 @@ paths:
             summary: Logout
             tags:
                 - auth
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -433,8 +474,6 @@ paths:
             description: Return the authenticated user's profile.
             tags:
                 - auth
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -520,8 +559,6 @@ paths:
             summary: Change password
             tags:
                 - auth-password
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -601,8 +638,6 @@ paths:
             summary: Issue password reset
             tags:
                 - auth-password-reset
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -678,8 +713,6 @@ paths:
             summary: External auth start
             tags:
                 - auth-providers
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -973,8 +1006,6 @@ paths:
             summary: Get security policy
             tags:
                 - auth-security-policy
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1003,8 +1034,6 @@ paths:
             summary: Update security policy
             tags:
                 - auth-security-policy
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1052,8 +1081,6 @@ paths:
             summary: List sessions
             tags:
                 - auth-sessions
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1082,8 +1109,6 @@ paths:
             summary: Revoke session
             tags:
                 - auth-sessions
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1118,8 +1143,6 @@ paths:
             summary: Revoke other sessions
             tags:
                 - auth-sessions
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1137,8 +1160,6 @@ paths:
             summary: Disable TOTP
             tags:
                 - auth-totp
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1203,8 +1224,6 @@ paths:
             summary: Enable TOTP
             tags:
                 - auth-totp
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1272,8 +1291,6 @@ paths:
             summary: Regenerate recovery codes
             tags:
                 - auth-totp
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1352,8 +1369,6 @@ paths:
             summary: Reset TOTP
             tags:
                 - auth-totp
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1432,8 +1447,6 @@ paths:
             summary: Setup TOTP
             tags:
                 - auth-totp
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1479,8 +1492,6 @@ paths:
                 - clusters
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1573,6 +1584,695 @@ paths:
                                         type: string
                                     msg:
                                         type: string
+    /api/v1/clusters/{cluster_id}/alert-rules:
+        get:
+            operationId: listAlertRules
+            summary: List alert rules
+            description: List the cluster's alert rules with built-in rule metadata.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: array
+                                        items:
+                                            $ref: '#/components/schemas/clusters_alertRuleResponse'
+    /api/v1/clusters/{cluster_id}/alert-rules/{rule_id}:
+        put:
+            operationId: updateAlertRule
+            summary: Update alert rule
+            description: Update an alert rule's enablement, severity, thresholds, hold/cooldown timers, mute window or channels.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: rule_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                channels:
+                                    type:
+                                        - array
+                                        - "null"
+                                    items:
+                                        type: string
+                                cooldownSeconds:
+                                    type:
+                                        - integer
+                                        - "null"
+                                    format: int32
+                                enabled:
+                                    type:
+                                        - boolean
+                                        - "null"
+                                forSeconds:
+                                    type:
+                                        - integer
+                                        - "null"
+                                    format: int32
+                                mutedUntil:
+                                    type:
+                                        - string
+                                        - "null"
+                                    format: date-time
+                                    example: "2026-01-02T15:04:05Z"
+                                params:
+                                    type: object
+                                    additionalProperties:
+                                        type: object
+                                severity:
+                                    type:
+                                        - string
+                                        - "null"
+                                unmute:
+                                    type: boolean
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        $ref: '#/components/schemas/clusters_alertRuleResponse'
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "404":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/alerts:
+        get:
+            operationId: listAlerts
+            summary: List alert instances
+            description: List alert instances for the cluster with optional status, severity and kind filters.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: active
+                  in: query
+                  schema:
+                    type: string
+                - name: kind
+                  in: query
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: severity
+                  in: query
+                  schema:
+                    type: string
+                - name: status
+                  in: query
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/model_AlertInstance'
+                                            page:
+                                                type: integer
+                                                format: int32
+                                            page_size:
+                                                type: integer
+                                                format: int32
+                                            total:
+                                                type: integer
+                                                format: int64
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/alerts/{alert_id}:
+        get:
+            operationId: alertDetail
+            summary: Alert detail
+            description: Fetch one alert instance. Event and delivery history are exposed by paginated subresources.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+            parameters:
+                - name: alert_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            ackedAt:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            ackedBy:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                            acker:
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_User'
+                                                    - type: "null"
+                                            clusterId:
+                                                type: string
+                                            createdAt:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            deliveries:
+                                                type: array
+                                                items:
+                                                    anyOf:
+                                                        - $ref: '#/components/schemas/model_AlertDelivery'
+                                                        - type: "null"
+                                            detailJson:
+                                                type: object
+                                            events:
+                                                type: array
+                                                items:
+                                                    anyOf:
+                                                        - $ref: '#/components/schemas/model_AlertEvent'
+                                                        - type: "null"
+                                            fingerprint:
+                                                type: string
+                                            firedAt:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            firstSeenAt:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            id:
+                                                type: string
+                                            kind:
+                                                type: string
+                                            lastNotifiedAt:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            lastSeenAt:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            notifyCount:
+                                                type: integer
+                                                format: int32
+                                            resolvedAt:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            resolvedReason:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                            rule:
+                                                anyOf:
+                                                    - $ref: '#/components/schemas/model_AlertRule'
+                                                    - type: "null"
+                                            ruleId:
+                                                type: string
+                                            severity:
+                                                $ref: '#/components/schemas/model_AlertSeverity'
+                                            status:
+                                                $ref: '#/components/schemas/model_AlertStatus'
+                                            suppressedUntilClear:
+                                                type: boolean
+                                            title:
+                                                type: string
+                                            updatedAt:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+    /api/v1/clusters/{cluster_id}/alerts/{alert_id}/ack:
+        post:
+            operationId: ackAlert
+            summary: Acknowledge alert
+            description: Acknowledge a firing alert. Re-acknowledging reassigns the acknowledgement.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+                - manage
+            parameters:
+                - name: alert_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        anyOf:
+                                            - $ref: '#/components/schemas/model_AlertInstance'
+                                            - type: "null"
+    /api/v1/clusters/{cluster_id}/alerts/{alert_id}/deliveries:
+        get:
+            operationId: alertDeliveries
+            summary: Alert delivery history
+            description: Fetch paginated notification delivery records for an alert.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+            parameters:
+                - name: alert_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_alertDeliveryResponse'
+                                            page:
+                                                type: integer
+                                                format: int32
+                                            page_size:
+                                                type: integer
+                                                format: int32
+                                            total:
+                                                type: integer
+                                                format: int64
+    /api/v1/clusters/{cluster_id}/alerts/{alert_id}/events:
+        get:
+            operationId: alertEvents
+            summary: Alert event history
+            description: Fetch a paginated alert event timeline.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+            parameters:
+                - name: alert_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: page
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+                - name: page_size
+                  in: query
+                  schema:
+                    type: integer
+                    format: int32
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            items:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_alertEventResponse'
+                                            page:
+                                                type: integer
+                                                format: int32
+                                            page_size:
+                                                type: integer
+                                                format: int32
+                                            total:
+                                                type: integer
+                                                format: int64
+    /api/v1/clusters/{cluster_id}/alerts/{alert_id}/resolve:
+        post:
+            operationId: resolveAlert
+            summary: Resolve alert
+            description: Manually resolve an alert and suppress the same condition until it clears. No recovery notification is sent.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+                - manage
+            parameters:
+                - name: alert_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                reason:
+                                    type: string
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        anyOf:
+                                            - $ref: '#/components/schemas/model_AlertInstance'
+                                            - type: "null"
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
+    /api/v1/clusters/{cluster_id}/alerts/batch-ack:
+        post:
+            operationId: batchAckAlerts
+            summary: Batch acknowledge alerts
+            description: Acknowledge multiple firing alerts at once. Unknown IDs are ignored.
+            tags:
+                - clusters-alerts
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - clusteraccess.Require
+                - read
+                - manage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                required: true
+                content:
+                    application/json:
+                        schema:
+                            type: object
+                            properties:
+                                ids:
+                                    type: array
+                                    items:
+                                        type: string
+                            required:
+                                - ids
+            responses:
+                "200":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            acknowledged:
+                                                type: object
+                                        required:
+                                            - acknowledged
+                "400":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/analytics/distributions/{dimension}:
         get:
             operationId: ranking
@@ -1582,8 +2282,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1658,8 +2356,6 @@ paths:
                 - clusters-analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1698,8 +2394,6 @@ paths:
                 - clusters-analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1759,8 +2453,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1812,8 +2504,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1856,8 +2546,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1898,8 +2586,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1974,8 +2660,6 @@ paths:
                 - clusters-analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2041,8 +2725,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2106,8 +2788,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2178,8 +2858,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2250,8 +2928,6 @@ paths:
                 - analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2308,8 +2984,6 @@ paths:
                 - clusters-analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2380,8 +3054,6 @@ paths:
                 - clusters-analytics
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2433,8 +3105,6 @@ paths:
             description: Paginated list of cluster API keys with permissions, status and last usage; token material is never returned.
             tags:
                 - clusters-api-keys
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2505,8 +3175,6 @@ paths:
             description: Create a cluster API key with a whitelisted permission subset; the plaintext token is returned exactly once.
             tags:
                 - clusters-api-keys
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2620,8 +3288,6 @@ paths:
             description: Update name, permissions, status or expiry of a cluster API key; revoked keys are immutable.
             tags:
                 - clusters-api-keys
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2749,8 +3415,6 @@ paths:
             description: Permanently revoke an API key; the row is retained for audit trails.
             tags:
                 - clusters-api-keys
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2834,8 +3498,6 @@ paths:
             description: Replace the token of an API key; the previous token stays valid for a bounded grace window.
             tags:
                 - clusters-api-keys
-            security:
-                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2946,8 +3608,6 @@ paths:
                 - certificates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3161,8 +3821,6 @@ paths:
                 - clusters-certificates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3540,8 +4198,6 @@ paths:
                 - clusters-certificates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4404,8 +5060,6 @@ paths:
                 - dns
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4573,8 +5227,6 @@ paths:
                 - clusters
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4692,8 +5344,6 @@ paths:
                 - dns
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4841,8 +5491,6 @@ paths:
                 - dns
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5042,8 +5690,6 @@ paths:
                 - dns
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5335,8 +5981,6 @@ paths:
                 - clusters
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5437,8 +6081,6 @@ paths:
                 - clusters-jobs
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5521,8 +6163,6 @@ paths:
                 - clusters-jobs
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5581,8 +6221,6 @@ paths:
                 - clusters-jobs
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5688,8 +6326,6 @@ paths:
                 - clusters-jobs
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5748,8 +6384,6 @@ paths:
                 - clusters-jobs
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5856,8 +6490,6 @@ paths:
                 - clusters-logpush
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5920,7 +6552,6 @@ paths:
                             properties:
                                 brokers:
                                     type: string
-                                    description: Comma-separated host:port broker list.
                                 enabled:
                                     type:
                                         - boolean
@@ -5929,11 +6560,6 @@ paths:
                                     type: array
                                     items:
                                         type: string
-                                        enum:
-                                            - access
-                                            - caddy
-                                            - node_runtime
-                                            - origin_health
                                 name:
                                     type: string
                                 password:
@@ -5942,7 +6568,6 @@ paths:
                                     type:
                                         - string
                                         - "null"
-                                    description: One of none, plain, scram-sha-256, scram-sha-512; "none" clears authentication on update.
                                 tls_enabled:
                                     type:
                                         - boolean
@@ -6007,17 +6632,6 @@ paths:
                                         type: string
                                     msg:
                                         type: string
-                "409":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/clusters/{cluster_id}/logpush-destinations/{destination_id}:
         put:
             operationId: updateLogpushDestination
@@ -6057,7 +6671,6 @@ paths:
                             properties:
                                 brokers:
                                     type: string
-                                    description: Comma-separated host:port broker list.
                                 enabled:
                                     type:
                                         - boolean
@@ -6066,11 +6679,6 @@ paths:
                                     type: array
                                     items:
                                         type: string
-                                        enum:
-                                            - access
-                                            - caddy
-                                            - node_runtime
-                                            - origin_health
                                 name:
                                     type: string
                                 password:
@@ -6079,7 +6687,6 @@ paths:
                                     type:
                                         - string
                                         - "null"
-                                    description: One of none, plain, scram-sha-256, scram-sha-512; "none" clears authentication on update.
                                 tls_enabled:
                                     type:
                                         - boolean
@@ -6144,28 +6751,6 @@ paths:
                                         type: string
                                     msg:
                                         type: string
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "409":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
         delete:
             operationId: deleteLogpushDestination
             summary: Delete logpush destination
@@ -6198,17 +6783,6 @@ paths:
             responses:
                 "204":
                     description: OK
-                "404":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
     /api/v1/clusters/{cluster_id}/logpush-destinations/{destination_id}/test:
         post:
             operationId: testLogpushDestination
@@ -6303,7 +6877,6 @@ paths:
                             properties:
                                 brokers:
                                     type: string
-                                    description: Comma-separated host:port broker list.
                                 enabled:
                                     type:
                                         - boolean
@@ -6312,11 +6885,6 @@ paths:
                                     type: array
                                     items:
                                         type: string
-                                        enum:
-                                            - access
-                                            - caddy
-                                            - node_runtime
-                                            - origin_health
                                 name:
                                     type: string
                                 password:
@@ -6325,7 +6893,6 @@ paths:
                                     type:
                                         - string
                                         - "null"
-                                    description: One of none, plain, scram-sha-256, scram-sha-512; "none" clears authentication on update.
                                 tls_enabled:
                                     type:
                                         - boolean
@@ -6373,8 +6940,6 @@ paths:
                 - clusters
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6633,8 +7198,6 @@ paths:
                 - nodes
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6779,8 +7342,6 @@ paths:
                 - nodes
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7076,8 +7637,6 @@ paths:
                 - nodes
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7416,8 +7975,6 @@ paths:
                                 priority:
                                     type: integer
                                     format: int32
-                                    minimum: 0
-                                    maximum: 1000
             responses:
                 "200":
                     description: OK
@@ -7437,17 +7994,6 @@ paths:
                                                 type: integer
                                                 format: int32
                 "400":
-                    description: Client Error
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    code:
-                                        type: string
-                                    msg:
-                                        type: string
-                "404":
                     description: Client Error
                     content:
                         application/json:
@@ -8076,8 +8622,6 @@ paths:
                 - clusters-notifications
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8435,8 +8979,6 @@ paths:
                 - publish
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8488,8 +9030,6 @@ paths:
                 - publish
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8546,8 +9086,6 @@ paths:
                 - clusters
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8648,8 +9186,6 @@ paths:
                 - clusters-site-templates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8686,8 +9222,6 @@ paths:
                 - clusters-site-templates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8771,8 +9305,6 @@ paths:
                 - clusters-site-templates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8836,8 +9368,6 @@ paths:
                 - clusters-site-templates
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8881,8 +9411,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8920,8 +9448,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9012,8 +9538,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9090,8 +9614,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9236,8 +9758,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9270,8 +9790,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9312,8 +9830,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9421,8 +9937,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9500,8 +10014,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9568,8 +10080,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9663,8 +10173,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9779,8 +10287,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9884,8 +10390,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9959,8 +10463,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10031,8 +10533,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10185,8 +10685,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10254,8 +10752,6 @@ paths:
                 - publish
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10298,8 +10794,6 @@ paths:
                 - publish
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10378,8 +10872,6 @@ paths:
                 - publish
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10426,8 +10918,6 @@ paths:
                 - purge
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10470,8 +10960,6 @@ paths:
                 - purge
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10609,8 +11097,6 @@ paths:
                 - purge
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10714,8 +11200,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10777,8 +11261,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10855,8 +11337,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10927,8 +11407,6 @@ paths:
                 - sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11004,8 +11482,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11073,8 +11549,6 @@ paths:
                 - clusters-sites
             security:
                 - cookie_goveto_session: []
-                - bearer_api_key: []
-                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11828,7 +12302,6 @@ paths:
         get:
             operationId: get_metrics
             summary: get /metrics
-            description: Expose Prometheus metrics in the text exposition format; only registered when metrics are enabled.
             tags:
                 - metrics
             x-middlewares:
@@ -11842,9 +12315,9 @@ paths:
                 "200":
                     description: OK
                     content:
-                        text/plain:
+                        application/json:
                             schema:
-                                type: string
+                                type: object
 components:
     schemas:
         adminsettings_authenticationProviderRequest:
@@ -12504,6 +12977,162 @@ components:
                     type:
                         - string
                         - "null"
+        clusters_alertDeliveryResponse:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                channelId:
+                    type: string
+                channelName:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                kind:
+                    type: string
+                lastError:
+                    type:
+                        - string
+                        - "null"
+                nextRetryAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                sentAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                status:
+                    type: string
+        clusters_alertEventResponse:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                fromStatus:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                payloadJson:
+                    type: object
+                toStatus:
+                    type:
+                        - string
+                        - "null"
+                type:
+                    type: string
+        clusters_alertOverviewCluster:
+            type: object
+            properties:
+                clusterId:
+                    type: string
+                firing:
+                    type: integer
+                    format: int64
+                name:
+                    type: string
+        clusters_alertOverviewItem:
+            type: object
+            properties:
+                clusterId:
+                    type: string
+                id:
+                    type: string
+                kind:
+                    type: string
+                lastSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                severity:
+                    type: string
+                status:
+                    type: string
+                title:
+                    type: string
+        clusters_alertRuleParamSpecResponse:
+            type: object
+            properties:
+                default:
+                    type: number
+                    format: double
+                exclusiveMinimum:
+                    type: boolean
+                key:
+                    type: string
+                label:
+                    type: string
+                maximum:
+                    type: number
+                    format: double
+                minimum:
+                    type: number
+                    format: double
+                step:
+                    type: number
+                    format: double
+                type:
+                    type: string
+        clusters_alertRuleResponse:
+            type: object
+            properties:
+                channels:
+                    type: array
+                    items:
+                        type: string
+                clusterId:
+                    type: string
+                cooldownSeconds:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                description:
+                    type: string
+                enabled:
+                    type: boolean
+                forSeconds:
+                    type: integer
+                    format: int32
+                id:
+                    type: string
+                kind:
+                    type: string
+                label:
+                    type: string
+                mutedUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                parameterSpecs:
+                    type: array
+                    items:
+                        $ref: '#/components/schemas/clusters_alertRuleParamSpecResponse'
+                paramsJson:
+                    type: object
+                severity:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         clusters_logpushDestinationResponse:
             type: object
             properties:
@@ -12838,16 +13467,701 @@ components:
                 version:
                     type: integer
                     format: int64
+        model_ACMEAccount:
+            type: object
+            properties:
+                accountJson:
+                    type: object
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                directoryUrl:
+                    type: string
+                email:
+                    type: string
+                id:
+                    type: string
+                privateKeyEncrypted:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ACMEChallenge:
+            type: object
+            properties:
+                certificate:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Certificate'
+                        - type: "null"
+                certificateId:
+                    type: string
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                dnsName:
+                    type:
+                        - string
+                        - "null"
+                dnsValue:
+                    type:
+                        - string
+                        - "null"
+                domain:
+                    type: string
+                expiresAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                keyAuth:
+                    type:
+                        - string
+                        - "null"
+                lastError:
+                    type:
+                        - string
+                        - "null"
+                providerRef:
+                    type:
+                        - string
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_ACMEChallengeStatus'
+                token:
+                    type: string
+                type:
+                    $ref: '#/components/schemas/model_ACMEChallengeType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ACMEChallengeStatus:
+            type: string
+            enum:
+                - PENDING
+                - PRESENTED
+                - CLEANING
+                - CLEANED
+                - FAILED
         model_ACMEChallengeType:
             type: string
             enum:
                 - HTTP_01
                 - DNS_01
+        model_AgentTask:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                kind:
+                    type: string
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                payload:
+                    type: object
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_AlertDelivery:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                channelId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                event:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_AlertEvent'
+                        - type: "null"
+                eventId:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                instance:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_AlertInstance'
+                        - type: "null"
+                instanceId:
+                    type: string
+                kind:
+                    type: string
+                lastError:
+                    type:
+                        - string
+                        - "null"
+                nextRetryAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                sentAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                status:
+                    $ref: '#/components/schemas/model_AlertDeliveryStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_AlertDeliveryStatus:
+            type: string
+            enum:
+                - PENDING
+                - SENT
+                - FAILED
+        model_AlertEvent:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                deliveries:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertDelivery'
+                            - type: "null"
+                fromStatus:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                instance:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_AlertInstance'
+                        - type: "null"
+                instanceId:
+                    type: string
+                payloadJson:
+                    type: object
+                toStatus:
+                    type:
+                        - string
+                        - "null"
+                type:
+                    $ref: '#/components/schemas/model_AlertEventType'
+        model_AlertEventType:
+            type: string
+            enum:
+                - STATE_CHANGE
+                - NOTIFY
+                - ACK
+                - RESOLVE
+                - REARM
+        model_AlertInstance:
+            type: object
+            properties:
+                ackedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                ackedBy:
+                    type:
+                        - string
+                        - "null"
+                acker:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                deliveries:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertDelivery'
+                            - type: "null"
+                detailJson:
+                    type: object
+                events:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertEvent'
+                            - type: "null"
+                fingerprint:
+                    type: string
+                firedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                firstSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                kind:
+                    type: string
+                lastNotifiedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                notifyCount:
+                    type: integer
+                    format: int32
+                resolvedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                resolvedReason:
+                    type:
+                        - string
+                        - "null"
+                rule:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_AlertRule'
+                        - type: "null"
+                ruleId:
+                    type: string
+                severity:
+                    $ref: '#/components/schemas/model_AlertSeverity'
+                status:
+                    $ref: '#/components/schemas/model_AlertStatus'
+                suppressedUntilClear:
+                    type: boolean
+                title:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_AlertRule:
+            type: object
+            properties:
+                channelsJson:
+                    type: object
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                cooldownSeconds:
+                    type: integer
+                    format: int32
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                enabled:
+                    type: boolean
+                forSeconds:
+                    type: integer
+                    format: int32
+                id:
+                    type: string
+                instances:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertInstance'
+                            - type: "null"
+                kind:
+                    type: string
+                mutedUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                paramsJson:
+                    type: object
+                severity:
+                    $ref: '#/components/schemas/model_AlertSeverity'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_AlertSeverity:
+            type: string
+            enum:
+                - INFO
+                - WARNING
+                - CRITICAL
+        model_AlertStatus:
+            type: string
+            enum:
+                - PENDING
+                - FIRING
+                - ACKNOWLEDGED
+                - RESOLVED
         model_ApiKeyStatus:
             type: string
             enum:
                 - ACTIVE
                 - DISABLED
+        model_AuditLog:
+            type: object
+            properties:
+                action:
+                    type: string
+                actor:
+                    type: string
+                actorId:
+                    type:
+                        - string
+                        - "null"
+                afterJson:
+                    type:
+                        - object
+                        - "null"
+                beforeJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                failureReason:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                requestId:
+                    type: string
+                resourceId:
+                    type: string
+                resourceType:
+                    type: string
+                result:
+                    type: string
+                sourceIp:
+                    type: string
+                user:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                userAgent:
+                    type: string
+        model_Certificate:
+            type: object
+            properties:
+                acmeChallengeType:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_ACMEChallengeType'
+                        - type: "null"
+                acmeDirectoryUrl:
+                    type:
+                        - string
+                        - "null"
+                acmeEmail:
+                    type:
+                        - string
+                        - "null"
+                autoRenew:
+                    type: boolean
+                certPem:
+                    type:
+                        - string
+                        - "null"
+                challenges:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ACMEChallenge'
+                            - type: "null"
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                domainsJson:
+                    type: object
+                expiresAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                fingerprint:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                issuer:
+                    type:
+                        - string
+                        - "null"
+                jobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_CertificateJob'
+                            - type: "null"
+                keyAlgorithm:
+                    type:
+                        - string
+                        - "null"
+                lastIssuedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastPublishError:
+                    type:
+                        - string
+                        - "null"
+                lastPublishedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastRenewalAttemptAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastRenewalError:
+                    type:
+                        - string
+                        - "null"
+                lastRevocationAttemptAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastRevocationError:
+                    type:
+                        - string
+                        - "null"
+                name:
+                    type: string
+                notBefore:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                privateKeyEncrypted:
+                    type: string
+                renewBeforeDays:
+                    type: integer
+                    format: int32
+                revocationReason:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                serialNumber:
+                    type:
+                        - string
+                        - "null"
+                sites:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_SiteCertificate'
+                            - type: "null"
+                source:
+                    $ref: '#/components/schemas/model_CertificateSource'
+                status:
+                    $ref: '#/components/schemas/model_CertificateStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_CertificateJob:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                certificate:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Certificate'
+                        - type: "null"
+                certificateId:
+                    type: string
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                operation:
+                    $ref: '#/components/schemas/model_CertificateOperation'
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_CertificateOperation:
             type: string
             enum:
@@ -12874,12 +14188,293 @@ components:
                 - REVOKING
                 - REVOKED
                 - REVOCATION_FAILED
+        model_Cluster:
+            type: object
+            properties:
+                acmeAccounts:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ACMEAccount'
+                            - type: "null"
+                alertRules:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertRule'
+                            - type: "null"
+                apiKeys:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterApiKey'
+                            - type: "null"
+                certificates:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Certificate'
+                            - type: "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                creator:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                creatorId:
+                    type: string
+                dnsLines:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSLine'
+                            - type: "null"
+                dnsProviders:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSProviderConfig'
+                            - type: "null"
+                dnsRecords:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSManagedRecord'
+                            - type: "null"
+                dnsSyncJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSSyncJob'
+                            - type: "null"
+                dnsSyncSnapshots:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSSyncSnapshot'
+                            - type: "null"
+                groups:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterGroup'
+                            - type: "null"
+                id:
+                    type: string
+                logpushDestinations:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_LogpushDestination'
+                            - type: "null"
+                members:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterMember'
+                            - type: "null"
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Node'
+                            - type: "null"
+                notificationChannels:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NotificationChannel'
+                            - type: "null"
+                originPools:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_OriginPool'
+                            - type: "null"
+                primaryHostname:
+                    type:
+                        - string
+                        - "null"
+                regions:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterRegion'
+                            - type: "null"
+                siteTemplates:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_SiteTemplate'
+                            - type: "null"
+                sites:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Site'
+                            - type: "null"
+                sshCredentials:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_SSHCredential'
+                            - type: "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ClusterApiKey:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                createdBy:
+                    type: string
+                creator:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                expiresAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                lastUsedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastUsedIp:
+                    type:
+                        - string
+                        - "null"
+                name:
+                    type: string
+                permissionsJson:
+                    type: object
+                prefix:
+                    type: string
+                previousExpiresAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                previousTokenHash:
+                    type:
+                        - string
+                        - "null"
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                status:
+                    $ref: '#/components/schemas/model_ApiKeyStatus'
+                tokenHash:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ClusterGroup:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodeMemberships:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeGroupMembership'
+                            - type: "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_ClusterMember:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                permission:
+                    $ref: '#/components/schemas/model_ClusterPermission'
+                user:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                userId:
+                    type: string
         model_ClusterPermission:
             type: string
             enum:
                 - OWNER
                 - OPERATOR
                 - VIEWER
+        model_ClusterRegion:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodeMemberships:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeRegionMembership'
+                            - type: "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_ConfigStatus:
             type: string
             enum:
@@ -12887,11 +14482,184 @@ components:
                 - PUBLISHED
                 - FAILED
                 - ROLLED_BACK
+        model_ConfigVersion:
+            type: object
+            properties:
+                configJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hash:
+                    type: string
+                id:
+                    type: string
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                version:
+                    type: integer
+                    format: int64
+        model_DNSLine:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeDNSLine'
+                            - type: "null"
+                providerCode:
+                    type: string
+                providerParentCode:
+                    type:
+                        - string
+                        - "null"
+                records:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSManagedRecord'
+                            - type: "null"
+                sortOrder:
+                    type: integer
+                    format: int32
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_DNSManagedRecord:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                dnsLine:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_DNSLine'
+                        - type: "null"
+                dnsLineId:
+                    type:
+                        - string
+                        - "null"
+                dnsLineKey:
+                    type: string
+                hostname:
+                    type: string
+                id:
+                    type: string
+                lastError:
+                    type:
+                        - string
+                        - "null"
+                lastSyncedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type:
+                        - string
+                        - "null"
+                providerRecordId:
+                    type:
+                        - string
+                        - "null"
+                siteDomain:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_SiteDomain'
+                        - type: "null"
+                siteDomainId:
+                    type:
+                        - string
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_DNSRecordStatus'
+                type:
+                    $ref: '#/components/schemas/model_DNSRecordType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                value:
+                    type: string
         model_DNSPlacement:
             type: string
             enum:
                 - ALL
                 - PRIMARY_BACKUP
+        model_DNSProviderConfig:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credentialsEncrypted:
+                    type: string
+                defaultTtl:
+                    type: integer
+                    format: int32
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                kind:
+                    $ref: '#/components/schemas/model_DNSProviderKind'
+                placement:
+                    $ref: '#/components/schemas/model_DNSPlacement'
+                provider:
+                    $ref: '#/components/schemas/model_DNSProviderType'
+                proxied:
+                    type: boolean
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                zone:
+                    type: string
+                zoneId:
+                    type:
+                        - string
+                        - "null"
         model_DNSProviderKind:
             type: string
             enum:
@@ -12925,6 +14693,212 @@ components:
                 - DELETE_CLUSTER
                 - DELETE_SITE
                 - ROLLBACK_CLUSTER
+        model_DNSSyncJob:
+            type: object
+            properties:
+                action:
+                    $ref: '#/components/schemas/model_DNSSyncAction'
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type:
+                        - string
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_DNSSyncSnapshot:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                recordsJson:
+                    type: object
+        model_ExternalIdentity:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                email:
+                    type: string
+                id:
+                    type: string
+                issuer:
+                    type: string
+                providerId:
+                    type: string
+                subject:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                user:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                userId:
+                    type: string
+        model_InstallJob:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                payload:
+                    type: object
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_JobStatus:
             type: string
             enum:
@@ -12934,6 +14908,422 @@ components:
                 - FAILED
                 - DEAD_LETTER
                 - CANCELLED
+        model_LogpushDestination:
+            type: object
+            properties:
+                brokers:
+                    type: string
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credentialsEncrypted:
+                    type:
+                        - string
+                        - "null"
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                logTypes:
+                    type: object
+                name:
+                    type: string
+                saslMechanism:
+                    type:
+                        - string
+                        - "null"
+                tlsEnabled:
+                    type: boolean
+                topic:
+                    type: string
+                type:
+                    $ref: '#/components/schemas/model_LogpushType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_LogpushType:
+            type: string
+            enum:
+                - KAFKA
+        model_Node:
+            type: object
+            properties:
+                addresses:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeAddress'
+                            - type: "null"
+                agentTasks:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AgentTask'
+                            - type: "null"
+                cacheConfig:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_NodeCacheConfig'
+                        - type: "null"
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                credential:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_NodeCredential'
+                        - type: "null"
+                dnsLines:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeDNSLine'
+                            - type: "null"
+                dnsPriority:
+                    type: integer
+                    format: int32
+                dnsRecords:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSManagedRecord'
+                            - type: "null"
+                droppedLogs:
+                    type: integer
+                    format: int64
+                droppedLogsAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                groupMemberships:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeGroupMembership'
+                            - type: "null"
+                hardwareProfile:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_NodeHardwareProfile'
+                        - type: "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                installError:
+                    type:
+                        - string
+                        - "null"
+                installJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_InstallJob'
+                            - type: "null"
+                name:
+                    type: string
+                onlineSince:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                queueBytes:
+                    type: integer
+                    format: int64
+                queueRecords:
+                    type: integer
+                    format: int64
+                redisAvailable:
+                    type:
+                        - boolean
+                        - "null"
+                redisStatusError:
+                    type:
+                        - string
+                        - "null"
+                regionMemberships:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeRegionMembership'
+                            - type: "null"
+                siteConfigVersions:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeSiteConfigVersion'
+                            - type: "null"
+                sshCredential:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_SSHCredential'
+                        - type: "null"
+                sshCredentialId:
+                    type:
+                        - string
+                        - "null"
+                sshHost:
+                    type:
+                        - string
+                        - "null"
+                sshHostKey:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_NodeSSHHostKey'
+                        - type: "null"
+                sshPort:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                status:
+                    $ref: '#/components/schemas/model_NodeStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type:
+                        - string
+                        - "null"
+        model_NodeAddress:
+            type: object
+            properties:
+                address:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+        model_NodeCacheConfig:
+            type: object
+            properties:
+                autoMaxSize:
+                    type: boolean
+                cacheDir:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                debugMode:
+                    type: boolean
+                id:
+                    type: string
+                maxDiskUsagePercent:
+                    type: integer
+                    format: int32
+                maxSizeBytes:
+                    type:
+                        - integer
+                        - "null"
+                    format: int64
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+        model_NodeCredential:
+            type: object
+            properties:
+                bootstrapIdentityEncrypted:
+                    type:
+                        - string
+                        - "null"
+                certificateNotAfter:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                certificateSerial:
+                    type:
+                        - string
+                        - "null"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                previousCertificateSerial:
+                    type:
+                        - string
+                        - "null"
+                previousCertificateValidUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                rotationCertificatePem:
+                    type:
+                        - string
+                        - "null"
+                rotationCsrSha256:
+                    type:
+                        - string
+                        - "null"
+        model_NodeDNSLine:
+            type: object
+            properties:
+                dnsLine:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_DNSLine'
+                        - type: "null"
+                dnsLineId:
+                    type: string
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+        model_NodeGroupMembership:
+            type: object
+            properties:
+                group:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_ClusterGroup'
+                        - type: "null"
+                groupId:
+                    type: string
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+        model_NodeHardwareProfile:
+            type: object
+            properties:
+                architecture:
+                    type: string
+                benchmarkBytes:
+                    type:
+                        - integer
+                        - "null"
+                    format: int64
+                benchmarkDurationMs:
+                    type:
+                        - integer
+                        - "null"
+                    format: int32
+                cacheDiskWriteBytesPerSecond:
+                    type:
+                        - integer
+                        - "null"
+                    format: int64
+                cpuModel:
+                    type: string
+                measuredAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+        model_NodeRegionMembership:
+            type: object
+            properties:
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                region:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_ClusterRegion'
+                        - type: "null"
+                regionId:
+                    type: string
+        model_NodeSSHHostKey:
+            type: object
+            properties:
+                fingerprintSha256:
+                    type: string
+                firstSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                keyType:
+                    type: string
+                lastVerifiedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                publicKey:
+                    type: string
+        model_NodeSiteConfigVersion:
+            type: object
+            properties:
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_ConfigStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: integer
+                    format: int64
         model_NodeStatus:
             type: string
             enum:
@@ -12943,11 +15333,323 @@ components:
                 - OFFLINE
                 - INSTALL_FAILED
                 - DISABLED
+        model_NotificationChannel:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                enabled:
+                    type: boolean
+                id:
+                    type: string
+                name:
+                    type: string
+                service:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                urlEncrypted:
+                    type: string
+        model_OriginBackend:
+            type: object
+            properties:
+                address:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                enabled:
+                    type: boolean
+                hostHeader:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                originPool:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_OriginPool'
+                        - type: "null"
+                originPoolId:
+                    type: string
+                priority:
+                    type: integer
+                    format: int32
+                protocol:
+                    $ref: '#/components/schemas/model_OriginProtocol'
+                weight:
+                    type: integer
+                    format: int32
+        model_OriginPool:
+            type: object
+            properties:
+                backends:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_OriginBackend'
+                            - type: "null"
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                governance:
+                    type: object
+                id:
+                    type: string
+                name:
+                    type: string
+                scheduler:
+                    type: string
+                sites:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Site'
+                            - type: "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_OriginProtocol:
             type: string
             enum:
                 - HTTP
                 - HTTPS
+        model_PasswordResetToken:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                expiresAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                tokenHash:
+                    type: string
+                usedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                user:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                userId:
+                    type: string
+        model_Policy:
+            type: object
+            properties:
+                cacheJson:
+                    type: object
+                compressionJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                deliveryJson:
+                    type: object
+                id:
+                    type: string
+                name:
+                    type: string
+                sites:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Site'
+                            - type: "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                wafJson:
+                    type: object
+        model_PublishJob:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                targets:
+                    type: object
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: integer
+                    format: int64
+        model_PurgeJob:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                type:
+                    $ref: '#/components/schemas/model_PurgeType'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                value:
+                    type:
+                        - string
+                        - "null"
         model_PurgeType:
             type: string
             enum:
@@ -12960,22 +15662,407 @@ components:
             enum:
                 - PASSWORD
                 - PRIVATE_KEY
+        model_SSHCredential:
+            type: object
+            properties:
+                authType:
+                    $ref: '#/components/schemas/model_SSHAuthType'
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                nodes:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Node'
+                            - type: "null"
+                secretEncrypted:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                username:
+                    type: string
+        model_Site:
+            type: object
+            properties:
+                certificates:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_SiteCertificate'
+                            - type: "null"
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                configVersions:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ConfigVersion'
+                            - type: "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                creator:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                creatorId:
+                    type: string
+                dnsSyncJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSSyncJob'
+                            - type: "null"
+                domains:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_SiteDomain'
+                            - type: "null"
+                id:
+                    type: string
+                listenerConfig:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_SiteListenerConfig'
+                        - type: "null"
+                name:
+                    type: string
+                nodeConfigVersions:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_NodeSiteConfigVersion'
+                            - type: "null"
+                originPool:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_OriginPool'
+                        - type: "null"
+                originPoolId:
+                    type: string
+                policy:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Policy'
+                        - type: "null"
+                policyId:
+                    type:
+                        - string
+                        - "null"
+                publishJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_PublishJob'
+                            - type: "null"
+                purgeJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_PurgeJob'
+                            - type: "null"
+                status:
+                    $ref: '#/components/schemas/model_SiteStatus'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                version:
+                    type: integer
+                    format: int64
+        model_SiteCertificate:
+            type: object
+            properties:
+                certificate:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Certificate'
+                        - type: "null"
+                certificateId:
+                    type: string
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+        model_SiteDomain:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                dnsRecords:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_DNSManagedRecord'
+                            - type: "null"
+                hostname:
+                    type: string
+                id:
+                    type: string
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+        model_SiteListenerConfig:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                hstsEnabled:
+                    type: boolean
+                hstsIncludeSubdomains:
+                    type: boolean
+                hstsMaxAge:
+                    type: integer
+                    format: int32
+                hstsPreload:
+                    type: boolean
+                http2Enabled:
+                    type: boolean
+                http3Enabled:
+                    type: boolean
+                httpEnabled:
+                    type: boolean
+                httpPort:
+                    type: integer
+                    format: int32
+                httpsEnabled:
+                    type: boolean
+                httpsPort:
+                    type: integer
+                    format: int32
+                id:
+                    type: string
+                ocspStaplingEnabled:
+                    type: boolean
+                redirectHttpToHttps:
+                    type: boolean
+                site:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Site'
+                        - type: "null"
+                siteId:
+                    type: string
+                tlsMinVersion:
+                    $ref: '#/components/schemas/model_TLSMinVersion'
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_SiteStatus:
             type: string
             enum:
                 - ACTIVE
                 - DISABLED
+        model_SiteTemplate:
+            type: object
+            properties:
+                cluster:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Cluster'
+                        - type: "null"
+                clusterId:
+                    type: string
+                configJson:
+                    type: object
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_TLSMinVersion:
             type: string
             enum:
                 - TLS1_2
                 - TLS1_3
+        model_User:
+            type: object
+            properties:
+                ackedAlerts:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AlertInstance'
+                            - type: "null"
+                auditLogs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AuditLog'
+                            - type: "null"
+                clusterMemberships:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterMember'
+                            - type: "null"
+                createdApiKeys:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ClusterApiKey'
+                            - type: "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                createdClusters:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Cluster'
+                            - type: "null"
+                createdSites:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_Site'
+                            - type: "null"
+                email:
+                    type: string
+                externalIdentities:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_ExternalIdentity'
+                            - type: "null"
+                failedLoginAttempts:
+                    type: integer
+                    format: int32
+                id:
+                    type: string
+                lastFailedLoginAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lastLoginAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                lockedUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                name:
+                    type: string
+                passwordChangedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                passwordHash:
+                    type: string
+                passwordResetTokens:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_PasswordResetToken'
+                            - type: "null"
+                role:
+                    $ref: '#/components/schemas/model_UserRole'
+                sessions:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_UserSession'
+                            - type: "null"
+                status:
+                    $ref: '#/components/schemas/model_UserStatus'
+                totpRecoveryCodes:
+                    type:
+                        - object
+                        - "null"
+                totpSecretEncrypted:
+                    type:
+                        - string
+                        - "null"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_UserRole:
             type: string
             enum:
                 - ADMIN
                 - OPERATOR
                 - VIEWER
+        model_UserSession:
+            type: object
+            properties:
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                expiresAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                ipAddress:
+                    type:
+                        - string
+                        - "null"
+                lastSeenAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                revokedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                tokenHash:
+                    type: string
+                user:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_User'
+                        - type: "null"
+                userAgent:
+                    type:
+                        - string
+                        - "null"
+                userId:
+                    type: string
         model_UserStatus:
             type: string
             enum:
@@ -14342,17 +17429,7 @@ components:
         wafdsl_token:
             type: object
     securitySchemes:
-        bearer_api_key:
-            type: http
-            scheme: bearer
-            bearerFormat: gve1_<token>
-            description: Cluster-scoped API key supplied as an Authorization Bearer credential.
         cookie_goveto_session:
             type: apiKey
             in: cookie
             name: goveto_session
-        x_api_key:
-            type: apiKey
-            in: header
-            name: X-API-Key
-            description: Cluster-scoped API key supplied through the X-API-Key header.

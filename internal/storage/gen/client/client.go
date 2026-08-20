@@ -27,6 +27,10 @@ type Client struct {
 	ACMEAccount           ACMEAccountActions
 	ACMEChallenge         ACMEChallengeActions
 	AgentTask             AgentTaskActions
+	AlertDelivery         AlertDeliveryActions
+	AlertEvent            AlertEventActions
+	AlertInstance         AlertInstanceActions
+	AlertRule             AlertRuleActions
 	AuditLog              AuditLogActions
 	Certificate           CertificateActions
 	CertificateJob        CertificateJobActions
@@ -82,6 +86,10 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.ACMEAccount = ACMEAccountActions{client: c}
 	c.ACMEChallenge = ACMEChallengeActions{client: c}
 	c.AgentTask = AgentTaskActions{client: c}
+	c.AlertDelivery = AlertDeliveryActions{client: c}
+	c.AlertEvent = AlertEventActions{client: c}
+	c.AlertInstance = AlertInstanceActions{client: c}
+	c.AlertRule = AlertRuleActions{client: c}
 	c.AuditLog = AuditLogActions{client: c}
 	c.Certificate = CertificateActions{client: c}
 	c.CertificateJob = CertificateJobActions{client: c}
@@ -297,6 +305,10 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.ACMEAccount = ACMEAccountActions{client: txClient}
 	txClient.ACMEChallenge = ACMEChallengeActions{client: txClient}
 	txClient.AgentTask = AgentTaskActions{client: txClient}
+	txClient.AlertDelivery = AlertDeliveryActions{client: txClient}
+	txClient.AlertEvent = AlertEventActions{client: txClient}
+	txClient.AlertInstance = AlertInstanceActions{client: txClient}
+	txClient.AlertRule = AlertRuleActions{client: txClient}
 	txClient.AuditLog = AuditLogActions{client: txClient}
 	txClient.Certificate = CertificateActions{client: txClient}
 	txClient.CertificateJob = CertificateJobActions{client: txClient}
@@ -3296,6 +3308,3950 @@ func (a AgentTaskActions) GroupBy(ctx context.Context, fields []string, opts ...
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("AgentTask.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedAlertDeliveryTable(c *Client) string { return c.quoteIdentifier("alert_deliveries") }
+func quotedAlertDeliveryColumns(c *Client) string {
+	cols := []string{"id", "instance_id", "event_id", "channel_id", "kind", "status", "attempts", "last_error", "next_retry_at", "sent_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAlertDeliveryField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "instance_id":
+		return c.quoteIdentifier(field), nil
+	case "event_id":
+		return c.quoteIdentifier(field), nil
+	case "channel_id":
+		return c.quoteIdentifier(field), nil
+	case "kind":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "last_error":
+		return c.quoteIdentifier(field), nil
+	case "next_retry_at":
+		return c.quoteIdentifier(field), nil
+	case "sent_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AlertDelivery field %q", field)
+	}
+}
+
+// buildAlertDeliveryWhere recursively builds a WHERE clause string and arguments.
+func buildAlertDeliveryWhere(c *Client, wheres []query.AlertDeliveryWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AlertDeliveryWhereClause); ok {
+				sub, subArgs := buildAlertDeliveryWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AlertDeliveryWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAlertDeliveryWhere(c, []query.AlertDeliveryWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AlertDeliveryWhereClause); ok {
+				sub, subArgs := buildAlertDeliveryWhere(c, []query.AlertDeliveryWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAlertDeliveryField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AlertDeliveryActions provides database operations for the AlertDelivery model.
+type AlertDeliveryActions struct {
+	client *Client
+}
+
+// AlertDeliveryCreateBuilder builds a AlertDelivery create operation incrementally.
+type AlertDeliveryCreateBuilder struct {
+	action AlertDeliveryActions
+	sets   []query.AlertDeliverySetClause
+}
+
+// Create starts a staged AlertDelivery create operation.
+func (a AlertDeliveryActions) Create() AlertDeliveryCreateBuilder {
+	return AlertDeliveryCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AlertDeliveryCreateBuilder) Set(sets ...query.AlertDeliverySetClause) AlertDeliveryCreateBuilder {
+	next := AlertDeliveryCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AlertDeliverySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AlertDeliveryCreateBuilder) Do(ctx context.Context) (*model.AlertDelivery, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AlertDeliveryCreateManyBuilder builds a bulk AlertDelivery insert operation.
+type AlertDeliveryCreateManyBuilder struct {
+	action            AlertDeliveryActions
+	data              []query.AlertDeliveryCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AlertDelivery insert operation.
+func (a AlertDeliveryActions) BulkCreate(data []query.AlertDeliveryCreateInput) AlertDeliveryCreateManyBuilder {
+	return AlertDeliveryCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AlertDeliveryCreateManyBuilder) OnConflictDoNothing(columns ...string) AlertDeliveryCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AlertDeliveryCreateManyBuilder) Returning(columns ...string) AlertDeliveryCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AlertDeliveryCreateManyBuilder) BatchSize(n int) AlertDeliveryCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AlertDeliveryCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertDeliveryCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AlertDelivery.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AlertDelivery.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AlertDeliveryCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AlertDelivery, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AlertDelivery
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertDeliveryCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "instance_id", "event_id", "channel_id", "kind", "status", "attempts", "last_error", "next_retry_at", "sent_at", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AlertDelivery
+			if err := rows.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AlertDeliveryCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "instance_id", "event_id", "channel_id", "kind", "status", "attempts", "last_error", "next_retry_at", "sent_at", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertDeliveryCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AlertDelivery.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AlertDeliveryQueryBuilder builds a AlertDelivery query incrementally.
+type AlertDeliveryQueryBuilder struct {
+	action AlertDeliveryActions
+	opts   []query.AlertDeliveryQueryOption
+}
+
+// Query starts a staged AlertDelivery query.
+func (a AlertDeliveryActions) Query() AlertDeliveryQueryBuilder {
+	return AlertDeliveryQueryBuilder{action: a}
+}
+
+func (b AlertDeliveryQueryBuilder) withOptions(opts ...query.AlertDeliveryQueryOption) AlertDeliveryQueryBuilder {
+	next := AlertDeliveryQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AlertDeliveryQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AlertDeliveryQueryBuilder) Where(clauses ...query.AlertDeliveryWhereClause) AlertDeliveryQueryBuilder {
+	opts := make([]query.AlertDeliveryQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AlertDeliveryQueryBuilder) OrderBy(clause query.AlertDeliveryOrderByClause) AlertDeliveryQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AlertDeliveryQueryBuilder) Include(clauses ...query.AlertDeliveryIncludeClause) AlertDeliveryQueryBuilder {
+	opts := make([]query.AlertDeliveryQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AlertDeliveryQueryBuilder) Take(n int) AlertDeliveryQueryBuilder {
+	return b.withOptions(query.AlertDeliveryTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AlertDeliveryQueryBuilder) Skip(n int) AlertDeliveryQueryBuilder {
+	return b.withOptions(query.AlertDeliverySkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AlertDeliveryQueryBuilder) Do(ctx context.Context) ([]model.AlertDelivery, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AlertDeliveryQueryBuilder) First(ctx context.Context) (*model.AlertDelivery, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AlertDeliveryQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAlertDeliveryOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AlertDeliveryUpdateBuilder builds a AlertDelivery update operation incrementally.
+type AlertDeliveryUpdateBuilder struct {
+	action AlertDeliveryActions
+	wheres []query.AlertDeliveryWhereClause
+	sets   []query.AlertDeliverySetClause
+}
+
+// Update starts a staged AlertDelivery update operation.
+func (a AlertDeliveryActions) Update() AlertDeliveryUpdateBuilder {
+	return AlertDeliveryUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AlertDeliveryUpdateBuilder) Where(clauses ...query.AlertDeliveryWhereClause) AlertDeliveryUpdateBuilder {
+	next := AlertDeliveryUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AlertDeliveryWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AlertDeliverySetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AlertDeliveryUpdateBuilder) Set(sets ...query.AlertDeliverySetClause) AlertDeliveryUpdateBuilder {
+	next := AlertDeliveryUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AlertDeliveryWhereClause(nil), b.wheres...),
+		sets:   make([]query.AlertDeliverySetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AlertDeliveryUpdateBuilder) combinedWhere() (query.AlertDeliveryWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertDeliveryWhereClause{}, fmt.Errorf("AlertDelivery.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertDelivery.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AlertDeliveryUpdateBuilder) Do(ctx context.Context) (*model.AlertDelivery, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AlertDeliveryUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AlertDeliveryDeleteBuilder builds a AlertDelivery delete operation incrementally.
+type AlertDeliveryDeleteBuilder struct {
+	action AlertDeliveryActions
+	wheres []query.AlertDeliveryWhereClause
+}
+
+// Delete starts a staged AlertDelivery delete operation.
+func (a AlertDeliveryActions) Delete() AlertDeliveryDeleteBuilder {
+	return AlertDeliveryDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AlertDeliveryDeleteBuilder) Where(clauses ...query.AlertDeliveryWhereClause) AlertDeliveryDeleteBuilder {
+	next := AlertDeliveryDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AlertDeliveryWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AlertDeliveryDeleteBuilder) combinedWhere() (query.AlertDeliveryWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertDeliveryWhereClause{}, fmt.Errorf("AlertDelivery.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertDelivery.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AlertDeliveryDeleteBuilder) Do(ctx context.Context) (*model.AlertDelivery, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AlertDeliveryDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AlertDelivery records.
+func (a AlertDeliveryActions) FindMany(ctx context.Context, opts ...query.AlertDeliveryQueryOption) ([]model.AlertDelivery, error) {
+	cfg := query.ApplyAlertDeliveryOptions(opts)
+	q := "SELECT " + quotedAlertDeliveryColumns(a.client) + " FROM " + quotedAlertDeliveryTable(a.client)
+	argIdx := 0
+	where, args := buildAlertDeliveryWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAlertDeliveryField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AlertDelivery
+	for rows.Next() {
+		var item model.AlertDelivery
+		if err := rows.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertDelivery.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AlertDelivery record.
+func (a AlertDeliveryActions) FindFirst(ctx context.Context, opts ...query.AlertDeliveryQueryOption) (*model.AlertDelivery, error) {
+	opts = append(opts, query.AlertDeliveryTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AlertDelivery record by unique constraint.
+func (a AlertDeliveryActions) FindUnique(ctx context.Context, where query.AlertDeliveryWhereClause) (*model.AlertDelivery, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertDeliveryWhere(a.client, []query.AlertDeliveryWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAlertDeliveryColumns(a.client) + " FROM " + quotedAlertDeliveryTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AlertDelivery
+	if err := row.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AlertDelivery.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AlertDelivery record.
+func (a AlertDeliveryActions) CreateOne(ctx context.Context, sets ...query.AlertDeliverySetClause) (*model.AlertDelivery, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertDelivery.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAlertDeliveryField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertDeliveryTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertDeliveryColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AlertDelivery
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertDelivery.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AlertDelivery records.
+func (a AlertDeliveryActions) CreateMany(ctx context.Context, data []query.AlertDeliveryCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AlertDeliveryActions) buildAlertDeliveryCreateManySQL(data []query.AlertDeliveryCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "instance_id", "event_id", "channel_id", "kind", "status", "attempts", "last_error", "next_retry_at", "sent_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAlertDeliveryTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AlertDelivery record matching the where clause.
+func (a AlertDeliveryActions) UpdateOne(ctx context.Context, where query.AlertDeliveryWhereClause, sets ...query.AlertDeliverySetClause) (*model.AlertDelivery, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertDelivery.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertDeliveryField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertDeliveryWhere(a.client, []query.AlertDeliveryWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertDeliveryTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertDeliveryColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertDelivery
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertDelivery.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AlertDelivery records matching the where clauses.
+func (a AlertDeliveryActions) UpdateMany(ctx context.Context, wheres []query.AlertDeliveryWhereClause, sets ...query.AlertDeliverySetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AlertDelivery.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertDeliveryField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertDeliveryWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertDeliveryTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertDelivery.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AlertDelivery record.
+func (a AlertDeliveryActions) UpsertOne(ctx context.Context, where query.AlertDeliveryWhereClause, create []query.AlertDeliverySetClause, update []query.AlertDeliverySetClause) (*model.AlertDelivery, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AlertDelivery.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAlertDeliveryField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertDeliveryTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertDeliveryField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAlertDeliveryField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertDeliveryField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertDeliveryColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertDelivery
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertDelivery.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AlertDelivery record matching the where clause.
+func (a AlertDeliveryActions) DeleteOne(ctx context.Context, where query.AlertDeliveryWhereClause) (*model.AlertDelivery, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertDeliveryWhere(a.client, []query.AlertDeliveryWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAlertDeliveryTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertDeliveryColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertDelivery
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.EventId, &item.ChannelId, &item.Kind, &item.Status, &item.Attempts, &item.LastError, &item.NextRetryAt, &item.SentAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertDelivery.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AlertDelivery records matching the where clauses.
+func (a AlertDeliveryActions) DeleteMany(ctx context.Context, wheres ...query.AlertDeliveryWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertDeliveryWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAlertDeliveryTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertDelivery.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AlertDelivery records matching the where clauses.
+func (a AlertDeliveryActions) Count(ctx context.Context, wheres ...query.AlertDeliveryWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertDeliveryWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAlertDeliveryTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AlertDelivery.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AlertDelivery.
+func (a AlertDeliveryActions) Aggregate(ctx context.Context, opts ...query.AlertDeliveryAggregateOption) (*query.AlertDeliveryAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertDeliveryField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAlertDeliveryTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AlertDeliveryAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AlertDelivery.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AlertDelivery.
+func (a AlertDeliveryActions) GroupBy(ctx context.Context, fields []string, opts ...query.AlertDeliveryAggregateOption) ([]query.AlertDeliveryGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAlertDeliveryField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertDeliveryField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAlertDeliveryTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AlertDelivery.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AlertDeliveryGroupByResult
+	for rows.Next() {
+		r := query.AlertDeliveryGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AlertDelivery.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedAlertEventTable(c *Client) string { return c.quoteIdentifier("alert_events") }
+func quotedAlertEventColumns(c *Client) string {
+	cols := []string{"id", "instance_id", "type", "from_status", "to_status", "payload_json", "created_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAlertEventField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "instance_id":
+		return c.quoteIdentifier(field), nil
+	case "type":
+		return c.quoteIdentifier(field), nil
+	case "from_status":
+		return c.quoteIdentifier(field), nil
+	case "to_status":
+		return c.quoteIdentifier(field), nil
+	case "payload_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AlertEvent field %q", field)
+	}
+}
+
+// buildAlertEventWhere recursively builds a WHERE clause string and arguments.
+func buildAlertEventWhere(c *Client, wheres []query.AlertEventWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AlertEventWhereClause); ok {
+				sub, subArgs := buildAlertEventWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AlertEventWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAlertEventWhere(c, []query.AlertEventWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AlertEventWhereClause); ok {
+				sub, subArgs := buildAlertEventWhere(c, []query.AlertEventWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAlertEventField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AlertEventActions provides database operations for the AlertEvent model.
+type AlertEventActions struct {
+	client *Client
+}
+
+// AlertEventCreateBuilder builds a AlertEvent create operation incrementally.
+type AlertEventCreateBuilder struct {
+	action AlertEventActions
+	sets   []query.AlertEventSetClause
+}
+
+// Create starts a staged AlertEvent create operation.
+func (a AlertEventActions) Create() AlertEventCreateBuilder {
+	return AlertEventCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AlertEventCreateBuilder) Set(sets ...query.AlertEventSetClause) AlertEventCreateBuilder {
+	next := AlertEventCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AlertEventSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AlertEventCreateBuilder) Do(ctx context.Context) (*model.AlertEvent, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AlertEventCreateManyBuilder builds a bulk AlertEvent insert operation.
+type AlertEventCreateManyBuilder struct {
+	action            AlertEventActions
+	data              []query.AlertEventCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AlertEvent insert operation.
+func (a AlertEventActions) BulkCreate(data []query.AlertEventCreateInput) AlertEventCreateManyBuilder {
+	return AlertEventCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AlertEventCreateManyBuilder) OnConflictDoNothing(columns ...string) AlertEventCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AlertEventCreateManyBuilder) Returning(columns ...string) AlertEventCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AlertEventCreateManyBuilder) BatchSize(n int) AlertEventCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AlertEventCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertEventCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AlertEvent.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AlertEvent.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AlertEventCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AlertEvent, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AlertEvent
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertEventCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "instance_id", "type", "from_status", "to_status", "payload_json", "created_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AlertEvent
+			if err := rows.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AlertEventCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "instance_id", "type", "from_status", "to_status", "payload_json", "created_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertEventCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AlertEvent.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AlertEventQueryBuilder builds a AlertEvent query incrementally.
+type AlertEventQueryBuilder struct {
+	action AlertEventActions
+	opts   []query.AlertEventQueryOption
+}
+
+// Query starts a staged AlertEvent query.
+func (a AlertEventActions) Query() AlertEventQueryBuilder {
+	return AlertEventQueryBuilder{action: a}
+}
+
+func (b AlertEventQueryBuilder) withOptions(opts ...query.AlertEventQueryOption) AlertEventQueryBuilder {
+	next := AlertEventQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AlertEventQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AlertEventQueryBuilder) Where(clauses ...query.AlertEventWhereClause) AlertEventQueryBuilder {
+	opts := make([]query.AlertEventQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AlertEventQueryBuilder) OrderBy(clause query.AlertEventOrderByClause) AlertEventQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AlertEventQueryBuilder) Include(clauses ...query.AlertEventIncludeClause) AlertEventQueryBuilder {
+	opts := make([]query.AlertEventQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AlertEventQueryBuilder) Take(n int) AlertEventQueryBuilder {
+	return b.withOptions(query.AlertEventTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AlertEventQueryBuilder) Skip(n int) AlertEventQueryBuilder {
+	return b.withOptions(query.AlertEventSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AlertEventQueryBuilder) Do(ctx context.Context) ([]model.AlertEvent, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AlertEventQueryBuilder) First(ctx context.Context) (*model.AlertEvent, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AlertEventQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAlertEventOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AlertEventUpdateBuilder builds a AlertEvent update operation incrementally.
+type AlertEventUpdateBuilder struct {
+	action AlertEventActions
+	wheres []query.AlertEventWhereClause
+	sets   []query.AlertEventSetClause
+}
+
+// Update starts a staged AlertEvent update operation.
+func (a AlertEventActions) Update() AlertEventUpdateBuilder {
+	return AlertEventUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AlertEventUpdateBuilder) Where(clauses ...query.AlertEventWhereClause) AlertEventUpdateBuilder {
+	next := AlertEventUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AlertEventWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AlertEventSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AlertEventUpdateBuilder) Set(sets ...query.AlertEventSetClause) AlertEventUpdateBuilder {
+	next := AlertEventUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AlertEventWhereClause(nil), b.wheres...),
+		sets:   make([]query.AlertEventSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AlertEventUpdateBuilder) combinedWhere() (query.AlertEventWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertEventWhereClause{}, fmt.Errorf("AlertEvent.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertEvent.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AlertEventUpdateBuilder) Do(ctx context.Context) (*model.AlertEvent, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AlertEventUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AlertEventDeleteBuilder builds a AlertEvent delete operation incrementally.
+type AlertEventDeleteBuilder struct {
+	action AlertEventActions
+	wheres []query.AlertEventWhereClause
+}
+
+// Delete starts a staged AlertEvent delete operation.
+func (a AlertEventActions) Delete() AlertEventDeleteBuilder {
+	return AlertEventDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AlertEventDeleteBuilder) Where(clauses ...query.AlertEventWhereClause) AlertEventDeleteBuilder {
+	next := AlertEventDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AlertEventWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AlertEventDeleteBuilder) combinedWhere() (query.AlertEventWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertEventWhereClause{}, fmt.Errorf("AlertEvent.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertEvent.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AlertEventDeleteBuilder) Do(ctx context.Context) (*model.AlertEvent, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AlertEventDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AlertEvent records.
+func (a AlertEventActions) FindMany(ctx context.Context, opts ...query.AlertEventQueryOption) ([]model.AlertEvent, error) {
+	cfg := query.ApplyAlertEventOptions(opts)
+	q := "SELECT " + quotedAlertEventColumns(a.client) + " FROM " + quotedAlertEventTable(a.client)
+	argIdx := 0
+	where, args := buildAlertEventWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAlertEventField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AlertEvent
+	for rows.Next() {
+		var item model.AlertEvent
+		if err := rows.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("AlertEvent.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AlertEvent record.
+func (a AlertEventActions) FindFirst(ctx context.Context, opts ...query.AlertEventQueryOption) (*model.AlertEvent, error) {
+	opts = append(opts, query.AlertEventTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AlertEvent record by unique constraint.
+func (a AlertEventActions) FindUnique(ctx context.Context, where query.AlertEventWhereClause) (*model.AlertEvent, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertEventWhere(a.client, []query.AlertEventWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAlertEventColumns(a.client) + " FROM " + quotedAlertEventTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AlertEvent
+	if err := row.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AlertEvent.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AlertEvent record.
+func (a AlertEventActions) CreateOne(ctx context.Context, sets ...query.AlertEventSetClause) (*model.AlertEvent, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertEvent.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAlertEventField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertEventTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertEventColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AlertEvent
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("AlertEvent.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AlertEvent records.
+func (a AlertEventActions) CreateMany(ctx context.Context, data []query.AlertEventCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AlertEventActions) buildAlertEventCreateManySQL(data []query.AlertEventCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "instance_id", "type", "from_status", "to_status", "payload_json", "created_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAlertEventTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AlertEvent record matching the where clause.
+func (a AlertEventActions) UpdateOne(ctx context.Context, where query.AlertEventWhereClause, sets ...query.AlertEventSetClause) (*model.AlertEvent, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertEvent.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertEventField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertEventWhere(a.client, []query.AlertEventWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertEventTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertEventColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertEvent
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertEvent.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AlertEvent records matching the where clauses.
+func (a AlertEventActions) UpdateMany(ctx context.Context, wheres []query.AlertEventWhereClause, sets ...query.AlertEventSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AlertEvent.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertEventField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertEventWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertEventTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertEvent.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AlertEvent record.
+func (a AlertEventActions) UpsertOne(ctx context.Context, where query.AlertEventWhereClause, create []query.AlertEventSetClause, update []query.AlertEventSetClause) (*model.AlertEvent, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AlertEvent.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAlertEventField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertEventTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertEventField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAlertEventField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertEventField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertEventColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertEvent
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+			return nil, fmt.Errorf("AlertEvent.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AlertEvent record matching the where clause.
+func (a AlertEventActions) DeleteOne(ctx context.Context, where query.AlertEventWhereClause) (*model.AlertEvent, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertEventWhere(a.client, []query.AlertEventWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAlertEventTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertEventColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertEvent
+		if err := row.Scan(&item.Id, &item.InstanceId, &item.Type, &item.FromStatus, &item.ToStatus, &item.PayloadJson, &item.CreatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertEvent.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AlertEvent records matching the where clauses.
+func (a AlertEventActions) DeleteMany(ctx context.Context, wheres ...query.AlertEventWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertEventWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAlertEventTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertEvent.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AlertEvent records matching the where clauses.
+func (a AlertEventActions) Count(ctx context.Context, wheres ...query.AlertEventWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertEventWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAlertEventTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AlertEvent.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AlertEvent.
+func (a AlertEventActions) Aggregate(ctx context.Context, opts ...query.AlertEventAggregateOption) (*query.AlertEventAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertEventField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAlertEventTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AlertEventAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AlertEvent.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AlertEvent.
+func (a AlertEventActions) GroupBy(ctx context.Context, fields []string, opts ...query.AlertEventAggregateOption) ([]query.AlertEventGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAlertEventField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertEventField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAlertEventTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AlertEvent.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AlertEventGroupByResult
+	for rows.Next() {
+		r := query.AlertEventGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AlertEvent.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedAlertInstanceTable(c *Client) string { return c.quoteIdentifier("alert_instances") }
+func quotedAlertInstanceColumns(c *Client) string {
+	cols := []string{"id", "rule_id", "cluster_id", "kind", "fingerprint", "status", "severity", "title", "detail_json", "first_seen_at", "last_seen_at", "fired_at", "acked_at", "acked_by", "resolved_at", "resolved_reason", "suppressed_until_clear", "notify_count", "last_notified_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAlertInstanceField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "rule_id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "kind":
+		return c.quoteIdentifier(field), nil
+	case "fingerprint":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "severity":
+		return c.quoteIdentifier(field), nil
+	case "title":
+		return c.quoteIdentifier(field), nil
+	case "detail_json":
+		return c.quoteIdentifier(field), nil
+	case "first_seen_at":
+		return c.quoteIdentifier(field), nil
+	case "last_seen_at":
+		return c.quoteIdentifier(field), nil
+	case "fired_at":
+		return c.quoteIdentifier(field), nil
+	case "acked_at":
+		return c.quoteIdentifier(field), nil
+	case "acked_by":
+		return c.quoteIdentifier(field), nil
+	case "resolved_at":
+		return c.quoteIdentifier(field), nil
+	case "resolved_reason":
+		return c.quoteIdentifier(field), nil
+	case "suppressed_until_clear":
+		return c.quoteIdentifier(field), nil
+	case "notify_count":
+		return c.quoteIdentifier(field), nil
+	case "last_notified_at":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AlertInstance field %q", field)
+	}
+}
+
+// buildAlertInstanceWhere recursively builds a WHERE clause string and arguments.
+func buildAlertInstanceWhere(c *Client, wheres []query.AlertInstanceWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AlertInstanceWhereClause); ok {
+				sub, subArgs := buildAlertInstanceWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AlertInstanceWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAlertInstanceWhere(c, []query.AlertInstanceWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AlertInstanceWhereClause); ok {
+				sub, subArgs := buildAlertInstanceWhere(c, []query.AlertInstanceWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAlertInstanceField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AlertInstanceActions provides database operations for the AlertInstance model.
+type AlertInstanceActions struct {
+	client *Client
+}
+
+// AlertInstanceCreateBuilder builds a AlertInstance create operation incrementally.
+type AlertInstanceCreateBuilder struct {
+	action AlertInstanceActions
+	sets   []query.AlertInstanceSetClause
+}
+
+// Create starts a staged AlertInstance create operation.
+func (a AlertInstanceActions) Create() AlertInstanceCreateBuilder {
+	return AlertInstanceCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AlertInstanceCreateBuilder) Set(sets ...query.AlertInstanceSetClause) AlertInstanceCreateBuilder {
+	next := AlertInstanceCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AlertInstanceSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AlertInstanceCreateBuilder) Do(ctx context.Context) (*model.AlertInstance, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AlertInstanceCreateManyBuilder builds a bulk AlertInstance insert operation.
+type AlertInstanceCreateManyBuilder struct {
+	action            AlertInstanceActions
+	data              []query.AlertInstanceCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AlertInstance insert operation.
+func (a AlertInstanceActions) BulkCreate(data []query.AlertInstanceCreateInput) AlertInstanceCreateManyBuilder {
+	return AlertInstanceCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AlertInstanceCreateManyBuilder) OnConflictDoNothing(columns ...string) AlertInstanceCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AlertInstanceCreateManyBuilder) Returning(columns ...string) AlertInstanceCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AlertInstanceCreateManyBuilder) BatchSize(n int) AlertInstanceCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AlertInstanceCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertInstanceCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AlertInstance.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AlertInstance.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AlertInstanceCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AlertInstance, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AlertInstance
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertInstanceCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "rule_id", "cluster_id", "kind", "fingerprint", "status", "severity", "title", "detail_json", "first_seen_at", "last_seen_at", "fired_at", "acked_at", "acked_by", "resolved_at", "resolved_reason", "suppressed_until_clear", "notify_count", "last_notified_at", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AlertInstance
+			if err := rows.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AlertInstanceCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "rule_id", "cluster_id", "kind", "fingerprint", "status", "severity", "title", "detail_json", "first_seen_at", "last_seen_at", "fired_at", "acked_at", "acked_by", "resolved_at", "resolved_reason", "suppressed_until_clear", "notify_count", "last_notified_at", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertInstanceCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AlertInstance.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AlertInstanceQueryBuilder builds a AlertInstance query incrementally.
+type AlertInstanceQueryBuilder struct {
+	action AlertInstanceActions
+	opts   []query.AlertInstanceQueryOption
+}
+
+// Query starts a staged AlertInstance query.
+func (a AlertInstanceActions) Query() AlertInstanceQueryBuilder {
+	return AlertInstanceQueryBuilder{action: a}
+}
+
+func (b AlertInstanceQueryBuilder) withOptions(opts ...query.AlertInstanceQueryOption) AlertInstanceQueryBuilder {
+	next := AlertInstanceQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AlertInstanceQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AlertInstanceQueryBuilder) Where(clauses ...query.AlertInstanceWhereClause) AlertInstanceQueryBuilder {
+	opts := make([]query.AlertInstanceQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AlertInstanceQueryBuilder) OrderBy(clause query.AlertInstanceOrderByClause) AlertInstanceQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AlertInstanceQueryBuilder) Include(clauses ...query.AlertInstanceIncludeClause) AlertInstanceQueryBuilder {
+	opts := make([]query.AlertInstanceQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AlertInstanceQueryBuilder) Take(n int) AlertInstanceQueryBuilder {
+	return b.withOptions(query.AlertInstanceTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AlertInstanceQueryBuilder) Skip(n int) AlertInstanceQueryBuilder {
+	return b.withOptions(query.AlertInstanceSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AlertInstanceQueryBuilder) Do(ctx context.Context) ([]model.AlertInstance, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AlertInstanceQueryBuilder) First(ctx context.Context) (*model.AlertInstance, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AlertInstanceQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAlertInstanceOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AlertInstanceUpdateBuilder builds a AlertInstance update operation incrementally.
+type AlertInstanceUpdateBuilder struct {
+	action AlertInstanceActions
+	wheres []query.AlertInstanceWhereClause
+	sets   []query.AlertInstanceSetClause
+}
+
+// Update starts a staged AlertInstance update operation.
+func (a AlertInstanceActions) Update() AlertInstanceUpdateBuilder {
+	return AlertInstanceUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AlertInstanceUpdateBuilder) Where(clauses ...query.AlertInstanceWhereClause) AlertInstanceUpdateBuilder {
+	next := AlertInstanceUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AlertInstanceWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AlertInstanceSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AlertInstanceUpdateBuilder) Set(sets ...query.AlertInstanceSetClause) AlertInstanceUpdateBuilder {
+	next := AlertInstanceUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AlertInstanceWhereClause(nil), b.wheres...),
+		sets:   make([]query.AlertInstanceSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AlertInstanceUpdateBuilder) combinedWhere() (query.AlertInstanceWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertInstanceWhereClause{}, fmt.Errorf("AlertInstance.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertInstance.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AlertInstanceUpdateBuilder) Do(ctx context.Context) (*model.AlertInstance, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AlertInstanceUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AlertInstanceDeleteBuilder builds a AlertInstance delete operation incrementally.
+type AlertInstanceDeleteBuilder struct {
+	action AlertInstanceActions
+	wheres []query.AlertInstanceWhereClause
+}
+
+// Delete starts a staged AlertInstance delete operation.
+func (a AlertInstanceActions) Delete() AlertInstanceDeleteBuilder {
+	return AlertInstanceDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AlertInstanceDeleteBuilder) Where(clauses ...query.AlertInstanceWhereClause) AlertInstanceDeleteBuilder {
+	next := AlertInstanceDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AlertInstanceWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AlertInstanceDeleteBuilder) combinedWhere() (query.AlertInstanceWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertInstanceWhereClause{}, fmt.Errorf("AlertInstance.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertInstance.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AlertInstanceDeleteBuilder) Do(ctx context.Context) (*model.AlertInstance, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AlertInstanceDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AlertInstance records.
+func (a AlertInstanceActions) FindMany(ctx context.Context, opts ...query.AlertInstanceQueryOption) ([]model.AlertInstance, error) {
+	cfg := query.ApplyAlertInstanceOptions(opts)
+	q := "SELECT " + quotedAlertInstanceColumns(a.client) + " FROM " + quotedAlertInstanceTable(a.client)
+	argIdx := 0
+	where, args := buildAlertInstanceWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAlertInstanceField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AlertInstance
+	for rows.Next() {
+		var item model.AlertInstance
+		if err := rows.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertInstance.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AlertInstance record.
+func (a AlertInstanceActions) FindFirst(ctx context.Context, opts ...query.AlertInstanceQueryOption) (*model.AlertInstance, error) {
+	opts = append(opts, query.AlertInstanceTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AlertInstance record by unique constraint.
+func (a AlertInstanceActions) FindUnique(ctx context.Context, where query.AlertInstanceWhereClause) (*model.AlertInstance, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertInstanceWhere(a.client, []query.AlertInstanceWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAlertInstanceColumns(a.client) + " FROM " + quotedAlertInstanceTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AlertInstance
+	if err := row.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AlertInstance.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AlertInstance record.
+func (a AlertInstanceActions) CreateOne(ctx context.Context, sets ...query.AlertInstanceSetClause) (*model.AlertInstance, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertInstance.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAlertInstanceField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertInstanceTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertInstanceColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AlertInstance
+		if err := row.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertInstance.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AlertInstance records.
+func (a AlertInstanceActions) CreateMany(ctx context.Context, data []query.AlertInstanceCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AlertInstanceActions) buildAlertInstanceCreateManySQL(data []query.AlertInstanceCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "rule_id", "cluster_id", "kind", "fingerprint", "status", "severity", "title", "detail_json", "first_seen_at", "last_seen_at", "fired_at", "acked_at", "acked_by", "resolved_at", "resolved_reason", "suppressed_until_clear", "notify_count", "last_notified_at", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAlertInstanceTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AlertInstance record matching the where clause.
+func (a AlertInstanceActions) UpdateOne(ctx context.Context, where query.AlertInstanceWhereClause, sets ...query.AlertInstanceSetClause) (*model.AlertInstance, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertInstance.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertInstanceField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertInstanceWhere(a.client, []query.AlertInstanceWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertInstanceTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertInstanceColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertInstance
+		if err := row.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertInstance.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AlertInstance records matching the where clauses.
+func (a AlertInstanceActions) UpdateMany(ctx context.Context, wheres []query.AlertInstanceWhereClause, sets ...query.AlertInstanceSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AlertInstance.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertInstanceField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertInstanceWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertInstanceTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertInstance.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AlertInstance record.
+func (a AlertInstanceActions) UpsertOne(ctx context.Context, where query.AlertInstanceWhereClause, create []query.AlertInstanceSetClause, update []query.AlertInstanceSetClause) (*model.AlertInstance, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AlertInstance.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAlertInstanceField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertInstanceTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertInstanceField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAlertInstanceField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertInstanceField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertInstanceColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertInstance
+		if err := row.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertInstance.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AlertInstance record matching the where clause.
+func (a AlertInstanceActions) DeleteOne(ctx context.Context, where query.AlertInstanceWhereClause) (*model.AlertInstance, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertInstanceWhere(a.client, []query.AlertInstanceWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAlertInstanceTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertInstanceColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertInstance
+		if err := row.Scan(&item.Id, &item.RuleId, &item.ClusterId, &item.Kind, &item.Fingerprint, &item.Status, &item.Severity, &item.Title, &item.DetailJson, &item.FirstSeenAt, &item.LastSeenAt, &item.FiredAt, &item.AckedAt, &item.AckedBy, &item.ResolvedAt, &item.ResolvedReason, &item.SuppressedUntilClear, &item.NotifyCount, &item.LastNotifiedAt, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertInstance.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AlertInstance records matching the where clauses.
+func (a AlertInstanceActions) DeleteMany(ctx context.Context, wheres ...query.AlertInstanceWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertInstanceWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAlertInstanceTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertInstance.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AlertInstance records matching the where clauses.
+func (a AlertInstanceActions) Count(ctx context.Context, wheres ...query.AlertInstanceWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertInstanceWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAlertInstanceTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AlertInstance.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AlertInstance.
+func (a AlertInstanceActions) Aggregate(ctx context.Context, opts ...query.AlertInstanceAggregateOption) (*query.AlertInstanceAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertInstanceField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAlertInstanceTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AlertInstanceAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AlertInstance.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AlertInstance.
+func (a AlertInstanceActions) GroupBy(ctx context.Context, fields []string, opts ...query.AlertInstanceAggregateOption) ([]query.AlertInstanceGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAlertInstanceField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertInstanceField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAlertInstanceTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AlertInstance.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AlertInstanceGroupByResult
+	for rows.Next() {
+		r := query.AlertInstanceGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AlertInstance.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedAlertRuleTable(c *Client) string { return c.quoteIdentifier("alert_rules") }
+func quotedAlertRuleColumns(c *Client) string {
+	cols := []string{"id", "cluster_id", "kind", "enabled", "severity", "params_json", "for_seconds", "cooldown_seconds", "muted_until", "channels_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAlertRuleField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "cluster_id":
+		return c.quoteIdentifier(field), nil
+	case "kind":
+		return c.quoteIdentifier(field), nil
+	case "enabled":
+		return c.quoteIdentifier(field), nil
+	case "severity":
+		return c.quoteIdentifier(field), nil
+	case "params_json":
+		return c.quoteIdentifier(field), nil
+	case "for_seconds":
+		return c.quoteIdentifier(field), nil
+	case "cooldown_seconds":
+		return c.quoteIdentifier(field), nil
+	case "muted_until":
+		return c.quoteIdentifier(field), nil
+	case "channels_json":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AlertRule field %q", field)
+	}
+}
+
+// buildAlertRuleWhere recursively builds a WHERE clause string and arguments.
+func buildAlertRuleWhere(c *Client, wheres []query.AlertRuleWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AlertRuleWhereClause); ok {
+				sub, subArgs := buildAlertRuleWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AlertRuleWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAlertRuleWhere(c, []query.AlertRuleWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AlertRuleWhereClause); ok {
+				sub, subArgs := buildAlertRuleWhere(c, []query.AlertRuleWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAlertRuleField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AlertRuleActions provides database operations for the AlertRule model.
+type AlertRuleActions struct {
+	client *Client
+}
+
+// AlertRuleCreateBuilder builds a AlertRule create operation incrementally.
+type AlertRuleCreateBuilder struct {
+	action AlertRuleActions
+	sets   []query.AlertRuleSetClause
+}
+
+// Create starts a staged AlertRule create operation.
+func (a AlertRuleActions) Create() AlertRuleCreateBuilder {
+	return AlertRuleCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AlertRuleCreateBuilder) Set(sets ...query.AlertRuleSetClause) AlertRuleCreateBuilder {
+	next := AlertRuleCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AlertRuleSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AlertRuleCreateBuilder) Do(ctx context.Context) (*model.AlertRule, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AlertRuleCreateManyBuilder builds a bulk AlertRule insert operation.
+type AlertRuleCreateManyBuilder struct {
+	action            AlertRuleActions
+	data              []query.AlertRuleCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AlertRule insert operation.
+func (a AlertRuleActions) BulkCreate(data []query.AlertRuleCreateInput) AlertRuleCreateManyBuilder {
+	return AlertRuleCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AlertRuleCreateManyBuilder) OnConflictDoNothing(columns ...string) AlertRuleCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AlertRuleCreateManyBuilder) Returning(columns ...string) AlertRuleCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AlertRuleCreateManyBuilder) BatchSize(n int) AlertRuleCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AlertRuleCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertRuleCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AlertRule.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AlertRule.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AlertRuleCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AlertRule, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AlertRule
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertRuleCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "kind", "enabled", "severity", "params_json", "for_seconds", "cooldown_seconds", "muted_until", "channels_json", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AlertRule
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AlertRuleCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "cluster_id", "kind", "enabled", "severity", "params_json", "for_seconds", "cooldown_seconds", "muted_until", "channels_json", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAlertRuleCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AlertRule.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AlertRuleQueryBuilder builds a AlertRule query incrementally.
+type AlertRuleQueryBuilder struct {
+	action AlertRuleActions
+	opts   []query.AlertRuleQueryOption
+}
+
+// Query starts a staged AlertRule query.
+func (a AlertRuleActions) Query() AlertRuleQueryBuilder {
+	return AlertRuleQueryBuilder{action: a}
+}
+
+func (b AlertRuleQueryBuilder) withOptions(opts ...query.AlertRuleQueryOption) AlertRuleQueryBuilder {
+	next := AlertRuleQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AlertRuleQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AlertRuleQueryBuilder) Where(clauses ...query.AlertRuleWhereClause) AlertRuleQueryBuilder {
+	opts := make([]query.AlertRuleQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AlertRuleQueryBuilder) OrderBy(clause query.AlertRuleOrderByClause) AlertRuleQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AlertRuleQueryBuilder) Include(clauses ...query.AlertRuleIncludeClause) AlertRuleQueryBuilder {
+	opts := make([]query.AlertRuleQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AlertRuleQueryBuilder) Take(n int) AlertRuleQueryBuilder {
+	return b.withOptions(query.AlertRuleTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AlertRuleQueryBuilder) Skip(n int) AlertRuleQueryBuilder {
+	return b.withOptions(query.AlertRuleSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AlertRuleQueryBuilder) Do(ctx context.Context) ([]model.AlertRule, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AlertRuleQueryBuilder) First(ctx context.Context) (*model.AlertRule, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AlertRuleQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAlertRuleOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AlertRuleUpdateBuilder builds a AlertRule update operation incrementally.
+type AlertRuleUpdateBuilder struct {
+	action AlertRuleActions
+	wheres []query.AlertRuleWhereClause
+	sets   []query.AlertRuleSetClause
+}
+
+// Update starts a staged AlertRule update operation.
+func (a AlertRuleActions) Update() AlertRuleUpdateBuilder {
+	return AlertRuleUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AlertRuleUpdateBuilder) Where(clauses ...query.AlertRuleWhereClause) AlertRuleUpdateBuilder {
+	next := AlertRuleUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AlertRuleWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AlertRuleSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AlertRuleUpdateBuilder) Set(sets ...query.AlertRuleSetClause) AlertRuleUpdateBuilder {
+	next := AlertRuleUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AlertRuleWhereClause(nil), b.wheres...),
+		sets:   make([]query.AlertRuleSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AlertRuleUpdateBuilder) combinedWhere() (query.AlertRuleWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertRuleWhereClause{}, fmt.Errorf("AlertRule.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertRule.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AlertRuleUpdateBuilder) Do(ctx context.Context) (*model.AlertRule, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AlertRuleUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AlertRuleDeleteBuilder builds a AlertRule delete operation incrementally.
+type AlertRuleDeleteBuilder struct {
+	action AlertRuleActions
+	wheres []query.AlertRuleWhereClause
+}
+
+// Delete starts a staged AlertRule delete operation.
+func (a AlertRuleActions) Delete() AlertRuleDeleteBuilder {
+	return AlertRuleDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AlertRuleDeleteBuilder) Where(clauses ...query.AlertRuleWhereClause) AlertRuleDeleteBuilder {
+	next := AlertRuleDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AlertRuleWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AlertRuleDeleteBuilder) combinedWhere() (query.AlertRuleWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AlertRuleWhereClause{}, fmt.Errorf("AlertRule.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AlertRule.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AlertRuleDeleteBuilder) Do(ctx context.Context) (*model.AlertRule, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AlertRuleDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AlertRule records.
+func (a AlertRuleActions) FindMany(ctx context.Context, opts ...query.AlertRuleQueryOption) ([]model.AlertRule, error) {
+	cfg := query.ApplyAlertRuleOptions(opts)
+	q := "SELECT " + quotedAlertRuleColumns(a.client) + " FROM " + quotedAlertRuleTable(a.client)
+	argIdx := 0
+	where, args := buildAlertRuleWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAlertRuleField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AlertRule
+	for rows.Next() {
+		var item model.AlertRule
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertRule.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AlertRule record.
+func (a AlertRuleActions) FindFirst(ctx context.Context, opts ...query.AlertRuleQueryOption) (*model.AlertRule, error) {
+	opts = append(opts, query.AlertRuleTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AlertRule record by unique constraint.
+func (a AlertRuleActions) FindUnique(ctx context.Context, where query.AlertRuleWhereClause) (*model.AlertRule, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertRuleWhere(a.client, []query.AlertRuleWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAlertRuleColumns(a.client) + " FROM " + quotedAlertRuleTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AlertRule
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AlertRule.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AlertRule record.
+func (a AlertRuleActions) CreateOne(ctx context.Context, sets ...query.AlertRuleSetClause) (*model.AlertRule, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertRule.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAlertRuleField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertRuleTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertRuleColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AlertRule
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertRule.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AlertRule records.
+func (a AlertRuleActions) CreateMany(ctx context.Context, data []query.AlertRuleCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AlertRuleActions) buildAlertRuleCreateManySQL(data []query.AlertRuleCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "cluster_id", "kind", "enabled", "severity", "params_json", "for_seconds", "cooldown_seconds", "muted_until", "channels_json", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAlertRuleTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AlertRule record matching the where clause.
+func (a AlertRuleActions) UpdateOne(ctx context.Context, where query.AlertRuleWhereClause, sets ...query.AlertRuleSetClause) (*model.AlertRule, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AlertRule.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertRuleField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertRuleWhere(a.client, []query.AlertRuleWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertRuleTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertRuleColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertRule
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertRule.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AlertRule records matching the where clauses.
+func (a AlertRuleActions) UpdateMany(ctx context.Context, wheres []query.AlertRuleWhereClause, sets ...query.AlertRuleSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AlertRule.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAlertRuleField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAlertRuleWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAlertRuleTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertRule.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AlertRule record.
+func (a AlertRuleActions) UpsertOne(ctx context.Context, where query.AlertRuleWhereClause, create []query.AlertRuleSetClause, update []query.AlertRuleSetClause) (*model.AlertRule, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AlertRule.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAlertRuleField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAlertRuleTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertRuleField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAlertRuleField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAlertRuleField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertRuleColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertRule
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AlertRule.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AlertRule record matching the where clause.
+func (a AlertRuleActions) DeleteOne(ctx context.Context, where query.AlertRuleWhereClause) (*model.AlertRule, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertRuleWhere(a.client, []query.AlertRuleWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAlertRuleTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAlertRuleColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AlertRule
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Kind, &item.Enabled, &item.Severity, &item.ParamsJson, &item.ForSeconds, &item.CooldownSeconds, &item.MutedUntil, &item.ChannelsJson, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AlertRule.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AlertRule records matching the where clauses.
+func (a AlertRuleActions) DeleteMany(ctx context.Context, wheres ...query.AlertRuleWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertRuleWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAlertRuleTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AlertRule.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AlertRule records matching the where clauses.
+func (a AlertRuleActions) Count(ctx context.Context, wheres ...query.AlertRuleWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAlertRuleWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAlertRuleTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AlertRule.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AlertRule.
+func (a AlertRuleActions) Aggregate(ctx context.Context, opts ...query.AlertRuleAggregateOption) (*query.AlertRuleAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertRuleField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAlertRuleTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AlertRuleAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AlertRule.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AlertRule.
+func (a AlertRuleActions) GroupBy(ctx context.Context, fields []string, opts ...query.AlertRuleAggregateOption) ([]query.AlertRuleGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAlertRuleField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAlertRuleField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAlertRuleTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AlertRule.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AlertRuleGroupByResult
+	for rows.Next() {
+		r := query.AlertRuleGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AlertRule.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
@@ -22000,7 +25956,7 @@ func (a LogpushDestinationActions) GroupBy(ctx context.Context, fields []string,
 
 func quotedNodeTable(c *Client) string { return c.quoteIdentifier("nodes") }
 func quotedNodeColumns(c *Client) string {
-	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "queue_records", "queue_bytes", "dropped_logs", "dropped_logs_at", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = c.quoteIdentifier(cols[i])
 	}
@@ -22026,6 +25982,14 @@ func quoteNodeField(c *Client, field string) (string, error) {
 	case "redis_available":
 		return c.quoteIdentifier(field), nil
 	case "redis_status_error":
+		return c.quoteIdentifier(field), nil
+	case "queue_records":
+		return c.quoteIdentifier(field), nil
+	case "queue_bytes":
+		return c.quoteIdentifier(field), nil
+	case "dropped_logs":
+		return c.quoteIdentifier(field), nil
+	case "dropped_logs_at":
 		return c.quoteIdentifier(field), nil
 	case "ssh_credential_id":
 		return c.quoteIdentifier(field), nil
@@ -22250,14 +26214,14 @@ func (b NodeCreateManyBuilder) DoReturning(ctx context.Context) ([]model.Node, e
 		if end > len(b.data) {
 			end = len(b.data)
 		}
-		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"})
+		q, args := b.action.buildNodeCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "queue_records", "queue_bytes", "dropped_logs", "dropped_logs_at", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"})
 		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
 		if err != nil {
 			return nil, fmt.Errorf("Node.BulkCreate.DoReturning: %w", err)
 		}
 		for rows.Next() {
 			var item model.Node
-			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("Node.BulkCreate.DoReturning scan: %w", err)
 			}
@@ -22284,7 +26248,7 @@ func (b NodeCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[str
 	}
 	returningColumns := b.returningColumns
 	if len(returningColumns) == 0 {
-		returningColumns = []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
+		returningColumns = []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "queue_records", "queue_bytes", "dropped_logs", "dropped_logs_at", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	}
 	batchSize := b.batchSize
 	if batchSize <= 0 || batchSize > len(b.data) {
@@ -22536,7 +26500,7 @@ func (a NodeActions) FindMany(ctx context.Context, opts ...query.NodeQueryOption
 	var results []model.Node
 	for rows.Next() {
 		var item model.Node
-		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.FindMany scan: %w", err)
 		}
 		results = append(results, item)
@@ -22568,7 +26532,7 @@ func (a NodeActions) FindUnique(ctx context.Context, where query.NodeWhereClause
 	q += " LIMIT 1"
 	row := a.client.executor.QueryRowContext(ctx, q, args...)
 	var item model.Node
-	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+	if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, nil
 		}
@@ -22599,7 +26563,7 @@ func (a NodeActions) CreateOne(ctx context.Context, sets ...query.NodeSetClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, vals...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.CreateOne: %w", err)
 		}
 		return &item, nil
@@ -22618,7 +26582,7 @@ func (a NodeActions) CreateMany(ctx context.Context, data []query.NodeCreateInpu
 }
 
 func (a NodeActions) buildNodeCreateManySQL(data []query.NodeCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
-	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
+	cols := []string{"id", "cluster_id", "name", "version", "heartbeat_at", "status", "install_error", "redis_available", "redis_status_error", "queue_records", "queue_bytes", "dropped_logs", "dropped_logs_at", "ssh_credential_id", "ssh_host", "ssh_port", "dns_priority", "online_since", "created_at", "updated_at"}
 	for i := range cols {
 		cols[i] = a.client.quoteIdentifier(cols[i])
 	}
@@ -22691,7 +26655,7 @@ func (a NodeActions) UpdateOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}
@@ -22796,7 +26760,7 @@ func (a NodeActions) UpsertOne(ctx context.Context, where query.NodeWhereClause,
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("Node.UpsertOne: %w", err)
 		}
 		return &item, nil
@@ -22820,7 +26784,7 @@ func (a NodeActions) DeleteOne(ctx context.Context, where query.NodeWhereClause)
 		q += " RETURNING " + quotedNodeColumns(a.client)
 		row := a.client.executor.QueryRowContext(ctx, q, args...)
 		var item model.Node
-		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := row.Scan(&item.Id, &item.ClusterId, &item.Name, &item.Version, &item.HeartbeatAt, &item.Status, &item.InstallError, &item.RedisAvailable, &item.RedisStatusError, &item.QueueRecords, &item.QueueBytes, &item.DroppedLogs, &item.DroppedLogsAt, &item.SshCredentialId, &item.SshHost, &item.SshPort, &item.DnsPriority, &item.OnlineSince, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			if err == sql.ErrNoRows {
 				return nil, nil
 			}

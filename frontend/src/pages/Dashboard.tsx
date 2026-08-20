@@ -10,7 +10,7 @@ import type {
 import type { DonutSlice } from '@/components/DonutChart.tsx';
 
 import { Button } from '@heroui/react';
-import { RefreshCw, Server } from 'lucide-react';
+import { LoaderCircle, RefreshCw, Server } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { RankingBars } from '@/components/RankingBars.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
 import { TimeSeriesChart } from '@/components/TimeSeriesChart.tsx';
+import { useAlertOverview } from '@/hooks/useAlertOverview.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { percentile } from '@/utils/statistics.ts';
@@ -128,6 +129,11 @@ function StatCell({
 export default function Dashboard() {
     const navigate = useNavigate();
     const { clusterId } = useCluster();
+    const {
+        overview: alertOverview,
+        loading: alertOverviewLoading,
+        error: alertOverviewError,
+    } = useAlertOverview();
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const nodeApi = useMemo(() => nodesApi(clusterId), [clusterId]);
     const siteApi = useMemo(() => sitesApi(clusterId), [clusterId]);
@@ -221,6 +227,8 @@ export default function Dashboard() {
     const refreshState = useAutoRefresh(load, Boolean(clusterId));
 
     const onlineNodes = nodes.filter((node) => node.status === 'ONLINE').length;
+    const firingAlerts =
+        alertOverview?.clusters.find((cluster) => cluster.clusterId === clusterId)?.firing ?? null;
     const chartTraffic = fillTrafficSeries(traffic, period);
     const bucketSeconds = period === '24h' ? 3600 : 86400;
     const bandwidthChart = chartTraffic.map((point) => ({
@@ -341,6 +349,26 @@ export default function Dashboard() {
                     <span className='text-xs text-muted'>Domains</span>
                     <span>{sites.reduce((sum, site) => sum + (site.domains?.length ?? 0), 0)}</span>
                 </span>
+                <button
+                    className='flex items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-surface-secondary'
+                    type='button'
+                    onClick={() => navigate('/alerts')}
+                >
+                    <span className='text-xs text-muted'>Firing alerts</span>
+                    {alertOverviewError ? (
+                        <span className='text-danger' title={alertOverviewError}>
+                            !
+                        </span>
+                    ) : alertOverviewLoading && firingAlerts === null ? (
+                        <LoaderCircle className='h-3.5 w-3.5 animate-spin text-muted' />
+                    ) : firingAlerts === null ? (
+                        <span className='text-muted'>-</span>
+                    ) : (
+                        <span className={firingAlerts > 0 ? 'text-danger' : 'text-success'}>
+                            {firingAlerts}
+                        </span>
+                    )}
+                </button>
             </div>
 
             <ContentCard noPadding>

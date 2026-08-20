@@ -196,6 +196,7 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 
 	clusterID, wasOnline, err := g.recordHeartbeat(
 		ctx, nodeID, first.Hello.CacheConfig, first.Hello.SiteVersions, first.Hello.AgentVersion, first.Hello.Redis,
+		nil,
 	)
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
@@ -293,6 +294,11 @@ func (g *Gateway) Connect(stream edgeprotocol.ManagementConnectServer) error {
 				}
 				if _, _, err := g.recordHeartbeat(
 					ctx, nodeID, message.Heartbeat.CacheConfig, message.Heartbeat.SiteVersions, "", message.Heartbeat.Redis,
+					&agentLogQueueMetrics{
+						Records: message.Heartbeat.QueueRecords,
+						Bytes:   message.Heartbeat.QueueBytes,
+						Dropped: message.Heartbeat.DroppedLogs,
+					},
 				); err != nil {
 					return status.Error(codes.Internal, err.Error())
 				}
@@ -482,6 +488,12 @@ func (g *Gateway) authorize(ctx context.Context, nodeID string, certificate *x50
 	return nil
 }
 
+type agentLogQueueMetrics struct {
+	Records uint64
+	Bytes   uint64
+	Dropped uint64
+}
+
 func (g *Gateway) recordHeartbeat(
 	ctx context.Context,
 	nodeID string,
@@ -489,12 +501,20 @@ func (g *Gateway) recordHeartbeat(
 	siteVersions map[string]uint64,
 	agentVersion string,
 	redis *edgeprotocol.RedisStatus,
+	logQueue *agentLogQueueMetrics,
 ) (string, bool, error) {
 	type nodeState struct {
 		ClusterID string `db:"cluster_id"`
 		Status    string `db:"status"`
 	}
 	var state nodeState
+	var queueRecords, queueBytes, droppedLogs *int64
+	if logQueue != nil {
+		records := int64(logQueue.Records)
+		bytes := int64(logQueue.Bytes)
+		dropped := int64(logQueue.Dropped)
+		queueRecords, queueBytes, droppedLogs = &records, &bytes, &dropped
+	}
 	err := g.db.Tx(ctx, func(tx *client.Client) error {
 		type credentialLock struct {
 			NodeID string `db:"node_id"`
@@ -513,8 +533,15 @@ func (g *Gateway) recordHeartbeat(
 		)
 		UPDATE nodes n SET status = 'ONLINE', heartbeat_at = NOW(), install_error = NULL,
 			version = CASE WHEN $2 <> '' THEN $2 ELSE n.version END, updated_at = NOW(),
-			online_since = CASE WHEN c.status <> 'ONLINE' THEN NOW() ELSE n.online_since END
-		FROM candidate c WHERE n.id = c.id RETURNING c.cluster_id, c.status`, nodeID, agentVersion)
+			online_since = CASE WHEN c.status <> 'ONLINE' THEN NOW() ELSE n.online_since END,
+			queue_records = COALESCE($3, n.queue_records),
+			queue_bytes = COALESCE($4, n.queue_bytes),
+			dropped_logs = COALESCE($5, n.dropped_logs),
+			dropped_logs_at = CASE
+				WHEN $5 IS NOT NULL AND $5 > n.dropped_logs THEN NOW()
+				ELSE n.dropped_logs_at END
+		FROM candidate c WHERE n.id = c.id RETURNING c.cluster_id, c.status`, nodeID, agentVersion,
+			queueRecords, queueBytes, droppedLogs)
 		if err != nil {
 			return err
 		}

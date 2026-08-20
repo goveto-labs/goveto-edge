@@ -1,4 +1,4 @@
-package clusters
+package notify
 
 import (
 	"bufio"
@@ -14,20 +14,31 @@ import (
 	"net/mail"
 	"net/smtp"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
 )
 
-func deliverCustomHostNotification(ctx context.Context, service string, serviceURL *url.URL, message, title string) error {
+var errResponseTooLarge = errors.New("notification response is too large")
+
+type endpointStatusError struct {
+	status string
+}
+
+func (e *endpointStatusError) Error() string {
+	return "notification endpoint returned " + e.status
+}
+
+func deliverCustomHost(ctx context.Context, service string, serviceURL *url.URL, message, title string) error {
 	if service == "smtp" {
-		return deliverSMTPNotification(ctx, serviceURL, message, title)
+		return deliverSMTP(ctx, serviceURL, message, title)
 	}
 	target, payload, headers, err := customHostHTTPRequest(service, serviceURL, message, title)
 	if err != nil {
 		return err
 	}
-	if err = notificationOutboundPolicy.ValidateURL(ctx, target, "http", "https"); err != nil {
+	if err = outboundPolicy.ValidateURL(ctx, target, "http", "https"); err != nil {
 		return err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(payload))
@@ -37,7 +48,7 @@ func deliverCustomHostNotification(ctx context.Context, service string, serviceU
 	for name, value := range headers {
 		request.Header[name] = append([]string(nil), value...)
 	}
-	return sendBoundedNotificationRequest(notificationHTTPClient, request)
+	return sendBoundedRequest(httpClient, request)
 }
 
 func customHostHTTPRequest(service string, serviceURL *url.URL, message, title string) (*url.URL, []byte, http.Header, error) {
@@ -65,17 +76,17 @@ func customHostHTTPRequest(service string, serviceURL *url.URL, message, title s
 			"icon": query.Get("icon"),
 		}
 	case "gotify":
-		path := strings.Trim(serviceURL.Path, "/")
-		token := path
+		pathValue := strings.Trim(serviceURL.Path, "/")
+		token := pathValue
 		base := ""
-		if index := strings.LastIndex(path, "/"); index >= 0 {
-			token = path[index+1:]
-			base = path[:index]
+		if index := strings.LastIndex(pathValue, "/"); index >= 0 {
+			token = pathValue[index+1:]
+			base = pathValue[:index]
 		}
 		if token == "" {
 			return nil, nil, nil, errors.New("Gotify token is required")
 		}
-		target.Path = "/" + base + "/message"
+		target.Path = path.Join("/", base, "message")
 		target.RawQuery = url.Values{"token": {token}}.Encode()
 		priority, _ := strconv.Atoi(query.Get("priority"))
 		payload = map[string]any{"message": message, "title": title, "priority": priority}
@@ -126,26 +137,126 @@ func customHostScheme(serviceURL *url.URL) string {
 	return "https"
 }
 
-func sendBoundedNotificationRequest(httpClient *http.Client, request *http.Request) error {
-	response, err := httpClient.Do(request)
+func sendBoundedRequest(client *http.Client, request *http.Request) error {
+	response, err := client.Do(request)
 	if err != nil {
 		return err
 	}
 	defer response.Body.Close()
-	read, err := io.Copy(io.Discard, io.LimitReader(response.Body, notificationResponseLimit+1))
+	read, err := io.Copy(io.Discard, io.LimitReader(response.Body, ResponseLimit+1))
 	if err != nil {
 		return err
 	}
-	if read > notificationResponseLimit {
-		return errors.New("notification response is too large")
+	if read > ResponseLimit {
+		return errResponseTooLarge
 	}
 	if response.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("notification endpoint returned %s", response.Status)
+		return &endpointStatusError{status: response.Status}
 	}
 	return nil
 }
 
-func deliverSMTPNotification(ctx context.Context, serviceURL *url.URL, message, title string) error {
+func deliverGeneric(ctx context.Context, serviceURL *url.URL, message, title string) error {
+	return deliverGenericWithClient(ctx, httpClient, serviceURL, message, title)
+}
+
+func deliverGenericWithClient(ctx context.Context, client *http.Client, serviceURL *url.URL, message, title string) error {
+	target := *serviceURL
+	switch {
+	case strings.HasPrefix(strings.ToLower(target.Scheme), "generic+"):
+		target.Scheme = target.Scheme[len("generic+"):]
+	case strings.EqualFold(target.Scheme, "generic"):
+		target.Scheme = "https"
+	default:
+		return errors.New("invalid generic webhook scheme")
+	}
+	query := target.Query()
+	method := strings.ToUpper(strings.TrimSpace(query.Get("method")))
+	if method == "" {
+		method = http.MethodPost
+	}
+	if method != http.MethodPost {
+		return errors.New("generic webhooks only support POST")
+	}
+	contentType := strings.TrimSpace(query.Get("contenttype"))
+	if contentType == "" {
+		contentType = "application/json"
+	}
+	body := []byte(message)
+	if strings.EqualFold(query.Get("template"), "json") {
+		messageKey := strings.TrimSpace(query.Get("messagekey"))
+		if messageKey == "" {
+			messageKey = "message"
+		}
+		titleKey := strings.TrimSpace(query.Get("titlekey"))
+		if titleKey == "" {
+			titleKey = "title"
+		}
+		payload := map[string]string{messageKey: message, titleKey: title}
+		for key, values := range query {
+			if strings.HasPrefix(key, "$") && len(values) > 0 {
+				payload[strings.TrimPrefix(key, "$")] = values[0]
+			}
+		}
+		var err error
+		body, err = json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+	} else if template := strings.TrimSpace(query.Get("template")); template != "" {
+		return fmt.Errorf("generic webhook template %q is not supported", template)
+	}
+	for key := range query {
+		switch {
+		case strings.HasPrefix(key, "@"), strings.HasPrefix(key, "$"), isGenericConfigKey(key):
+			query.Del(key)
+		case strings.HasPrefix(key, "__"):
+			values := query[key]
+			query.Del(key)
+			query[strings.TrimPrefix(key, "__")] = values
+		}
+	}
+	target.RawQuery = query.Encode()
+	if err := outboundPolicy.ValidateURL(ctx, &target, "http", "https"); err != nil {
+		return err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	request.Header.Set("Content-Type", contentType)
+	request.Header.Set("Accept", contentType)
+	for key, values := range serviceURL.Query() {
+		if strings.HasPrefix(key, "@") && len(values) > 0 {
+			name := http.CanonicalHeaderKey(strings.TrimPrefix(key, "@"))
+			if isForbiddenWebhookHeader(name) {
+				return fmt.Errorf("generic webhook header %q is not allowed", name)
+			}
+			request.Header.Set(name, values[0])
+		}
+	}
+	return sendBoundedRequest(client, request)
+}
+
+func isForbiddenWebhookHeader(name string) bool {
+	switch name {
+	case "Connection", "Content-Length", "Host", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade":
+		return true
+	default:
+		return false
+	}
+}
+
+func isGenericConfigKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "contenttype", "disabletls", "messagekey", "method", "template", "title", "titlekey":
+		return true
+	default:
+		return false
+	}
+}
+
+func deliverSMTP(ctx context.Context, serviceURL *url.URL, message, title string) error {
 	host := serviceURL.Hostname()
 	if host == "" {
 		return errors.New("SMTP host is required")
@@ -163,7 +274,7 @@ func deliverSMTPNotification(ctx context.Context, serviceURL *url.URL, message, 
 	if err != nil || len(recipients) == 0 {
 		return errors.New("SMTP from and to addresses are required")
 	}
-	connection, err := notificationOutboundPolicy.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
+	connection, err := outboundPolicy.DialContext(ctx, "tcp", net.JoinHostPort(host, port))
 	if err != nil {
 		return err
 	}
