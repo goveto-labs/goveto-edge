@@ -1515,6 +1515,20 @@ paths:
                         application/json:
                             schema:
                                 type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            clusters:
+                                                type: array
+                                                items:
+                                                    $ref: '#/components/schemas/clusters_clusterChoice'
+                                            requires_cluster:
+                                                type: boolean
+                                            selected_cluster_id:
+                                                type: string
         post:
             operationId: create
             summary: Create cluster
@@ -13232,6 +13246,19 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+        clusters_clusterChoice:
+            type: object
+            properties:
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                name:
+                    type: string
+                role:
+                    type: string
         clusters_logpushDestinationResponse:
             type: object
             properties:
