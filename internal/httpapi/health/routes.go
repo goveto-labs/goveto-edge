@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	"goveto-edge/internal/analytics"
+	"goveto-edge/internal/buildinfo"
 	"goveto-edge/internal/httpapi/types"
 )
 
@@ -20,14 +21,15 @@ func Register(e *echo.Echo, db *sql.DB, analyticsStore ...*analytics.Store) {
 }
 
 type statusResponse struct {
-	Status string `json:"status"`
+	Status  string `json:"status"`
+	Version string `json:"version"`
 }
 
 // @summary Liveness
 // @description Process liveness probe; returns ok when the process is running.
 // @Tags health
 func live(c *echo.Context) error {
-	return types.JSON(c, http.StatusOK, statusResponse{Status: "ok"})
+	return types.JSON(c, http.StatusOK, statusResponse{Status: "ok", Version: buildinfo.Current()})
 }
 
 // @summary Readiness
@@ -45,6 +47,6 @@ func ready(db *sql.DB, stores ...*analytics.Store) echo.HandlerFunc {
 				return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
 			}
 		}
-		return types.JSON(c, http.StatusOK, statusResponse{Status: "ok"})
+		return types.JSON(c, http.StatusOK, statusResponse{Status: "ok", Version: buildinfo.Current()})
 	}
 }

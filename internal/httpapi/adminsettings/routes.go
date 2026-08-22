@@ -28,6 +28,7 @@ type response struct {
 	HTTPProxy                 settings.HTTPProxyConfig    `json:"http_proxy"`
 	Authentication            authenticationResponse      `json:"authentication"`
 	JobRetention              settings.JobRetentionConfig `json:"job_retention"`
+	AgentAutoUpgradeEnabled   bool                        `json:"agent_auto_upgrade_enabled"`
 	RestartRequired           bool                        `json:"restart_required"`
 	Restarting                bool                        `json:"restarting"`
 }
@@ -69,6 +70,7 @@ type updateRequest struct {
 	HTTPProxy                 settings.HTTPProxyConfig    `json:"http_proxy"`
 	Authentication            authenticationRequest       `json:"authentication"`
 	JobRetention              settings.JobRetentionConfig `json:"job_retention"`
+	AgentAutoUpgradeEnabled   *bool                       `json:"agent_auto_upgrade_enabled"`
 	Restart                   bool                        `json:"restart"`
 }
 
@@ -237,6 +239,10 @@ func update(
 		if err != nil {
 			return err
 		}
+		currentAgentAutoUpgrade, err := settingStore.AgentAutoUpgradeEnabled(c.Request().Context())
+		if err != nil {
+			return err
+		}
 		currentCaptcha, _, err := settingStore.Captcha(c.Request().Context(), cipher)
 		if err != nil {
 			return err
@@ -291,6 +297,9 @@ func update(
 		}
 		if currentRetention != input.JobRetention {
 			settingsUpdate.JobRetention = &input.JobRetention
+		}
+		if input.AgentAutoUpgradeEnabled != nil && currentAgentAutoUpgrade != *input.AgentAutoUpgradeEnabled {
+			settingsUpdate.AgentAutoUpgradeEnabled = input.AgentAutoUpgradeEnabled
 		}
 		prepared, err := settings.PrepareAdminSettingsUpdate(
 			settingsUpdate, currentProviders, currentCaptcha, cipher,
@@ -424,6 +433,10 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 	if err != nil {
 		return response{}, err
 	}
+	agentAutoUpgradeEnabled, err := settingStore.AgentAutoUpgradeEnabled(c.Request().Context())
+	if err != nil {
+		return response{}, err
+	}
 	providerResponses := make([]authenticationProviderResponse, 0, len(providers))
 	for _, provider := range providers {
 		providerResponses = append(providerResponses, authenticationProviderResponse{
@@ -440,6 +453,7 @@ func readResponse(c *echo.Context, settingStore *settings.Store, cipher settings
 		AgentGatewayPublicAddress: address,
 		HTTPProxy:                 proxy,
 		JobRetention:              retention,
+		AgentAutoUpgradeEnabled:   agentAutoUpgradeEnabled,
 		Authentication: authenticationResponse{
 			LocalLoginEnabled: localEnabled,
 			RequireTOTP:       requireTOTP,

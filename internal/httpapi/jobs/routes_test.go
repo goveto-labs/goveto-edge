@@ -26,6 +26,9 @@ func TestPermissionForSensitiveJobs(t *testing.T) {
 	if got := permissionFor(jobqueue.Install); got != rbac.PermissionNodeManage {
 		t.Fatalf("install permission = %q", got)
 	}
+	if got := permissionFor(jobqueue.AgentUpgrade); got != rbac.PermissionCredentialManage {
+		t.Fatalf("agent upgrade permission = %q", got)
+	}
 	if got := permissionFor(jobqueue.Certificate); got != rbac.PermissionCertificateManage {
 		t.Fatalf("certificate permission = %q", got)
 	}

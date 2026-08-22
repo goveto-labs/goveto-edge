@@ -33,6 +33,7 @@ export interface AdminSettings {
     http_proxy: HTTPProxySettings;
     authentication: AuthenticationSettings;
     job_retention: JobRetentionSettings;
+    agent_auto_upgrade_enabled: boolean;
     restart_required: boolean;
     restarting: boolean;
 }
@@ -452,6 +453,19 @@ export interface NodeHardwareProfile {
     measured_at: string;
 }
 
+export interface AgentUpgrade {
+    id: string;
+    target_version: string;
+    status: string;
+    attempts: number;
+    max_attempts: number;
+    next_attempt_at: string;
+    cancel_requested_at?: string;
+    error?: string;
+    created_at: string;
+    updated_at: string;
+}
+
 export interface SiteConfigVersion {
     site_id: string;
     version: number;
@@ -482,6 +496,7 @@ export interface Node {
     siteConfigVersions?: SiteConfigVersion[];
     cacheConfig?: NodeCacheConfig;
     hardwareProfile?: NodeHardwareProfile;
+    agentUpgrade?: AgentUpgrade;
 }
 
 export interface NodeStatusResponse {
@@ -1048,7 +1063,13 @@ export interface PublishJob {
         | 'IDEMPOTENT_REUSED';
 }
 
-export type ManagedJobKind = 'PUBLISH' | 'PURGE' | 'INSTALL' | 'DNS' | 'CERTIFICATE';
+export type ManagedJobKind =
+    | 'PUBLISH'
+    | 'PURGE'
+    | 'INSTALL'
+    | 'AGENT_UPGRADE'
+    | 'DNS'
+    | 'CERTIFICATE';
 
 export interface ManagedJob {
     id: string;

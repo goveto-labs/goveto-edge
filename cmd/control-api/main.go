@@ -19,6 +19,7 @@ import (
 	"goveto-edge/internal/alerting"
 	"goveto-edge/internal/analytics"
 	"goveto-edge/internal/auth"
+	"goveto-edge/internal/buildinfo"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/config"
 	"goveto-edge/internal/dnssync"
@@ -45,9 +46,16 @@ import (
 // @description Control-plane API for managing edge clusters, nodes, sites, certificates, publish, purge and analytics.
 // @BasePath /
 func main() {
+	if buildinfo.PrintCommand(os.Args[1:], os.Stdout, "control-api") {
+		return
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		slog.Error("load config", "error", err)
+		os.Exit(1)
+	}
+	if err = node.ValidateAgentArtifactVersion(buildinfo.Current()); err != nil {
+		slog.Error("validate embedded agent artifact", "error", err)
 		os.Exit(1)
 	}
 
@@ -319,6 +327,10 @@ func main() {
 
 	installQueue := node.NewInstallQueue(orm)
 	go node.NewInstallWorker(orm, installQueue, credentialCipher).Run(ctx)
+	agentUpgradeQueue := node.NewAgentUpgradeQueue(orm)
+	go node.NewAgentUpgradeService(
+		orm, agentUpgradeQueue, credentialCipher, settingStore, buildinfo.Current(),
+	).Run(ctx)
 	go node.NewLifecycle(orm, 45*time.Second, onNodeStatusChange).Run(ctx)
 
 	agentListener, err := net.Listen("tcp", cfg.AgentGatewayAddress())
@@ -377,6 +389,7 @@ func main() {
 			authority,
 			gateway,
 			installQueue,
+			agentUpgradeQueue,
 			publishService,
 			certificateService,
 			purgeService,

@@ -79,7 +79,7 @@ func (w *Worker) Cleanup(ctx context.Context) (Stats, error) {
 		}{
 			{"publish_jobs", "PUBLISH"}, {"purge_jobs", "PURGE"},
 			{"install_jobs", "INSTALL"}, {"dns_sync_jobs", "DNS"},
-			{"certificate_jobs", "CERTIFICATE"},
+			{"certificate_jobs", "CERTIFICATE"}, {"agent_upgrade_jobs", "AGENT_UPGRADE"},
 		} {
 			query := terminalJobCleanupSQL(table.name, table.kind)
 			counts, execErr := client.Raw[cleanupCounts](ctx, tx, query, cutoff, batchSize)
@@ -133,6 +133,7 @@ const orphanExecutionCleanupSQL = `WITH doomed AS (
 		SELECT 1 FROM publish_jobs j WHERE e.job_type='PUBLISH' AND j.id=e.job_id UNION ALL
 		SELECT 1 FROM purge_jobs j WHERE e.job_type='PURGE' AND j.id=e.job_id UNION ALL
 		SELECT 1 FROM install_jobs j WHERE e.job_type='INSTALL' AND j.id=e.job_id UNION ALL
+		SELECT 1 FROM agent_upgrade_jobs j WHERE e.job_type='AGENT_UPGRADE' AND j.id=e.job_id UNION ALL
 		SELECT 1 FROM dns_sync_jobs j WHERE e.job_type='DNS' AND j.id=e.job_id UNION ALL
 		SELECT 1 FROM certificate_jobs j WHERE e.job_type='CERTIFICATE' AND j.id=e.job_id
 	) ORDER BY e.finished_at LIMIT $2 FOR UPDATE SKIP LOCKED

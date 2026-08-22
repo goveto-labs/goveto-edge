@@ -29,17 +29,19 @@ const (
 	LocalLoginEnabledKey   = "auth.local_login.enabled"
 	AuthProvidersKey       = "auth.external_providers"
 	JobRetentionKey        = "jobs.retention"
+	AgentAutoUpgradeKey    = "agent.auto_upgrade.enabled"
 )
 
 const agentGatewayAddressDescription = "Public host and port used by edge nodes to reach the agent gateway"
 
 const (
-	httpProxyDescription     = "Client IP forwarding headers used by the control plane"
-	localLoginDescription    = "Whether email and password login is available"
-	authProvidersDescription = "OAuth 2.0 and OpenID Connect login providers"
-	captchaDescription       = "CAPTCHA provider used to protect public registration"
-	registrationDescription  = "Whether users may create accounts through public registration"
-	jobRetentionDescription  = "Retention policy for terminal jobs, executions, and site configuration versions"
+	httpProxyDescription        = "Client IP forwarding headers used by the control plane"
+	localLoginDescription       = "Whether email and password login is available"
+	authProvidersDescription    = "OAuth 2.0 and OpenID Connect login providers"
+	captchaDescription          = "CAPTCHA provider used to protect public registration"
+	registrationDescription     = "Whether users may create accounts through public registration"
+	jobRetentionDescription     = "Retention policy for terminal jobs, executions, and site configuration versions"
+	agentAutoUpgradeDescription = "Whether the control plane automatically upgrades online edge agents"
 )
 
 const (
@@ -126,6 +128,7 @@ type AdminSettingsUpdate struct {
 	HTTPProxy                 *HTTPProxyConfig
 	LocalLoginEnabled         *bool
 	JobRetention              *JobRetentionConfig
+	AgentAutoUpgradeEnabled   *bool
 	RequireTOTP               bool
 	AuthProviders             []AuthProviderConfig
 	RegistrationEnabled       bool
@@ -260,6 +263,11 @@ func PrepareAdminSettingsUpdate(
 			return nil, err
 		}
 	}
+	if input.AgentAutoUpgradeEnabled != nil {
+		if err := appendSetting(AgentAutoUpgradeKey, *input.AgentAutoUpgradeEnabled, agentAutoUpgradeDescription); err != nil {
+			return nil, err
+		}
+	}
 	if err := appendSetting(RequireTOTPKey, input.RequireTOTP, "Require active users to enroll time-based one-time passwords"); err != nil {
 		return nil, err
 	}
@@ -382,6 +390,14 @@ func (s *Store) JobRetention(ctx context.Context) (JobRetentionConfig, error) {
 		return JobRetentionConfig{}, fmt.Errorf("stored job retention setting is invalid: %w", err)
 	}
 	return config, nil
+}
+
+func (s *Store) AgentAutoUpgradeEnabled(ctx context.Context) (bool, error) {
+	enabled := true
+	if _, err := s.Get(ctx, AgentAutoUpgradeKey, &enabled); err != nil {
+		return false, err
+	}
+	return enabled, nil
 }
 
 func (s *Store) SetJobRetention(ctx context.Context, config JobRetentionConfig) error {

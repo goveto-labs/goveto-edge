@@ -58,6 +58,7 @@ func New(
 	authority *edgecontrol.Authority,
 	gateway *edgecontrol.Gateway,
 	installQueue *node.InstallQueue,
+	agentUpgradeQueue *node.AgentUpgradeQueue,
 	publishService *publisher.Service,
 	certificateService *certmanager.Service,
 	purgeService *purge.Service,
@@ -113,7 +114,7 @@ func New(
 	apikeysapi.Register(e, orm, apiKeyService, limiter)
 	certificates.Register(e, orm, certificateService)
 	dnsapi.Register(e, orm, secretCiphers.DNS, dnsService)
-	nodes.Register(e, orm, installQueue, secretCiphers.General, authority, gateway, dnsService)
+	nodes.Register(e, orm, installQueue, agentUpgradeQueue, secretCiphers.General, authority, gateway, dnsService)
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	jobsapi.Register(e, orm, publishService)

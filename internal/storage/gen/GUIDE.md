@@ -199,6 +199,31 @@ query.PostAuthorIdColumn
   - `Createdat` (DateTime)
   - `Updatedat` (DateTime)
 
+### AgentUpgradeJob
+
+- Client handle: `c.AgentUpgradeJob`
+- Query namespace: `query.AgentUpgradeJob`
+- Fields:
+  - `Id` (String, id)
+  - `Nodeid` (UUID)
+  - `Targetversion` (String)
+  - `Payload` (Json)
+  - `Status` ()
+  - `Attempts` (Int)
+  - `Maxattempts` (Int)
+  - `Nextattemptat` (DateTime)
+  - `Leaseowner` (String, optional)
+  - `Leaseuntil` (DateTime, optional)
+  - `Heartbeatat` (DateTime, optional)
+  - `Idempotencykey` (String, optional, unique)
+  - `Cancelrequestedat` (DateTime, optional)
+  - `Timeoutat` (DateTime, optional)
+  - `Resultjson` (Json, optional)
+  - `Compensationjson` (Json, optional)
+  - `Error` (String, optional)
+  - `Createdat` (DateTime)
+  - `Updatedat` (DateTime)
+
 ### AlertDelivery
 
 - Client handle: `c.AlertDelivery`

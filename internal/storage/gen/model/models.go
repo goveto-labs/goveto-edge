@@ -63,6 +63,30 @@ type AgentTask struct {
 	Node              *Node            `db:"-" json:"node,omitempty"`
 }
 
+// AgentUpgradeJob represents the AgentUpgradeJob model.
+type AgentUpgradeJob struct {
+	Id                string           `db:"id" json:"id"`
+	NodeId            string           `db:"node_id" json:"nodeId"`
+	TargetVersion     string           `db:"target_version" json:"targetVersion"`
+	Payload           json.RawMessage  `db:"payload" json:"payload"`
+	Status            JobStatus        `db:"status" json:"status"`
+	Attempts          int              `db:"attempts" json:"attempts"`
+	MaxAttempts       int              `db:"max_attempts" json:"maxAttempts"`
+	NextAttemptAt     time.Time        `db:"next_attempt_at" json:"nextAttemptAt"`
+	LeaseOwner        *string          `db:"lease_owner" json:"leaseOwner"`
+	LeaseUntil        *time.Time       `db:"lease_until" json:"leaseUntil"`
+	HeartbeatAt       *time.Time       `db:"heartbeat_at" json:"heartbeatAt"`
+	IdempotencyKey    *string          `db:"idempotency_key" json:"idempotencyKey"`
+	CancelRequestedAt *time.Time       `db:"cancel_requested_at" json:"cancelRequestedAt"`
+	TimeoutAt         *time.Time       `db:"timeout_at" json:"timeoutAt"`
+	ResultJson        *json.RawMessage `db:"result_json" json:"resultJson"`
+	CompensationJson  *json.RawMessage `db:"compensation_json" json:"compensationJson"`
+	Error             *string          `db:"error" json:"error"`
+	CreatedAt         time.Time        `db:"created_at" json:"createdAt"`
+	UpdatedAt         time.Time        `db:"updated_at" json:"updatedAt"`
+	Node              *Node            `db:"-" json:"node,omitempty"`
+}
+
 // AlertDelivery represents the AlertDelivery model.
 type AlertDelivery struct {
 	Id          string              `db:"id" json:"id"`
@@ -518,6 +542,7 @@ type Node struct {
 	SshHostKey         *NodeSSHHostKey          `db:"-" json:"sshHostKey,omitempty"`
 	AgentTasks         []*AgentTask             `db:"-" json:"agentTasks,omitempty"`
 	InstallJobs        []*InstallJob            `db:"-" json:"installJobs,omitempty"`
+	AgentUpgradeJobs   []*AgentUpgradeJob       `db:"-" json:"agentUpgradeJobs,omitempty"`
 	SshCredential      *SSHCredential           `db:"-" json:"sshCredential,omitempty"`
 	SiteConfigVersions []*NodeSiteConfigVersion `db:"-" json:"siteConfigVersions,omitempty"`
 }

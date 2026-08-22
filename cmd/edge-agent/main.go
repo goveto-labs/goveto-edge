@@ -12,10 +12,14 @@ import (
 	_ "goveto-edge/caddy/cachematch"
 	_ "goveto-edge/caddy/govetocache"
 	_ "goveto-edge/caddy/waf"
+	"goveto-edge/internal/buildinfo"
 	"goveto-edge/internal/edgeagent"
 )
 
 func main() {
+	if buildinfo.PrintCommand(os.Args[1:], os.Stdout, "edge-agent") {
+		return
+	}
 	if handled, err := edgeagent.RunHardwareBenchmarkCommand(os.Args[1:], os.Stdout); handled {
 		if err != nil {
 			slog.Error("benchmark node hardware", "error", err)

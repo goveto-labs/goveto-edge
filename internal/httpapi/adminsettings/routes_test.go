@@ -98,6 +98,9 @@ func TestAdminSettingsResponseDoesNotExposeOIDCSecret(t *testing.T) {
 	if !strings.Contains(string(encoded), `"job_retention":{"history_days":90,"versions_per_site":20}`) {
 		t.Fatalf("job retention setting missing from response: %s", encoded)
 	}
+	if !strings.Contains(string(encoded), `"agent_auto_upgrade_enabled":false`) {
+		t.Fatalf("agent auto-upgrade setting missing from response: %s", encoded)
+	}
 }
 
 func TestBuildCaptchaConfigDoesNotReuseSecretAcrossProviders(t *testing.T) {

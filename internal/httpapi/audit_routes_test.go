@@ -61,7 +61,7 @@ func collectRegisteredMutations(t *testing.T) map[string]bool {
 	apikeysapi.Register(e, nil, nil, nil)
 	certificates.Register(e, nil, nil)
 	dnsapi.Register(e, nil, nil, nil)
-	nodes.Register(e, nil, nil, nil, nil, nil, nil)
+	nodes.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	publishapi.Register(e, nil, nil)
 	purgeapi.Register(e, nil, nil)
 	jobsapi.Register(e, nil, nil)

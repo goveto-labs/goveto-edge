@@ -23,6 +23,7 @@ const kinds: Array<{ value: '' | ManagedJobKind; label: string }> = [
     { value: 'PUBLISH', label: 'Publish' },
     { value: 'PURGE', label: 'Cache refresh' },
     { value: 'INSTALL', label: 'Installation' },
+    { value: 'AGENT_UPGRADE', label: 'Agent upgrade' },
     { value: 'DNS', label: 'DNS' },
     { value: 'CERTIFICATE', label: 'Certificate' },
 ];
@@ -764,10 +765,12 @@ export default function Jobs() {
                 </thead>
                 <tbody>
                     {jobs.map((job) => {
-                        const cancellable = ['PENDING', 'RUNNING'].includes(job.status);
-                        const replayable = ['FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(
-                            job.status
-                        );
+                        const cancellable =
+                            job.kind !== 'AGENT_UPGRADE' &&
+                            ['PENDING', 'RUNNING'].includes(job.status);
+                        const replayable =
+                            job.kind !== 'AGENT_UPGRADE' &&
+                            ['FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(job.status);
                         return (
                             <tr key={`${job.kind}:${job.id}`}>
                                 <td className='text-xs font-semibold'>{kindLabel(job.kind)}</td>
@@ -969,6 +972,7 @@ export default function Jobs() {
                 <DialogFooter>
                     {selectedDetail &&
                         mayMutate(selectedDetail) &&
+                        selectedDetail.kind !== 'AGENT_UPGRADE' &&
                         ['PENDING', 'RUNNING'].includes(selectedDetail.status) && (
                             <Button
                                 isDisabled={Boolean(mutating)}
@@ -980,6 +984,7 @@ export default function Jobs() {
                         )}
                     {selectedDetail &&
                         mayMutate(selectedDetail) &&
+                        selectedDetail.kind !== 'AGENT_UPGRADE' &&
                         ['FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(selectedDetail.status) && (
                             <Button
                                 isDisabled={Boolean(mutating)}

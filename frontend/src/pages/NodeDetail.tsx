@@ -72,6 +72,7 @@ import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
+import { needsVersionUpgrade } from '@/utils/version.ts';
 
 type DetailTab = 'overview' | 'details' | 'logs' | 'installation' | 'settings';
 type SettingsPage = 'network' | 'cache';
@@ -366,6 +367,9 @@ export default function NodeDetail() {
     const [manualInitializing, setManualInitializing] = useState(false);
     const [manualInitializationMessage, setManualInitializationMessage] = useState('');
     const [manualInitializationError, setManualInitializationError] = useState('');
+    const [upgradeRetrying, setUpgradeRetrying] = useState(false);
+    const [upgradeMessage, setUpgradeMessage] = useState('');
+    const [upgradeError, setUpgradeError] = useState('');
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
     const [logsLoading, setLogsLoading] = useState(false);
     const [logsError, setLogsError] = useState('');
@@ -414,15 +418,27 @@ export default function NodeDetail() {
         }
     }, [api, applyNode, cluster, clusterId, credentialApi, isOwner, nodeId]);
 
-    const refreshNode = useCallback(async () => {
-        if (!nodeId) return;
-        const value = await api.get(nodeId);
-        applyNode(value);
-    }, [api, applyNode, nodeId]);
+    const refreshNode = useCallback(
+        async (signal?: AbortSignal) => {
+            if (!nodeId) return;
+            const value = await api.get(nodeId, signal ? { signal } : undefined);
+            setNode(value);
+        },
+        [api, nodeId]
+    );
 
     useEffect(() => {
         void load();
     }, [load]);
+
+    useAutoRefresh(
+        refreshNode,
+        Boolean(nodeId),
+        node?.agentUpgrade && ['PENDING', 'RUNNING'].includes(node.agentUpgrade.status)
+            ? 2000
+            : 30_000,
+        false
+    );
 
     useEffect(() => {
         if (!nodeId) return;
@@ -437,6 +453,8 @@ export default function NodeDetail() {
         setTrustHostKeyMessage('');
         setHostKeyIssueActive(false);
         setTrustPreview(null);
+        setUpgradeMessage('');
+        setUpgradeError('');
     }, [nodeId]);
 
     const loadInstallation = useCallback(
@@ -803,6 +821,26 @@ export default function NodeDetail() {
         }
     };
 
+    const retryAgentUpgrade = async () => {
+        if (!node) return;
+        setUpgradeRetrying(true);
+        setUpgradeMessage('');
+        setUpgradeError('');
+        try {
+            const upgrade = await api.retryAgentUpgrade(node.id);
+            setNode((current) => (current ? { ...current, agentUpgrade: upgrade } : current));
+            setUpgradeMessage('Agent upgrade queued.');
+        } catch (retryError) {
+            setUpgradeError(
+                retryError instanceof ApiError
+                    ? retryError.message
+                    : 'Failed to retry the agent upgrade'
+            );
+        } finally {
+            setUpgradeRetrying(false);
+        }
+    };
+
     const openTrustHostKeyDialog = async () => {
         if (!node) return;
         setTrustConfirmOpen(true);
@@ -933,6 +971,11 @@ export default function NodeDetail() {
         cache?.cache_directory.trim().startsWith('/') &&
             cache.max_disk_usage_percent >= 1 &&
             cache.max_disk_usage_percent <= 90
+    );
+    const agentUpgradeRetryable = Boolean(
+        node?.agentUpgrade &&
+            ['FAILED', 'DEAD_LETTER', 'CANCELLED'].includes(node.agentUpgrade.status) &&
+            needsVersionUpgrade(node.version, node.agentUpgrade.target_version)
     );
     const enteringNetworkTab =
         previousDetailPathRef.current !== detailPath &&
@@ -1455,6 +1498,77 @@ export default function NodeDetail() {
                                             </span>
                                         </FormField>
                                     </div>
+                                </ContentCard>
+                                <ContentCard title='Agent upgrade'>
+                                    {node.agentUpgrade ? (
+                                        <div className='space-y-4'>
+                                            <div className='grid gap-5 sm:grid-cols-2'>
+                                                <FormField label='Target version'>
+                                                    <span className='font-mono text-sm'>
+                                                        {node.agentUpgrade.target_version}
+                                                    </span>
+                                                </FormField>
+                                                <FormField label='Upgrade status'>
+                                                    <StatusBadge
+                                                        status={node.agentUpgrade.status}
+                                                    />
+                                                </FormField>
+                                                <FormField label='Attempts'>
+                                                    <span className='text-sm'>
+                                                        {node.agentUpgrade.attempts} /{' '}
+                                                        {node.agentUpgrade.max_attempts}
+                                                    </span>
+                                                </FormField>
+                                                <FormField label='Last updated'>
+                                                    <span className='text-sm'>
+                                                        {new Date(
+                                                            node.agentUpgrade.updated_at
+                                                        ).toLocaleString()}
+                                                    </span>
+                                                </FormField>
+                                                {node.agentUpgrade.status === 'PENDING' && (
+                                                    <FormField label='Next attempt'>
+                                                        <span className='text-sm'>
+                                                            {new Date(
+                                                                node.agentUpgrade.next_attempt_at
+                                                            ).toLocaleString()}
+                                                        </span>
+                                                    </FormField>
+                                                )}
+                                            </div>
+                                            {node.agentUpgrade.error && (
+                                                <FormError message={node.agentUpgrade.error} />
+                                            )}
+                                            {upgradeError && <FormError message={upgradeError} />}
+                                            {upgradeMessage && (
+                                                <p className='text-sm text-success'>
+                                                    {upgradeMessage}
+                                                </p>
+                                            )}
+                                            {agentUpgradeRetryable && isOwner && (
+                                                <div className='flex justify-end border-t border-border pt-4'>
+                                                    <Button
+                                                        isIconOnly
+                                                        aria-label='Retry agent upgrade'
+                                                        isDisabled={
+                                                            upgradeRetrying ||
+                                                            node.status !== 'ONLINE'
+                                                        }
+                                                        variant='secondary'
+                                                        onPress={() => void retryAgentUpgrade()}
+                                                    >
+                                                        <RefreshCw
+                                                            className={`h-4 w-4 ${upgradeRetrying ? 'animate-spin' : ''}`}
+                                                        />
+                                                    </Button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ) : (
+                                        <p className='text-sm text-muted'>
+                                            No agent upgrade has been requested for this node.
+                                        </p>
+                                    )}
                                 </ContentCard>
                                 <ContentCard title='Membership'>
                                     <div className='space-y-5'>

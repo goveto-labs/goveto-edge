@@ -7,7 +7,8 @@ export const AUTO_REFRESH_INTERVAL = 60_000;
 export function useAutoRefresh(
     refresh: (signal: AbortSignal) => unknown | Promise<unknown>,
     enabled = true,
-    interval = AUTO_REFRESH_INTERVAL
+    interval = AUTO_REFRESH_INTERVAL,
+    runImmediately = true
 ) {
     const refreshRef = useRef(refresh);
     refreshRef.current = refresh;
@@ -62,7 +63,7 @@ export function useAutoRefresh(
             }
         };
 
-        void run();
+        if (runImmediately) void run();
         const timer = window.setInterval(() => void run(), interval);
         return () => {
             window.clearInterval(timer);
@@ -70,7 +71,7 @@ export function useAutoRefresh(
             controllerRef.current?.abort();
             controllerRef.current = null;
         };
-    }, [enabled, interval, refresh, retry]);
+    }, [enabled, interval, refresh, retry, runImmediately]);
 
     return {
         error,

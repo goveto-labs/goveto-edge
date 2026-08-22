@@ -64,6 +64,7 @@ var ControlPlaneRoutes = []Route{
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/disable", "node.disable", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/credentials/revoke", "node.credential.revoke", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", "node.install", "node", "node_id"},
+	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/agent-upgrade/retry", "node.agent_upgrade.retry", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", "node.install.initialize", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/preview", "node.ssh_host_key.preview", "node", "node_id"},
 	{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/trust", "node.ssh_host_key.trust", "node", "node_id"},

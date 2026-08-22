@@ -34,6 +34,8 @@ jobs:
           cache: true
       - name: Build release control plane with embedded agents
         run: script/build_control.sh "$RUNNER_TEMP/control-api"
+      - name: Verify embedded agent artifacts
+        run: go test -tags agent_artifacts ./static ./internal/node
       - name: Build all commands and packages
         run: go build ./...
       - name: Vet

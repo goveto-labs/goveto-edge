@@ -191,6 +191,7 @@ func TestApplyAdminSettingsUpdateRollsBackOnNthWriteFailure(t *testing.T) {
 		HTTPProxyKey:           `{"trust_all":false,"client_ip_headers":["X-Forwarded-For"]}`,
 		LocalLoginEnabledKey:   `true`,
 		JobRetentionKey:        `{"history_days":90,"versions_per_site":20}`,
+		AgentAutoUpgradeKey:    `true`,
 		RequireTOTPKey:         `false`,
 		AuthProvidersKey:       `[]`,
 		RegistrationEnabledKey: `false`,
@@ -206,12 +207,14 @@ func TestApplyAdminSettingsUpdateRollsBackOnNthWriteFailure(t *testing.T) {
 	proxy := HTTPProxyConfig{TrustAll: true, ClientIPHeaders: []string{"X-Real-IP"}}
 	localLogin := false
 	retention := JobRetentionConfig{HistoryDays: 30, VersionsPerSite: 10}
+	autoUpgrade := false
 	cipher := &atomicUpdateCipher{}
 	prepared, err := PrepareAdminSettingsUpdate(AdminSettingsUpdate{
 		AgentGatewayPublicAddress: &address,
 		HTTPProxy:                 &proxy,
 		LocalLoginEnabled:         &localLogin,
 		JobRetention:              &retention,
+		AgentAutoUpgradeEnabled:   &autoUpgrade,
 		RequireTOTP:               true,
 		AuthProviders: []AuthProviderConfig{{
 			ID: "provider-1", Type: AuthProviderOIDC, ProviderName: "SSO", ClientSecret: "provider-secret",

@@ -46,6 +46,9 @@ func TestTableForRejectsUntrustedNames(t *testing.T) {
 	if table, err := tableFor(Publish); err != nil || table != "publish_jobs" {
 		t.Fatalf("publish table = %q, %v", table, err)
 	}
+	if table, err := tableFor(AgentUpgrade); err != nil || table != "agent_upgrade_jobs" {
+		t.Fatalf("agent upgrade table = %q, %v", table, err)
+	}
 }
 
 func TestValidateIdempotencyKey(t *testing.T) {
@@ -70,6 +73,15 @@ func TestOutcomeDecisionRequeuesContentionWithoutConsumingAttempt(t *testing.T) 
 	})
 	if status != "PENDING" || !requeue || !next.Equal(now.Add(2*time.Second)) || message != "lock busy" {
 		t.Fatalf("contention decision = %q, %s, %q, %v", status, next, message, requeue)
+	}
+}
+
+func TestErrorlessRequeueIsNotReportedAsFailedExecution(t *testing.T) {
+	outcome := Outcome{RequeueAfter: 15 * time.Second}
+	status, _, _, _ := outcomeDecision(time.Now(), Lease{Attempt: 1, MaxAttempts: 5}, outcome)
+	executionStatus := executionOutcomeStatus(status, outcome)
+	if executionStatus != "PENDING" {
+		t.Fatalf("errorless requeue execution status = %q", executionStatus)
 	}
 }
 

@@ -183,7 +183,10 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 		manager := jobqueue.New(db)
 		responseID := c.Param("job_id")
 		mode := "cancel"
-		if cancel {
+		if cancel && kind == jobqueue.AgentUpgrade {
+			return echo.NewHTTPError(http.StatusConflict,
+				"agent upgrade jobs cannot be cancelled; disable automatic upgrades in admin settings")
+		} else if cancel {
 			err = manager.Cancel(c.Request().Context(), kind, c.Param("job_id"))
 		} else if kind == jobqueue.Publish {
 			oldJob, loadErr := db.PublishJob.FindUnique(c.Request().Context(), query.PublishJob.Id.Equals(c.Param("job_id")))
@@ -204,6 +207,8 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 					mode = "current"
 				}
 			}
+		} else if kind == jobqueue.AgentUpgrade {
+			return echo.NewHTTPError(http.StatusConflict, "retry agent upgrades from the node detail endpoint")
 		} else {
 			err = manager.Replay(c.Request().Context(), kind, c.Param("job_id"))
 		}
@@ -234,7 +239,7 @@ func mutate(db *client.Client, publishService *publisher.Service, cancel bool) e
 func loadMutationSnapshot(ctx context.Context, db *client.Client, kind jobqueue.Kind, id string) (*mutationSnapshot, error) {
 	tables := map[jobqueue.Kind]string{
 		jobqueue.Publish: "publish_jobs", jobqueue.Purge: "purge_jobs", jobqueue.Install: "install_jobs",
-		jobqueue.DNS: "dns_sync_jobs", jobqueue.Certificate: "certificate_jobs",
+		jobqueue.AgentUpgrade: "agent_upgrade_jobs", jobqueue.DNS: "dns_sync_jobs", jobqueue.Certificate: "certificate_jobs",
 	}
 	rows, err := client.Raw[mutationSnapshot](ctx, db, fmt.Sprintf(`SELECT id, $2::text AS kind,
 		status::text, attempts, result_json, compensation_json, error FROM %s WHERE id=$1`, tables[kind]),
@@ -267,6 +272,12 @@ const jobListSourceSQL = `
 		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
 		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
 		FROM install_jobs j JOIN nodes n ON n.id=j.node_id WHERE n.cluster_id=$1
+		UNION ALL SELECT j.id, 'AGENT_UPGRADE', j.node_id::text, 'NODE', n.name,
+		COALESCE((SELECT MIN(a.address) FROM node_addresses a WHERE a.node_id=j.node_id), ''),
+		'UPGRADE TO ' || j.target_version, j.status::text, j.attempts, j.max_attempts,
+		j.next_attempt_at, j.lease_owner, j.lease_until, j.heartbeat_at, j.cancel_requested_at,
+		j.timeout_at, j.result_json, j.compensation_json, j.error, j.created_at, j.updated_at
+		FROM agent_upgrade_jobs j JOIN nodes n ON n.id=j.node_id WHERE n.cluster_id=$1
 		UNION ALL SELECT j.id, 'DNS', COALESCE(j.site_id, j.cluster_id),
 		CASE WHEN j.site_id IS NULL THEN 'CLUSTER' ELSE 'SITE' END,
 		COALESCE(s.name, c.name), COALESCE((SELECT MIN(d.hostname) FROM site_domains d WHERE d.site_id=j.site_id), c.primary_hostname, ''),
@@ -323,6 +334,8 @@ func loadJobDetail(ctx context.Context, db *client.Client, clusterID string, kin
 		FROM (`+jobListSourceSQL+`) jobs JOIN purge_jobs j ON jobs.kind='PURGE' AND j.id=jobs.id
 		UNION ALL SELECT jobs.*, j.payload::jsonb
 		FROM (`+jobListSourceSQL+`) jobs JOIN install_jobs j ON jobs.kind='INSTALL' AND j.id=jobs.id
+		UNION ALL SELECT jobs.*, jsonb_build_object('target_version', j.target_version, 'trigger', j.payload->>'trigger')
+		FROM (`+jobListSourceSQL+`) jobs JOIN agent_upgrade_jobs j ON jobs.kind='AGENT_UPGRADE' AND j.id=jobs.id
 		UNION ALL SELECT jobs.*, jsonb_build_object('action', j.action, 'site_id', j.site_id)
 		FROM (`+jobListSourceSQL+`) jobs JOIN dns_sync_jobs j ON jobs.kind='DNS' AND j.id=jobs.id
 		UNION ALL SELECT jobs.*, jsonb_build_object('operation', j.operation)
@@ -444,11 +457,12 @@ func parseListParams(c *echo.Context) (listParams, error) {
 
 func requireJobInCluster(ctx context.Context, db *client.Client, clusterID string, kind jobqueue.Kind, id string) error {
 	queries := map[jobqueue.Kind]string{
-		jobqueue.Publish:     `SELECT j.id FROM publish_jobs j JOIN sites s ON s.id=j.site_id WHERE j.id=$1 AND s.cluster_id=$2`,
-		jobqueue.Purge:       `SELECT j.id FROM purge_jobs j JOIN sites s ON s.id=j.site_id WHERE j.id=$1 AND s.cluster_id=$2`,
-		jobqueue.Install:     `SELECT j.id FROM install_jobs j JOIN nodes n ON n.id=j.node_id WHERE j.id=$1 AND n.cluster_id=$2`,
-		jobqueue.DNS:         `SELECT j.id FROM dns_sync_jobs j WHERE j.id=$1 AND j.cluster_id=$2`,
-		jobqueue.Certificate: `SELECT j.id FROM certificate_jobs j JOIN certificates c ON c.id=j.certificate_id WHERE j.id=$1 AND c.cluster_id=$2`,
+		jobqueue.Publish:      `SELECT j.id FROM publish_jobs j JOIN sites s ON s.id=j.site_id WHERE j.id=$1 AND s.cluster_id=$2`,
+		jobqueue.Purge:        `SELECT j.id FROM purge_jobs j JOIN sites s ON s.id=j.site_id WHERE j.id=$1 AND s.cluster_id=$2`,
+		jobqueue.Install:      `SELECT j.id FROM install_jobs j JOIN nodes n ON n.id=j.node_id WHERE j.id=$1 AND n.cluster_id=$2`,
+		jobqueue.AgentUpgrade: `SELECT j.id FROM agent_upgrade_jobs j JOIN nodes n ON n.id=j.node_id WHERE j.id=$1 AND n.cluster_id=$2`,
+		jobqueue.DNS:          `SELECT j.id FROM dns_sync_jobs j WHERE j.id=$1 AND j.cluster_id=$2`,
+		jobqueue.Certificate:  `SELECT j.id FROM certificate_jobs j JOIN certificates c ON c.id=j.certificate_id WHERE j.id=$1 AND c.cluster_id=$2`,
 	}
 	type idRow struct {
 		ID string `db:"id"`
@@ -466,7 +480,7 @@ func requireJobInCluster(ctx context.Context, db *client.Client, clusterID strin
 func parseKind(value string) (jobqueue.Kind, error) {
 	kind := jobqueue.Kind(strings.ToUpper(value))
 	switch kind {
-	case jobqueue.Publish, jobqueue.Purge, jobqueue.Install, jobqueue.DNS, jobqueue.Certificate:
+	case jobqueue.Publish, jobqueue.Purge, jobqueue.Install, jobqueue.AgentUpgrade, jobqueue.DNS, jobqueue.Certificate:
 		return kind, nil
 	default:
 		return "", errors.New("unknown job kind")
@@ -481,6 +495,8 @@ func permissionFor(kind jobqueue.Kind) rbac.Permission {
 		return rbac.PermissionCacheOperate
 	case jobqueue.Install:
 		return rbac.PermissionNodeManage
+	case jobqueue.AgentUpgrade:
+		return rbac.PermissionCredentialManage
 	case jobqueue.DNS:
 		return rbac.PermissionCredentialManage
 	default:

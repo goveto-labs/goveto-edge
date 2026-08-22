@@ -63,6 +63,7 @@ type NodeQuery struct {
 	SshHostKey         nodeSshHostKeyRelation
 	AgentTasks         nodeAgentTasksRelation
 	InstallJobs        nodeInstallJobsRelation
+	AgentUpgradeJobs   nodeAgentUpgradeJobsRelation
 	SshCredential      nodeSshCredentialRelation
 	SiteConfigVersions nodeSiteConfigVersionsRelation
 }
@@ -123,6 +124,7 @@ var Node = NodeQuery{
 	SshHostKey:         nodeSshHostKeyRelation{},
 	AgentTasks:         nodeAgentTasksRelation{},
 	InstallJobs:        nodeInstallJobsRelation{},
+	AgentUpgradeJobs:   nodeAgentUpgradeJobsRelation{},
 	SshCredential:      nodeSshCredentialRelation{},
 	SiteConfigVersions: nodeSiteConfigVersionsRelation{},
 }
@@ -1622,6 +1624,14 @@ func (nodeInstallJobsRelation) Fetch() NodeIncludeClause {
 	return NodeIncludeClause{Relation: "installJobs"}
 }
 
+// AgentUpgradeJobsRelation provides relation query helpers for agentUpgradeJobs.
+type nodeAgentUpgradeJobsRelation struct{}
+
+// Fetch creates an include clause to fetch related agentUpgradeJobs.
+func (nodeAgentUpgradeJobsRelation) Fetch() NodeIncludeClause {
+	return NodeIncludeClause{Relation: "agentUpgradeJobs"}
+}
+
 // SshCredentialRelation provides relation query helpers for sshCredential.
 type nodeSshCredentialRelation struct{}
 
@@ -1703,6 +1713,7 @@ type NodeCreateInput struct {
 	SshHostKey         *NodeSSHHostKeyCreateNestedInput
 	AgentTasks         *AgentTaskCreateNestedInput
 	InstallJobs        *InstallJobCreateNestedInput
+	AgentUpgradeJobs   *AgentUpgradeJobCreateNestedInput
 	SshCredential      *SSHCredentialCreateNestedInput
 	SiteConfigVersions *NodeSiteConfigVersionCreateNestedInput
 }

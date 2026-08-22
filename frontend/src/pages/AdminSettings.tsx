@@ -95,6 +95,7 @@ function editable(settings: AdminSettingsData) {
         http_proxy: settings.http_proxy,
         authentication: settings.authentication,
         job_retention: settings.job_retention,
+        agent_auto_upgrade_enabled: settings.agent_auto_upgrade_enabled,
     };
 }
 
@@ -794,77 +795,101 @@ export default function AdminSettings() {
                                 )}
 
                                 {tab === 'jobs' && (
-                                    <ContentCard
-                                        title={
-                                            <span className='flex items-center gap-2'>
-                                                <ListTodo className='h-4 w-4 text-muted' />
-                                                History retention
-                                            </span>
-                                        }
-                                    >
-                                        <div className='grid gap-5 sm:grid-cols-2'>
-                                            <FormField
-                                                htmlFor='job-history-days'
-                                                label='Job history (days)'
-                                                hint={
-                                                    "Terminal jobs and their execution attempts older than this window are removed. Active jobs and each site's latest successful publish remain protected."
+                                    <div className='space-y-5'>
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <ServerCog className='h-4 w-4 text-muted' />
+                                                    Agent updates
+                                                </span>
+                                            }
+                                        >
+                                            <SettingToggle
+                                                description='Upgrade online agents to the version embedded in this control plane. Disabling cancels queued automatic upgrades; an upgrade already replacing a binary will finish verification or roll back.'
+                                                label='Automatic agent upgrades'
+                                                selected={form.agent_auto_upgrade_enabled}
+                                                onChange={(enabled) =>
+                                                    updateForm({
+                                                        ...form,
+                                                        agent_auto_upgrade_enabled: enabled,
+                                                    })
                                                 }
-                                            >
-                                                <Input
-                                                    id='job-history-days'
-                                                    max={3650}
-                                                    min={7}
-                                                    required
-                                                    type='number'
-                                                    value={String(form.job_retention.history_days)}
-                                                    variant='secondary'
-                                                    onChange={(event) =>
-                                                        updateForm({
-                                                            ...form,
-                                                            job_retention: {
-                                                                ...form.job_retention,
-                                                                history_days: Number(
-                                                                    event.target.value
-                                                                ),
-                                                            },
-                                                        })
+                                            />
+                                        </ContentCard>
+                                        <ContentCard
+                                            title={
+                                                <span className='flex items-center gap-2'>
+                                                    <ListTodo className='h-4 w-4 text-muted' />
+                                                    History retention
+                                                </span>
+                                            }
+                                        >
+                                            <div className='grid gap-5 sm:grid-cols-2'>
+                                                <FormField
+                                                    htmlFor='job-history-days'
+                                                    label='Job history (days)'
+                                                    hint={
+                                                        "Terminal jobs and their execution attempts older than this window are removed. Active jobs and each site's latest successful publish remain protected."
                                                     }
-                                                />
-                                            </FormField>
-                                            <FormField
-                                                htmlFor='config-versions-per-site'
-                                                label='Minimum versions per site'
-                                                hint='Keep at least this many recent configuration versions per site, even after the history window expires. Current and rollback baseline versions are always protected.'
-                                            >
-                                                <Input
-                                                    id='config-versions-per-site'
-                                                    max={1000}
-                                                    min={2}
-                                                    required
-                                                    type='number'
-                                                    value={String(
-                                                        form.job_retention.versions_per_site
-                                                    )}
-                                                    variant='secondary'
-                                                    onChange={(event) =>
-                                                        updateForm({
-                                                            ...form,
-                                                            job_retention: {
-                                                                ...form.job_retention,
-                                                                versions_per_site: Number(
-                                                                    event.target.value
-                                                                ),
-                                                            },
-                                                        })
-                                                    }
-                                                />
-                                            </FormField>
-                                        </div>
-                                        <p className='mt-5 border-t border-border pt-4 text-xs leading-5 text-muted'>
-                                            Cleanup runs hourly in batches. Changes apply without a
-                                            control-plane restart.
-                                        </p>
-                                    </ContentCard>
+                                                >
+                                                    <Input
+                                                        id='job-history-days'
+                                                        max={3650}
+                                                        min={7}
+                                                        required
+                                                        type='number'
+                                                        value={String(
+                                                            form.job_retention.history_days
+                                                        )}
+                                                        variant='secondary'
+                                                        onChange={(event) =>
+                                                            updateForm({
+                                                                ...form,
+                                                                job_retention: {
+                                                                    ...form.job_retention,
+                                                                    history_days: Number(
+                                                                        event.target.value
+                                                                    ),
+                                                                },
+                                                            })
+                                                        }
+                                                    />
+                                                </FormField>
+                                                <FormField
+                                                    htmlFor='config-versions-per-site'
+                                                    label='Minimum versions per site'
+                                                    hint='Keep at least this many recent configuration versions per site, even after the history window expires. Current and rollback baseline versions are always protected.'
+                                                >
+                                                    <Input
+                                                        id='config-versions-per-site'
+                                                        max={1000}
+                                                        min={2}
+                                                        required
+                                                        type='number'
+                                                        value={String(
+                                                            form.job_retention.versions_per_site
+                                                        )}
+                                                        variant='secondary'
+                                                        onChange={(event) =>
+                                                            updateForm({
+                                                                ...form,
+                                                                job_retention: {
+                                                                    ...form.job_retention,
+                                                                    versions_per_site: Number(
+                                                                        event.target.value
+                                                                    ),
+                                                                },
+                                                            })
+                                                        }
+                                                    />
+                                                </FormField>
+                                            </div>
+                                            <p className='mt-5 border-t border-border pt-4 text-xs leading-5 text-muted'>
+                                                Cleanup runs hourly in batches. Changes apply
+                                                without a control-plane restart.
+                                            </p>
+                                        </ContentCard>
+                                    </div>
                                 )}
 
                                 {tab === 'providers' && (

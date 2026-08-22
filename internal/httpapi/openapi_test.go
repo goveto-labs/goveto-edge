@@ -70,7 +70,7 @@ func collectRegisteredRoutes(t *testing.T) map[routeKey]bool {
 	apikeysapi.Register(e, nil, nil, nil)
 	certificates.Register(e, nil, nil)
 	dnsapi.Register(e, nil, nil, nil)
-	nodes.Register(e, nil, nil, nil, nil, nil, nil)
+	nodes.Register(e, nil, nil, nil, nil, nil, nil, nil)
 	publishapi.Register(e, nil, nil)
 	purgeapi.Register(e, nil, nil)
 	jobsapi.Register(e, nil, nil)

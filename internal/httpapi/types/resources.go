@@ -218,6 +218,29 @@ type Node struct {
 	CacheConfig        *NodeCacheConfig       `json:"cacheConfig,omitempty"`
 	HardwareProfile    *NodeHardwareProfile   `json:"hardwareProfile,omitempty"`
 	SSHHostKey         *NodeSSHHostKey        `json:"sshHostKey,omitempty"`
+	AgentUpgrade       *AgentUpgrade          `json:"agentUpgrade,omitempty"`
+}
+
+type AgentUpgrade struct {
+	ID                string          `json:"id"`
+	TargetVersion     string          `json:"target_version"`
+	Status            model.JobStatus `json:"status"`
+	Attempts          int             `json:"attempts"`
+	MaxAttempts       int             `json:"max_attempts"`
+	NextAttemptAt     time.Time       `json:"next_attempt_at"`
+	CancelRequestedAt *time.Time      `json:"cancel_requested_at,omitempty"`
+	Error             *string         `json:"error,omitempty"`
+	CreatedAt         time.Time       `json:"created_at"`
+	UpdatedAt         time.Time       `json:"updated_at"`
+}
+
+func NewAgentUpgrade(value *model.AgentUpgradeJob) AgentUpgrade {
+	return AgentUpgrade{
+		ID: value.Id, TargetVersion: value.TargetVersion, Status: value.Status,
+		Attempts: value.Attempts, MaxAttempts: value.MaxAttempts, NextAttemptAt: value.NextAttemptAt,
+		CancelRequestedAt: value.CancelRequestedAt, Error: value.Error,
+		CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt,
+	}
 }
 
 // NodeSSHHostKey is the operator-facing view of a node's pinned SSH host key.
@@ -281,6 +304,10 @@ func NewNode(value *model.Node) Node {
 	if value.SshHostKey != nil {
 		hostKey := NewNodeSSHHostKey(value.SshHostKey)
 		result.SSHHostKey = &hostKey
+	}
+	if len(value.AgentUpgradeJobs) > 0 {
+		upgrade := NewAgentUpgrade(value.AgentUpgradeJobs[0])
+		result.AgentUpgrade = &upgrade
 	}
 	return result
 }

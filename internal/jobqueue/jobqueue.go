@@ -20,16 +20,17 @@ import (
 type Kind string
 
 const (
-	Publish     Kind = "PUBLISH"
-	Purge       Kind = "PURGE"
-	Install     Kind = "INSTALL"
-	DNS         Kind = "DNS"
-	Certificate Kind = "CERTIFICATE"
+	Publish      Kind = "PUBLISH"
+	Purge        Kind = "PURGE"
+	Install      Kind = "INSTALL"
+	AgentUpgrade Kind = "AGENT_UPGRADE"
+	DNS          Kind = "DNS"
+	Certificate  Kind = "CERTIFICATE"
 )
 
 var tables = map[Kind]string{
 	Publish: "publish_jobs", Purge: "purge_jobs", Install: "install_jobs",
-	DNS: "dns_sync_jobs", Certificate: "certificate_jobs",
+	AgentUpgrade: "agent_upgrade_jobs", DNS: "dns_sync_jobs", Certificate: "certificate_jobs",
 }
 
 const (
@@ -422,10 +423,7 @@ func (m *Manager) finish(ctx context.Context, lease Lease, outcome Outcome) erro
 		if affected != 1 {
 			return ErrLeaseLost
 		}
-		executionStatus := status
-		if status == "PENDING" {
-			executionStatus = "FAILED"
-		}
+		executionStatus := executionOutcomeStatus(status, outcome)
 		_, updateErr = tx.RawExec(ctx, `UPDATE job_executions SET status=$5, finished_at=NOW(),
 			result_json=$6, error=$7, heartbeat_at=NOW()
 			WHERE job_type=$1 AND job_id=$2 AND attempt=$3 AND worker_id=$4 AND status='RUNNING'`,
@@ -433,6 +431,13 @@ func (m *Manager) finish(ctx context.Context, lease Lease, outcome Outcome) erro
 			resultJSON, nullableString(message))
 		return updateErr
 	})
+}
+
+func executionOutcomeStatus(jobStatus string, outcome Outcome) string {
+	if jobStatus == "PENDING" && outcome.Err != nil {
+		return "FAILED"
+	}
+	return jobStatus
 }
 
 func outcomeDecision(now time.Time, lease Lease, outcome Outcome) (string, time.Time, string, bool) {

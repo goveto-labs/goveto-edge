@@ -254,16 +254,17 @@ const (
 	MinCooldownSeconds = 60
 	MaxCooldownSeconds = 86400
 
-	KindNodeOffline       = "node_offline"
-	KindNodeRedisDown     = "node_redis_unavailable"
-	KindAgentLogBacklog   = "agent_log_backlog"
-	KindAgentLogsDropped  = "agent_logs_dropped"
-	KindCertExpiring      = "cert_expiring"
-	KindCertRenewFailed   = "cert_renewal_failed"
-	KindPublishFailed     = "publish_failed"
-	KindJobDeadLetter     = "job_dead_letter"
-	KindOriginErrorRate   = "origin_error_rate"
-	KindNodeResourceUsage = "node_resource_usage"
+	KindNodeOffline        = "node_offline"
+	KindNodeRedisDown      = "node_redis_unavailable"
+	KindAgentLogBacklog    = "agent_log_backlog"
+	KindAgentLogsDropped   = "agent_logs_dropped"
+	KindAgentUpgradeFailed = "agent_upgrade_failed"
+	KindCertExpiring       = "cert_expiring"
+	KindCertRenewFailed    = "cert_renewal_failed"
+	KindPublishFailed      = "publish_failed"
+	KindJobDeadLetter      = "job_dead_letter"
+	KindOriginErrorRate    = "origin_error_rate"
+	KindNodeResourceUsage  = "node_resource_usage"
 )
 
 // ValidateRuleTimers enforces the public timer contract used by both the API
@@ -318,6 +319,15 @@ var registry = map[string]*RuleSpec{
 			"window_seconds": integerParam("Window seconds", 300, 1, 86400),
 		},
 		Evaluate: evaluateAgentLogsDropped,
+	},
+	KindAgentUpgradeFailed: {
+		Kind: KindAgentUpgradeFailed, Label: "Agent upgrade failed",
+		Description:     "An edge agent upgrade failed; the previous version remains active or an upgrade prerequisite was not met.",
+		Severity:        model.AlertSeverityWARNING,
+		ForSeconds:      0,
+		CooldownSeconds: 3600,
+		Params:          map[string]ParamSpec{},
+		Evaluate:        evaluateAgentUpgradeFailed,
 	},
 	KindCertExpiring: {
 		Kind: KindCertExpiring, Label: "Certificate expiring",
@@ -510,6 +520,39 @@ func evaluateAgentLogsDropped(ctx context.Context, db *client.Client, clusterID 
 	return observations, nil
 }
 
+func evaluateAgentUpgradeFailed(ctx context.Context, db *client.Client, clusterID string, _ Params, _ AnalyticsQuerier) ([]Observation, error) {
+	rows, err := client.Raw[struct {
+		NodeID        string `db:"node_id"`
+		NodeName      string `db:"node_name"`
+		JobID         string `db:"job_id"`
+		TargetVersion string `db:"target_version"`
+		Status        string `db:"status"`
+		Error         string `db:"error"`
+	}](ctx, db, `SELECT DISTINCT ON (failed.node_id) failed.node_id, n.name AS node_name,
+		failed.id AS job_id, failed.target_version, failed.status::text, LEFT(COALESCE(failed.error, ''), 1000) AS error
+		FROM agent_upgrade_jobs failed JOIN nodes n ON n.id=failed.node_id
+		WHERE n.cluster_id=$1 AND failed.status IN ('FAILED','DEAD_LETTER')
+		AND NOT EXISTS (SELECT 1 FROM agent_upgrade_jobs recovered
+			WHERE recovered.node_id=failed.node_id AND recovered.status='SUCCEEDED'
+			AND recovered.updated_at > failed.updated_at)
+		ORDER BY failed.node_id, failed.created_at DESC`, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	observations := make([]Observation, 0, len(rows))
+	for _, row := range rows {
+		observations = append(observations, Observation{
+			Key:   row.NodeID,
+			Title: fmt.Sprintf("Agent upgrade for node %s failed", row.NodeName),
+			Detail: map[string]any{
+				"node_id": row.NodeID, "node_name": row.NodeName, "job_id": row.JobID,
+				"target_version": row.TargetVersion, "status": row.Status, "error": row.Error,
+			},
+		})
+	}
+	return observations, nil
+}
+
 func evaluateCertExpiring(ctx context.Context, db *client.Client, clusterID string, _ Params, _ AnalyticsQuerier) ([]Observation, error) {
 	rows, err := client.Raw[struct {
 		ID       string  `db:"id"`
@@ -608,6 +651,8 @@ const deadLetterSourceSQL = `SELECT 'PUBLISH' AS kind, j.id, j.site_id::text AS 
 	FROM purge_jobs j JOIN sites s ON s.id=j.site_id WHERE s.cluster_id=$1 AND j.status='DEAD_LETTER'
 	UNION ALL SELECT 'INSTALL', j.id, j.node_id::text, n.name, j.updated_at
 	FROM install_jobs j JOIN nodes n ON n.id=j.node_id WHERE n.cluster_id=$1 AND j.status='DEAD_LETTER'
+	UNION ALL SELECT 'AGENT_UPGRADE', j.id, j.node_id::text, n.name, j.updated_at
+	FROM agent_upgrade_jobs j JOIN nodes n ON n.id=j.node_id WHERE n.cluster_id=$1 AND j.status='DEAD_LETTER'
 	UNION ALL SELECT 'DNS', j.id, COALESCE(j.site_id, j.cluster_id), COALESCE(s.name, c.name), j.updated_at
 	FROM dns_sync_jobs j JOIN clusters c ON c.id=j.cluster_id LEFT JOIN sites s ON s.id=j.site_id
 	WHERE j.cluster_id=$1 AND j.status='DEAD_LETTER'

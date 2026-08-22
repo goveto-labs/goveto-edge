@@ -111,6 +111,8 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            agent_auto_upgrade_enabled:
+                                                type: boolean
                                             agent_gateway_public_address:
                                                 type: string
                                             authentication:
@@ -147,6 +149,10 @@ paths:
                         schema:
                             type: object
                             properties:
+                                agent_auto_upgrade_enabled:
+                                    type:
+                                        - boolean
+                                        - "null"
                                 agent_gateway_public_address:
                                     type: string
                                 authentication:
@@ -170,6 +176,8 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            agent_auto_upgrade_enabled:
+                                                type: boolean
                                             agent_gateway_public_address:
                                                 type: string
                                             authentication:
@@ -7628,6 +7636,93 @@ paths:
             responses:
                 "204":
                     description: OK
+    /api/v1/clusters/{cluster_id}/nodes/{node_id}/agent-upgrade/retry:
+        post:
+            operationId: retryAgentUpgrade
+            summary: Retry edge agent upgrade
+            description: Queue an upgrade to the release version embedded in this control plane using the node's stored SSH credential.
+            tags:
+                - nodes
+            security:
+                - cookie_goveto_session: []
+            x-middlewares:
+                - httpsecurity.Middleware
+                - sessions.Session
+                - apiKeyService.Middleware
+                - sessions.RequireActiveUser
+                - authapi.RequireTOTPEnrollment
+                - audit.Middleware
+                - authn.RequireAuth
+                - credentialManage
+            parameters:
+                - name: cluster_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+                - name: node_id
+                  in: path
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: OK
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    data:
+                                        type: object
+                                        properties:
+                                            attempts:
+                                                type: integer
+                                                format: int32
+                                            cancel_requested_at:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            created_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            error:
+                                                type:
+                                                    - string
+                                                    - "null"
+                                            id:
+                                                type: string
+                                            max_attempts:
+                                                type: integer
+                                                format: int32
+                                            next_attempt_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                                            status:
+                                                $ref: '#/components/schemas/model_JobStatus'
+                                            target_version:
+                                                type: string
+                                            updated_at:
+                                                type: string
+                                                format: date-time
+                                                example: "2026-01-02T15:04:05Z"
+                "409":
+                    description: Client Error
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                                properties:
+                                    code:
+                                        type: string
+                                    msg:
+                                        type: string
     /api/v1/clusters/{cluster_id}/nodes/{node_id}/cache-config:
         get:
             operationId: getCacheConfig
@@ -12258,6 +12353,8 @@ paths:
                                         properties:
                                             status:
                                                 type: string
+                                            version:
+                                                type: string
     /health/ready:
         get:
             operationId: ready
@@ -12286,6 +12383,8 @@ paths:
                                         type: object
                                         properties:
                                             status:
+                                                type: string
+                                            version:
                                                 type: string
                 "503":
                     description: Server Error
@@ -13639,6 +13738,85 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+        model_AgentUpgradeJob:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancelRequestedAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                compensationJson:
+                    type:
+                        - object
+                        - "null"
+                createdAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                heartbeatAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                id:
+                    type: string
+                idempotencyKey:
+                    type:
+                        - string
+                        - "null"
+                leaseOwner:
+                    type:
+                        - string
+                        - "null"
+                leaseUntil:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                maxAttempts:
+                    type: integer
+                    format: int32
+                nextAttemptAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                node:
+                    anyOf:
+                        - $ref: '#/components/schemas/model_Node'
+                        - type: "null"
+                nodeId:
+                    type: string
+                payload:
+                    type: object
+                resultJson:
+                    type:
+                        - object
+                        - "null"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                targetVersion:
+                    type: string
+                timeoutAt:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                updatedAt:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         model_AlertDelivery:
             type: object
             properties:
@@ -14967,6 +15145,12 @@ components:
                     items:
                         anyOf:
                             - $ref: '#/components/schemas/model_AgentTask'
+                            - type: "null"
+                agentUpgradeJobs:
+                    type: array
+                    items:
+                        anyOf:
+                            - $ref: '#/components/schemas/model_AgentUpgradeJob'
                             - type: "null"
                 cacheConfig:
                     anyOf:
@@ -16730,6 +16914,43 @@ components:
                     type: string
                     format: date-time
                     example: "2026-01-02T15:04:05Z"
+        types_AgentUpgrade:
+            type: object
+            properties:
+                attempts:
+                    type: integer
+                    format: int32
+                cancel_requested_at:
+                    type:
+                        - string
+                        - "null"
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                created_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                error:
+                    type:
+                        - string
+                        - "null"
+                id:
+                    type: string
+                max_attempts:
+                    type: integer
+                    format: int32
+                next_attempt_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
+                status:
+                    $ref: '#/components/schemas/model_JobStatus'
+                target_version:
+                    type: string
+                updated_at:
+                    type: string
+                    format: date-time
+                    example: "2026-01-02T15:04:05Z"
         types_Certificate:
             type: object
             properties:
@@ -17063,6 +17284,10 @@ components:
                     type: array
                     items:
                         $ref: '#/components/schemas/types_NodeAddress'
+                agentUpgrade:
+                    anyOf:
+                        - $ref: '#/components/schemas/types_AgentUpgrade'
+                        - type: "null"
                 cacheConfig:
                     anyOf:
                         - $ref: '#/components/schemas/types_NodeCacheConfig'

@@ -23,7 +23,7 @@ import (
 	"goveto-edge/internal/storage/gen/query"
 )
 
-func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, cipher *nodedomain.CredentialCipher, authority *edgecontrol.Authority, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) {
+func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, upgradeQueue *nodedomain.AgentUpgradeQueue, cipher *nodedomain.CredentialCipher, authority *edgecontrol.Authority, gateway *edgecontrol.Gateway, dnsService *dnssync.Service) {
 	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
 	nodeManage := clusteraccess.RequirePermission(db, rbac.PermissionNodeManage)
 	credentialManage := clusteraccess.RequirePermission(db, rbac.PermissionCredentialManage)
@@ -49,6 +49,7 @@ func Register(e *echo.Echo, db *client.Client, queue *nodedomain.InstallQueue, c
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/preview", previewSSHHostKey(db, cipher), authn.RequireAuth, credentialManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/ssh-host-key/trust", trustSSHHostKey(db, cipher), authn.RequireAuth, credentialManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall", reinstall(db, queue, cipher, authority, gateway), authn.RequireAuth, credentialManage)
+	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/agent-upgrade/retry", retryAgentUpgrade(db, upgradeQueue), authn.RequireAuth, credentialManage)
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation", getInstallation(db, cipher), authn.RequireAuth, credentialManage)
 	e.POST("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/initialize", initializeManualInstallation(db, queue, cipher, dnsService), authn.RequireAuth, nodeManage)
 	e.GET("/api/v1/clusters/:cluster_id/nodes/:node_id/installation/binary/:arch", downloadAgentBinary(db), authn.RequireAuth, nodeManage)

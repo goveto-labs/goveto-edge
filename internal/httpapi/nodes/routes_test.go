@@ -16,7 +16,7 @@ func TestDNSReconciliationTransactionIsOptional(t *testing.T) {
 
 func TestRegisterIncludesSSHCredentialRoutes(t *testing.T) {
 	e := echo.New()
-	Register(e, nil, nil, nil, nil, nil, nil)
+	Register(e, nil, nil, nil, nil, nil, nil, nil)
 
 	routes := e.Router().Routes()
 	for _, expected := range []struct {
@@ -32,6 +32,7 @@ func TestRegisterIncludesSSHCredentialRoutes(t *testing.T) {
 		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/disable"},
 		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/enable"},
 		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/reinstall"},
+		{http.MethodPost, "/api/v1/clusters/:cluster_id/nodes/:node_id/agent-upgrade/retry"},
 	} {
 		if _, err := routes.FindByMethodPath(expected.method, expected.path); err != nil {
 			t.Errorf("route %s %s is not registered", expected.method, expected.path)

@@ -73,6 +73,17 @@ func loadNodeRelations(ctx context.Context, db *client.Client, node *model.Node,
 			return err
 		}
 		node.SshHostKey = hostKey
+		upgrades, err := db.AgentUpgradeJob.Query().
+			Where(query.AgentUpgradeJob.NodeId.Equals(node.Id)).
+			OrderBy(query.AgentUpgradeJob.CreatedAt.Desc()).
+			Take(1).
+			Do(ctx)
+		if err != nil {
+			return err
+		}
+		if len(upgrades) == 1 {
+			node.AgentUpgradeJobs = []*model.AgentUpgradeJob{&upgrades[0]}
+		}
 	}
 	return nil
 }

@@ -168,12 +168,15 @@ func downloadAgentBinary(db *client.Client) echo.HandlerFunc {
 		if arch != "amd64" && arch != "arm64" {
 			return echo.NewHTTPError(http.StatusBadRequest, "architecture must be amd64 or arm64")
 		}
-		binary, err := staticassets.AgentBinary(arch)
+		artifact, err := staticassets.Agent(arch)
 		if err != nil {
 			return err
 		}
-		c.Response().Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="goveto-edge-agent-linux-%s"`, arch))
-		return c.Blob(http.StatusOK, "application/octet-stream", binary)
+		c.Response().Header().Set("Cache-Control", "no-store")
+		c.Response().Header().Set("Content-Disposition", fmt.Sprintf(
+			`attachment; filename="goveto-edge-agent-%s-linux-%s"`, artifact.Version, arch,
+		))
+		return c.Blob(http.StatusOK, "application/octet-stream", artifact.Binary)
 	}
 }
 

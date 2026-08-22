@@ -725,6 +725,34 @@ model InstallJob {
   @@map("install_jobs")
 }
 
+model AgentUpgradeJob {
+  id                String    @id @default(uuid())
+  nodeId            UUID      @map("node_id")
+  targetVersion     String    @map("target_version")
+  payload           Json
+  status            JobStatus @default(PENDING)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  node              Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+  @@map("agent_upgrade_jobs")
+}
+
 model JobExecution {
   id          String    @id @default(uuid())
   jobType     String    @map("job_type")
@@ -797,6 +825,7 @@ model Node {
   sshHostKey         NodeSSHHostKey?
   agentTasks         AgentTask[]
   installJobs        InstallJob[]
+  agentUpgradeJobs   AgentUpgradeJob[]
   sshCredential      SSHCredential?          @relation(fields: [sshCredentialId], references: [id])
   siteConfigVersions NodeSiteConfigVersion[]
 

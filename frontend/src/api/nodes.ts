@@ -1,5 +1,6 @@
 import type { AxiosRequestConfig } from 'axios';
 import type {
+    AgentUpgrade,
     CreateNodeRequest,
     Node,
     NodeAddress,
@@ -24,12 +25,15 @@ function clusterPath(clusterId: string, path: string) {
 
 export const nodesApi = (clusterId: string) => ({
     list: (config?: AxiosRequestConfig) => get<Node[]>(clusterPath(clusterId, '/nodes'), config),
-    get: (nodeId: string) => get<Node>(clusterPath(clusterId, `/nodes/${nodeId}`)),
+    get: (nodeId: string, config?: AxiosRequestConfig) =>
+        get<Node>(clusterPath(clusterId, `/nodes/${nodeId}`), config),
     create: (payload: CreateNodeRequest) => post<Node>(clusterPath(clusterId, '/nodes'), payload),
     testConnection: (ssh: NodeSSH) =>
         post<SSHConnectionTestResponse>(clusterPath(clusterId, '/nodes/test-connection'), { ssh }),
     reinstall: (nodeId: string, ssh: NodeSSH, force = false) =>
         post<Node>(clusterPath(clusterId, `/nodes/${nodeId}/reinstall`), { ssh, force }),
+    retryAgentUpgrade: (nodeId: string) =>
+        post<AgentUpgrade>(clusterPath(clusterId, `/nodes/${nodeId}/agent-upgrade/retry`)),
     previewSSHHostKey: (nodeId: string) =>
         post<NodeSSHHostKeyPreview>(
             clusterPath(clusterId, `/nodes/${nodeId}/ssh-host-key/preview`)

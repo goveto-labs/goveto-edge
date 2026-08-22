@@ -27,6 +27,7 @@ type Client struct {
 	ACMEAccount           ACMEAccountActions
 	ACMEChallenge         ACMEChallengeActions
 	AgentTask             AgentTaskActions
+	AgentUpgradeJob       AgentUpgradeJobActions
 	AlertDelivery         AlertDeliveryActions
 	AlertEvent            AlertEventActions
 	AlertInstance         AlertInstanceActions
@@ -86,6 +87,7 @@ func New(db *sql.DB, opts ...Option) *Client {
 	c.ACMEAccount = ACMEAccountActions{client: c}
 	c.ACMEChallenge = ACMEChallengeActions{client: c}
 	c.AgentTask = AgentTaskActions{client: c}
+	c.AgentUpgradeJob = AgentUpgradeJobActions{client: c}
 	c.AlertDelivery = AlertDeliveryActions{client: c}
 	c.AlertEvent = AlertEventActions{client: c}
 	c.AlertInstance = AlertInstanceActions{client: c}
@@ -305,6 +307,7 @@ func (c *Client) Tx(ctx context.Context, fn func(tx *Client) error) error {
 	txClient.ACMEAccount = ACMEAccountActions{client: txClient}
 	txClient.ACMEChallenge = ACMEChallengeActions{client: txClient}
 	txClient.AgentTask = AgentTaskActions{client: txClient}
+	txClient.AgentUpgradeJob = AgentUpgradeJobActions{client: txClient}
 	txClient.AlertDelivery = AlertDeliveryActions{client: txClient}
 	txClient.AlertEvent = AlertEventActions{client: txClient}
 	txClient.AlertInstance = AlertInstanceActions{client: txClient}
@@ -3308,6 +3311,1004 @@ func (a AgentTaskActions) GroupBy(ctx context.Context, fields []string, opts ...
 		}
 		if err := rows.Scan(scanDest...); err != nil {
 			return nil, fmt.Errorf("AgentTask.GroupBy scan: %w", err)
+		}
+		for i, f := range fields {
+			r.Group[f] = *(groupVals[i].(*any))
+		}
+		for i, opt := range opts {
+			if aggVals[i].Valid {
+				v := aggVals[i].Float64
+				switch opt.Fn {
+				case "avg":
+					r.Avg[opt.Field] = &v
+				case "sum":
+					r.Sum[opt.Field] = &v
+				case "min":
+					r.Min[opt.Field] = v
+				case "max":
+					r.Max[opt.Field] = v
+				}
+			}
+		}
+		results = append(results, r)
+	}
+	return results, rows.Err()
+}
+
+func quotedAgentUpgradeJobTable(c *Client) string { return c.quoteIdentifier("agent_upgrade_jobs") }
+func quotedAgentUpgradeJobColumns(c *Client) string {
+	cols := []string{"id", "node_id", "target_version", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = c.quoteIdentifier(cols[i])
+	}
+	return strings.Join(cols, ", ")
+}
+
+func quoteAgentUpgradeJobField(c *Client, field string) (string, error) {
+	switch field {
+	case "id":
+		return c.quoteIdentifier(field), nil
+	case "node_id":
+		return c.quoteIdentifier(field), nil
+	case "target_version":
+		return c.quoteIdentifier(field), nil
+	case "payload":
+		return c.quoteIdentifier(field), nil
+	case "status":
+		return c.quoteIdentifier(field), nil
+	case "attempts":
+		return c.quoteIdentifier(field), nil
+	case "max_attempts":
+		return c.quoteIdentifier(field), nil
+	case "next_attempt_at":
+		return c.quoteIdentifier(field), nil
+	case "lease_owner":
+		return c.quoteIdentifier(field), nil
+	case "lease_until":
+		return c.quoteIdentifier(field), nil
+	case "heartbeat_at":
+		return c.quoteIdentifier(field), nil
+	case "idempotency_key":
+		return c.quoteIdentifier(field), nil
+	case "cancel_requested_at":
+		return c.quoteIdentifier(field), nil
+	case "timeout_at":
+		return c.quoteIdentifier(field), nil
+	case "result_json":
+		return c.quoteIdentifier(field), nil
+	case "compensation_json":
+		return c.quoteIdentifier(field), nil
+	case "error":
+		return c.quoteIdentifier(field), nil
+	case "created_at":
+		return c.quoteIdentifier(field), nil
+	case "updated_at":
+		return c.quoteIdentifier(field), nil
+	default:
+		return "", fmt.Errorf("unknown AgentUpgradeJob field %q", field)
+	}
+}
+
+// buildAgentUpgradeJobWhere recursively builds a WHERE clause string and arguments.
+func buildAgentUpgradeJobWhere(c *Client, wheres []query.AgentUpgradeJobWhereClause, argIdx *int) (string, []any) {
+	var parts []string
+	var args []any
+	for _, w := range wheres {
+		switch w.Field {
+		case "__AND__":
+			if subs, ok := w.Value.([]query.AgentUpgradeJobWhereClause); ok {
+				sub, subArgs := buildAgentUpgradeJobWhere(c, subs, argIdx)
+				if sub != "" {
+					parts = append(parts, "("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		case "__OR__":
+			if subs, ok := w.Value.([]query.AgentUpgradeJobWhereClause); ok {
+				var orParts []string
+				for _, sc := range subs {
+					sub, subArgs := buildAgentUpgradeJobWhere(c, []query.AgentUpgradeJobWhereClause{sc}, argIdx)
+					if sub != "" {
+						orParts = append(orParts, sub)
+					}
+					args = append(args, subArgs...)
+				}
+				if len(orParts) > 0 {
+					parts = append(parts, "("+strings.Join(orParts, " OR ")+")")
+				}
+			}
+		case "__NOT__":
+			if sc, ok := w.Value.(query.AgentUpgradeJobWhereClause); ok {
+				sub, subArgs := buildAgentUpgradeJobWhere(c, []query.AgentUpgradeJobWhereClause{sc}, argIdx)
+				if sub != "" {
+					parts = append(parts, "NOT ("+sub+")")
+				}
+				args = append(args, subArgs...)
+			}
+		default:
+			field, err := quoteAgentUpgradeJobField(c, w.Field)
+			if err != nil {
+				parts = append(parts, "1 = 0")
+				continue
+			}
+			switch w.Operator {
+			case "IS NULL":
+				parts = append(parts, field+" IS NULL")
+			case "IN", "NOT IN":
+				if vals, ok := w.Value.([]any); ok {
+					if len(vals) == 0 {
+						if w.Operator == "IN" {
+							parts = append(parts, "1 = 0")
+						} else {
+							parts = append(parts, "1 = 1")
+						}
+					} else {
+						phs := make([]string, len(vals))
+						for i, v := range vals {
+							*argIdx++
+							phs[i] = c.placeholder(*argIdx)
+							args = append(args, v)
+						}
+						parts = append(parts, field+" "+w.Operator+" ("+strings.Join(phs, ", ")+")")
+					}
+				}
+			case "CONTAINS":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "STARTS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, escapeLikePattern(fmt.Sprint(w.Value))+"%")
+			case "ENDS_WITH":
+				*argIdx++
+				parts = append(parts, field+" LIKE "+c.placeholder(*argIdx)+" ESCAPE '\\'")
+				args = append(args, "%"+escapeLikePattern(fmt.Sprint(w.Value)))
+			default:
+				*argIdx++
+				parts = append(parts, field+" "+w.Operator+" "+c.placeholder(*argIdx))
+				args = append(args, w.Value)
+			}
+		}
+	}
+	return strings.Join(parts, " AND "), args
+}
+
+// AgentUpgradeJobActions provides database operations for the AgentUpgradeJob model.
+type AgentUpgradeJobActions struct {
+	client *Client
+}
+
+// AgentUpgradeJobCreateBuilder builds a AgentUpgradeJob create operation incrementally.
+type AgentUpgradeJobCreateBuilder struct {
+	action AgentUpgradeJobActions
+	sets   []query.AgentUpgradeJobSetClause
+}
+
+// Create starts a staged AgentUpgradeJob create operation.
+func (a AgentUpgradeJobActions) Create() AgentUpgradeJobCreateBuilder {
+	return AgentUpgradeJobCreateBuilder{action: a}
+}
+
+// Set appends field assignments to the staged create operation.
+func (b AgentUpgradeJobCreateBuilder) Set(sets ...query.AgentUpgradeJobSetClause) AgentUpgradeJobCreateBuilder {
+	next := AgentUpgradeJobCreateBuilder{
+		action: b.action,
+		sets:   make([]query.AgentUpgradeJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+// Do executes the staged create operation.
+func (b AgentUpgradeJobCreateBuilder) Do(ctx context.Context) (*model.AgentUpgradeJob, error) {
+	return b.action.CreateOne(ctx, b.sets...)
+}
+
+// AgentUpgradeJobCreateManyBuilder builds a bulk AgentUpgradeJob insert operation.
+type AgentUpgradeJobCreateManyBuilder struct {
+	action            AgentUpgradeJobActions
+	data              []query.AgentUpgradeJobCreateInput
+	conflictDoNothing bool
+	conflictColumns   []string
+	returningColumns  []string
+	batchSize         int
+}
+
+// BulkCreate starts a staged bulk AgentUpgradeJob insert operation.
+func (a AgentUpgradeJobActions) BulkCreate(data []query.AgentUpgradeJobCreateInput) AgentUpgradeJobCreateManyBuilder {
+	return AgentUpgradeJobCreateManyBuilder{action: a, data: data}
+}
+
+// OnConflictDoNothing makes duplicate rows no-op instead of failing.
+func (b AgentUpgradeJobCreateManyBuilder) OnConflictDoNothing(columns ...string) AgentUpgradeJobCreateManyBuilder {
+	next := b
+	next.conflictDoNothing = true
+	next.conflictColumns = append([]string(nil), columns...)
+	return next
+}
+
+// Returning sets the columns returned by DoReturningValues.
+func (b AgentUpgradeJobCreateManyBuilder) Returning(columns ...string) AgentUpgradeJobCreateManyBuilder {
+	next := b
+	next.returningColumns = append([]string(nil), columns...)
+	return next
+}
+
+// BatchSize limits how many rows are inserted per statement.
+func (b AgentUpgradeJobCreateManyBuilder) BatchSize(n int) AgentUpgradeJobCreateManyBuilder {
+	next := b
+	next.batchSize = n
+	return next
+}
+
+// Do executes the bulk insert and returns total affected rows.
+func (b AgentUpgradeJobCreateManyBuilder) Do(ctx context.Context) (int64, error) {
+	if len(b.data) == 0 {
+		return 0, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var total int64
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentUpgradeJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, nil)
+		result, err := b.action.client.executor.ExecContext(ctx, q, args...)
+		if err != nil {
+			return total, fmt.Errorf("AgentUpgradeJob.BulkCreate: %w", err)
+		}
+		n, err := result.RowsAffected()
+		if err != nil {
+			return total, fmt.Errorf("AgentUpgradeJob.BulkCreate rows affected: %w", err)
+		}
+		total += n
+	}
+	return total, nil
+}
+
+// DoReturning executes the bulk insert and returns inserted rows.
+func (b AgentUpgradeJobCreateManyBuilder) DoReturning(ctx context.Context) ([]model.AgentUpgradeJob, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning: RETURNING is only supported for postgresql")
+	}
+	if len(b.returningColumns) > 0 {
+		return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning: custom returning columns require DoReturningValues")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []model.AgentUpgradeJob
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentUpgradeJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, []string{"id", "node_id", "target_version", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"})
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning: %w", err)
+		}
+		for rows.Next() {
+			var item model.AgentUpgradeJob
+			if err := rows.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning scan: %w", err)
+			}
+			results = append(results, item)
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning rows: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturning close: %w", err)
+		}
+	}
+	return results, nil
+}
+
+// DoReturningValues executes the bulk insert and returns selected column values.
+func (b AgentUpgradeJobCreateManyBuilder) DoReturningValues(ctx context.Context) ([]map[string]any, error) {
+	if b.action.client.dialect != "postgresql" {
+		return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturningValues: RETURNING is only supported for postgresql")
+	}
+	if len(b.data) == 0 {
+		return nil, nil
+	}
+	returningColumns := b.returningColumns
+	if len(returningColumns) == 0 {
+		returningColumns = []string{"id", "node_id", "target_version", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	}
+	batchSize := b.batchSize
+	if batchSize <= 0 || batchSize > len(b.data) {
+		batchSize = len(b.data)
+	}
+	var results []map[string]any
+	for start := 0; start < len(b.data); start += batchSize {
+		end := start + batchSize
+		if end > len(b.data) {
+			end = len(b.data)
+		}
+		q, args := b.action.buildAgentUpgradeJobCreateManySQL(b.data[start:end], b.conflictDoNothing, b.conflictColumns, returningColumns)
+		rows, err := b.action.client.executor.QueryContext(ctx, q, args...)
+		if err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturningValues: %w", err)
+		}
+		batch, err := scanRowsToMaps(rows)
+		closeErr := rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturningValues scan: %w", err)
+		}
+		if closeErr != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.BulkCreate.DoReturningValues close: %w", closeErr)
+		}
+		results = append(results, batch...)
+	}
+	return results, nil
+}
+
+// AgentUpgradeJobQueryBuilder builds a AgentUpgradeJob query incrementally.
+type AgentUpgradeJobQueryBuilder struct {
+	action AgentUpgradeJobActions
+	opts   []query.AgentUpgradeJobQueryOption
+}
+
+// Query starts a staged AgentUpgradeJob query.
+func (a AgentUpgradeJobActions) Query() AgentUpgradeJobQueryBuilder {
+	return AgentUpgradeJobQueryBuilder{action: a}
+}
+
+func (b AgentUpgradeJobQueryBuilder) withOptions(opts ...query.AgentUpgradeJobQueryOption) AgentUpgradeJobQueryBuilder {
+	next := AgentUpgradeJobQueryBuilder{
+		action: b.action,
+		opts:   make([]query.AgentUpgradeJobQueryOption, 0, len(b.opts)+len(opts)),
+	}
+	next.opts = append(next.opts, b.opts...)
+	next.opts = append(next.opts, opts...)
+	return next
+}
+
+// Where appends WHERE clauses to the staged query.
+func (b AgentUpgradeJobQueryBuilder) Where(clauses ...query.AgentUpgradeJobWhereClause) AgentUpgradeJobQueryBuilder {
+	opts := make([]query.AgentUpgradeJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// OrderBy appends an ORDER BY clause to the staged query.
+func (b AgentUpgradeJobQueryBuilder) OrderBy(clause query.AgentUpgradeJobOrderByClause) AgentUpgradeJobQueryBuilder {
+	return b.withOptions(clause)
+}
+
+// Include appends include clauses to the staged query.
+func (b AgentUpgradeJobQueryBuilder) Include(clauses ...query.AgentUpgradeJobIncludeClause) AgentUpgradeJobQueryBuilder {
+	opts := make([]query.AgentUpgradeJobQueryOption, len(clauses))
+	for i, clause := range clauses {
+		opts[i] = clause
+	}
+	return b.withOptions(opts...)
+}
+
+// Take applies a LIMIT to the staged query.
+func (b AgentUpgradeJobQueryBuilder) Take(n int) AgentUpgradeJobQueryBuilder {
+	return b.withOptions(query.AgentUpgradeJobTakeOption{N: n})
+}
+
+// Skip applies an OFFSET to the staged query.
+func (b AgentUpgradeJobQueryBuilder) Skip(n int) AgentUpgradeJobQueryBuilder {
+	return b.withOptions(query.AgentUpgradeJobSkipOption{N: n})
+}
+
+// Do executes the staged query and returns all matching rows.
+func (b AgentUpgradeJobQueryBuilder) Do(ctx context.Context) ([]model.AgentUpgradeJob, error) {
+	return b.action.FindMany(ctx, b.opts...)
+}
+
+// First executes the staged query and returns the first matching row.
+func (b AgentUpgradeJobQueryBuilder) First(ctx context.Context) (*model.AgentUpgradeJob, error) {
+	return b.action.FindFirst(ctx, b.opts...)
+}
+
+// Count executes the staged query as a COUNT over its WHERE clauses.
+func (b AgentUpgradeJobQueryBuilder) Count(ctx context.Context) (int64, error) {
+	cfg := query.ApplyAgentUpgradeJobOptions(b.opts)
+	return b.action.Count(ctx, cfg.Wheres...)
+}
+
+// AgentUpgradeJobUpdateBuilder builds a AgentUpgradeJob update operation incrementally.
+type AgentUpgradeJobUpdateBuilder struct {
+	action AgentUpgradeJobActions
+	wheres []query.AgentUpgradeJobWhereClause
+	sets   []query.AgentUpgradeJobSetClause
+}
+
+// Update starts a staged AgentUpgradeJob update operation.
+func (a AgentUpgradeJobActions) Update() AgentUpgradeJobUpdateBuilder {
+	return AgentUpgradeJobUpdateBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged update operation.
+func (b AgentUpgradeJobUpdateBuilder) Where(clauses ...query.AgentUpgradeJobWhereClause) AgentUpgradeJobUpdateBuilder {
+	next := AgentUpgradeJobUpdateBuilder{
+		action: b.action,
+		wheres: make([]query.AgentUpgradeJobWhereClause, 0, len(b.wheres)+len(clauses)),
+		sets:   append([]query.AgentUpgradeJobSetClause(nil), b.sets...),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+// Set appends field assignments to the staged update operation.
+func (b AgentUpgradeJobUpdateBuilder) Set(sets ...query.AgentUpgradeJobSetClause) AgentUpgradeJobUpdateBuilder {
+	next := AgentUpgradeJobUpdateBuilder{
+		action: b.action,
+		wheres: append([]query.AgentUpgradeJobWhereClause(nil), b.wheres...),
+		sets:   make([]query.AgentUpgradeJobSetClause, 0, len(b.sets)+len(sets)),
+	}
+	next.sets = append(next.sets, b.sets...)
+	next.sets = append(next.sets, sets...)
+	return next
+}
+
+func (b AgentUpgradeJobUpdateBuilder) combinedWhere() (query.AgentUpgradeJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AgentUpgradeJobWhereClause{}, fmt.Errorf("AgentUpgradeJob.Update.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AgentUpgradeJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged update as a single-row update.
+func (b AgentUpgradeJobUpdateBuilder) Do(ctx context.Context) (*model.AgentUpgradeJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.UpdateOne(ctx, where, b.sets...)
+}
+
+// DoMany executes the staged update as a multi-row update.
+func (b AgentUpgradeJobUpdateBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.UpdateMany(ctx, b.wheres, b.sets...)
+}
+
+// AgentUpgradeJobDeleteBuilder builds a AgentUpgradeJob delete operation incrementally.
+type AgentUpgradeJobDeleteBuilder struct {
+	action AgentUpgradeJobActions
+	wheres []query.AgentUpgradeJobWhereClause
+}
+
+// Delete starts a staged AgentUpgradeJob delete operation.
+func (a AgentUpgradeJobActions) Delete() AgentUpgradeJobDeleteBuilder {
+	return AgentUpgradeJobDeleteBuilder{action: a}
+}
+
+// Where appends WHERE clauses to the staged delete operation.
+func (b AgentUpgradeJobDeleteBuilder) Where(clauses ...query.AgentUpgradeJobWhereClause) AgentUpgradeJobDeleteBuilder {
+	next := AgentUpgradeJobDeleteBuilder{
+		action: b.action,
+		wheres: make([]query.AgentUpgradeJobWhereClause, 0, len(b.wheres)+len(clauses)),
+	}
+	next.wheres = append(next.wheres, b.wheres...)
+	next.wheres = append(next.wheres, clauses...)
+	return next
+}
+
+func (b AgentUpgradeJobDeleteBuilder) combinedWhere() (query.AgentUpgradeJobWhereClause, error) {
+	if len(b.wheres) == 0 {
+		return query.AgentUpgradeJobWhereClause{}, fmt.Errorf("AgentUpgradeJob.Delete.Do: no where clause provided")
+	}
+	if len(b.wheres) == 1 {
+		return b.wheres[0], nil
+	}
+	return query.AgentUpgradeJob.AND(b.wheres...), nil
+}
+
+// Do executes the staged delete as a single-row delete.
+func (b AgentUpgradeJobDeleteBuilder) Do(ctx context.Context) (*model.AgentUpgradeJob, error) {
+	where, err := b.combinedWhere()
+	if err != nil {
+		return nil, err
+	}
+	return b.action.DeleteOne(ctx, where)
+}
+
+// DoMany executes the staged delete as a multi-row delete.
+func (b AgentUpgradeJobDeleteBuilder) DoMany(ctx context.Context) (int64, error) {
+	return b.action.DeleteMany(ctx, b.wheres...)
+}
+
+// FindMany retrieves multiple AgentUpgradeJob records.
+func (a AgentUpgradeJobActions) FindMany(ctx context.Context, opts ...query.AgentUpgradeJobQueryOption) ([]model.AgentUpgradeJob, error) {
+	cfg := query.ApplyAgentUpgradeJobOptions(opts)
+	q := "SELECT " + quotedAgentUpgradeJobColumns(a.client) + " FROM " + quotedAgentUpgradeJobTable(a.client)
+	argIdx := 0
+	where, args := buildAgentUpgradeJobWhere(a.client, cfg.Wheres, &argIdx)
+	if where != "" {
+		q += " WHERE " + where
+	}
+	if len(cfg.OrderBys) > 0 {
+		obs := make([]string, len(cfg.OrderBys))
+		for i, ob := range cfg.OrderBys {
+			field, err := quoteAgentUpgradeJobField(a.client, ob.Field)
+			if err != nil {
+				return nil, err
+			}
+			direction := strings.ToUpper(ob.Direction)
+			if direction != "ASC" && direction != "DESC" {
+				return nil, fmt.Errorf("invalid order direction %q", ob.Direction)
+			}
+			obs[i] = field + " " + direction
+		}
+		q += " ORDER BY " + strings.Join(obs, ", ")
+	}
+	if cfg.Take != nil {
+		q += fmt.Sprintf(" LIMIT %d", *cfg.Take)
+	}
+	if cfg.Skip != nil {
+		if cfg.Take == nil {
+			switch a.client.dialect {
+			case "mysql":
+				q += " LIMIT 18446744073709551615"
+			case "sqlite":
+				q += " LIMIT -1"
+			}
+		}
+		q += fmt.Sprintf(" OFFSET %d", *cfg.Skip)
+	}
+	rows, err := a.client.executor.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.FindMany: %w", err)
+	}
+	defer rows.Close()
+	var results []model.AgentUpgradeJob
+	for rows.Next() {
+		var item model.AgentUpgradeJob
+		if err := rows.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.FindMany scan: %w", err)
+		}
+		results = append(results, item)
+	}
+	return results, rows.Err()
+}
+
+// FindFirst retrieves the first matching AgentUpgradeJob record.
+func (a AgentUpgradeJobActions) FindFirst(ctx context.Context, opts ...query.AgentUpgradeJobQueryOption) (*model.AgentUpgradeJob, error) {
+	opts = append(opts, query.AgentUpgradeJobTakeOption{N: 1})
+	results, err := a.FindMany(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	return &results[0], nil
+}
+
+// FindUnique retrieves a single AgentUpgradeJob record by unique constraint.
+func (a AgentUpgradeJobActions) FindUnique(ctx context.Context, where query.AgentUpgradeJobWhereClause) (*model.AgentUpgradeJob, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentUpgradeJobWhere(a.client, []query.AgentUpgradeJobWhereClause{where}, &argIdx)
+	q := "SELECT " + quotedAgentUpgradeJobColumns(a.client) + " FROM " + quotedAgentUpgradeJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	q += " LIMIT 1"
+	row := a.client.executor.QueryRowContext(ctx, q, args...)
+	var item model.AgentUpgradeJob
+	if err := row.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("AgentUpgradeJob.FindUnique: %w", err)
+	}
+	return &item, nil
+}
+
+// CreateOne creates a single AgentUpgradeJob record.
+func (a AgentUpgradeJobActions) CreateOne(ctx context.Context, sets ...query.AgentUpgradeJobSetClause) (*model.AgentUpgradeJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AgentUpgradeJob.CreateOne: no fields provided")
+	}
+	cols := make([]string, len(sets))
+	vals := make([]any, len(sets))
+	phs := make([]string, len(sets))
+	for i, s := range sets {
+		field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		vals[i] = s.Value
+		phs[i] = a.client.placeholder(i + 1)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAgentUpgradeJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentUpgradeJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, vals...)
+		var item model.AgentUpgradeJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.CreateOne: %w", err)
+		}
+		return &item, nil
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, vals...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.CreateOne: %w", err)
+	}
+	_ = result
+	return nil, nil
+}
+
+// CreateMany creates multiple AgentUpgradeJob records.
+func (a AgentUpgradeJobActions) CreateMany(ctx context.Context, data []query.AgentUpgradeJobCreateInput) (int64, error) {
+	return a.BulkCreate(data).Do(ctx)
+}
+
+func (a AgentUpgradeJobActions) buildAgentUpgradeJobCreateManySQL(data []query.AgentUpgradeJobCreateInput, conflictDoNothing bool, conflictColumns []string, returningColumns []string) (string, []any) {
+	cols := []string{"id", "node_id", "target_version", "payload", "status", "attempts", "max_attempts", "next_attempt_at", "lease_owner", "lease_until", "heartbeat_at", "idempotency_key", "cancel_requested_at", "timeout_at", "result_json", "compensation_json", "error", "created_at", "updated_at"}
+	for i := range cols {
+		cols[i] = a.client.quoteIdentifier(cols[i])
+	}
+	argIdx := 0
+	var valueSets []string
+	var args []any
+	for _, d := range data {
+		row := d.ScalarValues()
+		phs := make([]string, len(row))
+		for i, v := range row {
+			argIdx++
+			phs[i] = a.client.placeholder(argIdx)
+			args = append(args, v)
+		}
+		valueSets = append(valueSets, "("+strings.Join(phs, ", ")+")")
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES %s", quotedAgentUpgradeJobTable(a.client), strings.Join(cols, ", "), strings.Join(valueSets, ", "))
+	if conflictDoNothing {
+		switch a.client.dialect {
+		case "mysql":
+			if len(cols) > 0 {
+				q += " ON DUPLICATE KEY UPDATE " + cols[0] + " = " + cols[0]
+			}
+		default:
+			q += " ON CONFLICT"
+			if len(conflictColumns) > 0 {
+				quoted := make([]string, len(conflictColumns))
+				for i, field := range conflictColumns {
+					quoted[i] = a.client.quoteIdentifier(field)
+				}
+				q += " (" + strings.Join(quoted, ", ") + ")"
+			}
+			q += " DO NOTHING"
+		}
+	}
+	if len(returningColumns) > 0 {
+		quoted := make([]string, len(returningColumns))
+		for i, field := range returningColumns {
+			quoted[i] = a.client.quoteIdentifier(field)
+		}
+		q += " RETURNING " + strings.Join(quoted, ", ")
+	}
+	return q, args
+}
+
+// UpdateOne updates a single AgentUpgradeJob record matching the where clause.
+func (a AgentUpgradeJobActions) UpdateOne(ctx context.Context, where query.AgentUpgradeJobWhereClause, sets ...query.AgentUpgradeJobSetClause) (*model.AgentUpgradeJob, error) {
+	if len(sets) == 0 {
+		return nil, fmt.Errorf("AgentUpgradeJob.UpdateOne: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+1)
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAgentUpgradeJobWhere(a.client, []query.AgentUpgradeJobWhereClause{where}, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAgentUpgradeJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentUpgradeJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentUpgradeJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AgentUpgradeJob.UpdateOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.UpdateOne: %w", err)
+	}
+	return nil, nil
+}
+
+// UpdateMany updates multiple AgentUpgradeJob records matching the where clauses.
+func (a AgentUpgradeJobActions) UpdateMany(ctx context.Context, wheres []query.AgentUpgradeJobWhereClause, sets ...query.AgentUpgradeJobSetClause) (int64, error) {
+	if len(sets) == 0 {
+		return 0, fmt.Errorf("AgentUpgradeJob.UpdateMany: no fields to update")
+	}
+	argIdx := 0
+	setParts := make([]string, len(sets))
+	args := make([]any, 0, len(sets)+len(wheres))
+	for i, s := range sets {
+		argIdx++
+		field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+		if err != nil {
+			return 0, err
+		}
+		setParts[i] = field + " = " + a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	whereSQL, whereArgs := buildAgentUpgradeJobWhere(a.client, wheres, &argIdx)
+	args = append(args, whereArgs...)
+	q := fmt.Sprintf("UPDATE %s SET %s", quotedAgentUpgradeJobTable(a.client), strings.Join(setParts, ", "))
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AgentUpgradeJob.UpdateMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// UpsertOne creates or updates a single AgentUpgradeJob record.
+func (a AgentUpgradeJobActions) UpsertOne(ctx context.Context, where query.AgentUpgradeJobWhereClause, create []query.AgentUpgradeJobSetClause, update []query.AgentUpgradeJobSetClause) (*model.AgentUpgradeJob, error) {
+	if len(create) == 0 {
+		return nil, fmt.Errorf("AgentUpgradeJob.UpsertOne: no create fields provided")
+	}
+	argIdx := 0
+	cols := make([]string, len(create))
+	phs := make([]string, len(create))
+	args := make([]any, 0, len(create)+len(update))
+	for i, s := range create {
+		field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+		if err != nil {
+			return nil, err
+		}
+		cols[i] = field
+		argIdx++
+		phs[i] = a.client.placeholder(argIdx)
+		args = append(args, s.Value)
+	}
+	q := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s)", quotedAgentUpgradeJobTable(a.client), strings.Join(cols, ", "), strings.Join(phs, ", "))
+	if a.client.dialect == "mysql" {
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " ON DUPLICATE KEY UPDATE " + strings.Join(uParts, ", ")
+		}
+	} else {
+		conflictField, err := quoteAgentUpgradeJobField(a.client, where.Field)
+		if err != nil {
+			return nil, err
+		}
+		q += fmt.Sprintf(" ON CONFLICT (%s) DO", conflictField)
+		if len(update) > 0 {
+			uParts := make([]string, len(update))
+			for i, s := range update {
+				argIdx++
+				field, err := quoteAgentUpgradeJobField(a.client, s.Field)
+				if err != nil {
+					return nil, err
+				}
+				uParts[i] = field + " = " + a.client.placeholder(argIdx)
+				args = append(args, s.Value)
+			}
+			q += " UPDATE SET " + strings.Join(uParts, ", ")
+		} else {
+			q += " NOTHING"
+		}
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentUpgradeJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentUpgradeJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.UpsertOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.UpsertOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteOne deletes a single AgentUpgradeJob record matching the where clause.
+func (a AgentUpgradeJobActions) DeleteOne(ctx context.Context, where query.AgentUpgradeJobWhereClause) (*model.AgentUpgradeJob, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentUpgradeJobWhere(a.client, []query.AgentUpgradeJobWhereClause{where}, &argIdx)
+	q := "DELETE FROM " + quotedAgentUpgradeJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	if a.client.dialect == "postgresql" {
+		q += " RETURNING " + quotedAgentUpgradeJobColumns(a.client)
+		row := a.client.executor.QueryRowContext(ctx, q, args...)
+		var item model.AgentUpgradeJob
+		if err := row.Scan(&item.Id, &item.NodeId, &item.TargetVersion, &item.Payload, &item.Status, &item.Attempts, &item.MaxAttempts, &item.NextAttemptAt, &item.LeaseOwner, &item.LeaseUntil, &item.HeartbeatAt, &item.IdempotencyKey, &item.CancelRequestedAt, &item.TimeoutAt, &item.ResultJson, &item.CompensationJson, &item.Error, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			if err == sql.ErrNoRows {
+				return nil, nil
+			}
+			return nil, fmt.Errorf("AgentUpgradeJob.DeleteOne: %w", err)
+		}
+		return &item, nil
+	}
+	_, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.DeleteOne: %w", err)
+	}
+	return nil, nil
+}
+
+// DeleteMany deletes multiple AgentUpgradeJob records matching the where clauses.
+func (a AgentUpgradeJobActions) DeleteMany(ctx context.Context, wheres ...query.AgentUpgradeJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentUpgradeJobWhere(a.client, wheres, &argIdx)
+	q := "DELETE FROM " + quotedAgentUpgradeJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	result, err := a.client.executor.ExecContext(ctx, q, args...)
+	if err != nil {
+		return 0, fmt.Errorf("AgentUpgradeJob.DeleteMany: %w", err)
+	}
+	return result.RowsAffected()
+}
+
+// Count returns the number of AgentUpgradeJob records matching the where clauses.
+func (a AgentUpgradeJobActions) Count(ctx context.Context, wheres ...query.AgentUpgradeJobWhereClause) (int64, error) {
+	argIdx := 0
+	whereSQL, args := buildAgentUpgradeJobWhere(a.client, wheres, &argIdx)
+	q := "SELECT COUNT(*) FROM " + quotedAgentUpgradeJobTable(a.client)
+	if whereSQL != "" {
+		q += " WHERE " + whereSQL
+	}
+	var count int64
+	if err := a.client.executor.QueryRowContext(ctx, q, args...).Scan(&count); err != nil {
+		return 0, fmt.Errorf("AgentUpgradeJob.Count: %w", err)
+	}
+	return count, nil
+}
+
+// Aggregate computes aggregate values for AgentUpgradeJob.
+func (a AgentUpgradeJobActions) Aggregate(ctx context.Context, opts ...query.AgentUpgradeJobAggregateOption) (*query.AgentUpgradeJobAggregateResult, error) {
+	selParts := []string{"COUNT(*)"}
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAgentUpgradeJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s", strings.Join(selParts, ", "), quotedAgentUpgradeJobTable(a.client))
+	row := a.client.executor.QueryRowContext(ctx, q)
+	result := &query.AgentUpgradeJobAggregateResult{
+		Avg: make(map[string]*float64),
+		Sum: make(map[string]*float64),
+		Min: make(map[string]any),
+		Max: make(map[string]any),
+	}
+	aggVals := make([]sql.NullFloat64, len(opts))
+	scanDest := make([]any, 0, 1+len(opts))
+	scanDest = append(scanDest, &result.Count)
+	for i := range opts {
+		scanDest = append(scanDest, &aggVals[i])
+	}
+	if err := row.Scan(scanDest...); err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.Aggregate: %w", err)
+	}
+	for i, opt := range opts {
+		if aggVals[i].Valid {
+			v := aggVals[i].Float64
+			switch opt.Fn {
+			case "avg":
+				result.Avg[opt.Field] = &v
+			case "sum":
+				result.Sum[opt.Field] = &v
+			case "min":
+				result.Min[opt.Field] = v
+			case "max":
+				result.Max[opt.Field] = v
+			}
+		}
+	}
+	return result, nil
+}
+
+// GroupBy performs a GROUP BY query on AgentUpgradeJob.
+func (a AgentUpgradeJobActions) GroupBy(ctx context.Context, fields []string, opts ...query.AgentUpgradeJobAggregateOption) ([]query.AgentUpgradeJobGroupByResult, error) {
+	selParts := make([]string, 0, len(fields)+1+len(opts))
+	groupFields := make([]string, len(fields))
+	for i, field := range fields {
+		quoted, err := quoteAgentUpgradeJobField(a.client, field)
+		if err != nil {
+			return nil, err
+		}
+		groupFields[i] = quoted
+	}
+	selParts = append(selParts, groupFields...)
+	selParts = append(selParts, "COUNT(*)")
+	for _, opt := range opts {
+		fn := strings.ToUpper(opt.Fn)
+		if fn != "AVG" && fn != "SUM" && fn != "MIN" && fn != "MAX" {
+			return nil, fmt.Errorf("invalid aggregate function %q", opt.Fn)
+		}
+		field, err := quoteAgentUpgradeJobField(a.client, opt.Field)
+		if err != nil {
+			return nil, err
+		}
+		selParts = append(selParts, fmt.Sprintf("%s(%s)", fn, field))
+	}
+	q := fmt.Sprintf("SELECT %s FROM %s GROUP BY %s", strings.Join(selParts, ", "), quotedAgentUpgradeJobTable(a.client), strings.Join(groupFields, ", "))
+	rows, err := a.client.executor.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("AgentUpgradeJob.GroupBy: %w", err)
+	}
+	defer rows.Close()
+	var results []query.AgentUpgradeJobGroupByResult
+	for rows.Next() {
+		r := query.AgentUpgradeJobGroupByResult{
+			Group: make(map[string]any),
+			Avg:   make(map[string]*float64),
+			Sum:   make(map[string]*float64),
+			Min:   make(map[string]any),
+			Max:   make(map[string]any),
+		}
+		groupVals := make([]any, len(fields))
+		scanDest := make([]any, 0, len(fields)+1+len(opts))
+		for i := range fields {
+			groupVals[i] = new(any)
+			scanDest = append(scanDest, groupVals[i])
+		}
+		scanDest = append(scanDest, &r.Count)
+		aggVals := make([]sql.NullFloat64, len(opts))
+		for i := range opts {
+			scanDest = append(scanDest, &aggVals[i])
+		}
+		if err := rows.Scan(scanDest...); err != nil {
+			return nil, fmt.Errorf("AgentUpgradeJob.GroupBy scan: %w", err)
 		}
 		for i, f := range fields {
 			r.Group[f] = *(groupVals[i].(*any))
