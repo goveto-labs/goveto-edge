@@ -453,6 +453,8 @@ paths:
             summary: Logout
             tags:
                 - auth
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -482,6 +484,8 @@ paths:
             description: Return the authenticated user's profile.
             tags:
                 - auth
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -567,6 +571,8 @@ paths:
             summary: Change password
             tags:
                 - auth-password
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -646,6 +652,8 @@ paths:
             summary: Issue password reset
             tags:
                 - auth-password-reset
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -721,6 +729,8 @@ paths:
             summary: External auth start
             tags:
                 - auth-providers
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1014,6 +1024,8 @@ paths:
             summary: Get security policy
             tags:
                 - auth-security-policy
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1042,6 +1054,8 @@ paths:
             summary: Update security policy
             tags:
                 - auth-security-policy
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1089,6 +1103,8 @@ paths:
             summary: List sessions
             tags:
                 - auth-sessions
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1117,6 +1133,8 @@ paths:
             summary: Revoke session
             tags:
                 - auth-sessions
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1151,6 +1169,8 @@ paths:
             summary: Revoke other sessions
             tags:
                 - auth-sessions
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1168,6 +1188,8 @@ paths:
             summary: Disable TOTP
             tags:
                 - auth-totp
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1232,6 +1254,8 @@ paths:
             summary: Enable TOTP
             tags:
                 - auth-totp
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1299,6 +1323,8 @@ paths:
             summary: Regenerate recovery codes
             tags:
                 - auth-totp
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1377,6 +1403,8 @@ paths:
             summary: Reset TOTP
             tags:
                 - auth-totp
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1455,6 +1483,8 @@ paths:
             summary: Setup TOTP
             tags:
                 - auth-totp
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3127,6 +3157,8 @@ paths:
             description: Paginated list of cluster API keys with permissions, status and last usage; token material is never returned.
             tags:
                 - clusters-api-keys
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3197,6 +3229,8 @@ paths:
             description: Create a cluster API key with a whitelisted permission subset; the plaintext token is returned exactly once.
             tags:
                 - clusters-api-keys
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3310,6 +3344,8 @@ paths:
             description: Update name, permissions, status or expiry of a cluster API key; revoked keys are immutable.
             tags:
                 - clusters-api-keys
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3437,6 +3473,8 @@ paths:
             description: Permanently revoke an API key; the row is retained for audit trails.
             tags:
                 - clusters-api-keys
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3520,6 +3558,8 @@ paths:
             description: Replace the token of an API key; the previous token stays valid for a bounded grace window.
             tags:
                 - clusters-api-keys
+            security:
+                - cookie_goveto_session: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
