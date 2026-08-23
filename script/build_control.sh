@@ -35,6 +35,7 @@ done
 cd "$repo_root"
 
 "$repo_root/script/build_agent.sh" --version "$version"
+"$repo_root/script/build_frontend.sh"
 mkdir -p "$(dirname "$output")"
-go build -tags agent_artifacts -trimpath \
+go build -tags agent_artifacts,console_artifacts -trimpath \
   -ldflags="-X goveto-edge/internal/buildinfo.Version=$version" -o "$output" ./cmd/control-api

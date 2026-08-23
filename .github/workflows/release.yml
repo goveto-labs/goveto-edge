@@ -1,0 +1,129 @@
+name: Release
+
+# Builds and pushes the multi-arch control-plane image to GHCR when a GitHub
+# Release is published. The console SPA and both edge-agent architectures are
+# embedded by the Dockerfile, so one image serves amd64 and arm64 hosts and
+# can install agents on either architecture.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to build (canonical SemVer, e.g. v1.2.3)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+  # Build attestations (provenance) for pushed images.
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  image:
+    name: Build and push image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      image: ${{ steps.image.outputs.image }}
+      image_tag: ${{ steps.image.outputs.image_tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve release version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ -n "$RELEASE_TAG" ]; then
+            version="$RELEASE_TAG"
+          else
+            version="$INPUT_VERSION"
+          fi
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$'; then
+            echo "refusing to build non-canonical version \"$version\" (expected vMAJOR.MINOR.PATCH)" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.version.outputs.version }}
+
+      - name: Resolve image tags
+        id: image
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          repository="${GITHUB_REPOSITORY,,}"
+          image="$REGISTRY/$repository"
+          release="${VERSION#v}"
+          image_tag="${VERSION//+/_}"
+          major="${release%%.*}"
+          minor="${release#*.}"; minor="${minor%%.*}"
+          tags="$image:$image_tag"
+          # Moving tags (major.minor, major, latest) only advance on stable
+          # releases; pre-releases are pinned to their exact version.
+          if [[ "$release" != *-* ]]; then
+            tags="$tags"$'\n'"$image:$major.$minor"
+            tags="$tags"$'\n'"$image:$major"
+            tags="$tags"$'\n'"$image:latest"
+          fi
+          {
+            echo "image=$image"
+            echo "image_tag=$image_tag"
+            echo "tags<<EOF"
+            echo "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            GOVETO_VERSION=${{ steps.version.outputs.version }}
+          tags: ${{ steps.image.outputs.tags }}
+          labels: |
+            org.opencontainers.image.title=${{ github.event.repository.name }}
+            org.opencontainers.image.description=Goveto Edge control plane (console and edge agents embedded)
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+  smoke:
+    name: Smoke test pushed image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: image
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+    steps:
+      - uses: docker/setup-qemu-action@v3
+
+      - name: Run version command (${{ matrix.platform }})
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+          image="${{ needs.image.outputs.image }}:${{ needs.image.outputs.image_tag }}"
+          output="$(docker run --rm --platform ${{ matrix.platform }} "$image" version)"
+          echo "$output"
+          [ "$output" = "control-api ${{ needs.image.outputs.version }}" ]

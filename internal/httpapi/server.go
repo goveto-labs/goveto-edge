@@ -126,6 +126,10 @@ func New(
 		analyticsapi.Register(e, orm, analyticsData)
 	}
 
+	// Console SPA must be registered after every API module: the catch-all
+	// only wins requests that no API route matched.
+	registerConsole(e)
+
 	return e
 }
 

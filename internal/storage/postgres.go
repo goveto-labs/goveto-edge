@@ -21,7 +21,7 @@ func InitSchema(ctx context.Context, db *sql.DB, schemaFS fs.FS, databaseURL str
 		SchemaFS:         schemaFS,
 		SchemaRoot:       ".",
 		DatabaseURL:      databaseURL,
-		AllowDestructive: true,
+		AllowDestructive: false,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apply database schema: %w", err)

@@ -1,0 +1,81 @@
+# Goveto Edge control plane - single-host production stack.
+#
+# Prerequisites:
+#   cp .env.example .env   # then set NODE_CREDENTIAL_MASTER_KEY and passwords
+#
+# Start:
+#   docker compose up -d
+#
+# The console is served by the control API on http://localhost:8080. Edge
+# nodes connect to the mTLS agent gateway on port 8443; that port must be
+# reachable from edge nodes and is configured during instance initialization.
+#
+# This stack is intentionally minimal. For high availability run multiple
+# control-api replicas behind a TCP/HTTP load balancer with the same
+# NODE_CREDENTIAL_MASTER_KEY on every replica (see README.md).
+
+name: goveto-edge
+
+services:
+  db:
+    image: timescale/timescaledb:2.29.2-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: goveto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: goveto
+    volumes:
+      # PostgreSQL 18 images keep data in a versioned subdirectory, so the
+      # mount point is the parent directory (required for future pg_upgrade).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U goveto -d goveto"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  redis:
+    image: redis:8.2-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  control-api:
+    image: ghcr.io/goveto-labs/goveto-edge:${GOVETO_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgresql://goveto@db:5432/goveto?sslmode=disable
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      REDIS_URL: redis://redis:6379/0
+      GOVETO_DATA_DIR: /var/lib/goveto-edge
+      # ANALYTICS_DATABASE_URL defaults to DATABASE_URL (same instance,
+      # TimescaleDB enabled). Split it out by pointing it at a dedicated
+      # TimescaleDB instance in .env.
+    ports:
+      - "${HTTP_PUBLISH_PORT:-8080}:8080"
+      - "${AGENT_GATEWAY_PUBLISH_PORT:-8443}:8443"
+    volumes:
+      - goveto-data:/var/lib/goveto-edge
+      # Optional GeoIP databases for country/region and ISP analytics.
+      # - ./GeoLite2-City.mmdb:/var/lib/goveto-edge/GeoLite2-City.mmdb:ro
+      # - ./GeoLite2-ASN.mmdb:/var/lib/goveto-edge/GeoLite2-ASN.mmdb:ro
+
+volumes:
+  pgdata:
+  redisdata:
+  goveto-data:

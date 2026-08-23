@@ -64,6 +64,7 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 
 	var apiErr *APIError
 	var he *echo.HTTPError
+	var statusCoder echo.HTTPStatusCoder
 	switch {
 	case errors.As(err, &apiErr):
 		if apiErr.Status != 0 {
@@ -88,6 +89,12 @@ func HTTPErrorHandler(c *echo.Context, err error) {
 		} else {
 			msg = http.StatusText(status)
 		}
+		code = httpStatusCode(status)
+	case errors.As(err, &statusCoder):
+		// Echo sentinel errors (ErrMethodNotAllowed, ErrNotFound, ...) carry
+		// only a status code and must not fall through as internal errors.
+		status = statusCoder.StatusCode()
+		msg = http.StatusText(status)
 		code = httpStatusCode(status)
 	default:
 		slog.Error("http request failed",

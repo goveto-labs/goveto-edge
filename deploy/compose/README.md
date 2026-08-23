@@ -1,4 +1,35 @@
-# Persistent control-plane secrets
+# Goveto Edge deployment
+
+## Quick start (Docker Compose)
+
+```bash
+cd deploy/compose
+cp .env.example .env
+# edit .env: set POSTGRES_PASSWORD and (for multi-replica) NODE_CREDENTIAL_MASTER_KEY
+docker compose up -d
+```
+
+The stack runs TimescaleDB (control + analytics database), Redis (sessions,
+rate limiting, cache) and the control plane with the console SPA and both
+edge-agent architectures embedded. Open `http://localhost:8080` and follow the
+instance initialization wizard.
+
+Requirements:
+
+- Ports: 8080 (console + API), 8443 (mTLS agent gateway) must be reachable
+  from edge nodes.
+- Data: named volumes `pgdata`, `redisdata`, `goveto-data`. Back up `pgdata`
+  and `goveto-data`; losing `goveto-data` loses the generated master keys (see
+  below).
+- Upgrades: set `GOVETO_IMAGE_TAG` to the new release tag and
+  `docker compose up -d`. Database schema changes are applied on startup.
+
+Sizing note: the bundled stack targets a single host. For high availability
+run multiple `control-api` replicas behind a load balancer with the same
+`NODE_CREDENTIAL_MASTER_KEY` on every replica, and manage PostgreSQL/Redis
+yourself.
+
+## Persistent control-plane secrets
 
 For a single control-plane replica, the control API generates its credential
 master key on first startup. Persist `GOVETO_DATA_DIR` across replacements:

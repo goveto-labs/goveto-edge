@@ -1,0 +1,23 @@
+# Keep the build context minimal so local state cannot leak into images.
+.git
+.github
+.agents
+.idea
+.vscode
+.data
+.env
+.env.*
+*.local
+*.test
+GeoLite2-City.mmdb
+GeoLite2-City.mmdb.*
+frontend/node_modules
+frontend/dist
+frontend/.vscode
+static/agent/*
+!static/agent/.gitkeep
+static/web/dist/*
+!static/web/dist/.gitkeep
+deploy/benchmark/results
+deploy/benchmark/state
+bin
