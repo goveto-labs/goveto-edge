@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react';
 import type { NodeRequestLog, SiteSummary } from '@/api';
 
-import { Button, Input, Pagination, Tooltip } from '@heroui/react';
+import { Button, Input, Tooltip } from '@heroui/react';
 import { Eye, FileSearch, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 import { ApiError, analyticsApi, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
@@ -12,8 +12,11 @@ import { DialogShell } from '@/components/DialogShell.tsx';
 import { FormField } from '@/components/FormField.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
+import { TablePagination } from '@/components/TablePagination.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useListQuery } from '@/hooks/useListQuery.ts';
+import { integerField, stringField } from '@/utils/listQuery.ts';
 
 const countryNames =
     typeof Intl.DisplayNames === 'function'
@@ -77,16 +80,12 @@ function statusClass(status: number) {
     return 'bg-success/15 text-success';
 }
 
-type PageItem = number | 'start-ellipsis' | 'end-ellipsis';
-
-function visiblePages(current: number, total: number): PageItem[] {
-    if (total <= 7) return Array.from({ length: total }, (_, index) => index + 1);
-    if (current <= 4) return [1, 2, 3, 4, 5, 'end-ellipsis', total];
-    if (current >= total - 3) {
-        return [1, 'start-ellipsis', total - 4, total - 3, total - 2, total - 1, total];
-    }
-    return [1, 'start-ellipsis', current - 1, current, current + 1, 'end-ellipsis', total];
-}
+const accessLogsQuery = {
+    site: stringField(),
+    q: stringField(),
+    page: integerField(1, { min: 1 }),
+    page_size: integerField(25, { allowed: [25, 50, 100] }),
+};
 
 function DetailSection({ children, title }: { children: ReactNode; title: string }) {
     return (
@@ -193,38 +192,32 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
     const analytics = useMemo(() => analyticsApi(clusterId), [clusterId]);
     const requestSequence = useRef(0);
     const [siteItems, setSiteItems] = useState<SiteSummary[]>([]);
-    const [siteId, setSiteId] = useState('');
     const [logs, setLogs] = useState<NodeRequestLog[]>([]);
-    const [query, setQuery] = useState('');
-    const [search, setSearch] = useState('');
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
     const [total, setTotal] = useState(0);
     const [selected, setSelected] = useState<NodeRequestLog | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const { values, replace, searchInput, setSearchInput } = useListQuery(accessLogsQuery, {
+        searchKey: 'q',
+    });
+    const siteId = values.site;
+    const search = values.q;
+    const page = values.page;
+    const pageSize = values.page_size;
     const activeSiteId = embeddedSiteId || siteId;
-
-    useEffect(() => {
-        const timer = window.setTimeout(() => {
-            setSearch(query.trim());
-            setPage(1);
-        }, 300);
-        return () => window.clearTimeout(timer);
-    }, [query]);
 
     const loadSites = useCallback(async () => {
         if (!clusterId || embeddedSiteId) return;
         try {
             const items = await sites.list();
             setSiteItems(items);
-            setSiteId((current) =>
-                current === '' || items.some((item) => item.id === current) ? current : ''
-            );
+            if (siteId && !items.some((item) => item.id === siteId)) {
+                replace({ site: '' }, { resetPage: true });
+            }
         } catch (loadError) {
             setError(loadError instanceof ApiError ? loadError.message : 'Failed to load sites');
         }
-    }, [clusterId, embeddedSiteId, sites]);
+    }, [clusterId, embeddedSiteId, replace, siteId, sites]);
 
     const loadLogs = useCallback(async () => {
         const sequence = ++requestSequence.current;
@@ -244,7 +237,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
             if (sequence !== requestSequence.current) return;
             const lastPage = Math.max(1, Math.ceil(result.total / result.page_size) || 1);
             if (page > lastPage) {
-                setPage(lastPage);
+                replace({ page: lastPage });
                 return;
             }
             setLogs(result.items);
@@ -258,7 +251,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
         } finally {
             if (sequence === requestSequence.current) setLoading(false);
         }
-    }, [activeSiteId, analytics, clusterId, embeddedSiteId, page, pageSize, search]);
+    }, [activeSiteId, analytics, clusterId, embeddedSiteId, page, pageSize, replace, search]);
 
     useAutoRefresh(loadSites, Boolean(clusterId && !embeddedSiteId));
     useAutoRefresh(loadLogs, Boolean(clusterId && (!embeddedSiteId || activeSiteId)));
@@ -271,10 +264,6 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
         },
         [siteItems]
     );
-
-    const pageCount = Math.max(1, Math.ceil(total / pageSize));
-    const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
-    const rangeEnd = Math.min(page * pageSize, total);
 
     if (!clusterId) {
         return (
@@ -325,19 +314,16 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                             placeholder='All sites'
                             value={siteId}
                             variant='secondary'
-                            onChange={(value) => {
-                                setSiteId(value);
-                                setPage(1);
-                            }}
+                            onChange={(value) => replace({ site: value }, { resetPage: true })}
                         />
                     )}
                     <FormField htmlFor='access-log-search' label='Search requests'>
                         <Input
                             id='access-log-search'
                             placeholder='Path, IP, request ID, status, user agent'
-                            value={query}
+                            value={searchInput}
                             variant='secondary'
-                            onChange={(event) => setQuery(event.target.value)}
+                            onChange={(event) => setSearchInput(event.target.value)}
                         />
                     </FormField>
                     <SelectField
@@ -349,10 +335,9 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         }))}
                         value={String(pageSize)}
                         variant='secondary'
-                        onChange={(value) => {
-                            setPageSize(Number(value));
-                            setPage(1);
-                        }}
+                        onChange={(value) =>
+                            replace({ page_size: Number(value) }, { resetPage: true })
+                        }
                     />
                     <Button
                         isDisabled={loading || Boolean(embeddedSiteId && !activeSiteId)}
@@ -375,6 +360,14 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         : 'Requests received across all sites will appear here.'
                 }
                 emptyTitle='No matching access logs'
+                footer={
+                    <TablePagination
+                        page={page}
+                        pageSize={pageSize}
+                        total={total}
+                        onPageChange={(nextPage) => replace({ page: nextPage })}
+                    />
+                }
                 loading={loading && Boolean(clusterId && (!embeddedSiteId || activeSiteId))}
                 title={`${total.toLocaleString()} requests`}
             >
@@ -475,56 +468,6 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                     })}
                 </tbody>
             </DataTable>
-
-            {total > 0 && (
-                <Pagination className='justify-between' size='sm'>
-                    <Pagination.Summary>
-                        Showing {rangeStart.toLocaleString()}-{rangeEnd.toLocaleString()} of{' '}
-                        {total.toLocaleString()}
-                    </Pagination.Summary>
-                    <Pagination.Content>
-                        <Pagination.Item>
-                            <Pagination.Previous
-                                isDisabled={page <= 1}
-                                onPress={() => setPage((current) => Math.max(1, current - 1))}
-                            >
-                                <Pagination.PreviousIcon />
-                                Previous
-                            </Pagination.Previous>
-                        </Pagination.Item>
-                        {visiblePages(page, pageCount).map((item) =>
-                            typeof item === 'number' ? (
-                                <Pagination.Item
-                                    className={item === page ? undefined : 'hidden sm:block'}
-                                    key={item}
-                                >
-                                    <Pagination.Link
-                                        isActive={item === page}
-                                        onPress={() => setPage(item)}
-                                    >
-                                        {item}
-                                    </Pagination.Link>
-                                </Pagination.Item>
-                            ) : (
-                                <Pagination.Item className='hidden sm:block' key={item}>
-                                    <Pagination.Ellipsis />
-                                </Pagination.Item>
-                            )
-                        )}
-                        <Pagination.Item>
-                            <Pagination.Next
-                                isDisabled={page >= pageCount}
-                                onPress={() =>
-                                    setPage((current) => Math.min(pageCount, current + 1))
-                                }
-                            >
-                                Next
-                                <Pagination.NextIcon />
-                            </Pagination.Next>
-                        </Pagination.Item>
-                    </Pagination.Content>
-                </Pagination>
-            )}
 
             <DialogShell
                 icon={<FileSearch className='h-5 w-5' />}

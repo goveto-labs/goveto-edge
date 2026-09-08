@@ -7,12 +7,15 @@ interface DataTableProps {
     children?: ReactNode;
     title?: ReactNode;
     action?: ReactNode;
+    footer?: ReactNode;
+    caption?: string;
     className?: string;
     empty?: boolean;
     emptyTitle?: string;
     emptyDescription?: string;
     emptyAction?: ReactNode;
     loading?: boolean;
+    compact?: boolean;
     'aria-label'?: string;
 }
 
@@ -20,14 +23,18 @@ export function DataTable({
     children,
     title,
     action,
+    footer,
+    caption,
     className = '',
     empty = false,
     emptyTitle = 'No data yet',
     emptyDescription = 'There is nothing to display right now.',
     emptyAction,
     loading = false,
+    compact = false,
     'aria-label': ariaLabel,
 }: DataTableProps) {
+    const tableCaption = caption || ariaLabel;
     return (
         <Card
             className={`gap-0 overflow-hidden rounded-xl border border-border/70 bg-surface p-0 shadow-sm ${className}`}
@@ -35,7 +42,11 @@ export function DataTable({
             {(title || action) && (
                 <div className='flex min-h-14 flex-col gap-3 border-b border-border bg-surface px-5 py-3 sm:flex-row sm:items-center sm:justify-between'>
                     {title && <div className='text-sm font-semibold tracking-tight'>{title}</div>}
-                    {action && <div className='flex items-center gap-2'>{action}</div>}
+                    {action && (
+                        <div className='flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:items-end'>
+                            {action}
+                        </div>
+                    )}
                 </div>
             )}
             {loading ? (
@@ -58,11 +69,17 @@ export function DataTable({
                 <div className='overflow-x-auto'>
                     <table
                         aria-label={ariaLabel}
-                        className='w-full min-w-max border-collapse text-left [&_tbody_tr]:border-b [&_tbody_tr]:border-border/70 [&_tbody_tr]:transition-colors [&_tbody_tr:last-child]:border-0 [&_tbody_tr:hover]:bg-surface-secondary/35 [&_td]:px-5 [&_td]:py-3.5 [&_th]:h-11 [&_th]:bg-surface-secondary/45 [&_th]:px-5 [&_th]:py-0 [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted'
+                        className={`w-full min-w-max border-collapse text-left [&_tbody_tr]:border-b [&_tbody_tr]:border-border/70 [&_tbody_tr]:transition-colors [&_tbody_tr:last-child]:border-0 [&_tbody_tr:hover]:bg-surface-secondary/35 [&_th]:h-11 [&_th]:bg-surface-secondary/45 [&_th]:px-5 [&_th]:py-0 [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted ${
+                            compact ? '[&_td]:px-5 [&_td]:py-2.5' : '[&_td]:px-5 [&_td]:py-3.5'
+                        }`}
                     >
+                        {tableCaption && <caption className='sr-only'>{tableCaption}</caption>}
                         {children}
                     </table>
                 </div>
+            )}
+            {footer && !loading && !empty && (
+                <div className='border-t border-border px-5 py-3'>{footer}</div>
             )}
         </Card>
     );

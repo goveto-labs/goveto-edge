@@ -2,7 +2,7 @@ import type { DNSLine, Node, NodeSnapshot } from '@/api';
 
 import { Button, Input } from '@heroui/react';
 import { Check, Eye, Globe2, Plus, Power, PowerOff, Search, Trash2 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
@@ -11,10 +11,25 @@ import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { DialogFooter, DialogShell } from '@/components/DialogShell.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { TablePagination } from '@/components/TablePagination.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useListQuery } from '@/hooks/useListQuery.ts';
+import { enumField, integerField, stringField } from '@/utils/listQuery.ts';
+import { matchesQuery, paginateItems } from '@/utils/pagination.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
+
+const nodesQuery = {
+    q: stringField(),
+    status: enumField(
+        ['', 'ONLINE', 'OFFLINE', 'DISABLED', 'INSTALLING', 'INSTALL_FAILED', 'PENDING'] as const,
+        ''
+    ),
+    page: integerField(1, { min: 1 }),
+    page_size: integerField(25, { allowed: [25, 50, 100] }),
+};
 
 function formatPercent(value: number) {
     return `${value.toFixed(1)}%`;
@@ -61,6 +76,9 @@ export default function Nodes() {
     const [dnsLineQuery, setDnsLineQuery] = useState('');
     const [dnsLineSaving, setDnsLineSaving] = useState(false);
     const [dnsLineError, setDnsLineError] = useState('');
+    const { values, replace, searchInput, setSearchInput } = useListQuery(nodesQuery, {
+        searchKey: 'q',
+    });
 
     const filteredDnsLines = useMemo(() => {
         const query = dnsLineQuery.trim().toLocaleLowerCase();
@@ -90,6 +108,24 @@ export default function Nodes() {
     }, [analytics, cluster, clusterId, nodeApi]);
 
     useAutoRefresh(load, Boolean(clusterId));
+
+    const filteredNodes = useMemo(
+        () =>
+            nodes.filter((node) => {
+                if (values.status && node.status !== values.status) return false;
+                return matchesQuery(
+                    values.q,
+                    node.name,
+                    node.id,
+                    node.addresses.map((address) => address.address)
+                );
+            }),
+        [nodes, values.q, values.status]
+    );
+    const pagedNodes = paginateItems(filteredNodes, values.page, values.page_size);
+    useEffect(() => {
+        if (pagedNodes.page !== values.page) replace({ page: pagedNodes.page });
+    }, [pagedNodes.page, replace, values.page]);
 
     const handleDelete = async (node: Node) => {
         try {
@@ -212,17 +248,74 @@ export default function Nodes() {
 
             <DataTable
                 aria-label='Nodes'
-                empty={nodes.length === 0}
+                action={
+                    <div className='grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_160px_110px]'>
+                        <Input
+                            aria-label='Search nodes'
+                            placeholder='Search name or address'
+                            value={searchInput}
+                            variant='secondary'
+                            onChange={(event) => setSearchInput(event.target.value)}
+                        />
+                        <SelectField
+                            ariaLabel='Node status'
+                            options={[
+                                { id: '', label: 'All statuses' },
+                                { id: 'ONLINE', label: 'Online' },
+                                { id: 'OFFLINE', label: 'Offline' },
+                                { id: 'DISABLED', label: 'Disabled' },
+                                { id: 'INSTALLING', label: 'Installing' },
+                                { id: 'INSTALL_FAILED', label: 'Install failed' },
+                                { id: 'PENDING', label: 'Pending' },
+                            ]}
+                            value={values.status}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace(
+                                    { status: value as typeof values.status },
+                                    { resetPage: true }
+                                )
+                            }
+                        />
+                        <SelectField
+                            ariaLabel='Rows per page'
+                            options={[25, 50, 100].map((size) => ({
+                                id: String(size),
+                                label: `${size} rows`,
+                            }))}
+                            value={String(values.page_size)}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace({ page_size: Number(value) }, { resetPage: true })
+                            }
+                        />
+                    </div>
+                }
+                caption='Nodes'
+                empty={pagedNodes.items.length === 0}
                 emptyAction={
-                    canManage ? (
+                    canManage && nodes.length === 0 ? (
                         <Button onPress={() => navigate('/nodes/create')}>
                             <Plus className='mr-2 h-4 w-4' />
                             Create node
                         </Button>
                     ) : undefined
                 }
-                emptyDescription='Create a node to start serving traffic from this cluster.'
-                emptyTitle='No nodes yet'
+                emptyDescription={
+                    nodes.length === 0
+                        ? 'Create a node to start serving traffic from this cluster.'
+                        : 'No nodes match the current filters.'
+                }
+                emptyTitle={nodes.length === 0 ? 'No nodes yet' : 'No matching nodes'}
+                footer={
+                    <TablePagination
+                        page={pagedNodes.page}
+                        pageSize={values.page_size}
+                        total={pagedNodes.total}
+                        onPageChange={(nextPage) => replace({ page: nextPage })}
+                    />
+                }
+                title={`${pagedNodes.total.toLocaleString()} nodes`}
             >
                 <thead>
                     <tr>
@@ -238,7 +331,7 @@ export default function Nodes() {
                     </tr>
                 </thead>
                 <tbody>
-                    {nodes.map((node) => {
+                    {pagedNodes.items.map((node) => {
                         const assignedLines = (node.dnsLines || []).map(
                             (link) =>
                                 dnsLines.find((line) => line.id === link.dnsLineId)?.name ||

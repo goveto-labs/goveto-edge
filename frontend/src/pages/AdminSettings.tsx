@@ -20,7 +20,7 @@ import {
     Trash2,
     UserRoundCog,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import { ApiError, adminSettingsApi } from '@/api';
@@ -36,6 +36,7 @@ import { SelectField } from '@/components/SelectField.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { ValueListAddField } from '@/components/ValueListAddField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
 import AuditLog from '@/pages/AuditLog.tsx';
 import Users from '@/pages/Users.tsx';
 
@@ -189,6 +190,7 @@ export default function AdminSettings() {
     const [restarting, setRestarting] = useState(false);
     const [saved, setSaved] = useState(false);
     const [error, setError] = useState('');
+    const loadedSettings = useRef<AdminSettingsData | null>(null);
 
     const dirty = useMemo(
         () =>
@@ -209,12 +211,16 @@ export default function AdminSettings() {
         form?.authentication.providers.filter((provider) => provider.enabled).length ?? 0;
 
     const applySettings = useCallback((settings: AdminSettingsData) => {
+        loadedSettings.current = settings;
         setForm(settings);
         setBaseline(JSON.stringify(editable(settings)));
         setBaselineNetwork(networkSnapshot(settings));
         setProviderSecrets({});
         setCaptchaSecret('');
     }, []);
+    const { requestAction } = useUnsavedChanges(dirty, 'admin-settings', () => {
+        if (loadedSettings.current) applySettings(loadedSettings.current);
+    });
 
     useEffect(() => {
         if (user?.role !== 'ADMIN' || !settingsTab || form) return;
@@ -370,7 +376,16 @@ export default function AdminSettings() {
                                     aria-current={tab === item.id ? 'page' : undefined}
                                     className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors ${tab === item.id ? 'bg-surface-secondary text-foreground' : 'text-muted hover:bg-surface-secondary hover:text-foreground'}`}
                                     type='button'
-                                    onClick={() => navigate(`/settings/admin/${item.id}`)}
+                                    onClick={() => {
+                                        const go = () => navigate(`/settings/admin/${item.id}`);
+                                        if (
+                                            settingsTab &&
+                                            item.id !== 'users' &&
+                                            item.id !== 'audit'
+                                        )
+                                            go();
+                                        else requestAction(go);
+                                    }}
                                 >
                                     <Icon className='h-4 w-4 shrink-0' />
                                     {item.label}

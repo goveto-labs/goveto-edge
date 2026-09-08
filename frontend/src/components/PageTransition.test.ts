@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { expect, test } from 'vitest';
 
 import { clusterPageKey } from './pageKey.ts';
 
@@ -7,12 +6,11 @@ test('switching clusters creates a new page instance key', () => {
     const clusterA = clusterPageKey('cluster-a', '/sites');
     const clusterB = clusterPageKey('cluster-b', '/sites');
 
-    assert.notEqual(clusterA, clusterB);
+    expect(clusterA).not.toBe(clusterB);
 });
 
 test('detail tabs share one page instance within a cluster', () => {
-    assert.equal(
-        clusterPageKey('cluster-a', '/sites/site-1/cache'),
+    expect(clusterPageKey('cluster-a', '/sites/site-1/cache')).toBe(
         clusterPageKey('cluster-a', '/sites/site-1/security')
     );
 });

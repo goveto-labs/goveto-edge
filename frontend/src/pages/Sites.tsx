@@ -1,18 +1,30 @@
 import type { SiteBundle, SiteSummary, SiteTemplate } from '@/api';
 
-import { Button } from '@heroui/react';
+import { Button, Input } from '@heroui/react';
 import { Copy, Download, Eye, FileStack, Globe2, Plus, Power, Send, Upload } from 'lucide-react';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { ApiError, sitesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
+import { SelectField } from '@/components/SelectField.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { TablePagination } from '@/components/TablePagination.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useListQuery } from '@/hooks/useListQuery.ts';
+import { enumField, integerField, stringField } from '@/utils/listQuery.ts';
+import { matchesQuery, paginateItems } from '@/utils/pagination.ts';
 import { canOperateCluster } from '@/utils/rbac.ts';
+
+const sitesQuery = {
+    q: stringField(),
+    status: enumField(['', 'ACTIVE', 'DISABLED'] as const, ''),
+    page: integerField(1, { min: 1 }),
+    page_size: integerField(25, { allowed: [25, 50, 100] }),
+};
 
 function formatBandwidth(bitsPerSecond: number) {
     if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return '0 bps';
@@ -34,6 +46,10 @@ export default function Sites() {
     const importRef = useRef<HTMLInputElement>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const { values, replace, searchInput, setSearchInput } = useListQuery(sitesQuery, {
+        searchKey: 'q',
+    });
+    const selectionFiltersRef = useRef({ clusterId, q: values.q, status: values.status });
 
     const loadSites = useCallback(
         async (signal?: AbortSignal) => {
@@ -76,6 +92,31 @@ export default function Sites() {
     );
 
     useAutoRefresh(loadSites, Boolean(clusterId));
+
+    const filteredSites = useMemo(
+        () =>
+            sites.filter((site) => {
+                if (values.status && site.status !== values.status) return false;
+                return matchesQuery(values.q, site.name, site.id, site.domains);
+            }),
+        [sites, values.q, values.status]
+    );
+    useEffect(() => {
+        const previous = selectionFiltersRef.current;
+        selectionFiltersRef.current = { clusterId, q: values.q, status: values.status };
+        if (
+            previous.clusterId === clusterId &&
+            previous.q === values.q &&
+            previous.status === values.status
+        ) {
+            return;
+        }
+        setSelected((current) => (current.size === 0 ? current : new Set()));
+    }, [clusterId, values.q, values.status]);
+    const pagedSites = paginateItems(filteredSites, values.page, values.page_size);
+    useEffect(() => {
+        if (pagedSites.page !== values.page) replace({ page: pagedSites.page });
+    }, [pagedSites.page, replace, values.page]);
 
     const runBulk = async (action: 'ENABLE' | 'DISABLE' | 'PUBLISH') => {
         if (selected.size === 0) return;
@@ -263,33 +304,92 @@ export default function Sites() {
 
             <DataTable
                 aria-label='Sites'
-                empty={sites.length === 0}
+                action={
+                    <div className='grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_150px_110px]'>
+                        <Input
+                            aria-label='Search sites'
+                            placeholder='Search name or domain'
+                            value={searchInput}
+                            variant='secondary'
+                            onChange={(event) => setSearchInput(event.target.value)}
+                        />
+                        <SelectField
+                            ariaLabel='Site status'
+                            options={[
+                                { id: '', label: 'All statuses' },
+                                { id: 'ACTIVE', label: 'Active' },
+                                { id: 'DISABLED', label: 'Disabled' },
+                            ]}
+                            value={values.status}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace(
+                                    { status: value as typeof values.status },
+                                    { resetPage: true }
+                                )
+                            }
+                        />
+                        <SelectField
+                            ariaLabel='Rows per page'
+                            options={[25, 50, 100].map((size) => ({
+                                id: String(size),
+                                label: `${size} rows`,
+                            }))}
+                            value={String(values.page_size)}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace({ page_size: Number(value) }, { resetPage: true })
+                            }
+                        />
+                    </div>
+                }
+                caption='Sites'
+                empty={pagedSites.items.length === 0}
                 emptyAction={
-                    canOperate ? (
+                    canOperate && sites.length === 0 ? (
                         <Button onPress={() => navigate('/sites/create')}>
                             <Plus className='mr-2 h-4 w-4' />
                             Create site
                         </Button>
                     ) : undefined
                 }
-                emptyDescription='Create a site to route domains to origin servers.'
-                emptyTitle='No sites yet'
+                emptyDescription={
+                    sites.length === 0
+                        ? 'Create a site to route domains to origin servers.'
+                        : 'No sites match the current filters.'
+                }
+                emptyTitle={sites.length === 0 ? 'No sites yet' : 'No matching sites'}
+                footer={
+                    <TablePagination
+                        page={pagedSites.page}
+                        pageSize={values.page_size}
+                        total={pagedSites.total}
+                        onPageChange={(nextPage) => replace({ page: nextPage })}
+                    />
+                }
                 loading={loading}
+                title={`${pagedSites.total.toLocaleString()} sites`}
             >
                 <thead>
                     <tr>
                         {canOperate && (
                             <th className='w-10'>
                                 <input
-                                    aria-label='Select all sites'
-                                    checked={sites.length > 0 && selected.size === sites.length}
+                                    aria-label='Select all sites on this page'
+                                    checked={
+                                        pagedSites.items.length > 0 &&
+                                        pagedSites.items.every((site) => selected.has(site.id))
+                                    }
                                     type='checkbox'
                                     onChange={(event) =>
-                                        setSelected(
-                                            event.target.checked
-                                                ? new Set(sites.map((site) => site.id))
-                                                : new Set()
-                                        )
+                                        setSelected((current) => {
+                                            const next = new Set(current);
+                                            for (const site of pagedSites.items) {
+                                                if (event.target.checked) next.add(site.id);
+                                                else next.delete(site.id);
+                                            }
+                                            return next;
+                                        })
                                     }
                                 />
                             </th>
@@ -305,7 +405,7 @@ export default function Sites() {
                     </tr>
                 </thead>
                 <tbody>
-                    {sites.map((site) => (
+                    {pagedSites.items.map((site) => (
                         <tr key={site.id}>
                             {canOperate && (
                                 <td>

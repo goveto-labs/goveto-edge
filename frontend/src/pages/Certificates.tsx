@@ -28,9 +28,13 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { TablePagination } from '@/components/TablePagination.tsx';
 import { ToggleSwitch } from '@/components/ToggleSwitch.tsx';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useListQuery } from '@/hooks/useListQuery.ts';
+import { enumField, integerField, stringField } from '@/utils/listQuery.ts';
+import { matchesQuery, paginateItems } from '@/utils/pagination.ts';
 import { canManageCluster } from '@/utils/rbac.ts';
 
 const LETS_ENCRYPT_PROD = 'https://acme-v02.api.letsencrypt.org/directory';
@@ -46,6 +50,13 @@ const REVOCATION_REASONS = [
 ];
 
 type ExpiryFilter = 'all' | 'attention' | '30d' | 'expired';
+
+const certificatesQuery = {
+    q: stringField(),
+    expiry: enumField(['all', 'attention', '30d', 'expired'] as const, 'all'),
+    page: integerField(1, { min: 1 }),
+    page_size: integerField(25, { allowed: [25, 50, 100] }),
+};
 
 function message(error: unknown, fallback: string) {
     return error instanceof ApiError || error instanceof Error ? error.message : fallback;
@@ -135,7 +146,10 @@ export default function Certificates() {
     const [pendingRevoke, setPendingRevoke] = useState<Certificate | null>(null);
     const [revocationReason, setRevocationReason] = useState('KEY_COMPROMISE');
     const [revokeConfirmation, setRevokeConfirmation] = useState('');
-    const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>('all');
+    const { values, replace, searchInput, setSearchInput } = useListQuery(certificatesQuery, {
+        searchKey: 'q',
+    });
+    const expiryFilter = values.expiry as ExpiryFilter;
 
     const uploadModal = useOverlayState();
     const acmeModal = useOverlayState();
@@ -188,8 +202,13 @@ export default function Certificates() {
                 if (expiryFilter === 'attention') return needsAttention(cert, currentTime);
                 return true;
             })
+            .filter((cert) => matchesQuery(values.q, cert.name, cert.id, cert.domains))
             .sort((left, right) => expiryTime(left) - expiryTime(right));
-    }, [certs, expiryFilter]);
+    }, [certs, expiryFilter, values.q]);
+    const pagedCerts = paginateItems(visibleCerts, values.page, values.page_size);
+    useEffect(() => {
+        if (pagedCerts.page !== values.page) replace({ page: pagedCerts.page });
+    }, [pagedCerts.page, replace, values.page]);
 
     const load = useCallback(
         async (signal?: AbortSignal) => {
@@ -429,20 +448,44 @@ export default function Certificates() {
             <DataTable
                 aria-label='Certificates'
                 action={
-                    <SelectField
-                        ariaLabel='Certificate expiry filter'
-                        className='min-w-48'
-                        options={[
-                            { id: 'all', label: 'All certificates' },
-                            { id: 'attention', label: 'Needs attention' },
-                            { id: '30d', label: 'Expires within 30 days' },
-                            { id: 'expired', label: 'Expired' },
-                        ]}
-                        value={expiryFilter}
-                        onChange={(value) => setExpiryFilter(value as ExpiryFilter)}
-                    />
+                    <div className='grid w-full gap-2 sm:grid-cols-2 lg:grid-cols-[minmax(220px,1fr)_200px_110px]'>
+                        <Input
+                            aria-label='Search certificates'
+                            placeholder='Search name or domain'
+                            value={searchInput}
+                            variant='secondary'
+                            onChange={(event) => setSearchInput(event.target.value)}
+                        />
+                        <SelectField
+                            ariaLabel='Certificate expiry filter'
+                            options={[
+                                { id: 'all', label: 'All certificates' },
+                                { id: 'attention', label: 'Needs attention' },
+                                { id: '30d', label: 'Expires within 30 days' },
+                                { id: 'expired', label: 'Expired' },
+                            ]}
+                            value={expiryFilter}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace({ expiry: value as ExpiryFilter }, { resetPage: true })
+                            }
+                        />
+                        <SelectField
+                            ariaLabel='Rows per page'
+                            options={[25, 50, 100].map((size) => ({
+                                id: String(size),
+                                label: `${size} rows`,
+                            }))}
+                            value={String(values.page_size)}
+                            variant='secondary'
+                            onChange={(value) =>
+                                replace({ page_size: Number(value) }, { resetPage: true })
+                            }
+                        />
+                    </div>
                 }
-                empty={visibleCerts.length === 0}
+                caption='Certificates'
+                empty={pagedCerts.items.length === 0}
                 emptyAction={
                     canManage && certs.length === 0 ? (
                         <Button onPress={openACME}>
@@ -457,7 +500,15 @@ export default function Certificates() {
                         : 'No certificates match the selected expiry filter.'
                 }
                 emptyTitle={certs.length === 0 ? 'No certificates yet' : 'No matching certificates'}
-                title={`${visibleCerts.length} of ${certs.length} certificates`}
+                footer={
+                    <TablePagination
+                        page={pagedCerts.page}
+                        pageSize={values.page_size}
+                        total={pagedCerts.total}
+                        onPageChange={(nextPage) => replace({ page: nextPage })}
+                    />
+                }
+                title={`${pagedCerts.total.toLocaleString()} of ${certs.length.toLocaleString()} certificates`}
             >
                 <thead>
                     <tr className='border-b border-border'>
@@ -470,7 +521,7 @@ export default function Certificates() {
                     </tr>
                 </thead>
                 <tbody>
-                    {visibleCerts.map((cert) => {
+                    {pagedCerts.items.map((cert) => {
                         const busy = busyId === cert.id;
                         const lifecycleLocked =
                             cert.status === 'REVOKING' ||

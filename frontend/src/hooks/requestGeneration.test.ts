@@ -1,5 +1,4 @@
-import assert from 'node:assert/strict';
-import test from 'node:test';
+import { expect, test } from 'vitest';
 
 import { RequestGeneration } from './requestGeneration.ts';
 
@@ -11,8 +10,8 @@ test('a late request cannot commit after a newer request starts', () => {
     const first = requests.next();
     const second = requests.next();
 
-    assert.equal(requests.isCurrent(first, firstController.signal), false);
-    assert.equal(requests.isCurrent(second, secondController.signal), true);
+    expect(requests.isCurrent(first, firstController.signal)).toBe(false);
+    expect(requests.isCurrent(second, secondController.signal)).toBe(true);
 });
 
 test('invalidating a request prevents it from committing after cleanup', () => {
@@ -23,5 +22,5 @@ test('invalidating a request prevents it from committing after cleanup', () => {
     requests.invalidate();
     controller.abort();
 
-    assert.equal(requests.isCurrent(request, controller.signal), false);
+    expect(requests.isCurrent(request, controller.signal)).toBe(false);
 });

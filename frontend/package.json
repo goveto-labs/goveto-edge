@@ -10,7 +10,8 @@
     "lint": "biome check .",
     "format": "biome format . --write",
     "fix": "biome check . --write",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
@@ -44,6 +45,8 @@
     "@tailwindcss/vite": "4.3.1",
     "@types/geojson": "^7946.0.16",
     "@types/node": "22.12.0",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/topojson-client": "^3.1.5",
@@ -53,7 +56,9 @@
     "postcss": "8.5.15",
     "tailwind-variants": "3.2.2",
     "tailwindcss": "4.3.1",
+    "jsdom": "^26.1.0",
     "typescript": "5.6.3",
-    "vite": "8.0.16"
+    "vite": "8.0.16",
+    "vitest": "^3.2.4"
   }
 }

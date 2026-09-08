@@ -1,4 +1,11 @@
-import type { AlertDelivery, AlertDetail, AlertEvent, AlertInstance, AlertSeverity } from '@/api';
+import type {
+    AlertDelivery,
+    AlertDetail,
+    AlertEvent,
+    AlertInstance,
+    AlertSeverity,
+    AlertStatus,
+} from '@/api';
 
 import { Button, Input, Tabs, Tooltip } from '@heroui/react';
 import { CheckCheck, CheckCircle2, Eye, RefreshCw, Siren, Timer, XCircle } from 'lucide-react';
@@ -14,8 +21,10 @@ import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { StatCard } from '@/components/StatCard.tsx';
 import { StatusBadge } from '@/components/StatusBadge.tsx';
+import { TablePagination } from '@/components/TablePagination.tsx';
 import { useAlertOverview } from '@/hooks/useAlertOverview.tsx';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useListQuery } from '@/hooks/useListQuery.ts';
 import {
     alertStatusLabels,
     formatAlertAge,
@@ -23,6 +32,7 @@ import {
     severityBadgeClass,
     severityLabel,
 } from '@/utils/alerts.ts';
+import { enumField, integerField } from '@/utils/listQuery.ts';
 import { canOperateCluster } from '@/utils/rbac.ts';
 
 const statusFilters = [
@@ -39,6 +49,21 @@ const severityFilters = [
     ['WARNING', 'Warning'],
     ['INFO', 'Info'],
 ] as const;
+
+const alertsQuery = {
+    view: enumField(['alerts', 'rules'] as const, 'alerts'),
+    status: enumField(
+        statusFilters.map(([value]) => value),
+        ''
+    ),
+    severity: enumField(
+        severityFilters.map(([value]) => value),
+        ''
+    ),
+    active: enumField(['true', 'false', ''] as const, 'true'),
+    page: integerField(1, { min: 1 }),
+    page_size: integerField(25, { allowed: [25, 50, 100] }),
+};
 
 function formatTime(value?: string | null) {
     if (!value) return '-';
@@ -165,12 +190,8 @@ export default function Alerts() {
     const role = clusters.find((cluster) => cluster.id === clusterId)?.role;
     const canOperate = canOperateCluster(role);
     const api = useMemo(() => alertsApi(clusterId), [clusterId]);
-
-    const [status, setStatus] = useState<AlertInstance['status'] | ''>('');
-    const [severity, setSeverity] = useState<AlertSeverity | ''>('');
-    const [activeOnly, setActiveOnly] = useState('true');
-    const [page, setPage] = useState(1);
-    const [pageSize, setPageSize] = useState(25);
+    const { values, replace } = useListQuery(alertsQuery);
+    const { view, status, severity, active: activeOnly, page, page_size: pageSize } = values;
     const [total, setTotal] = useState(0);
     const [counts, setCounts] = useState({ firing: 0, acknowledged: 0, pending: 0 });
     const [items, setItems] = useState<AlertInstance[]>([]);
@@ -201,8 +222,8 @@ export default function Alerts() {
         setLoading(true);
         try {
             const result = await api.list({
-                status: status || undefined,
-                severity: severity || undefined,
+                status: (status || undefined) as AlertStatus | undefined,
+                severity: (severity || undefined) as AlertSeverity | undefined,
                 active: activeOnly === '' ? undefined : activeOnly === 'true',
                 page,
                 page_size: pageSize,
@@ -210,7 +231,7 @@ export default function Alerts() {
             if (version !== requestVersion.current) return;
             const nextPageCount = Math.max(1, Math.ceil(result.total / pageSize));
             if (page > nextPageCount) {
-                setPage(nextPageCount);
+                replace({ page: nextPageCount });
                 return;
             }
             setItems(result.items);
@@ -222,7 +243,7 @@ export default function Alerts() {
         } finally {
             if (version === requestVersion.current) setLoading(false);
         }
-    }, [api, clusterId, status, severity, activeOnly, page, pageSize]);
+    }, [api, clusterId, status, severity, activeOnly, page, pageSize, replace]);
 
     const loadCounts = useCallback(async () => {
         if (!clusterId) return;
@@ -245,11 +266,11 @@ export default function Alerts() {
     useEffect(() => {
         if (previousClusterID.current !== clusterId) {
             previousClusterID.current = clusterId;
-            setPage(1);
+            replace({ page: 1 });
             setSelected(null);
             detailController.current?.abort();
         }
-    }, [clusterId]);
+    }, [clusterId, replace]);
 
     useEffect(() => {
         void load();
@@ -408,9 +429,6 @@ export default function Alerts() {
         [api, load, loadCounts, refreshAlertOverview]
     );
 
-    const pageCount = Math.max(1, Math.ceil(total / pageSize));
-    const rangeStart = total === 0 ? 0 : (page - 1) * pageSize + 1;
-    const rangeEnd = Math.min(page * pageSize, total);
     const firingOnPage = items.filter((item) => item.status === 'FIRING').length;
 
     if (!clusterId) {
@@ -469,7 +487,11 @@ export default function Alerts() {
                 />
             </div>
 
-            <Tabs aria-label='Alert center' defaultSelectedKey='alerts'>
+            <Tabs
+                aria-label='Alert center'
+                selectedKey={view}
+                onSelectionChange={(key) => replace({ view: String(key) as typeof view })}
+            >
                 <Tabs.ListContainer>
                     <Tabs.List aria-label='Alert views'>
                         <Tabs.Tab id='alerts'>
@@ -495,10 +517,12 @@ export default function Alerts() {
                                         }))}
                                         value={status}
                                         variant='secondary'
-                                        onChange={(value) => {
-                                            setStatus(value as AlertInstance['status'] | '');
-                                            setPage(1);
-                                        }}
+                                        onChange={(value) =>
+                                            replace(
+                                                { status: value as typeof status },
+                                                { resetPage: true }
+                                            )
+                                        }
                                     />
                                     <SelectField
                                         ariaLabel='Alert severity'
@@ -508,10 +532,12 @@ export default function Alerts() {
                                         }))}
                                         value={severity}
                                         variant='secondary'
-                                        onChange={(value) => {
-                                            setSeverity(value as AlertSeverity | '');
-                                            setPage(1);
-                                        }}
+                                        onChange={(value) =>
+                                            replace(
+                                                { severity: value as typeof severity },
+                                                { resetPage: true }
+                                            )
+                                        }
                                     />
                                     <SelectField
                                         ariaLabel='Active filter'
@@ -522,10 +548,12 @@ export default function Alerts() {
                                         ]}
                                         value={activeOnly}
                                         variant='secondary'
-                                        onChange={(value) => {
-                                            setActiveOnly(value);
-                                            setPage(1);
-                                        }}
+                                        onChange={(value) =>
+                                            replace(
+                                                { active: value as typeof activeOnly },
+                                                { resetPage: true }
+                                            )
+                                        }
                                     />
                                     <SelectField
                                         ariaLabel='Rows per page'
@@ -535,10 +563,12 @@ export default function Alerts() {
                                         }))}
                                         value={String(pageSize)}
                                         variant='secondary'
-                                        onChange={(value) => {
-                                            setPageSize(Number(value));
-                                            setPage(1);
-                                        }}
+                                        onChange={(value) =>
+                                            replace(
+                                                { page_size: Number(value) },
+                                                { resetPage: true }
+                                            )
+                                        }
                                     />
                                     {canOperate && firingOnPage > 0 && (
                                         <Tooltip>
@@ -565,6 +595,14 @@ export default function Alerts() {
                             empty={items.length === 0}
                             emptyDescription='Alerts matching the selected filters will appear here.'
                             emptyTitle='No alerts'
+                            footer={
+                                <TablePagination
+                                    page={page}
+                                    pageSize={pageSize}
+                                    total={total}
+                                    onPageChange={(nextPage) => replace({ page: nextPage })}
+                                />
+                            }
                             loading={loading && items.length === 0}
                             title={`${total.toLocaleString()} alerts`}
                         >
@@ -689,40 +727,6 @@ export default function Alerts() {
                                 })}
                             </tbody>
                         </DataTable>
-
-                        {total > 0 && (
-                            <div className='flex items-center justify-between pt-2 text-xs text-muted'>
-                                <span>
-                                    Showing {rangeStart.toLocaleString()}-
-                                    {rangeEnd.toLocaleString()} of {total.toLocaleString()}
-                                </span>
-                                <div className='flex gap-2'>
-                                    <Button
-                                        isDisabled={page <= 1}
-                                        size='sm'
-                                        variant='secondary'
-                                        onPress={() =>
-                                            setPage((current) => Math.max(1, current - 1))
-                                        }
-                                    >
-                                        Previous
-                                    </Button>
-                                    <span className='flex items-center px-1'>
-                                        {page} / {pageCount}
-                                    </span>
-                                    <Button
-                                        isDisabled={page >= pageCount}
-                                        size='sm'
-                                        variant='secondary'
-                                        onPress={() =>
-                                            setPage((current) => Math.min(pageCount, current + 1))
-                                        }
-                                    >
-                                        Next
-                                    </Button>
-                                </div>
-                            </div>
-                        )}
                     </div>
                 </Tabs.Panel>
                 <Tabs.Panel id='rules'>
