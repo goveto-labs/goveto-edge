@@ -1269,13 +1269,12 @@ func storeProviderLines(
 	return err
 }
 
-func optionalCreateString(input string) **string {
+func optionalCreateString(input string) *string {
 	if input == "" {
 		return nil
 	}
 	value := input
-	pointer := &value
-	return &pointer
+	return &value
 }
 
 func uniqueLineName(name, code string, names map[string]string) string {

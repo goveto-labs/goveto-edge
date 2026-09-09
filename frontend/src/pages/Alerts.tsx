@@ -572,7 +572,7 @@ export default function Alerts() {
                                     />
                                     {canOperate && firingOnPage > 0 && (
                                         <Tooltip>
-                                            <Tooltip.Trigger>
+                                            <Tooltip.Trigger className='flex items-center'>
                                                 <Button
                                                     isDisabled={mutating}
                                                     size='sm'

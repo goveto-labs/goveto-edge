@@ -119,7 +119,7 @@ func TestOptionalCreateString(t *testing.T) {
 		t.Fatalf("empty input should yield nil, got %v", got)
 	}
 	got := optionalCreateString("parent")
-	if got == nil || **got != "parent" {
+	if got == nil || *got != "parent" {
 		t.Fatalf("non-empty input not wrapped: %v", got)
 	}
 }
