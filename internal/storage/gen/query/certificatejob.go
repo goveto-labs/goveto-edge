@@ -1406,15 +1406,15 @@ type CertificateJobCreateInput struct {
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Certificate       *CertificateCreateNestedInput
@@ -1434,5 +1434,5 @@ type CertificateJobCreateNestedInput struct {
 // CertificateJobWhereUniqueInput identifies a unique CertificateJob record.
 type CertificateJobWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

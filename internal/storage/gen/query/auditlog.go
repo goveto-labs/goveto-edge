@@ -1083,18 +1083,18 @@ type AuditLogGroupByResult struct {
 // AuditLogCreateInput holds data for creating a AuditLog record.
 type AuditLogCreateInput struct {
 	Id            string
-	ActorId       **string
+	ActorId       *string
 	Actor         string
 	SourceIp      string
 	UserAgent     string
 	Action        string
 	ResourceType  string
 	ResourceId    string
-	BeforeJson    **json.RawMessage
-	AfterJson     **json.RawMessage
+	BeforeJson    *json.RawMessage
+	AfterJson     *json.RawMessage
 	RequestId     string
 	Result        string
-	FailureReason **string
+	FailureReason *string
 	CreatedAt     time.Time
 	User          *UserCreateNestedInput
 }

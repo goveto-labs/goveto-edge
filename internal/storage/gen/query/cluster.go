@@ -767,7 +767,7 @@ type ClusterCreateInput struct {
 	Id                   string
 	CreatorId            string
 	Name                 string
-	PrimaryHostname      **string
+	PrimaryHostname      *string
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	Creator              *UserCreateNestedInput
@@ -806,5 +806,5 @@ type ClusterCreateNestedInput struct {
 // ClusterWhereUniqueInput identifies a unique Cluster record.
 type ClusterWhereUniqueInput struct {
 	Id              *string
-	PrimaryHostname **string
+	PrimaryHostname *string
 }

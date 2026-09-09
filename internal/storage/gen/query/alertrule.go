@@ -918,7 +918,7 @@ type AlertRuleCreateInput struct {
 	ParamsJson      json.RawMessage
 	ForSeconds      int
 	CooldownSeconds int
-	MutedUntil      **time.Time
+	MutedUntil      *time.Time
 	ChannelsJson    json.RawMessage
 	CreatedAt       time.Time
 	UpdatedAt       time.Time

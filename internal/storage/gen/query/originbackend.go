@@ -746,7 +746,7 @@ type OriginBackendCreateInput struct {
 	OriginPoolId string
 	Protocol     model.OriginProtocol
 	Address      string
-	HostHeader   **string
+	HostHeader   *string
 	Weight       int
 	Priority     int
 	Enabled      bool

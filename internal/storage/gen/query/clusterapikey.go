@@ -1271,14 +1271,14 @@ type ClusterApiKeyCreateInput struct {
 	Name              string
 	Prefix            string
 	TokenHash         string
-	PreviousTokenHash **string
-	PreviousExpiresAt **time.Time
+	PreviousTokenHash *string
+	PreviousExpiresAt *time.Time
 	PermissionsJson   json.RawMessage
 	Status            model.ApiKeyStatus
-	ExpiresAt         **time.Time
-	RevokedAt         **time.Time
-	LastUsedAt        **time.Time
-	LastUsedIp        **string
+	ExpiresAt         *time.Time
+	RevokedAt         *time.Time
+	LastUsedAt        *time.Time
+	LastUsedIp        *string
 	CreatedBy         string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
@@ -1301,5 +1301,5 @@ type ClusterApiKeyCreateNestedInput struct {
 type ClusterApiKeyWhereUniqueInput struct {
 	Id                *string
 	TokenHash         *string
-	PreviousTokenHash **string
+	PreviousTokenHash *string
 }

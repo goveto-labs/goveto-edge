@@ -1173,11 +1173,11 @@ type ACMEChallengeCreateInput struct {
 	Status        model.ACMEChallengeStatus
 	Domain        string
 	Token         string
-	KeyAuth       **string
-	DnsName       **string
-	DnsValue      **string
-	ProviderRef   **string
-	LastError     **string
+	KeyAuth       *string
+	DnsName       *string
+	DnsValue      *string
+	ProviderRef   *string
+	LastError     *string
 	ExpiresAt     time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

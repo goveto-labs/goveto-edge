@@ -93,6 +93,11 @@ enum ConfigStatus {
   ROLLED_BACK
 }
 
+enum DNSPlacement {
+  ALL
+  PRIMARY_BACKUP
+}
+
 enum DNSProviderKind {
   ENDPOINT
   ACME
@@ -101,11 +106,6 @@ enum DNSProviderKind {
 enum DNSProviderType {
   ALIYUN
   CLOUDFLARE
-}
-
-enum DNSPlacement {
-  ALL
-  PRIMARY_BACKUP
 }
 
 enum DNSRecordStatus {
@@ -231,100 +231,6 @@ model ACMEChallenge {
   @@map("acme_challenges")
 }
 
-model AlertDelivery {
-  id          UUID                @id @default(uuid())
-  instanceId  UUID                @map("instance_id")
-  eventId     UUID?               @map("event_id")
-  channelId   UUID                @map("channel_id")
-  kind        String
-  status      AlertDeliveryStatus @default(PENDING)
-  attempts    Int                 @default(0)
-  lastError   String?             @map("last_error")
-  nextRetryAt DateTime?           @map("next_retry_at")
-  sentAt      DateTime?           @map("sent_at")
-  createdAt   DateTime            @default(now()) @map("created_at")
-  updatedAt   DateTime            @default(now()) @updatedAt @map("updated_at")
-  instance    AlertInstance       @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  event       AlertEvent?         @relation(fields: [eventId], references: [id])
-
-  @@index([status, nextRetryAt])
-  @@index([instanceId])
-  @@map("alert_deliveries")
-}
-
-model AlertEvent {
-  id          UUID          @id @default(uuid())
-  instanceId  UUID          @map("instance_id")
-  type        AlertEventType
-  fromStatus  String?
-  toStatus    String?
-  payloadJson Json          @default("{}") @map("payload_json")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  instance    AlertInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-  deliveries  AlertDelivery[]
-
-  @@index([instanceId, createdAt])
-  @@map("alert_events")
-}
-
-model AlertInstance {
-  id             UUID          @id @default(uuid())
-  ruleId         UUID          @map("rule_id")
-  clusterId      String        @map("cluster_id")
-  kind           String
-  fingerprint    String
-  status         AlertStatus   @default(PENDING)
-  severity       AlertSeverity @default(WARNING)
-  title          String
-  detailJson     Json          @default("{}") @map("detail_json")
-  firstSeenAt    DateTime      @default(now()) @map("first_seen_at")
-  lastSeenAt     DateTime      @default(now()) @map("last_seen_at")
-  firedAt        DateTime?     @map("fired_at")
-  ackedAt        DateTime?     @map("acked_at")
-  ackedBy        String?       @map("acked_by")
-  resolvedAt     DateTime?     @map("resolved_at")
-  resolvedReason String?       @map("resolved_reason")
-  suppressedUntilClear Boolean @default(false) @map("suppressed_until_clear")
-  notifyCount    Int           @default(0) @map("notify_count")
-  lastNotifiedAt DateTime?     @map("last_notified_at")
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @default(now()) @updatedAt @map("updated_at")
-  rule           AlertRule     @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  acker          User?         @relation(fields: [ackedBy], references: [id])
-  events         AlertEvent[]
-  deliveries     AlertDelivery[]
-
-  @@index([clusterId, status])
-  @@index([ruleId, status])
-  @@index([fingerprint])
-  @@unique(
-    [ruleId, fingerprint],
-    name: "alert_instances_active_fingerprint_key",
-    expressions: ["", "(CASE WHEN status <> 'RESOLVED' THEN fingerprint END)"]
-  )
-  @@map("alert_instances")
-}
-
-model AlertRule {
-  id              UUID          @id @default(uuid())
-  clusterId       String        @map("cluster_id")
-  kind            String
-  enabled         Boolean       @default(true)
-  severity        AlertSeverity @default(WARNING)
-  paramsJson      Json          @default("{}") @map("params_json")
-  forSeconds      Int           @default(0) @map("for_seconds")
-  cooldownSeconds Int           @default(300) @map("cooldown_seconds")
-  mutedUntil      DateTime?     @map("muted_until")
-  channelsJson    Json          @default("[]") @map("channels_json")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @default(now()) @updatedAt @map("updated_at")
-  cluster         Cluster       @relation(fields: [clusterId], references: [id], onDelete: Cascade)
-  instances       AlertInstance[]
-
-  @@unique([clusterId, kind])
-  @@map("alert_rules")
-}
-
 model AgentTask {
   id                UUID      @id @default(uuid())
   nodeId            UUID      @map("node_id")
@@ -351,6 +257,124 @@ model AgentTask {
   @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
   @@map("agent_tasks")
+}
+
+model AgentUpgradeJob {
+  id                String    @id @default(uuid())
+  nodeId            UUID      @map("node_id")
+  targetVersion     String    @map("target_version")
+  payload           Json
+  status            JobStatus @default(PENDING)
+  attempts          Int       @default(0)
+  maxAttempts       Int       @default(5) @map("max_attempts")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  leaseOwner        String?   @map("lease_owner")
+  leaseUntil        DateTime? @map("lease_until")
+  heartbeatAt       DateTime? @map("heartbeat_at")
+  idempotencyKey    String?   @unique @map("idempotency_key")
+  cancelRequestedAt DateTime? @map("cancel_requested_at")
+  timeoutAt         DateTime? @map("timeout_at")
+  resultJson        Json?     @map("result_json")
+  compensationJson  Json?     @map("compensation_json")
+  error             String?   @db.Text
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
+  node              Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, createdAt])
+  @@index([status, nextAttemptAt])
+  @@index([status, leaseUntil])
+  @@map("agent_upgrade_jobs")
+}
+
+model AlertDelivery {
+  id          UUID                @id @default(uuid())
+  instanceId  UUID                @map("instance_id")
+  eventId     UUID?               @map("event_id")
+  channelId   UUID                @map("channel_id")
+  kind        String
+  status      AlertDeliveryStatus @default(PENDING)
+  attempts    Int                 @default(0)
+  lastError   String?             @map("last_error")
+  nextRetryAt DateTime?           @map("next_retry_at")
+  sentAt      DateTime?           @map("sent_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @default(now()) @updatedAt @map("updated_at")
+  instance    AlertInstance       @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  event       AlertEvent?         @relation(fields: [eventId], references: [id])
+
+  @@index([status, nextRetryAt])
+  @@index([instanceId])
+  @@map("alert_deliveries")
+}
+
+model AlertEvent {
+  id          UUID            @id @default(uuid())
+  instanceId  UUID            @map("instance_id")
+  type        AlertEventType
+  fromStatus  String?
+  toStatus    String?
+  payloadJson Json            @default("{}") @map("payload_json")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  instance    AlertInstance   @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  deliveries  AlertDelivery[]
+
+  @@index([instanceId, createdAt])
+  @@map("alert_events")
+}
+
+model AlertInstance {
+  id                   UUID            @id @default(uuid())
+  ruleId               UUID            @map("rule_id")
+  clusterId            String          @map("cluster_id")
+  kind                 String
+  fingerprint          String
+  status               AlertStatus     @default(PENDING)
+  severity             AlertSeverity   @default(WARNING)
+  title                String
+  detailJson           Json            @default("{}") @map("detail_json")
+  firstSeenAt          DateTime        @default(now()) @map("first_seen_at")
+  lastSeenAt           DateTime        @default(now()) @map("last_seen_at")
+  firedAt              DateTime?       @map("fired_at")
+  ackedAt              DateTime?       @map("acked_at")
+  ackedBy              String?         @map("acked_by")
+  resolvedAt           DateTime?       @map("resolved_at")
+  resolvedReason       String?         @map("resolved_reason")
+  suppressedUntilClear Boolean         @default(false) @map("suppressed_until_clear")
+  notifyCount          Int             @default(0) @map("notify_count")
+  lastNotifiedAt       DateTime?       @map("last_notified_at")
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @default(now()) @updatedAt @map("updated_at")
+  rule                 AlertRule       @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  acker                User?           @relation(fields: [ackedBy], references: [id])
+  events               AlertEvent[]
+  deliveries           AlertDelivery[]
+
+  @@index([clusterId, status])
+  @@index([ruleId, status])
+  @@index([fingerprint])
+  @@unique([ruleId, fingerprint], name: "alert_instances_active_fingerprint_key", expressions: ["", "(CASE WHEN status <> 'RESOLVED' THEN fingerprint END)"])
+  @@map("alert_instances")
+}
+
+model AlertRule {
+  id              UUID            @id @default(uuid())
+  clusterId       String          @map("cluster_id")
+  kind            String
+  enabled         Boolean         @default(true)
+  severity        AlertSeverity   @default(WARNING)
+  paramsJson      Json            @default("{}") @map("params_json")
+  forSeconds      Int             @default(0) @map("for_seconds")
+  cooldownSeconds Int             @default(300) @map("cooldown_seconds")
+  mutedUntil      DateTime?       @map("muted_until")
+  channelsJson    Json            @default("[]") @map("channels_json")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @default(now()) @updatedAt @map("updated_at")
+  cluster         Cluster         @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+  instances       AlertInstance[]
+
+  @@unique([clusterId, kind])
+  @@map("alert_rules")
 }
 
 model AuditLog {
@@ -647,8 +671,8 @@ model DNSSyncJob {
   resultJson        Json?         @map("result_json")
   compensationJson  Json?         @map("compensation_json")
   error             String?       @db.Text
-  createdAt         DateTime     @default(now()) @map("created_at")
-  updatedAt         DateTime     @default(now()) @updatedAt @map("updated_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @default(now()) @updatedAt @map("updated_at")
   cluster           Cluster       @relation(fields: [clusterId], references: [id])
   site              Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
 
@@ -723,34 +747,6 @@ model InstallJob {
   @@index([status, nextAttemptAt])
   @@index([status, leaseUntil])
   @@map("install_jobs")
-}
-
-model AgentUpgradeJob {
-  id                String    @id @default(uuid())
-  nodeId            UUID      @map("node_id")
-  targetVersion     String    @map("target_version")
-  payload           Json
-  status            JobStatus @default(PENDING)
-  attempts          Int       @default(0)
-  maxAttempts       Int       @default(5) @map("max_attempts")
-  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
-  leaseOwner        String?   @map("lease_owner")
-  leaseUntil        DateTime? @map("lease_until")
-  heartbeatAt       DateTime? @map("heartbeat_at")
-  idempotencyKey    String?   @unique @map("idempotency_key")
-  cancelRequestedAt DateTime? @map("cancel_requested_at")
-  timeoutAt         DateTime? @map("timeout_at")
-  resultJson        Json?     @map("result_json")
-  compensationJson  Json?     @map("compensation_json")
-  error             String?   @db.Text
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at")
-  node              Node      @relation(fields: [nodeId], references: [id], onDelete: Cascade)
-
-  @@index([nodeId, createdAt])
-  @@index([status, nextAttemptAt])
-  @@index([status, leaseUntil])
-  @@map("agent_upgrade_jobs")
 }
 
 model JobExecution {

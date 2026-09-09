@@ -1193,17 +1193,17 @@ type DNSManagedRecordGroupByResult struct {
 type DNSManagedRecordCreateInput struct {
 	Id               string
 	ClusterId        string
-	SiteDomainId     **string
-	DnsLineId        **string
+	SiteDomainId     *string
+	DnsLineId        *string
 	DnsLineKey       string
-	NodeId           **string
+	NodeId           *string
 	Hostname         string
 	Type             model.DNSRecordType
 	Value            string
-	ProviderRecordId **string
+	ProviderRecordId *string
 	Status           model.DNSRecordStatus
-	LastError        **string
-	LastSyncedAt     **time.Time
+	LastError        *string
+	LastSyncedAt     *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	Cluster          *ClusterCreateNestedInput

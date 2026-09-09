@@ -419,7 +419,7 @@ type DynamicSettingGroupByResult struct {
 type DynamicSettingCreateInput struct {
 	Key         string
 	ValueJson   json.RawMessage
-	Description **string
+	Description *string
 	UpdatedAt   time.Time
 }
 

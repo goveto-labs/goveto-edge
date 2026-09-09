@@ -937,7 +937,7 @@ type SiteCreateInput struct {
 	Name               string
 	Status             model.SiteStatus
 	OriginPoolId       string
-	PolicyId           **string
+	PolicyId           *string
 	Version            int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time

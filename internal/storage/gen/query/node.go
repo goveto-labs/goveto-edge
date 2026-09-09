@@ -1684,21 +1684,21 @@ type NodeCreateInput struct {
 	Id                 string
 	ClusterId          string
 	Name               string
-	Version            **string
-	HeartbeatAt        **time.Time
+	Version            *string
+	HeartbeatAt        *time.Time
 	Status             model.NodeStatus
-	InstallError       **string
-	RedisAvailable     **bool
-	RedisStatusError   **string
+	InstallError       *string
+	RedisAvailable     *bool
+	RedisStatusError   *string
 	QueueRecords       int64
 	QueueBytes         int64
 	DroppedLogs        int64
-	DroppedLogsAt      **time.Time
-	SshCredentialId    **string
-	SshHost            **string
-	SshPort            **int
+	DroppedLogsAt      *time.Time
+	SshCredentialId    *string
+	SshHost            *string
+	SshPort            *int
 	DnsPriority        int
-	OnlineSince        **time.Time
+	OnlineSince        *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	Cluster            *ClusterCreateNestedInput

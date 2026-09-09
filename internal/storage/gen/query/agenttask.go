@@ -1438,18 +1438,18 @@ type AgentTaskCreateInput struct {
 	Kind              string
 	Payload           json.RawMessage
 	Status            model.JobStatus
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Node              *NodeCreateNestedInput
@@ -1469,5 +1469,5 @@ type AgentTaskCreateNestedInput struct {
 // AgentTaskWhereUniqueInput identifies a unique AgentTask record.
 type AgentTaskWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

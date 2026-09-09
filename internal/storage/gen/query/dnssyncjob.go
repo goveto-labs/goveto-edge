@@ -1485,21 +1485,21 @@ type DNSSyncJobGroupByResult struct {
 type DNSSyncJobCreateInput struct {
 	Id                string
 	ClusterId         string
-	SiteId            **string
+	SiteId            *string
 	Action            model.DNSSyncAction
 	Status            model.JobStatus
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Cluster           *ClusterCreateNestedInput
@@ -1520,5 +1520,5 @@ type DNSSyncJobCreateNestedInput struct {
 // DNSSyncJobWhereUniqueInput identifies a unique DNSSyncJob record.
 type DNSSyncJobWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

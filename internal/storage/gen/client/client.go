@@ -1256,7 +1256,7 @@ func (a ACMEAccountActions) Aggregate(ctx context.Context, opts ...query.ACMEAcc
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -1330,7 +1330,7 @@ func (a ACMEAccountActions) GroupBy(ctx context.Context, fields []string, opts .
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -2246,7 +2246,7 @@ func (a ACMEChallengeActions) Aggregate(ctx context.Context, opts ...query.ACMEC
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -2320,7 +2320,7 @@ func (a ACMEChallengeActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -3244,7 +3244,7 @@ func (a AgentTaskActions) Aggregate(ctx context.Context, opts ...query.AgentTask
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -3318,7 +3318,7 @@ func (a AgentTaskActions) GroupBy(ctx context.Context, fields []string, opts ...
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -4242,7 +4242,7 @@ func (a AgentUpgradeJobActions) Aggregate(ctx context.Context, opts ...query.Age
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -4316,7 +4316,7 @@ func (a AgentUpgradeJobActions) GroupBy(ctx context.Context, fields []string, op
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -5226,7 +5226,7 @@ func (a AlertDeliveryActions) Aggregate(ctx context.Context, opts ...query.Alert
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -5300,7 +5300,7 @@ func (a AlertDeliveryActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -6200,7 +6200,7 @@ func (a AlertEventActions) Aggregate(ctx context.Context, opts ...query.AlertEve
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -6274,7 +6274,7 @@ func (a AlertEventActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -7202,7 +7202,7 @@ func (a AlertInstanceActions) Aggregate(ctx context.Context, opts ...query.Alert
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -7276,7 +7276,7 @@ func (a AlertInstanceActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -8186,7 +8186,7 @@ func (a AlertRuleActions) Aggregate(ctx context.Context, opts ...query.AlertRule
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -8260,7 +8260,7 @@ func (a AlertRuleActions) GroupBy(ctx context.Context, fields []string, opts ...
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -9174,7 +9174,7 @@ func (a AuditLogActions) Aggregate(ctx context.Context, opts ...query.AuditLogAg
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -9248,7 +9248,7 @@ func (a AuditLogActions) GroupBy(ctx context.Context, fields []string, opts ...q
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -10194,7 +10194,7 @@ func (a CertificateActions) Aggregate(ctx context.Context, opts ...query.Certifi
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -10268,7 +10268,7 @@ func (a CertificateActions) GroupBy(ctx context.Context, fields []string, opts .
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -11190,7 +11190,7 @@ func (a CertificateJobActions) Aggregate(ctx context.Context, opts ...query.Cert
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -11264,7 +11264,7 @@ func (a CertificateJobActions) GroupBy(ctx context.Context, fields []string, opt
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -12162,7 +12162,7 @@ func (a ClusterActions) Aggregate(ctx context.Context, opts ...query.ClusterAggr
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -12236,7 +12236,7 @@ func (a ClusterActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -13154,7 +13154,7 @@ func (a ClusterApiKeyActions) Aggregate(ctx context.Context, opts ...query.Clust
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -13228,7 +13228,7 @@ func (a ClusterApiKeyActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -14124,7 +14124,7 @@ func (a ClusterGroupActions) Aggregate(ctx context.Context, opts ...query.Cluste
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -14198,7 +14198,7 @@ func (a ClusterGroupActions) GroupBy(ctx context.Context, fields []string, opts 
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -15092,7 +15092,7 @@ func (a ClusterMemberActions) Aggregate(ctx context.Context, opts ...query.Clust
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -15166,7 +15166,7 @@ func (a ClusterMemberActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -16062,7 +16062,7 @@ func (a ClusterRegionActions) Aggregate(ctx context.Context, opts ...query.Clust
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -16136,7 +16136,7 @@ func (a ClusterRegionActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -17036,7 +17036,7 @@ func (a ConfigVersionActions) Aggregate(ctx context.Context, opts ...query.Confi
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -17110,7 +17110,7 @@ func (a ConfigVersionActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -18012,7 +18012,7 @@ func (a DNSLineActions) Aggregate(ctx context.Context, opts ...query.DNSLineAggr
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -18086,7 +18086,7 @@ func (a DNSLineActions) GroupBy(ctx context.Context, fields []string, opts ...qu
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -19002,7 +19002,7 @@ func (a DNSManagedRecordActions) Aggregate(ctx context.Context, opts ...query.DN
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -19076,7 +19076,7 @@ func (a DNSManagedRecordActions) GroupBy(ctx context.Context, fields []string, o
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -19988,7 +19988,7 @@ func (a DNSProviderConfigActions) Aggregate(ctx context.Context, opts ...query.D
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -20062,7 +20062,7 @@ func (a DNSProviderConfigActions) GroupBy(ctx context.Context, fields []string, 
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -20986,7 +20986,7 @@ func (a DNSSyncJobActions) Aggregate(ctx context.Context, opts ...query.DNSSyncJ
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -21060,7 +21060,7 @@ func (a DNSSyncJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -21954,7 +21954,7 @@ func (a DNSSyncSnapshotActions) Aggregate(ctx context.Context, opts ...query.DNS
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -22028,7 +22028,7 @@ func (a DNSSyncSnapshotActions) GroupBy(ctx context.Context, fields []string, op
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -22922,7 +22922,7 @@ func (a DynamicSettingActions) Aggregate(ctx context.Context, opts ...query.Dyna
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -22996,7 +22996,7 @@ func (a DynamicSettingActions) GroupBy(ctx context.Context, fields []string, opt
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -23898,7 +23898,7 @@ func (a ExternalIdentityActions) Aggregate(ctx context.Context, opts ...query.Ex
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -23972,7 +23972,7 @@ func (a ExternalIdentityActions) GroupBy(ctx context.Context, fields []string, o
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -24894,7 +24894,7 @@ func (a InstallJobActions) Aggregate(ctx context.Context, opts ...query.InstallJ
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -24968,7 +24968,7 @@ func (a InstallJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -25876,7 +25876,7 @@ func (a JobExecutionActions) Aggregate(ctx context.Context, opts ...query.JobExe
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -25950,7 +25950,7 @@ func (a JobExecutionActions) GroupBy(ctx context.Context, fields []string, opts 
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -26864,7 +26864,7 @@ func (a LogpushDestinationActions) Aggregate(ctx context.Context, opts ...query.
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -26938,7 +26938,7 @@ func (a LogpushDestinationActions) GroupBy(ctx context.Context, fields []string,
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -27864,7 +27864,7 @@ func (a NodeActions) Aggregate(ctx context.Context, opts ...query.NodeAggregateO
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -27938,7 +27938,7 @@ func (a NodeActions) GroupBy(ctx context.Context, fields []string, opts ...query
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -28832,7 +28832,7 @@ func (a NodeAddressActions) Aggregate(ctx context.Context, opts ...query.NodeAdd
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -28906,7 +28906,7 @@ func (a NodeAddressActions) GroupBy(ctx context.Context, fields []string, opts .
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -29810,7 +29810,7 @@ func (a NodeCacheConfigActions) Aggregate(ctx context.Context, opts ...query.Nod
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -29884,7 +29884,7 @@ func (a NodeCacheConfigActions) GroupBy(ctx context.Context, fields []string, op
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -30788,7 +30788,7 @@ func (a NodeCredentialActions) Aggregate(ctx context.Context, opts ...query.Node
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -30862,7 +30862,7 @@ func (a NodeCredentialActions) GroupBy(ctx context.Context, fields []string, opt
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -31752,7 +31752,7 @@ func (a NodeDNSLineActions) Aggregate(ctx context.Context, opts ...query.NodeDNS
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -31826,7 +31826,7 @@ func (a NodeDNSLineActions) GroupBy(ctx context.Context, fields []string, opts .
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -32718,7 +32718,7 @@ func (a NodeGroupMembershipActions) Aggregate(ctx context.Context, opts ...query
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -32792,7 +32792,7 @@ func (a NodeGroupMembershipActions) GroupBy(ctx context.Context, fields []string
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -33694,7 +33694,7 @@ func (a NodeHardwareProfileActions) Aggregate(ctx context.Context, opts ...query
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -33768,7 +33768,7 @@ func (a NodeHardwareProfileActions) GroupBy(ctx context.Context, fields []string
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -34660,7 +34660,7 @@ func (a NodeRegionMembershipActions) Aggregate(ctx context.Context, opts ...quer
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -34734,7 +34734,7 @@ func (a NodeRegionMembershipActions) GroupBy(ctx context.Context, fields []strin
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -35632,7 +35632,7 @@ func (a NodeSSHHostKeyActions) Aggregate(ctx context.Context, opts ...query.Node
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -35706,7 +35706,7 @@ func (a NodeSSHHostKeyActions) GroupBy(ctx context.Context, fields []string, opt
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -36604,7 +36604,7 @@ func (a NodeSiteConfigVersionActions) Aggregate(ctx context.Context, opts ...que
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -36678,7 +36678,7 @@ func (a NodeSiteConfigVersionActions) GroupBy(ctx context.Context, fields []stri
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -37582,7 +37582,7 @@ func (a NotificationChannelActions) Aggregate(ctx context.Context, opts ...query
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -37656,7 +37656,7 @@ func (a NotificationChannelActions) GroupBy(ctx context.Context, fields []string
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -38560,7 +38560,7 @@ func (a OriginBackendActions) Aggregate(ctx context.Context, opts ...query.Origi
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -38634,7 +38634,7 @@ func (a OriginBackendActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -39534,7 +39534,7 @@ func (a OriginPoolActions) Aggregate(ctx context.Context, opts ...query.OriginPo
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -39608,7 +39608,7 @@ func (a OriginPoolActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -40508,7 +40508,7 @@ func (a PasswordResetTokenActions) Aggregate(ctx context.Context, opts ...query.
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -40582,7 +40582,7 @@ func (a PasswordResetTokenActions) GroupBy(ctx context.Context, fields []string,
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -41484,7 +41484,7 @@ func (a PolicyActions) Aggregate(ctx context.Context, opts ...query.PolicyAggreg
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -41558,7 +41558,7 @@ func (a PolicyActions) GroupBy(ctx context.Context, fields []string, opts ...que
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -42482,7 +42482,7 @@ func (a PublishJobActions) Aggregate(ctx context.Context, opts ...query.PublishJ
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -42556,7 +42556,7 @@ func (a PublishJobActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -43480,7 +43480,7 @@ func (a PurgeJobActions) Aggregate(ctx context.Context, opts ...query.PurgeJobAg
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -43554,7 +43554,7 @@ func (a PurgeJobActions) GroupBy(ctx context.Context, fields []string, opts ...q
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -44456,7 +44456,7 @@ func (a SSHCredentialActions) Aggregate(ctx context.Context, opts ...query.SSHCr
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -44530,7 +44530,7 @@ func (a SSHCredentialActions) GroupBy(ctx context.Context, fields []string, opts
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -45436,7 +45436,7 @@ func (a SiteActions) Aggregate(ctx context.Context, opts ...query.SiteAggregateO
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -45510,7 +45510,7 @@ func (a SiteActions) GroupBy(ctx context.Context, fields []string, opts ...query
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -46400,7 +46400,7 @@ func (a SiteCertificateActions) Aggregate(ctx context.Context, opts ...query.Sit
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -46474,7 +46474,7 @@ func (a SiteCertificateActions) GroupBy(ctx context.Context, fields []string, op
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -47368,7 +47368,7 @@ func (a SiteDomainActions) Aggregate(ctx context.Context, opts ...query.SiteDoma
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -47442,7 +47442,7 @@ func (a SiteDomainActions) GroupBy(ctx context.Context, fields []string, opts ..
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -48364,7 +48364,7 @@ func (a SiteListenerConfigActions) Aggregate(ctx context.Context, opts ...query.
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -48438,7 +48438,7 @@ func (a SiteListenerConfigActions) GroupBy(ctx context.Context, fields []string,
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -49336,7 +49336,7 @@ func (a SiteTemplateActions) Aggregate(ctx context.Context, opts ...query.SiteTe
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -49410,7 +49410,7 @@ func (a SiteTemplateActions) GroupBy(ctx context.Context, fields []string, opts 
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -50326,7 +50326,7 @@ func (a UserActions) Aggregate(ctx context.Context, opts ...query.UserAggregateO
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -50400,7 +50400,7 @@ func (a UserActions) GroupBy(ctx context.Context, fields []string, opts ...query
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":
@@ -51304,7 +51304,7 @@ func (a UserSessionActions) Aggregate(ctx context.Context, opts ...query.UserSes
 	for i, opt := range opts {
 		if aggVals[i].Valid {
 			v := aggVals[i].Float64
-			switch opt.Fn {
+			switch strings.ToLower(opt.Fn) {
 			case "avg":
 				result.Avg[opt.Field] = &v
 			case "sum":
@@ -51378,7 +51378,7 @@ func (a UserSessionActions) GroupBy(ctx context.Context, fields []string, opts .
 		for i, opt := range opts {
 			if aggVals[i].Valid {
 				v := aggVals[i].Float64
-				switch opt.Fn {
+				switch strings.ToLower(opt.Fn) {
 				case "avg":
 					r.Avg[opt.Field] = &v
 				case "sum":

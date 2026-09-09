@@ -731,7 +731,7 @@ type DNSLineCreateInput struct {
 	ClusterId          string
 	Name               string
 	ProviderCode       string
-	ProviderParentCode **string
+	ProviderParentCode *string
 	SortOrder          int
 	CreatedAt          time.Time
 	UpdatedAt          time.Time

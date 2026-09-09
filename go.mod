@@ -5,7 +5,7 @@ go 1.27.0
 require (
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/andybalholm/brotli v1.2.2
-	github.com/arsfy/gcorm v0.1.12
+	github.com/arsfy/gcorm v0.1.13
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/caddyserver/caddy/v2 v2.11.4
 	github.com/containrrr/shoutrrr v0.8.0

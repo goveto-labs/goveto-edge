@@ -1391,15 +1391,15 @@ type InstallJobCreateInput struct {
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Node              *NodeCreateNestedInput
@@ -1419,5 +1419,5 @@ type InstallJobCreateNestedInput struct {
 // InstallJobWhereUniqueInput identifies a unique InstallJob record.
 type InstallJobWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

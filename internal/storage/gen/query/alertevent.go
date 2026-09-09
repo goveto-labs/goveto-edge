@@ -598,8 +598,8 @@ type AlertEventCreateInput struct {
 	Id          string
 	InstanceId  string
 	Type        model.AlertEventType
-	FromStatus  **string
-	ToStatus    **string
+	FromStatus  *string
+	ToStatus    *string
 	PayloadJson json.RawMessage
 	CreatedAt   time.Time
 	Instance    *AlertInstanceCreateNestedInput

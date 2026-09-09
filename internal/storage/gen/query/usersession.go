@@ -799,11 +799,11 @@ type UserSessionCreateInput struct {
 	Id         string
 	UserId     string
 	TokenHash  string
-	IpAddress  **string
-	UserAgent  **string
+	IpAddress  *string
+	UserAgent  *string
 	ExpiresAt  time.Time
 	LastSeenAt time.Time
-	RevokedAt  **time.Time
+	RevokedAt  *time.Time
 	CreatedAt  time.Time
 	User       *UserCreateNestedInput
 }

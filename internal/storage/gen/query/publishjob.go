@@ -1476,15 +1476,15 @@ type PublishJobCreateInput struct {
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Site              *SiteCreateNestedInput
@@ -1504,5 +1504,5 @@ type PublishJobCreateNestedInput struct {
 // PublishJobWhereUniqueInput identifies a unique PublishJob record.
 type PublishJobWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

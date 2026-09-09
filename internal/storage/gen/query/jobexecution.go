@@ -894,9 +894,9 @@ type JobExecutionCreateInput struct {
 	Status      model.JobStatus
 	StartedAt   time.Time
 	HeartbeatAt time.Time
-	FinishedAt  **time.Time
-	ResultJson  **json.RawMessage
-	Error       **string
+	FinishedAt  *time.Time
+	ResultJson  *json.RawMessage
+	Error       *string
 }
 
 // ScalarValues returns the scalar field values in column order.

@@ -1572,14 +1572,14 @@ type AlertInstanceCreateInput struct {
 	DetailJson           json.RawMessage
 	FirstSeenAt          time.Time
 	LastSeenAt           time.Time
-	FiredAt              **time.Time
-	AckedAt              **time.Time
-	AckedBy              **string
-	ResolvedAt           **time.Time
-	ResolvedReason       **string
+	FiredAt              *time.Time
+	AckedAt              *time.Time
+	AckedBy              *string
+	ResolvedAt           *time.Time
+	ResolvedReason       *string
 	SuppressedUntilClear bool
 	NotifyCount          int
-	LastNotifiedAt       **time.Time
+	LastNotifiedAt       *time.Time
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 	Rule                 *AlertRuleCreateNestedInput

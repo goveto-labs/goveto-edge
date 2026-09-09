@@ -1268,13 +1268,13 @@ type UserCreateInput struct {
 	Name                string
 	Role                model.UserRole
 	Status              model.UserStatus
-	TotpSecretEncrypted **string
-	TotpRecoveryCodes   **json.RawMessage
+	TotpSecretEncrypted *string
+	TotpRecoveryCodes   *json.RawMessage
 	FailedLoginAttempts int
-	LastFailedLoginAt   **time.Time
-	LockedUntil         **time.Time
-	LastLoginAt         **time.Time
-	PasswordChangedAt   **time.Time
+	LastFailedLoginAt   *time.Time
+	LockedUntil         *time.Time
+	LastLoginAt         *time.Time
+	PasswordChangedAt   *time.Time
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
 	Sessions            *UserSessionCreateNestedInput

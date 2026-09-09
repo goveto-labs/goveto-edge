@@ -827,14 +827,14 @@ type NodeCredentialGroupByResult struct {
 // NodeCredentialCreateInput holds data for creating a NodeCredential record.
 type NodeCredentialCreateInput struct {
 	NodeId                        string
-	CertificateSerial             **string
-	CertificateNotAfter           **time.Time
-	BootstrapIdentityEncrypted    **string
-	PreviousCertificateSerial     **string
-	PreviousCertificateValidUntil **time.Time
-	RotationCsrSha256             **string
-	RotationCertificatePem        **string
-	RevokedAt                     **time.Time
+	CertificateSerial             *string
+	CertificateNotAfter           *time.Time
+	BootstrapIdentityEncrypted    *string
+	PreviousCertificateSerial     *string
+	PreviousCertificateValidUntil *time.Time
+	RotationCsrSha256             *string
+	RotationCertificatePem        *string
+	RevokedAt                     *time.Time
 	Node                          *NodeCreateNestedInput
 }
 
@@ -852,5 +852,5 @@ type NodeCredentialCreateNestedInput struct {
 // NodeCredentialWhereUniqueInput identifies a unique NodeCredential record.
 type NodeCredentialWhereUniqueInput struct {
 	NodeId            *string
-	CertificateSerial **string
+	CertificateSerial *string
 }

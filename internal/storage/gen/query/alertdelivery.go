@@ -941,14 +941,14 @@ type AlertDeliveryGroupByResult struct {
 type AlertDeliveryCreateInput struct {
 	Id          string
 	InstanceId  string
-	EventId     **string
+	EventId     *string
 	ChannelId   string
 	Kind        string
 	Status      model.AlertDeliveryStatus
 	Attempts    int
-	LastError   **string
-	NextRetryAt **time.Time
-	SentAt      **time.Time
+	LastError   *string
+	NextRetryAt *time.Time
+	SentAt      *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	Instance    *AlertInstanceCreateNestedInput

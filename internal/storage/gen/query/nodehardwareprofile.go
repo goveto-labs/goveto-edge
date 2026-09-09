@@ -656,9 +656,9 @@ type NodeHardwareProfileCreateInput struct {
 	NodeId                       string
 	Architecture                 string
 	CpuModel                     string
-	CacheDiskWriteBytesPerSecond **int64
-	BenchmarkBytes               **int64
-	BenchmarkDurationMs          **int
+	CacheDiskWriteBytesPerSecond *int64
+	BenchmarkBytes               *int64
+	BenchmarkDurationMs          *int
 	MeasuredAt                   time.Time
 	Node                         *NodeCreateNestedInput
 }

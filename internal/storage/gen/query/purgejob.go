@@ -1476,20 +1476,20 @@ type PurgeJobCreateInput struct {
 	Id                string
 	SiteId            string
 	Type              model.PurgeType
-	Value             **string
+	Value             *string
 	Status            model.JobStatus
 	Attempts          int
 	MaxAttempts       int
 	NextAttemptAt     time.Time
-	LeaseOwner        **string
-	LeaseUntil        **time.Time
-	HeartbeatAt       **time.Time
-	IdempotencyKey    **string
-	CancelRequestedAt **time.Time
-	TimeoutAt         **time.Time
-	ResultJson        **json.RawMessage
-	CompensationJson  **json.RawMessage
-	Error             **string
+	LeaseOwner        *string
+	LeaseUntil        *time.Time
+	HeartbeatAt       *time.Time
+	IdempotencyKey    *string
+	CancelRequestedAt *time.Time
+	TimeoutAt         *time.Time
+	ResultJson        *json.RawMessage
+	CompensationJson  *json.RawMessage
+	Error             *string
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Site              *SiteCreateNestedInput
@@ -1509,5 +1509,5 @@ type PurgeJobCreateNestedInput struct {
 // PurgeJobWhereUniqueInput identifies a unique PurgeJob record.
 type PurgeJobWhereUniqueInput struct {
 	Id             *string
-	IdempotencyKey **string
+	IdempotencyKey *string
 }

@@ -958,7 +958,7 @@ type DNSProviderConfigCreateInput struct {
 	Kind                 model.DNSProviderKind
 	Provider             model.DNSProviderType
 	Zone                 string
-	ZoneId               **string
+	ZoneId               *string
 	CredentialsEncrypted string
 	DefaultTtl           int
 	Proxied              bool

@@ -967,8 +967,8 @@ type LogpushDestinationCreateInput struct {
 	Topic                string
 	LogTypes             json.RawMessage
 	TlsEnabled           bool
-	SaslMechanism        **string
-	CredentialsEncrypted **string
+	SaslMechanism        *string
+	CredentialsEncrypted *string
 	Enabled              bool
 	CreatedAt            time.Time
 	UpdatedAt            time.Time

@@ -1262,17 +1262,17 @@ func (certificateAcmeEmailField) Desc() CertificateOrderByClause {
 type certificateAcmeChallengeTypeField struct{}
 
 // Equals creates an equality condition.
-func (certificateAcmeChallengeTypeField) Equals(v model.ACMEChallengeType) CertificateWhereClause {
+func (certificateAcmeChallengeTypeField) Equals(v *model.ACMEChallengeType) CertificateWhereClause {
 	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "=", Value: v}
 }
 
 // Not creates a not-equal condition.
-func (certificateAcmeChallengeTypeField) Not(v model.ACMEChallengeType) CertificateWhereClause {
+func (certificateAcmeChallengeTypeField) Not(v *model.ACMEChallengeType) CertificateWhereClause {
 	return CertificateWhereClause{Field: "acme_challenge_type", Operator: "!=", Value: v}
 }
 
 // In creates an IN condition.
-func (certificateAcmeChallengeTypeField) In(vals ...model.ACMEChallengeType) CertificateWhereClause {
+func (certificateAcmeChallengeTypeField) In(vals ...*model.ACMEChallengeType) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -1281,7 +1281,7 @@ func (certificateAcmeChallengeTypeField) In(vals ...model.ACMEChallengeType) Cer
 }
 
 // NotIn creates a NOT IN condition.
-func (certificateAcmeChallengeTypeField) NotIn(vals ...model.ACMEChallengeType) CertificateWhereClause {
+func (certificateAcmeChallengeTypeField) NotIn(vals ...*model.ACMEChallengeType) CertificateWhereClause {
 	iVals := make([]any, len(vals))
 	for i, v := range vals {
 		iVals[i] = v
@@ -2297,29 +2297,29 @@ type CertificateCreateInput struct {
 	Name                    string
 	Source                  model.CertificateSource
 	Status                  model.CertificateStatus
-	CertPem                 **string
+	CertPem                 *string
 	PrivateKeyEncrypted     string
-	Fingerprint             **string
-	SerialNumber            **string
+	Fingerprint             *string
+	SerialNumber            *string
 	DomainsJson             json.RawMessage
-	NotBefore               **time.Time
-	ExpiresAt               **time.Time
-	Issuer                  **string
-	KeyAlgorithm            **string
-	AcmeDirectoryUrl        **string
-	AcmeEmail               **string
+	NotBefore               *time.Time
+	ExpiresAt               *time.Time
+	Issuer                  *string
+	KeyAlgorithm            *string
+	AcmeDirectoryUrl        *string
+	AcmeEmail               *string
 	AcmeChallengeType       *model.ACMEChallengeType
 	AutoRenew               bool
 	RenewBeforeDays         int
-	LastIssuedAt            **time.Time
-	LastRenewalAttemptAt    **time.Time
-	LastRenewalError        **string
-	LastPublishedAt         **time.Time
-	LastPublishError        **string
-	RevokedAt               **time.Time
-	RevocationReason        **int
-	LastRevocationAttemptAt **time.Time
-	LastRevocationError     **string
+	LastIssuedAt            *time.Time
+	LastRenewalAttemptAt    *time.Time
+	LastRenewalError        *string
+	LastPublishedAt         *time.Time
+	LastPublishError        *string
+	RevokedAt               *time.Time
+	RevocationReason        *int
+	LastRevocationAttemptAt *time.Time
+	LastRevocationError     *string
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
 	Cluster                 *ClusterCreateNestedInput

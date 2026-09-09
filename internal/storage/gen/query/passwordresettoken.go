@@ -583,7 +583,7 @@ type PasswordResetTokenCreateInput struct {
 	UserId    string
 	TokenHash string
 	ExpiresAt time.Time
-	UsedAt    **time.Time
+	UsedAt    *time.Time
 	CreatedAt time.Time
 	User      *UserCreateNestedInput
 }

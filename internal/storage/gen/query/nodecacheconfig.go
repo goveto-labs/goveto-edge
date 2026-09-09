@@ -735,7 +735,7 @@ type NodeCacheConfigCreateInput struct {
 	NodeId              string
 	CacheDir            string
 	AutoMaxSize         bool
-	MaxSizeBytes        **int64
+	MaxSizeBytes        *int64
 	MaxDiskUsagePercent int
 	DebugMode           bool
 	CreatedAt           time.Time
