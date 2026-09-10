@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 
 import { Badge, Tooltip } from '@heroui/react';
+import { ChevronDown } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
@@ -14,6 +15,8 @@ interface NavItemProps {
     badge?: number;
     collapsed?: boolean;
     onClick?: () => void;
+    expanded?: boolean;
+    onToggleExpand?: () => void;
 }
 
 export function NavItem({
@@ -24,6 +27,8 @@ export function NavItem({
     badge,
     collapsed,
     onClick,
+    expanded,
+    onToggleExpand,
 }: NavItemProps) {
     const navigate = useNavigate();
     const { requestAction } = useUnsavedChanges();
@@ -71,6 +76,26 @@ export function NavItem({
                 <Tooltip.Trigger>{link}</Tooltip.Trigger>
                 <Tooltip.Content>{label}</Tooltip.Content>
             </Tooltip>
+        );
+    }
+
+    if (onToggleExpand) {
+        return (
+            <div className='flex items-center'>
+                <div className='min-w-0 flex-1'>{link}</div>
+                <button
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}
+                    className='flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-secondary hover:text-foreground'
+                    type='button'
+                    onClick={onToggleExpand}
+                >
+                    <ChevronDown
+                        aria-hidden='true'
+                        className={`h-4 w-4 transition-transform duration-200 ${expanded ? '' : '-rotate-90'}`}
+                    />
+                </button>
+            </div>
         );
     }
 

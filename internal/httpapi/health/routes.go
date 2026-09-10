@@ -20,16 +20,25 @@ func Register(e *echo.Echo, db *sql.DB, analyticsStore ...*analytics.Store) {
 	group.GET("/ready", ready(db, analyticsStore...))
 }
 
+// startedAt records process boot time so dev builds without a release
+// version can still be identified by their startup stamp.
+var startedAt = time.Now()
+
 type statusResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status    string `json:"status"`
+	Version   string `json:"version"`
+	StartedAt string `json:"startedAt"`
 }
 
 // @summary Liveness
 // @description Process liveness probe; returns ok when the process is running.
 // @Tags health
 func live(c *echo.Context) error {
-	return types.JSON(c, http.StatusOK, statusResponse{Status: "ok", Version: buildinfo.Current()})
+	return types.JSON(c, http.StatusOK, statusResponse{
+		Status:    "ok",
+		Version:   buildinfo.Current(),
+		StartedAt: startedAt.Format(time.RFC3339),
+	})
 }
 
 // @summary Readiness
@@ -47,6 +56,10 @@ func ready(db *sql.DB, stores ...*analytics.Store) echo.HandlerFunc {
 				return c.JSON(http.StatusServiceUnavailable, types.Fail("service_unavailable", "unavailable"))
 			}
 		}
-		return types.JSON(c, http.StatusOK, statusResponse{Status: "ok", Version: buildinfo.Current()})
+		return types.JSON(c, http.StatusOK, statusResponse{
+			Status:    "ok",
+			Version:   buildinfo.Current(),
+			StartedAt: startedAt.Format(time.RFC3339),
+		})
 	}
 }

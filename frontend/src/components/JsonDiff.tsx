@@ -148,7 +148,7 @@ function DiffCell({ line, side }: { line: DiffLine | null; side: 'left' | 'right
         side === 'left' ? (removed ? 'text-danger' : '') : added ? 'text-success' : '';
     return (
         <div
-            className={`flex items-start gap-1 overflow-x-auto whitespace-pre border-border px-2 leading-6 [scrollbar-width:thin] ${
+            className={`flex items-start gap-1 overflow-x-auto whitespace-pre border-border px-2 leading-6 ${
                 side === 'left' ? 'border-r' : ''
             } ${background}`}
         >

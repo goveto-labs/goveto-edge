@@ -21,4 +21,7 @@ func TestLiveIncludesBuildVersion(t *testing.T) {
 	if !strings.Contains(body, `"status":"ok"`) || !strings.Contains(body, `"version":"`+buildinfo.Current()+`"`) {
 		t.Fatalf("liveness response does not include status and version: %s", body)
 	}
+	if !strings.Contains(body, `"startedAt":"`) {
+		t.Fatalf("liveness response does not include startedAt: %s", body)
+	}
 }

@@ -19,6 +19,7 @@ import {
     Waves,
     Waypoints,
 } from 'lucide-react';
+import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
 import AnimalStepIcon from './icons/AnimalStep';
@@ -26,6 +27,7 @@ import { NavItem } from '@/components/NavItem.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
 import { useCluster } from '@/hooks/useCluster.ts';
+import { useConsoleVersion } from '@/hooks/useConsoleVersion.ts';
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges.tsx';
 import { canManageCluster } from '@/utils/rbac.ts';
 
@@ -97,6 +99,8 @@ interface SidebarProps {
 }
 
 function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
+    const version = useConsoleVersion();
+
     if (collapsed) {
         return (
             <div className='flex justify-center px-3 pb-1 pt-4'>
@@ -109,10 +113,23 @@ function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
 
     return (
         <div className='flex items-center gap-2.5 px-4 pb-1 pt-4'>
-            <AnimalStepIcon className='h-8 w-8' />
-            <span className='truncate text-sm font-semibold tracking-tight' translate='no'>
-                Goveto Edge
-            </span>
+            <AnimalStepIcon className='h-8 w-8 shrink-0' />
+            <div className='min-w-0'>
+                <span
+                    className='block truncate text-sm font-semibold tracking-tight'
+                    translate='no'
+                >
+                    Goveto Edge
+                </span>
+                {version ? (
+                    <span
+                        className='block truncate text-[11px] leading-tight text-muted'
+                        translate='no'
+                    >
+                        {version}
+                    </span>
+                ) : null}
+            </div>
         </div>
     );
 }
@@ -123,11 +140,25 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
     const { clusterId, clusters } = useCluster();
     const clusterRole = clusters.find((cluster) => cluster.id === clusterId)?.role;
     const visibleNav = navigationFor(user?.role === 'ADMIN', canManageCluster(clusterRole));
+    // Sections start expanded; users can collapse groups for this session.
+    const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(() => new Set());
+
+    const toggleGroup = (path: string) => {
+        setCollapsedGroups((previous) => {
+            const next = new Set(previous);
+            if (next.has(path)) {
+                next.delete(path);
+            } else {
+                next.add(path);
+            }
+            return next;
+        });
+    };
 
     return (
         <nav
             aria-label='Primary'
-            className={`flex-1 space-y-1 overflow-y-auto p-3 pt-2 ${collapsed ? 'px-2' : ''}`}
+            className={`flex-1 space-y-1 overflow-y-auto p-3 ${collapsed ? 'px-2' : ''}`}
         >
             {visibleNav.map((item) => {
                 const activeChild =
@@ -137,19 +168,24 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
                         .sort((left, right) => right.path.length - left.path.length)
                         .find((child) => location.pathname.startsWith(`${child.path}/`));
                 const active =
-                    location.pathname === item.path ||
-                    (item.path !== '/' &&
-                        !activeChild &&
-                        location.pathname.startsWith(`${item.path}/`));
-                const expanded = active || Boolean(activeChild);
+                    !activeChild &&
+                    (location.pathname === item.path ||
+                        (item.path !== '/' && location.pathname.startsWith(`${item.path}/`)));
+                const expanded = !collapsedGroups.has(item.path);
                 return (
                     <div key={item.path}>
                         <NavItem
                             active={active}
                             collapsed={collapsed}
+                            expanded={expanded}
                             icon={item.icon}
                             label={item.label}
                             onClick={onNavigate}
+                            onToggleExpand={
+                                !collapsed && item.children
+                                    ? () => toggleGroup(item.path)
+                                    : undefined
+                            }
                             to={item.path}
                         />
                         {!collapsed && expanded && item.children && (
