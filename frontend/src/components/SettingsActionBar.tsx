@@ -24,7 +24,7 @@ export function SettingsActionBar({
         <div className='sticky bottom-20 z-20 mx-0 mt-3 flex flex-col gap-3 rounded-xl border border-warning/40 bg-surface/95 px-4 py-3 shadow-xl backdrop-blur supports-[backdrop-filter]:bg-surface/90 sm:mx-8 sm:flex-row sm:items-center sm:justify-between md:bottom-4'>
             <div aria-live='polite' className='flex min-w-0 flex-col items-start gap-1.5'>
                 <div className='inline-flex w-fit items-center gap-2 rounded-lg bg-warning/15 px-2.5 py-1.5 text-xs font-semibold text-warning'>
-                    <AlertTriangle className='h-4 w-4 shrink-0' />
+                    <AlertTriangle aria-hidden='true' className='h-4 w-4 shrink-0' />
                     Unsaved changes
                 </div>
                 {error && <div className='text-xs text-danger'>{error}</div>}
@@ -36,7 +36,7 @@ export function SettingsActionBar({
                     variant='secondary'
                     onPress={onDiscard}
                 >
-                    <Undo2 className='h-4 w-4' />
+                    <Undo2 aria-hidden='true' className='h-4 w-4' />
                     Discard
                 </Button>
                 {children}

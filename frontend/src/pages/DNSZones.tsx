@@ -173,12 +173,12 @@ export default function DNSZones() {
                     variant='ghost'
                     onPress={() => void load()}
                 >
-                    <RefreshCw className='mr-2 h-4 w-4' />
+                    <RefreshCw aria-hidden='true' className='mr-2 h-4 w-4' />
                     Refresh
                 </Button>
                 {isOwner && (
                     <Button isDisabled={!canEdit} onPress={openDialog}>
-                        <Plus className='mr-2 h-4 w-4' />
+                        <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                         Add zone
                     </Button>
                 )}
@@ -207,7 +207,7 @@ export default function DNSZones() {
                 emptyAction={
                     isOwner && clusterId ? (
                         <Button isDisabled={!canEdit} onPress={openDialog}>
-                            <Plus className='mr-2 h-4 w-4' />
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                             Add zone
                         </Button>
                     ) : undefined
@@ -230,9 +230,12 @@ export default function DNSZones() {
                     {zones.map((zone) => (
                         <tr key={zone.id}>
                             <td>
-                                <div className='flex items-center gap-2 font-mono text-xs font-semibold'>
-                                    <Shield className='h-4 w-4 text-muted' />
-                                    {zone.zone}
+                                <div className='flex min-w-0 items-center gap-2 font-mono text-xs font-semibold'>
+                                    <Shield
+                                        aria-hidden='true'
+                                        className='h-4 w-4 shrink-0 text-muted'
+                                    />
+                                    <span className='truncate'>{zone.zone}</span>
                                 </div>
                             </td>
                             <td className='text-sm'>{providerLabel(zone.type)}</td>
@@ -258,7 +261,7 @@ export default function DNSZones() {
                                             variant='danger'
                                             onPress={() => setPendingDelete(zone)}
                                         >
-                                            <Trash2 className='h-3.5 w-3.5' />
+                                            <Trash2 aria-hidden='true' className='h-3.5 w-3.5' />
                                         </Button>
                                     ) : (
                                         <span className='text-xs text-muted'>Managed in DNS</span>
@@ -272,7 +275,7 @@ export default function DNSZones() {
 
             <DialogShell
                 clusterContext='target'
-                icon={<Shield className='h-5 w-5' />}
+                icon={<Shield aria-hidden='true' className='h-5 w-5' />}
                 isDismissable={!busy}
                 isOpen={dialogOpen}
                 size='lg'
@@ -311,8 +314,10 @@ export default function DNSZones() {
                                 <div className='flex flex-col gap-1'>
                                     <Label htmlFor='zone-key-id'>AccessKey ID</Label>
                                     <Input
+                                        autoComplete='off'
                                         disabled={!canEdit}
                                         id='zone-key-id'
+                                        spellCheck={false}
                                         value={accessKeyId}
                                         variant='secondary'
                                         onChange={(event) => setAccessKeyId(event.target.value)}
@@ -321,6 +326,7 @@ export default function DNSZones() {
                                 <div className='flex flex-col gap-1'>
                                     <Label htmlFor='zone-key-secret'>AccessKey secret</Label>
                                     <Input
+                                        autoComplete='off'
                                         disabled={!canEdit}
                                         id='zone-key-secret'
                                         type='password'
@@ -334,6 +340,7 @@ export default function DNSZones() {
                             <div className='flex flex-col gap-1 md:col-span-2'>
                                 <Label htmlFor='zone-api-token'>API token</Label>
                                 <Input
+                                    autoComplete='off'
                                     disabled={!canEdit}
                                     id='zone-api-token'
                                     type='password'
@@ -352,7 +359,7 @@ export default function DNSZones() {
                                 {discovering ? (
                                     <Spinner className='mr-2' size='sm' />
                                 ) : (
-                                    <RefreshCw className='mr-2 h-4 w-4' />
+                                    <RefreshCw aria-hidden='true' className='mr-2 h-4 w-4' />
                                 )}
                                 Load zones
                             </Button>
@@ -390,7 +397,7 @@ export default function DNSZones() {
                             Cancel
                         </Button>
                         <Button isDisabled={!canEdit || !zoneName} type='submit'>
-                            <Save className='mr-2 h-4 w-4' />
+                            <Save aria-hidden='true' className='mr-2 h-4 w-4' />
                             {busy ? 'Saving…' : 'Add zone'}
                         </Button>
                     </DialogFooter>

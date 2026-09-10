@@ -218,7 +218,7 @@ function ResponseEditor({
                     <span>Response body</span>
                     <textarea
                         aria-label='Response body'
-                        className='min-h-28 resize-y rounded-lg border border-border bg-surface-secondary px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-primary'
+                        className='min-h-28 resize-y rounded-lg border border-border bg-surface-secondary px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-accent'
                         value={response.body ?? ''}
                         onChange={(event) => onChange({ ...response, body: event.target.value })}
                     />
@@ -452,7 +452,7 @@ function SortablePreviewRow({
                 {...sortable.attributes}
                 {...sortable.listeners}
                 aria-label={`Reorder ${title}`}
-                className='shrink-0 cursor-grab rounded-md p-1.5 text-muted hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                className='shrink-0 cursor-grab rounded-md p-1.5 text-muted hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                 type='button'
             >
                 <GripVertical className='h-4 w-4' />
@@ -795,7 +795,7 @@ function SortableRule({
                     {...sortable.attributes}
                     {...sortable.listeners}
                     aria-label={`Reorder ${rule.name}`}
-                    className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                    className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                     type='button'
                 >
                     <GripVertical className='h-4 w-4' />
@@ -806,7 +806,7 @@ function SortableRule({
                         <span className='shrink-0 text-xs text-muted'>
                             {rule.type === 'RATE_LIMIT' ? 'Frequency' : 'Request match'}
                         </span>
-                        <span className='shrink-0 text-xs font-medium text-primary'>
+                        <span className='shrink-0 text-xs font-medium text-accent'>
                             {actions.find((action) => action.id === rule.action.type)?.label}
                         </span>
                     </span>
@@ -1286,7 +1286,7 @@ function SortableRuleSet({
                         {...sortable.attributes}
                         {...sortable.listeners}
                         aria-label={`Reorder ${ruleSet.name}`}
-                        className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                        className='cursor-grab rounded-md p-1.5 text-muted hover:bg-surface hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                         type='button'
                     >
                         <GripVertical className='h-4 w-4' />
@@ -1487,7 +1487,7 @@ export function SiteSecuritySettings({
             <ContentCard noPadding>
                 <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
                     <div className='flex items-center gap-2'>
-                        <ShieldCheck className='h-4 w-4 text-primary' />
+                        <ShieldCheck className='h-4 w-4 text-accent' />
                         <h2 className='text-sm font-semibold'>Web application firewall</h2>
                     </div>
                     <div className='flex flex-wrap items-center gap-3'>
@@ -1616,7 +1616,7 @@ export function SiteSecuritySettings({
             >
                 <Button isDisabled={!valid || saving} onPress={onSave}>
                     <Save className='h-4 w-4' />
-                    {saving ? 'Saving...' : 'Save security'}
+                    {saving ? 'Saving…' : 'Save security'}
                 </Button>
             </SettingsActionBar>
             {dslEdit && (

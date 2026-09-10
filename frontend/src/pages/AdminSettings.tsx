@@ -387,7 +387,7 @@ export default function AdminSettings() {
                                         else requestAction(go);
                                     }}
                                 >
-                                    <Icon className='h-4 w-4 shrink-0' />
+                                    <Icon aria-hidden='true' className='h-4 w-4 shrink-0' />
                                     {item.label}
                                 </button>
                             </div>
@@ -436,7 +436,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <ServerCog className='h-4 w-4 text-muted' />
+                                                    <ServerCog
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Connectivity
                                                 </span>
                                             }
@@ -469,7 +472,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <Network className='h-4 w-4 text-muted' />
+                                                    <Network
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Client IP resolution
                                                 </span>
                                             }
@@ -491,7 +497,10 @@ export default function AdminSettings() {
                                                 />
                                                 {form.http_proxy.trust_all && (
                                                     <div className='flex items-center gap-2 py-3 text-xs text-warning'>
-                                                        <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
+                                                        <AlertTriangle
+                                                            aria-hidden='true'
+                                                            className='mt-0.5 h-4 w-4 shrink-0 text-warning'
+                                                        />
                                                         Direct clients can spoof these headers
                                                         unless an external proxy strips them.
                                                     </div>
@@ -553,7 +562,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <ShieldCheck className='h-4 w-4 text-muted' />
+                                                    <ShieldCheck
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Sign-in policy
                                                 </span>
                                             }
@@ -604,7 +616,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <UserRoundCog className='h-4 w-4 text-muted' />
+                                                    <UserRoundCog
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Public registration
                                                 </span>
                                             }
@@ -687,6 +702,7 @@ export default function AdminSettings() {
                                                         <Input
                                                             autoComplete='off'
                                                             id='captcha-site-key'
+                                                            spellCheck={false}
                                                             required={
                                                                 form.authentication.registration
                                                                     .enabled
@@ -779,7 +795,7 @@ export default function AdminSettings() {
                                                     <div className='text-xs text-muted'>
                                                         Configured
                                                     </div>
-                                                    <div className='mt-1 text-xl font-semibold'>
+                                                    <div className='tabular mt-1 text-xl font-semibold'>
                                                         {form.authentication.providers.length}
                                                     </div>
                                                 </div>
@@ -787,7 +803,7 @@ export default function AdminSettings() {
                                                     <div className='text-xs text-muted'>
                                                         Enabled
                                                     </div>
-                                                    <div className='mt-1 text-xl font-semibold'>
+                                                    <div className='tabular mt-1 text-xl font-semibold'>
                                                         {enabledProviderCount}
                                                     </div>
                                                 </div>
@@ -795,7 +811,7 @@ export default function AdminSettings() {
                                                     <div className='text-xs text-muted'>
                                                         Automatic users
                                                     </div>
-                                                    <div className='mt-1 text-xl font-semibold'>
+                                                    <div className='tabular mt-1 text-xl font-semibold'>
                                                         {
                                                             form.authentication.providers.filter(
                                                                 (provider) =>
@@ -814,7 +830,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <ServerCog className='h-4 w-4 text-muted' />
+                                                    <ServerCog
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Agent updates
                                                 </span>
                                             }
@@ -834,7 +853,10 @@ export default function AdminSettings() {
                                         <ContentCard
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <ListTodo className='h-4 w-4 text-muted' />
+                                                    <ListTodo
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     History retention
                                                 </span>
                                             }
@@ -916,21 +938,27 @@ export default function AdminSettings() {
                                                 variant='primary'
                                                 onPress={() => openProviderDialog(null)}
                                             >
-                                                <Plus className='h-4 w-4' />
+                                                <Plus aria-hidden='true' className='h-4 w-4' />
                                                 Add provider
                                             </Button>
                                         }
                                         noPadding
                                         title={
                                             <span className='flex items-center gap-2'>
-                                                <KeyRound className='h-4 w-4 text-muted' />
+                                                <KeyRound
+                                                    aria-hidden='true'
+                                                    className='h-4 w-4 text-muted'
+                                                />
                                                 OAuth 2.0 and OpenID Connect providers
                                             </span>
                                         }
                                     >
                                         {form.authentication.providers.length === 0 ? (
                                             <div className='flex min-h-48 flex-col items-center justify-center px-6 py-10 text-center'>
-                                                <KeyRound className='h-8 w-8 text-muted' />
+                                                <KeyRound
+                                                    aria-hidden='true'
+                                                    className='h-8 w-8 text-muted'
+                                                />
                                                 <div className='mt-3 text-sm font-medium'>
                                                     No providers configured
                                                 </div>
@@ -1005,7 +1033,10 @@ export default function AdminSettings() {
                                                                             )
                                                                         }
                                                                     >
-                                                                        <Pencil className='h-4 w-4' />
+                                                                        <Pencil
+                                                                            aria-hidden='true'
+                                                                            className='h-4 w-4'
+                                                                        />
                                                                     </Button>
                                                                 </Tooltip.Trigger>
                                                                 <Tooltip.Content>
@@ -1027,7 +1058,10 @@ export default function AdminSettings() {
                                                                             )
                                                                         }
                                                                     >
-                                                                        <Trash2 className='h-4 w-4' />
+                                                                        <Trash2
+                                                                            aria-hidden='true'
+                                                                            className='h-4 w-4'
+                                                                        />
                                                                     </Button>
                                                                 </Tooltip.Trigger>
                                                                 <Tooltip.Content>
@@ -1045,7 +1079,10 @@ export default function AdminSettings() {
                                 <div className='sticky bottom-4 flex flex-col gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-lg sm:flex-row sm:items-center sm:justify-between'>
                                     <div className='flex min-w-0 items-center gap-2 text-xs text-muted'>
                                         {restartAffected && (
-                                            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-warning' />
+                                            <AlertTriangle
+                                                aria-hidden='true'
+                                                className='mt-0.5 h-4 w-4 shrink-0 text-warning'
+                                            />
                                         )}
                                         {restartAffected
                                             ? 'Connectivity and client IP changes restart the control plane after saving.'
@@ -1064,8 +1101,8 @@ export default function AdminSettings() {
                                         type='submit'
                                         variant='primary'
                                     >
-                                        <Save className='h-4 w-4' />
-                                        {saving ? 'Saving...' : 'Save changes'}
+                                        <Save aria-hidden='true' className='h-4 w-4' />
+                                        {saving ? 'Saving…' : 'Save changes'}
                                     </Button>
                                 </div>
                             </form>

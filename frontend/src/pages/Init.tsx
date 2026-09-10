@@ -57,7 +57,7 @@ export default function Init() {
                 <div className='mx-auto my-auto w-full max-w-[460px]'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
-                            <Globe className='h-4 w-4' />
+                            <Globe aria-hidden='true' className='h-4 w-4' />
                         </div>
                         <span className='text-lg font-semibold tracking-tight'>Goveto Edge</span>
                     </div>
@@ -91,6 +91,7 @@ export default function Init() {
                                 id='init-email'
                                 placeholder='admin@example.com'
                                 required
+                                spellCheck={false}
                                 type='email'
                                 value={email}
                                 onChange={(event) => setEmail(event.target.value)}
@@ -151,7 +152,7 @@ export default function Init() {
                         <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
                             {loading ? (
                                 <span className='flex items-center justify-center gap-2'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
                                     Initializing…
                                 </span>
                             ) : (

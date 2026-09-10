@@ -279,7 +279,10 @@ export default function Jobs() {
             <PageHeader
                 actions={
                     <Button isIconOnly aria-label='Refresh jobs' variant='ghost' onPress={load}>
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                     </Button>
                 }
                 subtitle='Inspect job inputs, execution attempts, results, and dead letters.'
@@ -299,6 +302,7 @@ export default function Jobs() {
                         <Input
                             aria-label='Search jobs'
                             placeholder='Search job, resource, or operation'
+                            spellCheck={false}
                             value={searchInput}
                             variant='secondary'
                             onChange={(event) => setSearchInput(event.target.value)}
@@ -423,7 +427,7 @@ export default function Jobs() {
                                                     variant='ghost'
                                                     onPress={() => void loadDetails(job)}
                                                 >
-                                                    <Eye className='h-4 w-4' />
+                                                    <Eye aria-hidden='true' className='h-4 w-4' />
                                                 </Button>
                                             </Tooltip.Trigger>
                                             <Tooltip.Content>View details</Tooltip.Content>
@@ -439,7 +443,10 @@ export default function Jobs() {
                                                         variant='ghost'
                                                         onPress={() => void mutate(job, 'cancel')}
                                                     >
-                                                        <XCircle className='h-4 w-4' />
+                                                        <XCircle
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>Cancel</Tooltip.Content>
@@ -456,7 +463,10 @@ export default function Jobs() {
                                                         variant='ghost'
                                                         onPress={() => void mutate(job, 'replay')}
                                                     >
-                                                        <RotateCcw className='h-4 w-4' />
+                                                        <RotateCcw
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>Replay</Tooltip.Content>
@@ -530,7 +540,7 @@ export default function Jobs() {
                                 variant='secondary'
                                 onPress={() => void mutate(selectedDetail, 'cancel')}
                             >
-                                <XCircle className='h-4 w-4' /> Cancel
+                                <XCircle aria-hidden='true' className='h-4 w-4' /> Cancel
                             </Button>
                         )}
                     {selectedDetail &&
@@ -542,7 +552,7 @@ export default function Jobs() {
                                 variant='secondary'
                                 onPress={() => void mutate(selectedDetail, 'replay')}
                             >
-                                <RotateCcw className='h-4 w-4' /> Replay
+                                <RotateCcw aria-hidden='true' className='h-4 w-4' /> Replay
                             </Button>
                         )}
                     <Button

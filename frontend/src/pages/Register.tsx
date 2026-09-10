@@ -61,7 +61,7 @@ export default function Register() {
     if (loadingConfig) {
         return (
             <div className='flex h-screen items-center justify-center'>
-                <Spinner />
+                <Spinner aria-label='Loading…' role='status' />
             </div>
         );
     }
@@ -72,7 +72,7 @@ export default function Register() {
                 <Card className='w-full max-w-md p-6'>
                     <div className='mb-4 flex items-center gap-2'>
                         <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
-                            <Globe className='h-5 w-5' />
+                            <Globe aria-hidden='true' className='h-5 w-5' />
                         </div>
                         <span className='text-lg font-bold'>Goveto Edge</span>
                     </div>
@@ -94,7 +94,7 @@ export default function Register() {
             <Card className='w-full max-w-md p-6 shadow-sm'>
                 <div className='mb-6 flex items-center gap-2'>
                     <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
-                        <Globe className='h-5 w-5' />
+                        <Globe aria-hidden='true' className='h-5 w-5' />
                     </div>
                     <span className='text-lg font-bold'>Goveto Edge</span>
                 </div>
@@ -104,7 +104,10 @@ export default function Register() {
 
                 {success ? (
                     <div className='space-y-4'>
-                        <div className='rounded-lg bg-success px-4 py-3 text-sm text-success-foreground'>
+                        <div
+                            className='rounded-lg bg-success px-4 py-3 text-sm text-success-foreground'
+                            role='status'
+                        >
                             Registration successful. You can now sign in.
                         </div>
                         <Button fullWidth onPress={() => navigate('/login')}>
@@ -114,7 +117,10 @@ export default function Register() {
                 ) : (
                     <form className='space-y-4' onSubmit={handleSubmit}>
                         {error && (
-                            <div className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'>
+                            <div
+                                className='rounded-lg bg-danger px-4 py-3 text-sm text-danger-foreground'
+                                role='alert'
+                            >
                                 {error}
                             </div>
                         )}
@@ -122,6 +128,7 @@ export default function Register() {
                             <Label htmlFor='register-name'>Name</Label>
                             <Input
                                 variant='secondary'
+                                autoComplete='name'
                                 id='register-name'
                                 required
                                 value={name}
@@ -132,8 +139,10 @@ export default function Register() {
                             <Label htmlFor='register-email'>Email</Label>
                             <Input
                                 variant='secondary'
+                                autoComplete='email'
                                 id='register-email'
                                 required
+                                spellCheck={false}
                                 type='email'
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
@@ -143,6 +152,7 @@ export default function Register() {
                             <Label htmlFor='register-password'>Password</Label>
                             <Input
                                 variant='secondary'
+                                autoComplete='new-password'
                                 id='register-password'
                                 required
                                 type='password'
@@ -166,8 +176,8 @@ export default function Register() {
                         >
                             {loading ? (
                                 <span className='flex items-center justify-center gap-2'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                    Creating account...
+                                    <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                                    Creating account…
                                 </span>
                             ) : (
                                 'Register'

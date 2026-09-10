@@ -102,6 +102,8 @@ export function SSHCredentialDialog({
                         <FormField label='SSH user' required>
                             <Input
                                 required
+                                autoComplete='username'
+                                spellCheck={false}
                                 value={username}
                                 variant='secondary'
                                 onChange={(event) => setUsername(event.target.value)}
@@ -125,7 +127,10 @@ export function SSHCredentialDialog({
                                     setPassphrase('');
                                 }}
                             >
-                                <LockKeyhole className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
+                                <LockKeyhole
+                                    aria-hidden='true'
+                                    className='mt-0.5 h-5 w-5 shrink-0 text-muted'
+                                />
                                 <span>
                                     <span className='block text-sm font-semibold'>Password</span>
                                     <span className='mt-1 block text-xs leading-5 text-muted'>
@@ -146,7 +151,10 @@ export function SSHCredentialDialog({
                                     setPassword('');
                                 }}
                             >
-                                <KeyRound className='mt-0.5 h-5 w-5 shrink-0 text-muted' />
+                                <KeyRound
+                                    aria-hidden='true'
+                                    className='mt-0.5 h-5 w-5 shrink-0 text-muted'
+                                />
                                 <span>
                                     <span className='block text-sm font-semibold'>Private key</span>
                                     <span className='mt-1 block text-xs leading-5 text-muted'>
@@ -165,6 +173,7 @@ export function SSHCredentialDialog({
                         >
                             <Input
                                 required={requiresSecret}
+                                autoComplete='new-password'
                                 type='password'
                                 value={password}
                                 variant='secondary'
@@ -201,6 +210,7 @@ export function SSHCredentialDialog({
                                 label='Private key passphrase'
                             >
                                 <Input
+                                    autoComplete='new-password'
                                     type='password'
                                     value={passphrase}
                                     variant='secondary'

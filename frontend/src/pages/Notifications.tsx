@@ -221,7 +221,7 @@ export default function Notifications() {
             <PageHeader
                 actions={
                     <Button isDisabled={!clusterId || !canManage} onPress={openCreate}>
-                        <Plus className='h-4 w-4' />
+                        <Plus aria-hidden='true' className='h-4 w-4' />
                         Add channel
                     </Button>
                 }
@@ -247,12 +247,12 @@ export default function Notifications() {
                     </div>
                 ) : loading ? (
                     <div className='flex items-center justify-center gap-2 px-5 py-10 text-sm text-muted'>
-                        <Loader2 className='h-4 w-4 animate-spin' />
-                        Loading channels
+                        <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                        Loading channels…
                     </div>
                 ) : channels.length === 0 ? (
                     <div className='px-5 py-10 text-center'>
-                        <BellRing className='mx-auto h-6 w-6 text-muted' />
+                        <BellRing aria-hidden='true' className='mx-auto h-6 w-6 text-muted' />
                         <div className='mt-3 text-sm font-medium'>No notification channels</div>
                         <div className='mt-1 text-xs text-muted'>
                             Cluster alerts have no delivery destination.
@@ -267,7 +267,7 @@ export default function Notifications() {
                             >
                                 <div className='min-w-0'>
                                     <div className='flex flex-wrap items-center gap-2'>
-                                        <span className='text-sm font-semibold'>
+                                        <span className='truncate text-sm font-semibold'>
                                             {channel.name}
                                         </span>
                                         <span
@@ -278,7 +278,7 @@ export default function Notifications() {
                                     </div>
                                     <div className='mt-1 flex flex-wrap items-center gap-2 text-xs text-muted'>
                                         <span className='uppercase'>{channel.service}</span>
-                                        <code>{channel.masked_url}</code>
+                                        <code className='break-all'>{channel.masked_url}</code>
                                     </div>
                                 </div>
                                 <div className='flex shrink-0 items-center gap-2'>
@@ -291,9 +291,12 @@ export default function Notifications() {
                                                 onPress={() => void test(channel)}
                                             >
                                                 {busyID === channel.id ? (
-                                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                                    <Loader2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 animate-spin'
+                                                    />
                                                 ) : (
-                                                    <Send className='h-4 w-4' />
+                                                    <Send aria-hidden='true' className='h-4 w-4' />
                                                 )}
                                                 Test
                                             </Button>
@@ -307,7 +310,10 @@ export default function Notifications() {
                                                         variant='ghost'
                                                         onPress={() => openEdit(channel)}
                                                     >
-                                                        <Pencil className='h-4 w-4' />
+                                                        <Pencil
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>Edit channel</Tooltip.Content>
@@ -322,7 +328,10 @@ export default function Notifications() {
                                                         variant='ghost'
                                                         onPress={() => setDeleteTarget(channel)}
                                                     >
-                                                        <Trash2 className='h-4 w-4 text-danger' />
+                                                        <Trash2
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4 text-danger'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>Delete channel</Tooltip.Content>
@@ -467,9 +476,9 @@ export default function Notifications() {
                             onPress={() => void testInDialog()}
                         >
                             {testing ? (
-                                <Loader2 className='h-4 w-4 animate-spin' />
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
                             ) : (
-                                <Send className='h-4 w-4' />
+                                <Send aria-hidden='true' className='h-4 w-4' />
                             )}
                             Test
                         </Button>
@@ -477,7 +486,9 @@ export default function Notifications() {
                             Cancel
                         </Button>
                         <Button isDisabled={Boolean(busyID) || testing} type='submit'>
-                            {busyID && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busyID && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Save
                         </Button>
                     </DialogFooter>

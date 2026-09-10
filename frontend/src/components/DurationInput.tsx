@@ -62,6 +62,7 @@ export function DurationInput({
     return (
         <div className='grid min-w-0 grid-cols-[minmax(0,1fr)_7.5rem] gap-2'>
             <Input
+                className='tabular'
                 id={id}
                 min={minimumSeconds / factor}
                 max={maximumSeconds / factor}

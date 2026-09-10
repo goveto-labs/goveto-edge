@@ -54,7 +54,7 @@ export function RankingBars({
                     </div>
                     <div className='ml-8 h-1.5 overflow-hidden rounded-full bg-surface-secondary'>
                         <div
-                            className='h-full rounded-full bg-linear-to-r from-primary/50 to-primary'
+                            className='h-full rounded-full bg-linear-to-r from-accent/50 to-accent'
                             style={{ width: `${Math.max(2, (item.requests / max) * 100)}%` }}
                         />
                     </div>

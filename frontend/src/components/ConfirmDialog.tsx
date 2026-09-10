@@ -127,7 +127,7 @@ export function ConfirmDialog({
                                 onPress={onConfirm}
                             >
                                 {loading
-                                    ? 'Working...'
+                                    ? 'Working…'
                                     : hasSpecificActionLabel
                                       ? confirmLabel
                                       : 'Action unavailable'}

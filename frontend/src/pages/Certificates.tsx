@@ -404,11 +404,11 @@ export default function Certificates() {
                 {canManage && (
                     <>
                         <Button variant='secondary' onPress={openUpload}>
-                            <Upload className='mr-2 h-4 w-4' />
+                            <Upload aria-hidden='true' className='mr-2 h-4 w-4' />
                             Upload PEM
                         </Button>
                         <Button onPress={openACME}>
-                            <Zap className='mr-2 h-4 w-4' />
+                            <Zap aria-hidden='true' className='mr-2 h-4 w-4' />
                             Issue with ACME
                         </Button>
                     </>
@@ -489,7 +489,7 @@ export default function Certificates() {
                 emptyAction={
                     canManage && certs.length === 0 ? (
                         <Button onPress={openACME}>
-                            <Plus className='mr-2 h-4 w-4' />
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                             Issue certificate
                         </Button>
                     ) : undefined
@@ -536,6 +536,7 @@ export default function Certificates() {
                                 <td>
                                     <div className='flex items-center gap-2 text-sm font-semibold'>
                                         <ShieldCheck
+                                            aria-hidden='true'
                                             className={`h-4 w-4 ${cert.status === 'ACTIVE' ? 'text-success' : 'text-muted'}`}
                                         />
                                         {cert.name}
@@ -586,7 +587,10 @@ export default function Certificates() {
                                                         variant='secondary'
                                                         onPress={() => void action(cert, 'renew')}
                                                     >
-                                                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                                                        <RefreshCw
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-3.5 w-3.5'
+                                                        />
                                                         Renew
                                                     </Button>
                                                     <Button
@@ -595,7 +599,10 @@ export default function Certificates() {
                                                         variant='secondary'
                                                         onPress={() => void action(cert, 'reissue')}
                                                     >
-                                                        <RotateCw className='mr-1.5 h-3.5 w-3.5' />
+                                                        <RotateCw
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-3.5 w-3.5'
+                                                        />
                                                         Reissue
                                                     </Button>
                                                 </>
@@ -607,7 +614,10 @@ export default function Certificates() {
                                                     variant='secondary'
                                                     onPress={() => openReplace(cert)}
                                                 >
-                                                    <Upload className='mr-1.5 h-3.5 w-3.5' />
+                                                    <Upload
+                                                        aria-hidden='true'
+                                                        className='mr-1.5 h-3.5 w-3.5'
+                                                    />
                                                     Replace
                                                 </Button>
                                             )}
@@ -622,7 +632,10 @@ export default function Certificates() {
                                                 variant='secondary'
                                                 onPress={() => void action(cert, 'publish')}
                                             >
-                                                <Send className='mr-1.5 h-3.5 w-3.5' />
+                                                <Send
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-3.5 w-3.5'
+                                                />
                                                 Publish
                                             </Button>
                                             {cert.source === 'ACME' &&
@@ -640,7 +653,10 @@ export default function Certificates() {
                                                             setPendingRevoke(cert);
                                                         }}
                                                     >
-                                                        <ShieldOff className='mr-1.5 h-3.5 w-3.5' />
+                                                        <ShieldOff
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-3.5 w-3.5'
+                                                        />
                                                         Revoke
                                                     </Button>
                                                 )}
@@ -656,7 +672,10 @@ export default function Certificates() {
                                                 variant='danger'
                                                 onPress={() => setPendingDelete(cert)}
                                             >
-                                                <Trash2 className='h-3.5 w-3.5' />
+                                                <Trash2
+                                                    aria-hidden='true'
+                                                    className='h-3.5 w-3.5'
+                                                />
                                             </Button>
                                         </div>
                                     )}
@@ -685,6 +704,7 @@ export default function Certificates() {
                                 id='cert-name'
                                 disabled={Boolean(replaceTarget)}
                                 required
+                                spellCheck={false}
                                 variant='secondary'
                                 value={name}
                                 onChange={(event) => setName(event.target.value)}
@@ -743,6 +763,7 @@ export default function Certificates() {
                                 autoFocus
                                 id='acme-name'
                                 required
+                                spellCheck={false}
                                 variant='secondary'
                                 value={name}
                                 onChange={(event) => {
@@ -754,7 +775,9 @@ export default function Certificates() {
                         <FormField htmlFor='acme-email' label='ACME account email' required>
                             <Input
                                 id='acme-email'
+                                autoComplete='email'
                                 required
+                                spellCheck={false}
                                 type='email'
                                 variant='secondary'
                                 value={email}
@@ -886,6 +909,7 @@ export default function Certificates() {
                             >
                                 <Input
                                     id='directory-url'
+                                    spellCheck={false}
                                     type='url'
                                     variant='secondary'
                                     value={directoryUrl}
@@ -997,6 +1021,7 @@ export default function Certificates() {
                     >
                         <Input
                             id='revoke-confirmation'
+                            spellCheck={false}
                             value={revokeConfirmation}
                             variant='secondary'
                             onChange={(event) => setRevokeConfirmation(event.target.value)}

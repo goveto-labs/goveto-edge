@@ -138,20 +138,23 @@ export function WAFDSLEditorDialog({
                     <div aria-live='polite' className='flex items-center gap-2 text-xs'>
                         {loading || validating ? (
                             <>
-                                <LoaderCircle className='h-4 w-4 animate-spin text-muted' />
+                                <LoaderCircle
+                                    aria-hidden='true'
+                                    className='h-4 w-4 animate-spin text-muted'
+                                />
                                 <span className='text-muted'>
-                                    {loading ? 'Loading DSL...' : 'Checking syntax...'}
+                                    {loading ? 'Loading DSL…' : 'Checking syntax…'}
                                 </span>
                             </>
                         ) : isCurrent && validation?.valid ? (
                             <>
-                                <CheckCircle2 className='h-4 w-4 text-success' />
+                                <CheckCircle2 aria-hidden='true' className='h-4 w-4 text-success' />
                                 <span className='font-medium text-success'>Valid WAF policy</span>
                             </>
                         ) : diagnostics.length > 0 ? (
                             <>
-                                <AlertCircle className='h-4 w-4 text-danger' />
-                                <span className='font-medium text-danger'>
+                                <AlertCircle aria-hidden='true' className='h-4 w-4 text-danger' />
+                                <span className='font-medium tabular text-danger'>
                                     {diagnostics.length} issue{diagnostics.length === 1 ? '' : 's'}
                                 </span>
                             </>
@@ -163,13 +166,16 @@ export function WAFDSLEditorDialog({
                         variant='secondary'
                         onPress={() => void format()}
                     >
-                        <WandSparkles className='h-4 w-4' />
+                        <WandSparkles aria-hidden='true' className='h-4 w-4' />
                         Format
                     </Button>
                 </div>
                 {loading ? (
                     <div className='flex h-[min(62dvh,680px)] items-center justify-center rounded-lg border border-border bg-surface-secondary/35'>
-                        <LoaderCircle className='h-5 w-5 animate-spin text-muted' />
+                        <LoaderCircle
+                            aria-hidden='true'
+                            className='h-5 w-5 animate-spin text-muted'
+                        />
                     </div>
                 ) : (
                     <WAFDSLCodeEditor
@@ -193,7 +199,7 @@ export function WAFDSLEditorDialog({
                                 type='button'
                                 onClick={() => editorRef.current?.revealDiagnostic(diagnostic)}
                             >
-                                <span className='shrink-0 font-mono text-danger'>
+                                <span className='shrink-0 font-mono tabular text-danger'>
                                     {diagnostic.line}:{diagnostic.column}
                                 </span>
                                 <span className='text-foreground'>{diagnostic.message}</span>

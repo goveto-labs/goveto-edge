@@ -21,7 +21,7 @@ import { useCluster } from '@/hooks/useCluster.ts';
  */
 function PageSwitchOverlay() {
     return (
-        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-primary'>
+        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-accent'>
             <div className='h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent' />
         </div>
     );

@@ -85,7 +85,10 @@ const mapLocations: MapLocation[] = atlas.features.flatMap((country) => {
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -182,7 +185,7 @@ export function GeoTrafficPanel({
                                         // biome-ignore lint/a11y/useSemanticElements: An interactive SVG region cannot use an HTML button element.
                                         <path
                                             aria-label={label}
-                                            className='cursor-pointer fill-primary transition-[fill-opacity,stroke] duration-150 focus:outline-none focus-visible:stroke-foreground'
+                                            className='cursor-pointer fill-accent transition-[fill-opacity,stroke] duration-150 focus:outline-none focus-visible:stroke-foreground'
                                             d={location.path}
                                             key={location.id}
                                             role='button'
@@ -196,6 +199,12 @@ export function GeoTrafficPanel({
                                             tabIndex={0}
                                             onBlur={() => setActiveCode(null)}
                                             onFocus={() => setActiveCode(location.id)}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    event.preventDefault();
+                                                    setActiveCode(location.id);
+                                                }
+                                            }}
                                             onPointerEnter={() => setActiveCode(location.id)}
                                             onPointerLeave={() => setActiveCode(null)}
                                         >
@@ -264,7 +273,7 @@ export function GeoTrafficPanel({
                                   const isActive = activeCode?.toUpperCase() === country.code;
                                   return (
                                       <button
-                                          className={`grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${isActive ? 'text-primary' : ''}`}
+                                          className={`grid w-full grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent ${isActive ? 'text-accent' : ''}`}
                                           key={country.code}
                                           type='button'
                                           onBlur={() => setActiveCode(null)}

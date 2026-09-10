@@ -697,7 +697,7 @@ export function SiteCacheRules({
                 <ContentCard className='overflow-hidden' noPadding>
                     <div className='flex flex-col gap-5 border-b border-border px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                         <div className='flex items-center gap-3'>
-                            <span className='flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground'>
+                            <span className='flex h-10 w-10 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
                                 <HardDrive className='h-5 w-5' />
                             </span>
                             <div>
@@ -882,7 +882,7 @@ export function SiteCacheRules({
                 >
                     <Button isDisabled={saving || !rulesValid} onPress={onSave}>
                         <Save className='mr-1.5 h-4 w-4' />
-                        {saving ? 'Saving...' : 'Save cache rules'}
+                        {saving ? 'Saving…' : 'Save cache rules'}
                     </Button>
                 </SettingsActionBar>
             </div>

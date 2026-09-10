@@ -73,11 +73,11 @@ export function ValueListAddField({
                         <span className='truncate font-mono text-xs'>{value}</span>
                         <button
                             aria-label={`Remove ${value}`}
-                            className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                            className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                             type='button'
                             onClick={() => onChange(values.filter((item) => item !== value))}
                         >
-                            <X className='h-3.5 w-3.5' />
+                            <X aria-hidden='true' className='h-3.5 w-3.5' />
                         </button>
                     </span>
                 ))}
@@ -87,7 +87,7 @@ export function ValueListAddField({
                     variant='secondary'
                     onPress={() => handleOpenChange(true)}
                 >
-                    <Plus className='mr-1.5 h-4 w-4' />
+                    <Plus aria-hidden='true' className='mr-1.5 h-4 w-4' />
                     {addLabel}
                 </Button>
             </div>

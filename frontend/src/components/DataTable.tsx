@@ -50,8 +50,12 @@ export function DataTable({
                 </div>
             )}
             {loading ? (
-                <div className='flex min-h-52 items-center justify-center' role='status'>
-                    <Spinner />
+                <div
+                    aria-live='polite'
+                    className='flex min-h-52 items-center justify-center'
+                    role='status'
+                >
+                    <Spinner aria-label='Loading' />
                 </div>
             ) : empty ? (
                 <div
@@ -59,7 +63,7 @@ export function DataTable({
                     role='status'
                 >
                     <div className='mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-border bg-surface-secondary text-muted'>
-                        <Inbox className='h-5 w-5' />
+                        <Inbox aria-hidden='true' className='h-5 w-5' />
                     </div>
                     <h3 className='text-sm font-semibold'>{emptyTitle}</h3>
                     <p className='mt-1 max-w-sm text-sm leading-6 text-muted'>{emptyDescription}</p>
@@ -69,7 +73,7 @@ export function DataTable({
                 <div className='overflow-x-auto'>
                     <table
                         aria-label={ariaLabel}
-                        className={`w-full min-w-max border-collapse text-left [&_tbody_tr]:border-b [&_tbody_tr]:border-border/70 [&_tbody_tr]:transition-colors [&_tbody_tr:last-child]:border-0 [&_tbody_tr:hover]:bg-surface-secondary/35 [&_th]:h-11 [&_th]:bg-surface-secondary/45 [&_th]:px-5 [&_th]:py-0 [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted ${
+                        className={`w-full min-w-max border-collapse text-left [&_tbody_tr]:border-b [&_tbody_tr]:border-border/70 [&_tbody_tr]:transition-colors [&_tbody_tr:last-child]:border-0 [&_tbody_tr:hover]:bg-surface-secondary/35 [&_th]:h-11 [&_th]:bg-surface-secondary/45 [&_th]:px-5 [&_th]:py-0 [&_th]:text-xs [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted [&_td]:tabular-nums ${
                             compact ? '[&_td]:px-5 [&_td]:py-2.5' : '[&_td]:px-5 [&_td]:py-3.5'
                         }`}
                     >

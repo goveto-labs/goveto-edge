@@ -1,6 +1,6 @@
 import type { ClusterMember, ClusterRole } from '@/api';
 
-import { Button, Input } from '@heroui/react';
+import { Alert, Button, Input } from '@heroui/react';
 import { Loader2, Pencil, Plus, Trash2, Users } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
@@ -119,7 +119,7 @@ export default function ClusterMembers() {
                             setAddOpen(true);
                         }}
                     >
-                        <Plus className='h-4 w-4' /> Add member
+                        <Plus aria-hidden='true' className='h-4 w-4' /> Add member
                     </Button>
                 }
                 subtitle='Manage access to the selected cluster.'
@@ -127,9 +127,13 @@ export default function ClusterMembers() {
             />
             {error && !addOpen && !editing && <FormError message={error} />}
             {success && (
-                <div className='rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success'>
-                    {success}
-                </div>
+                <Alert status='success'>
+                    <Alert.Indicator />
+                    <Alert.Content>
+                        <Alert.Title>Members updated</Alert.Title>
+                        <Alert.Description>{success}</Alert.Description>
+                    </Alert.Content>
+                </Alert>
             )}
             {!clusterId ? (
                 <div className='py-12 text-center text-sm text-muted'>
@@ -196,7 +200,10 @@ export default function ClusterMembers() {
                                                         setError('');
                                                     }}
                                                 >
-                                                    <Pencil className='h-4 w-4' />
+                                                    <Pencil
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4'
+                                                    />
                                                 </Button>
                                                 <Button
                                                     isIconOnly
@@ -206,7 +213,10 @@ export default function ClusterMembers() {
                                                     variant='ghost'
                                                     onPress={() => setRemoveTarget(member)}
                                                 >
-                                                    <Trash2 className='h-4 w-4 text-danger' />
+                                                    <Trash2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-danger'
+                                                    />
                                                 </Button>
                                             </div>
                                         )}
@@ -232,7 +242,9 @@ export default function ClusterMembers() {
                         {error && <FormError message={error} />}
                         <FormField htmlFor='member-email' label='Email' required>
                             <Input
+                                autoComplete='off'
                                 id='member-email'
+                                spellCheck={false}
                                 type='email'
                                 variant='secondary'
                                 value={email}
@@ -257,7 +269,9 @@ export default function ClusterMembers() {
                             Cancel
                         </Button>
                         <Button isDisabled={Boolean(busy) || !email.trim()} type='submit'>
-                            {busy === 'add' && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy === 'add' && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Add member
                         </Button>
                     </DialogFooter>
@@ -296,7 +310,9 @@ export default function ClusterMembers() {
                             Cancel
                         </Button>
                         <Button isDisabled={Boolean(busy)} type='submit'>
-                            {busy && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Save
                         </Button>
                     </DialogFooter>

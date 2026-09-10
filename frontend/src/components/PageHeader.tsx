@@ -66,8 +66,25 @@ export function PageHeader({
             {tabs && tabs.length > 0 && (
                 <div
                     aria-label={`${title} views`}
-                    className='flex w-fit items-center gap-1 rounded-xl bg-surface p-1'
+                    className='flex w-fit items-center gap-1 rounded-xl border border-border/60 bg-surface p-1'
                     role='tablist'
+                    onKeyDown={(event) => {
+                        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                        event.preventDefault();
+                        const tabEls = Array.from(
+                            event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')
+                        );
+                        const current = tabEls.indexOf(document.activeElement as HTMLButtonElement);
+                        if (current === -1) return;
+                        let next = current;
+                        if (event.key === 'ArrowRight') next = (current + 1) % tabEls.length;
+                        if (event.key === 'ArrowLeft')
+                            next = (current - 1 + tabEls.length) % tabEls.length;
+                        if (event.key === 'Home') next = 0;
+                        if (event.key === 'End') next = tabEls.length - 1;
+                        tabEls[next]?.focus();
+                        tabEls[next]?.click();
+                    }}
                 >
                     {tabs.map((tab) => {
                         const active = activeTab === tab.id;
@@ -77,11 +94,12 @@ export function PageHeader({
                                 key={tab.id}
                                 className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${
                                     active
-                                        ? 'bg-surface-secondary text-foreground shadow-sm'
-                                        : 'text-muted hover:text-foreground'
+                                        ? 'bg-accent-soft text-accent-soft-foreground'
+                                        : 'text-muted hover:bg-surface-secondary hover:text-foreground'
                                 }`}
                                 onClick={() => onTabChange?.(tab.id)}
                                 role='tab'
+                                tabIndex={active ? 0 : -1}
                                 type='button'
                             >
                                 {tab.label}

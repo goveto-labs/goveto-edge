@@ -257,7 +257,7 @@ export default function Logpush() {
             <PageHeader
                 actions={
                     <Button isDisabled={!clusterId || !canManage} onPress={openCreate}>
-                        <Plus className='h-4 w-4' />
+                        <Plus aria-hidden='true' className='h-4 w-4' />
                         Add destination
                     </Button>
                 }
@@ -283,12 +283,12 @@ export default function Logpush() {
                     </div>
                 ) : loading ? (
                     <div className='flex items-center justify-center gap-2 px-5 py-10 text-sm text-muted'>
-                        <Loader2 className='h-4 w-4 animate-spin' />
-                        Loading destinations
+                        <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                        Loading destinations…
                     </div>
                 ) : destinations.length === 0 ? (
                     <div className='px-5 py-10 text-center'>
-                        <Waves className='mx-auto h-6 w-6 text-muted' />
+                        <Waves aria-hidden='true' className='mx-auto h-6 w-6 text-muted' />
                         <div className='mt-3 text-sm font-medium'>No logpush destinations</div>
                         <div className='mt-1 text-xs text-muted'>
                             Edge logs are only stored in the built-in analytics database.
@@ -303,7 +303,7 @@ export default function Logpush() {
                             >
                                 <div className='min-w-0'>
                                     <div className='flex flex-wrap items-center gap-2'>
-                                        <span className='text-sm font-semibold'>
+                                        <span className='truncate text-sm font-semibold'>
                                             {destination.name}
                                         </span>
                                         <span
@@ -314,7 +314,7 @@ export default function Logpush() {
                                     </div>
                                     <div className='mt-1 flex flex-wrap items-center gap-2 text-xs text-muted'>
                                         <span className='uppercase'>{destination.type}</span>
-                                        <code>
+                                        <code className='break-all'>
                                             {destination.brokers.join(', ')} → {destination.topic}
                                         </code>
                                         <span>{destination.log_types.join(', ')}</span>
@@ -333,9 +333,12 @@ export default function Logpush() {
                                                 onPress={() => void test(destination)}
                                             >
                                                 {busyID === destination.id ? (
-                                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                                    <Loader2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 animate-spin'
+                                                    />
                                                 ) : (
-                                                    <Send className='h-4 w-4' />
+                                                    <Send aria-hidden='true' className='h-4 w-4' />
                                                 )}
                                                 Test
                                             </Button>
@@ -349,7 +352,10 @@ export default function Logpush() {
                                                         variant='ghost'
                                                         onPress={() => openEdit(destination)}
                                                     >
-                                                        <Pencil className='h-4 w-4' />
+                                                        <Pencil
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>Edit destination</Tooltip.Content>
@@ -364,7 +370,10 @@ export default function Logpush() {
                                                         variant='ghost'
                                                         onPress={() => setDeleteTarget(destination)}
                                                     >
-                                                        <Trash2 className='h-4 w-4 text-danger' />
+                                                        <Trash2
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4 text-danger'
+                                                        />
                                                     </Button>
                                                 </Tooltip.Trigger>
                                                 <Tooltip.Content>
@@ -481,6 +490,7 @@ export default function Logpush() {
                                         autoCapitalize='none'
                                         autoComplete='off'
                                         id='logpush-username'
+                                        spellCheck={false}
                                         value={username}
                                         variant='secondary'
                                         onChange={(event) => {
@@ -548,9 +558,9 @@ export default function Logpush() {
                             onPress={() => void testInDialog()}
                         >
                             {testing ? (
-                                <Loader2 className='h-4 w-4 animate-spin' />
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
                             ) : (
-                                <Send className='h-4 w-4' />
+                                <Send aria-hidden='true' className='h-4 w-4' />
                             )}
                             Test
                         </Button>
@@ -558,7 +568,9 @@ export default function Logpush() {
                             Cancel
                         </Button>
                         <Button isDisabled={Boolean(busyID) || testing} type='submit'>
-                            {busyID && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busyID && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Save
                         </Button>
                     </DialogFooter>

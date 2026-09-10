@@ -245,6 +245,7 @@ export function AdminAuthProviderDialog({
                         <Input
                             autoComplete='off'
                             id='auth-provider-client-id'
+                            spellCheck={false}
                             value={draft.client_id}
                             variant='secondary'
                             onChange={(event) =>
@@ -285,6 +286,7 @@ export function AdminAuthProviderDialog({
                             autoCapitalize='none'
                             id='auth-provider-issuer'
                             placeholder={preset.issuerPlaceholder}
+                            spellCheck={false}
                             type='url'
                             value={draft.issuer_url}
                             variant='secondary'
@@ -303,6 +305,7 @@ export function AdminAuthProviderDialog({
                             <Input
                                 autoCapitalize='none'
                                 id='auth-provider-authorization-url'
+                                spellCheck={false}
                                 type='url'
                                 value={draft.authorization_url}
                                 variant='secondary'
@@ -316,6 +319,7 @@ export function AdminAuthProviderDialog({
                                 <Input
                                     autoCapitalize='none'
                                     id='auth-provider-token-url'
+                                    spellCheck={false}
                                     type='url'
                                     value={draft.token_url}
                                     variant='secondary'
@@ -332,6 +336,7 @@ export function AdminAuthProviderDialog({
                                 <Input
                                     autoCapitalize='none'
                                     id='auth-provider-user-info-url'
+                                    spellCheck={false}
                                     type='url'
                                     value={draft.user_info_url}
                                     variant='secondary'
@@ -349,6 +354,7 @@ export function AdminAuthProviderDialog({
                             <Input
                                 autoCapitalize='none'
                                 id='auth-provider-email-url'
+                                spellCheck={false}
                                 type='url'
                                 value={draft.email_url}
                                 variant='secondary'
@@ -380,6 +386,7 @@ export function AdminAuthProviderDialog({
                     <Input
                         autoCapitalize='none'
                         id='auth-provider-redirect-url'
+                        spellCheck={false}
                         type='url'
                         value={draft.redirect_url}
                         variant='secondary'
@@ -396,6 +403,7 @@ export function AdminAuthProviderDialog({
                 >
                     <Input
                         id='auth-provider-scopes'
+                        spellCheck={false}
                         value={draft.scopes.join(', ')}
                         variant='secondary'
                         onChange={(event) =>

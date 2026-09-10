@@ -793,7 +793,7 @@ export function SiteDeliverySettings({
             <ContentCard className='overflow-hidden' noPadding>
                 <div className='flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                     <div className='flex items-center gap-3'>
-                        <span className='flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground'>
+                        <span className='flex h-10 w-10 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
                             <Route className='h-5 w-5' />
                         </span>
                         <div>
@@ -1177,7 +1177,7 @@ export function SiteDeliverySettings({
             >
                 <Button isDisabled={saving || !complete} onPress={onSave}>
                     <Save className='mr-1.5 h-4 w-4' />
-                    {saving ? 'Saving...' : 'Save delivery settings'}
+                    {saving ? 'Saving…' : 'Save delivery settings'}
                 </Button>
             </SettingsActionBar>
         </div>

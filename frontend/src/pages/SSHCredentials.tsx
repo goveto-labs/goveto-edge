@@ -103,7 +103,7 @@ export default function SSHCredentials() {
                             setDialogOpen(true);
                         }}
                     >
-                        <Plus className='mr-2 h-4 w-4' />
+                        <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                         Add credential
                     </Button>
                 )}
@@ -131,7 +131,7 @@ export default function SSHCredentials() {
                                 setDialogOpen(true);
                             }}
                         >
-                            <Plus className='mr-2 h-4 w-4' />
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                             Add credential
                         </Button>
                     ) : undefined
@@ -159,7 +159,7 @@ export default function SSHCredentials() {
                         <tr key={credential.id}>
                             <td>
                                 <div className='flex items-center gap-2 text-sm font-semibold'>
-                                    <KeyRound className='h-4 w-4 text-muted' />
+                                    <KeyRound aria-hidden='true' className='h-4 w-4 text-muted' />
                                     {credential.name}
                                 </div>
                             </td>
@@ -169,11 +169,12 @@ export default function SSHCredentials() {
                             </td>
                             <td>
                                 <Button
+                                    className='tabular'
                                     size='sm'
                                     variant='ghost'
                                     onPress={() => void openNodes(credential)}
                                 >
-                                    <Server className='mr-1.5 h-3.5 w-3.5' />
+                                    <Server aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
                                     {credential.node_count}
                                 </Button>
                             </td>
@@ -187,7 +188,7 @@ export default function SSHCredentials() {
                                         variant='secondary'
                                         onPress={() => void openNodes(credential)}
                                     >
-                                        <Eye className='mr-1.5 h-3.5 w-3.5' />
+                                        <Eye aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
                                         Nodes
                                     </Button>
                                     {isOwner && (
@@ -200,7 +201,10 @@ export default function SSHCredentials() {
                                                     setDialogOpen(true);
                                                 }}
                                             >
-                                                <Pencil className='mr-1.5 h-3.5 w-3.5' />
+                                                <Pencil
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-3.5 w-3.5'
+                                                />
                                                 Edit
                                             </Button>
                                             <Button
@@ -209,7 +213,10 @@ export default function SSHCredentials() {
                                                 variant='danger'
                                                 onPress={() => setPendingDelete(credential)}
                                             >
-                                                <Trash2 className='mr-1.5 h-3.5 w-3.5' />
+                                                <Trash2
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-3.5 w-3.5'
+                                                />
                                                 Delete
                                             </Button>
                                         </>

@@ -83,7 +83,7 @@ function DetailValue({ label, value, mono }: { label: string; value?: ReactNode;
     return (
         <div className='min-w-0'>
             <dt className='text-xs text-muted'>{label}</dt>
-            <dd className={`mt-1 break-words text-sm ${mono ? 'font-mono text-xs' : ''}`}>
+            <dd className={`mt-1 break-words text-sm tabular ${mono ? 'font-mono text-xs' : ''}`}>
                 {value === '' || value === undefined || value === null ? '-' : value}
             </dd>
         </div>
@@ -112,7 +112,7 @@ function CopyButton({ label, value }: { label: string; value: string }) {
                     variant='ghost'
                     onPress={() => void navigator.clipboard.writeText(value)}
                 >
-                    <Copy className='h-3.5 w-3.5' />
+                    <Copy aria-hidden='true' className='h-3.5 w-3.5' />
                 </Button>
             </Tooltip.Trigger>
             <Tooltip.Content>Copy {label}</Tooltip.Content>
@@ -183,7 +183,7 @@ function SummaryTab({ job, onNavigate }: { job: ManagedJob; onNavigate: () => vo
                                 variant='ghost'
                                 onPress={onNavigate}
                             >
-                                <ExternalLink className='h-3.5 w-3.5' />
+                                <ExternalLink aria-hidden='true' className='h-3.5 w-3.5' />
                             </Button>
                         )}
                     </div>
@@ -311,7 +311,7 @@ function AttemptsTab({
                     >
                         <summary className='cursor-pointer px-4 py-3'>
                             <div className='grid gap-2 sm:grid-cols-[7rem_8rem_1fr_auto] sm:items-center'>
-                                <span className='font-mono text-xs'>
+                                <span className='font-mono text-xs tabular'>
                                     Attempt {execution.attempt}
                                 </span>
                                 <span>
@@ -323,7 +323,7 @@ function AttemptsTab({
                                 >
                                     {execution.worker_id}
                                 </span>
-                                <span className='text-xs text-muted'>
+                                <span className='text-xs text-muted tabular'>
                                     {formatDuration(execution.started_at, execution.finished_at)}
                                 </span>
                             </div>

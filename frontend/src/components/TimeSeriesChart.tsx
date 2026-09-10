@@ -251,7 +251,7 @@ export function TimeSeriesChart({
                         return (
                             <g key={`${line.label}-${line.value}`}>
                                 <line
-                                    stroke={line.color ?? '#f59e0b'}
+                                    stroke={line.color ?? 'var(--chart-4)'}
                                     strokeDasharray='6 4'
                                     strokeOpacity={0.8}
                                     vectorEffect='non-scaling-stroke'
@@ -261,7 +261,7 @@ export function TimeSeriesChart({
                                     y2={y}
                                 />
                                 <text
-                                    fill={line.color ?? '#f59e0b'}
+                                    fill={line.color ?? 'var(--chart-4)'}
                                     fontSize='11'
                                     fontWeight='600'
                                     paintOrder='stroke'

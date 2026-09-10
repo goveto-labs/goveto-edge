@@ -1,5 +1,14 @@
-import { Alert, Avatar, Button, Drawer, Input, useOverlayState, useTheme } from '@heroui/react';
-import { ChevronLeft, ChevronRight, Menu, Moon, Plus, Sun } from 'lucide-react';
+import {
+    Alert,
+    Avatar,
+    Button,
+    Drawer,
+    Input,
+    Popover,
+    useOverlayState,
+    useTheme,
+} from '@heroui/react';
+import { ChevronLeft, ChevronRight, LogOut, Menu, Moon, Plus, Sun } from 'lucide-react';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
@@ -65,9 +74,60 @@ function PageTitle({
  */
 function ContentFallback() {
     return (
-        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-primary'>
+        <div className='pointer-events-none absolute left-0 top-0 z-50 p-1 text-accent'>
             <div className='h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent' />
         </div>
+    );
+}
+
+/**
+ * Header account menu: avatar trigger, popover with user details and logout.
+ * Replaces the sidebar profile card so the sidebar stays purely navigational.
+ */
+function UserMenu({ onLogout }: { onLogout: () => void }) {
+    const { user } = useAuth();
+    const label = user?.name || user?.email || user?.id || 'User';
+    const initial = label.slice(0, 1).toUpperCase();
+    const secondary = user?.name && user?.email ? user.email : (user?.role ?? '');
+
+    return (
+        <Popover>
+            <Popover.Trigger>
+                <Button
+                    aria-label='Account menu'
+                    className='h-9 w-9 rounded-full'
+                    isIconOnly
+                    variant='ghost'
+                >
+                    <Avatar className='h-7 w-7 text-xs'>
+                        <Avatar.Fallback>{initial}</Avatar.Fallback>
+                    </Avatar>
+                </Button>
+            </Popover.Trigger>
+            <Popover.Content className='w-64 p-0' placement='bottom end'>
+                <div className='flex items-center gap-3 px-4 py-3.5'>
+                    <Avatar className='h-9 w-9 shrink-0 text-sm'>
+                        <Avatar.Fallback>{initial}</Avatar.Fallback>
+                    </Avatar>
+                    <div className='min-w-0'>
+                        <div className='truncate text-sm font-semibold'>{label}</div>
+                        {secondary && (
+                            <div className='truncate text-xs text-muted'>{secondary}</div>
+                        )}
+                    </div>
+                </div>
+                <div className='border-t border-border p-1.5'>
+                    <Button
+                        className='w-full justify-start gap-2.5 text-sm font-medium text-muted'
+                        variant='ghost'
+                        onPress={onLogout}
+                    >
+                        <LogOut aria-hidden='true' className='h-4 w-4' />
+                        Log out
+                    </Button>
+                </div>
+            </Popover.Content>
+        </Popover>
     );
 }
 
@@ -122,20 +182,21 @@ export function Layout() {
         }
     };
 
-    const userLabel = user?.name || user?.email || user?.id || 'User';
-    const userInitial = userLabel.slice(0, 1).toUpperCase();
     const canManageAPIKeys = canManageCluster(
         clusters.find((cluster) => cluster.id === clusterId)?.role
     );
 
     return (
         <div className='flex h-full'>
+            <a className='skip-link' href='#main-content'>
+                Skip to main content
+            </a>
             <aside
                 className={`hidden flex-col overflow-y-auto border-r border-border bg-surface transition-[width] duration-300 ease-in-out md:flex ${
                     sidebarCollapsed ? 'w-[72px]' : 'w-64'
                 }`}
             >
-                <Sidebar collapsed={sidebarCollapsed} onLogout={handleLogout} />
+                <Sidebar collapsed={sidebarCollapsed} />
             </aside>
 
             <div className='flex min-w-0 flex-1 flex-col'>
@@ -143,10 +204,10 @@ export function Layout() {
                     <div className='flex items-center gap-3'>
                         <Drawer state={mobileMenu}>
                             <Drawer.Trigger aria-label='Open navigation' className='md:hidden'>
-                                <Menu className='h-5 w-5' />
+                                <Menu aria-hidden='true' className='h-5 w-5' />
                             </Drawer.Trigger>
                             <Drawer.Content className='w-[280px]'>
-                                <Sidebar onLogout={handleLogout} onNavigate={mobileMenu.close} />
+                                <Sidebar onNavigate={mobileMenu.close} />
                             </Drawer.Content>
                         </Drawer>
 
@@ -159,9 +220,9 @@ export function Layout() {
                             onPress={() => setSidebarCollapsed((c) => !c)}
                         >
                             {sidebarCollapsed ? (
-                                <ChevronRight className='h-4 w-4' />
+                                <ChevronRight aria-hidden='true' className='h-4 w-4' />
                             ) : (
-                                <ChevronLeft className='h-4 w-4' />
+                                <ChevronLeft aria-hidden='true' className='h-4 w-4' />
                             )}
                         </Button>
 
@@ -199,27 +260,34 @@ export function Layout() {
 
                         <Button
                             isIconOnly
+                            aria-label={
+                                resolvedTheme === 'dark'
+                                    ? 'Switch to light theme'
+                                    : 'Switch to dark theme'
+                            }
                             className='hidden sm:flex'
                             size='sm'
                             variant='ghost'
                             onPress={toggleTheme}
                         >
                             {resolvedTheme === 'dark' ? (
-                                <Sun className='h-4 w-4' />
+                                <Sun aria-hidden='true' className='h-4 w-4' />
                             ) : (
-                                <Moon className='h-4 w-4' />
+                                <Moon aria-hidden='true' className='h-4 w-4' />
                             )}
                         </Button>
 
                         <AlertBell />
 
-                        <Avatar className='h-8 w-8 text-xs md:hidden'>
-                            <Avatar.Fallback>{userInitial}</Avatar.Fallback>
-                        </Avatar>
+                        <UserMenu onLogout={handleLogout} />
                     </div>
                 </header>
 
-                <main className='flex-1 overflow-y-auto bg-background p-4 md:p-6'>
+                <main
+                    className='flex-1 overflow-y-auto bg-background p-4 md:p-6'
+                    id='main-content'
+                    tabIndex={-1}
+                >
                     <div
                         className={`relative mx-auto min-h-full ${
                             /^\/nodes\/(?!create(?:\/|$))[^/]+/.test(location.pathname) ||
@@ -301,7 +369,7 @@ export function Layout() {
             <Button
                 isIconOnly
                 aria-label='Create cluster'
-                className='fixed bottom-6 right-6 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg md:hidden'
+                className='fixed bottom-6 right-6 z-50 flex h-12 w-12 items-center justify-center rounded-full bg-accent text-accent-foreground shadow-lg md:hidden'
                 onPress={createModal.open}
             >
                 <Plus className='h-5 w-5' />

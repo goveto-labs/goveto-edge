@@ -86,7 +86,10 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
                         variant='ghost'
                         onPress={load}
                     >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                     </Button>
                 }
                 embedded={embedded}
@@ -101,6 +104,7 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
                         <Input
                             aria-label='Filter by actor'
                             placeholder='Actor'
+                            spellCheck={false}
                             value={actor}
                             variant='secondary'
                             onChange={(event) => {
@@ -218,7 +222,7 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
                                     variant='ghost'
                                     onPress={() => setSelected(event)}
                                 >
-                                    <Eye className='h-4 w-4' />
+                                    <Eye aria-hidden='true' className='h-4 w-4' />
                                 </Button>
                             </td>
                         </tr>
@@ -228,7 +232,9 @@ export default function AuditLog({ embedded = false }: { embedded?: boolean }) {
             {total > 0 && (
                 <Pagination className='justify-between' size='sm'>
                     <Pagination.Summary>
-                        Showing {rangeStart}-{rangeEnd} of {total.toLocaleString()}
+                        <span className='tabular'>
+                            Showing {rangeStart}-{rangeEnd} of {total.toLocaleString()}
+                        </span>
                     </Pagination.Summary>
                     <Pagination.Content>
                         <Pagination.Item>

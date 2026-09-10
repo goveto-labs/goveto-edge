@@ -172,7 +172,9 @@ function DeliveryList({ deliveries }: { deliveries: AlertDelivery[] }) {
                                     </div>
                                 )}
                             </td>
-                            <td className='py-2 pr-4 font-mono text-xs'>{delivery.attempts}</td>
+                            <td className='py-2 pr-4 font-mono text-xs tabular'>
+                                {delivery.attempts}
+                            </td>
                             <td className='py-2 text-xs text-muted'>
                                 {formatTime(delivery.sentAt ?? delivery.createdAt)}
                             </td>
@@ -458,7 +460,10 @@ export default function Alerts() {
                             void loadCounts();
                         }}
                     >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                     </Button>
                 }
                 subtitle='Monitor firing alerts, acknowledge incidents, and tune notification rules.'
@@ -579,7 +584,10 @@ export default function Alerts() {
                                                     variant='secondary'
                                                     onPress={() => void acknowledgeAllFiring()}
                                                 >
-                                                    <CheckCheck className='h-4 w-4' />
+                                                    <CheckCheck
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4'
+                                                    />
                                                     Ack all firing ({firingOnPage})
                                                 </Button>
                                             </Tooltip.Trigger>
@@ -671,7 +679,10 @@ export default function Alerts() {
                                                                     void openDetail(alert.id)
                                                                 }
                                                             >
-                                                                <Eye className='h-4 w-4' />
+                                                                <Eye
+                                                                    aria-hidden='true'
+                                                                    className='h-4 w-4'
+                                                                />
                                                             </Button>
                                                         </Tooltip.Trigger>
                                                         <Tooltip.Content>Details</Tooltip.Content>
@@ -689,7 +700,10 @@ export default function Alerts() {
                                                                         void acknowledge(alert)
                                                                     }
                                                                 >
-                                                                    <CheckCircle2 className='h-4 w-4' />
+                                                                    <CheckCircle2
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4'
+                                                                    />
                                                                 </Button>
                                                             </Tooltip.Trigger>
                                                             <Tooltip.Content>
@@ -712,7 +726,10 @@ export default function Alerts() {
                                                                         setConfirmResolve(alert);
                                                                     }}
                                                                 >
-                                                                    <XCircle className='h-4 w-4' />
+                                                                    <XCircle
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4'
+                                                                    />
                                                                 </Button>
                                                             </Tooltip.Trigger>
                                                             <Tooltip.Content>
@@ -774,7 +791,9 @@ export default function Alerts() {
                             </div>
                             <div className='min-w-0'>
                                 <dt className='text-xs text-muted'>Notifications</dt>
-                                <dd className='mt-1 text-sm font-mono'>{selected.notifyCount}</dd>
+                                <dd className='mt-1 text-sm font-mono tabular'>
+                                    {selected.notifyCount}
+                                </dd>
                             </div>
                             <div className='min-w-0'>
                                 <dt className='text-xs text-muted'>First seen</dt>
@@ -895,7 +914,7 @@ export default function Alerts() {
                             if (confirmResolve) void resolve(confirmResolve, resolveReason.trim());
                         }}
                     >
-                        <CheckCircle2 className='h-4 w-4' />
+                        <CheckCircle2 aria-hidden='true' className='h-4 w-4' />
                         Resolve
                     </Button>
                 </DialogFooter>

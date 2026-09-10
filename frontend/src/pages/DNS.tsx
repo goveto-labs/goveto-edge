@@ -410,11 +410,14 @@ export default function DNS() {
                     variant='ghost'
                     onPress={() => void load()}
                 >
-                    <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                    <RefreshCw
+                        aria-hidden='true'
+                        className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                    />
                 </Button>
                 {isOwner && !configured && (
                     <Button isDisabled={!canEdit} onPress={() => setDomainDialogOpen(true)}>
-                        <Plus className='mr-2 h-4 w-4' />
+                        <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                         Configure endpoint
                     </Button>
                 )}
@@ -425,13 +428,13 @@ export default function DNS() {
                         variant='secondary'
                         onPress={() => setDomainDialogOpen(true)}
                     >
-                        <Pencil className='mr-2 h-4 w-4' />
+                        <Pencil aria-hidden='true' className='mr-2 h-4 w-4' />
                         Edit endpoint
                     </Button>
                 )}
                 {configured && isOwner && (
                     <Button isDisabled={!canEdit || !enabled} onPress={sync}>
-                        <RefreshCw className='mr-2 h-4 w-4' />
+                        <RefreshCw aria-hidden='true' className='mr-2 h-4 w-4' />
                         Sync now
                     </Button>
                 )}
@@ -439,10 +442,10 @@ export default function DNS() {
                     <Dropdown>
                         <Dropdown.Trigger
                             aria-label='More DNS actions'
-                            className='inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:pointer-events-none disabled:opacity-50'
+                            className='inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:pointer-events-none disabled:opacity-50'
                             isDisabled={!ready || loading || busy}
                         >
-                            <MoreHorizontal className='h-5 w-5' />
+                            <MoreHorizontal aria-hidden='true' className='h-5 w-5' />
                         </Dropdown.Trigger>
                         <Dropdown.Popover placement='bottom end'>
                             <Dropdown.Menu aria-label='DNS endpoint actions'>
@@ -452,7 +455,7 @@ export default function DNS() {
                                     textValue='Edit endpoint'
                                     onAction={() => setDomainDialogOpen(true)}
                                 >
-                                    <Pencil className='h-4 w-4' />
+                                    <Pencil aria-hidden='true' className='h-4 w-4' />
                                     Edit endpoint
                                 </Dropdown.Item>
                                 <Dropdown.Item
@@ -460,7 +463,7 @@ export default function DNS() {
                                     textValue='Refresh endpoint'
                                     onAction={() => void refreshDomain()}
                                 >
-                                    <RefreshCw className='h-4 w-4' />
+                                    <RefreshCw aria-hidden='true' className='h-4 w-4' />
                                     Refresh endpoint
                                 </Dropdown.Item>
                                 <Dropdown.Item
@@ -469,7 +472,7 @@ export default function DNS() {
                                     textValue='Roll back'
                                     onAction={() => void rollback()}
                                 >
-                                    <RotateCcw className='h-4 w-4' />
+                                    <RotateCcw aria-hidden='true' className='h-4 w-4' />
                                     Roll back
                                 </Dropdown.Item>
                                 <Dropdown.Item
@@ -478,7 +481,7 @@ export default function DNS() {
                                     variant='danger'
                                     onAction={() => setDeleteConfirmOpen(true)}
                                 >
-                                    <Trash2 className='h-4 w-4' />
+                                    <Trash2 aria-hidden='true' className='h-4 w-4' />
                                     Delete endpoint
                                 </Dropdown.Item>
                             </Dropdown.Menu>
@@ -506,7 +509,7 @@ export default function DNS() {
                     <div className='flex flex-col justify-between gap-4 sm:flex-row sm:items-center'>
                         <div>
                             <div className='flex items-center gap-2 font-semibold'>
-                                <Globe2 className='h-4 w-4' />
+                                <Globe2 aria-hidden='true' className='h-4 w-4 shrink-0' />
                                 {zone}
                             </div>
                             <p className='mt-1 text-sm text-muted'>
@@ -519,7 +522,7 @@ export default function DNS() {
                     </div>
                 ) : (
                     <div className='py-5 text-center'>
-                        <Globe2 className='mx-auto mb-3 h-8 w-8 text-muted' />
+                        <Globe2 aria-hidden='true' className='mx-auto mb-3 h-8 w-8 text-muted' />
                         <h2 className='font-semibold'>No CDN endpoint configured</h2>
                         <p className='mt-1 text-sm text-muted'>
                             Add provider credentials, then choose the DNS zone for the cluster
@@ -531,7 +534,7 @@ export default function DNS() {
 
             <DialogShell
                 clusterContext={configured ? 'current' : 'target'}
-                icon={<Globe2 className='h-5 w-5' />}
+                icon={<Globe2 aria-hidden='true' className='h-5 w-5' />}
                 isDismissable={!busy}
                 isOpen={domainDialogOpen}
                 size='lg'
@@ -560,6 +563,8 @@ export default function DNS() {
                                     <Input
                                         variant='secondary'
                                         id='dns-key-id'
+                                        autoComplete='off'
+                                        spellCheck={false}
                                         disabled={!canEdit}
                                         placeholder={
                                             credentialsReusable
@@ -575,6 +580,7 @@ export default function DNS() {
                                     <Input
                                         variant='secondary'
                                         id='dns-key-secret'
+                                        autoComplete='off'
                                         disabled={!canEdit}
                                         placeholder={
                                             credentialsReusable
@@ -593,6 +599,7 @@ export default function DNS() {
                                 <Input
                                     variant='secondary'
                                     id='dns-token'
+                                    autoComplete='off'
                                     disabled={!canEdit}
                                     placeholder={
                                         credentialsReusable
@@ -614,7 +621,7 @@ export default function DNS() {
                                 {discoveringDomains ? (
                                     <Spinner className='mr-2' size='sm' />
                                 ) : (
-                                    <RefreshCw className='mr-2 h-4 w-4' />
+                                    <RefreshCw aria-hidden='true' className='mr-2 h-4 w-4' />
                                 )}
                                 Load zones
                             </Button>
@@ -636,6 +643,8 @@ export default function DNS() {
                             <Input
                                 variant='secondary'
                                 id='dns-hostname'
+                                autoComplete='off'
+                                spellCheck={false}
                                 disabled={!canEdit || !zone}
                                 placeholder={zone ? `edge.${zone}` : 'Select a DNS zone first'}
                                 required
@@ -705,7 +714,7 @@ export default function DNS() {
                             Cancel
                         </Button>
                         <Button isDisabled={!canEdit || !zone} type='submit'>
-                            <Save className='mr-2 h-4 w-4' />
+                            <Save aria-hidden='true' className='mr-2 h-4 w-4' />
                             {busy
                                 ? 'Saving…'
                                 : configured
@@ -769,10 +778,10 @@ export default function DNS() {
                 <tbody>
                     {jobs.map((job) => (
                         <tr key={job.id}>
-                            <td className='font-mono text-xs max-w-48'>{job.id}</td>
+                            <td className='max-w-48 truncate font-mono text-xs'>{job.id}</td>
                             <td>{job.action === 'UPSERT_CLUSTER' ? 'SYNC_NODE_IP' : job.action}</td>
                             <td>{job.status}</td>
-                            <td className='max-w-12'>
+                            <td className='max-w-12 tabular'>
                                 {job.attempts}/{job.maxAttempts}
                             </td>
                             <td className='max-w-156 break-all'>{job.resultJson?.error || '—'}</td>

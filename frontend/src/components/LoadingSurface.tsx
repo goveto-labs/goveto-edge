@@ -22,9 +22,9 @@ export function LoadingSurface({
                 }`}
                 role='status'
             >
-                <span className='sr-only'>{label}</span>
-                <div className='absolute inset-x-0 top-0 h-1 overflow-hidden bg-primary/15'>
-                    <div className='local-loading-progress h-full bg-primary shadow-[0_0_10px_var(--color-primary)]' />
+                <span className='sr-only'>{label}…</span>
+                <div className='absolute inset-x-0 top-0 h-1 overflow-hidden bg-accent/15'>
+                    <div className='local-loading-progress h-full bg-accent shadow-[0_0_10px_var(--color-accent)]' />
                 </div>
             </div>
             {children}

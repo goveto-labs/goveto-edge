@@ -29,7 +29,10 @@ const sitesQuery = {
 function formatBandwidth(bitsPerSecond: number) {
     if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) return '0 bps';
     const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
-    const unit = Math.min(Math.floor(Math.log(bitsPerSecond) / Math.log(1000)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bitsPerSecond) / Math.log(1000)), units.length - 1)
+    );
     return `${(bitsPerSecond / 1000 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -262,17 +265,17 @@ export default function Sites() {
                             }}
                         />
                         <Button variant='secondary' onPress={() => importRef.current?.click()}>
-                            <Upload className='mr-2 h-4 w-4' /> Import
+                            <Upload aria-hidden='true' className='mr-2 h-4 w-4' /> Import
                         </Button>
                         <Button
                             isDisabled={templates.length === 0}
                             variant='secondary'
                             onPress={() => void createFromTemplate()}
                         >
-                            <FileStack className='mr-2 h-4 w-4' /> From template
+                            <FileStack aria-hidden='true' className='mr-2 h-4 w-4' /> From template
                         </Button>
                         <Button onPress={() => navigate('/sites/create')}>
-                            <Plus className='mr-2 h-4 w-4' /> Create site
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' /> Create site
                         </Button>
                     </div>
                 )}
@@ -286,18 +289,20 @@ export default function Sites() {
 
             {canOperate && selected.size > 0 && (
                 <div className='flex flex-wrap items-center gap-2 border-y border-border bg-surface-secondary/40 px-4 py-3'>
-                    <span className='mr-auto text-sm font-medium'>{selected.size} selected</span>
+                    <span className='tabular mr-auto text-sm font-medium'>
+                        {selected.size} selected
+                    </span>
                     <Button size='sm' variant='secondary' onPress={() => void runBulk('ENABLE')}>
-                        <Power className='mr-1.5 h-3.5 w-3.5' /> Enable
+                        <Power aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' /> Enable
                     </Button>
                     <Button size='sm' variant='secondary' onPress={() => void runBulk('DISABLE')}>
-                        <Power className='mr-1.5 h-3.5 w-3.5' /> Disable
+                        <Power aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' /> Disable
                     </Button>
                     <Button size='sm' variant='secondary' onPress={() => void runBulk('PUBLISH')}>
-                        <Send className='mr-1.5 h-3.5 w-3.5' /> Publish
+                        <Send aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' /> Publish
                     </Button>
                     <Button size='sm' variant='secondary' onPress={() => void exportSelected()}>
-                        <Download className='mr-1.5 h-3.5 w-3.5' /> Export
+                        <Download aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' /> Export
                     </Button>
                 </div>
             )}
@@ -348,7 +353,7 @@ export default function Sites() {
                 emptyAction={
                     canOperate && sites.length === 0 ? (
                         <Button onPress={() => navigate('/sites/create')}>
-                            <Plus className='mr-2 h-4 w-4' />
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                             Create site
                         </Button>
                     ) : undefined
@@ -430,7 +435,7 @@ export default function Sites() {
                                     type='button'
                                     onClick={() => navigate(`/sites/${site.id}/overview`)}
                                 >
-                                    <Globe2 className='h-4 w-4 text-muted' />
+                                    <Globe2 aria-hidden='true' className='h-4 w-4 text-muted' />
                                     {site.name}
                                 </button>
                             </td>
@@ -442,13 +447,13 @@ export default function Sites() {
                             <td>
                                 <StatusBadge status={site.status} />
                             </td>
-                            <td className='whitespace-nowrap text-sm'>
+                            <td className='tabular whitespace-nowrap text-sm'>
                                 {formatBandwidth(site.bandwidth_bps)}
                             </td>
-                            <td className='whitespace-nowrap text-sm'>
+                            <td className='tabular whitespace-nowrap text-sm'>
                                 {site.qps.toFixed(site.qps >= 10 ? 0 : 2)}
                             </td>
-                            <td className='text-sm text-muted'>{site.certificate_count}</td>
+                            <td className='tabular text-sm text-muted'>{site.certificate_count}</td>
                             <td className='whitespace-nowrap text-sm text-muted'>
                                 {new Date(site.updated_at).toLocaleString()}
                             </td>
@@ -463,7 +468,7 @@ export default function Sites() {
                                                 variant='ghost'
                                                 onPress={() => void cloneSite(site)}
                                             >
-                                                <Copy className='h-3.5 w-3.5' />
+                                                <Copy aria-hidden='true' className='h-3.5 w-3.5' />
                                             </Button>
                                             <Button
                                                 isIconOnly
@@ -472,7 +477,10 @@ export default function Sites() {
                                                 variant='ghost'
                                                 onPress={() => void saveTemplate(site)}
                                             >
-                                                <FileStack className='h-3.5 w-3.5' />
+                                                <FileStack
+                                                    aria-hidden='true'
+                                                    className='h-3.5 w-3.5'
+                                                />
                                             </Button>
                                         </>
                                     )}
@@ -481,7 +489,8 @@ export default function Sites() {
                                         variant='secondary'
                                         onPress={() => navigate(`/sites/${site.id}/overview`)}
                                     >
-                                        <Eye className='mr-1.5 h-3.5 w-3.5' /> View
+                                        <Eye aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />{' '}
+                                        View
                                     </Button>
                                 </div>
                             </td>

@@ -1,0 +1,11 @@
+{
+  "editor.quickSuggestions": {
+    "other": "on",
+    "comments": "off",
+    "strings": "on"
+  },
+  "editor.suggest.showColors": true,
+  "biome.configurationPath": "frontend/biome.json",
+  "biome.lsp.bin": "frontend/node_modules/.bin/biome",
+  "tailwindCSS.experimental.configFile": "frontend/src/styles/globals.css"
+}

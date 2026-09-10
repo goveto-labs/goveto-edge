@@ -112,7 +112,10 @@ export function AlertRulesPanel({
                         variant='ghost'
                         onPress={() => void load()}
                     >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                     </Button>
                 }
                 aria-label='Alert rules'
@@ -155,7 +158,7 @@ export function AlertRulesPanel({
                                 <td className='text-xs text-muted'>
                                     every {formatRuleSeconds(rule.cooldownSeconds)}
                                 </td>
-                                <td className='text-xs text-muted'>
+                                <td className='text-xs tabular text-muted'>
                                     {rule.channels.length === 0
                                         ? channels.length === 0
                                             ? 'no channels configured'
@@ -169,7 +172,7 @@ export function AlertRulesPanel({
                                         </span>
                                         {muted && (
                                             <span className='inline-flex items-center gap-1 text-xs text-warning'>
-                                                <BellOff className='h-3 w-3' />
+                                                <BellOff aria-hidden='true' className='h-3 w-3' />
                                                 muted
                                             </span>
                                         )}
@@ -202,9 +205,15 @@ export function AlertRulesPanel({
                                                             }}
                                                         >
                                                             {muted ? (
-                                                                <BellRing className='h-4 w-4' />
+                                                                <BellRing
+                                                                    aria-hidden='true'
+                                                                    className='h-4 w-4'
+                                                                />
                                                             ) : (
-                                                                <BellOff className='h-4 w-4' />
+                                                                <BellOff
+                                                                    aria-hidden='true'
+                                                                    className='h-4 w-4'
+                                                                />
                                                             )}
                                                         </Button>
                                                     </Tooltip.Trigger>
@@ -221,7 +230,10 @@ export function AlertRulesPanel({
                                                             variant='ghost'
                                                             onPress={() => setEditing(rule)}
                                                         >
-                                                            <PencilLine className='h-4 w-4' />
+                                                            <PencilLine
+                                                                aria-hidden='true'
+                                                                className='h-4 w-4'
+                                                            />
                                                         </Button>
                                                     </Tooltip.Trigger>
                                                     <Tooltip.Content>Edit rule</Tooltip.Content>

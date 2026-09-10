@@ -204,7 +204,7 @@ export function SiteCompressionSettings({
                 <div className='flex flex-col gap-5 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                     <div className='flex items-center gap-3'>
                         <span
-                            className={`flex h-10 w-10 items-center justify-center rounded-xl ${compression.enabled ? 'bg-primary text-primary-foreground' : 'bg-surface-secondary text-muted'}`}
+                            className={`flex h-10 w-10 items-center justify-center rounded-xl ${compression.enabled ? 'bg-accent text-accent-foreground' : 'bg-surface-secondary text-muted'}`}
                         >
                             <FileArchive className='h-5 w-5' />
                         </span>
@@ -434,7 +434,7 @@ export function SiteCompressionSettings({
                     onPress={onSave}
                 >
                     <Save className='mr-1.5 h-4 w-4' />
-                    {saving ? 'Saving...' : 'Save compression settings'}
+                    {saving ? 'Saving…' : 'Save compression settings'}
                 </Button>
             </SettingsActionBar>
         </div>

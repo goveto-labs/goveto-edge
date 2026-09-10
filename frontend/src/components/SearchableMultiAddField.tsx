@@ -166,12 +166,12 @@ export function SearchableMultiAddField({
                                 onChange(next);
                             }}
                         >
-                            <X className='h-3.5 w-3.5' />
+                            <X aria-hidden='true' className='h-3.5 w-3.5' />
                         </button>
                     </span>
                 ))}
                 {hiddenSelectionCount > 0 && (
-                    <span className='rounded-full bg-surface-secondary px-3 py-1 text-sm text-muted'>
+                    <span className='rounded-full bg-surface-secondary px-3 py-1 text-sm tabular text-muted'>
                         +{hiddenSelectionCount} more
                     </span>
                 )}
@@ -181,10 +181,10 @@ export function SearchableMultiAddField({
                     variant='secondary'
                     onPress={() => handleOpenChange(true)}
                 >
-                    <Plus className='mr-1.5 h-4 w-4' />
+                    <Plus aria-hidden='true' className='mr-1.5 h-4 w-4' />
                     {addLabel}
                     {selected.size > 0 && (
-                        <span className='ml-1 rounded-full bg-primary/10 px-1.5 text-xs text-primary'>
+                        <span className='ml-1 rounded-full bg-accent/10 px-1.5 text-xs tabular text-accent'>
                             {selected.size}
                         </span>
                     )}
@@ -238,7 +238,10 @@ export function SearchableMultiAddField({
                     )}
                     <div className='flex flex-col gap-2 sm:flex-row'>
                         <div className='relative min-w-0 flex-1'>
-                            <Search className='pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted' />
+                            <Search
+                                aria-hidden='true'
+                                className='pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted'
+                            />
                             <Input
                                 autoFocus
                                 aria-label={`Search ${itemLabel}s`}
@@ -260,12 +263,12 @@ export function SearchableMultiAddField({
                                 resetScroll();
                             }}
                         >
-                            Selected only ({draft.size})
+                            Selected only (<span className='tabular'>{draft.size}</span>)
                         </Button>
                     </div>
 
                     <div className='flex flex-wrap items-center justify-between gap-2 text-sm'>
-                        <span className='text-muted'>
+                        <span className='tabular text-muted'>
                             {filteredOptions.length} result{filteredOptions.length === 1 ? '' : 's'}
                         </span>
                         <div className='flex gap-2'>
@@ -339,11 +342,16 @@ export function SearchableMultiAddField({
                                             <span
                                                 className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                                                     active
-                                                        ? 'border-primary bg-primary text-primary-foreground'
+                                                        ? 'border-accent bg-accent text-accent-foreground'
                                                         : 'border-border bg-surface'
                                                 }`}
                                             >
-                                                {active && <Check className='h-3.5 w-3.5' />}
+                                                {active && (
+                                                    <Check
+                                                        aria-hidden='true'
+                                                        className='h-3.5 w-3.5'
+                                                    />
+                                                )}
                                             </span>
                                             <span className='min-w-0 flex-1'>
                                                 <span className='block truncate text-sm font-medium'>
@@ -356,7 +364,7 @@ export function SearchableMultiAddField({
                                                 )}
                                             </span>
                                             {active && (
-                                                <span className='text-xs font-medium text-primary'>
+                                                <span className='text-xs font-medium text-accent'>
                                                     Selected
                                                 </span>
                                             )}
@@ -368,7 +376,7 @@ export function SearchableMultiAddField({
                     </div>
                 </div>
                 <DialogFooter>
-                    <div className='mr-auto self-center text-sm text-muted'>
+                    <div className='mr-auto self-center text-sm tabular text-muted'>
                         {draft.size} selected
                     </div>
                     <Button type='button' variant='ghost' onPress={() => setOpen(false)}>

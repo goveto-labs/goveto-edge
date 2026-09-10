@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import { analyticsApi, nodesApi, sitesApi } from '@/api';
 import { AsyncState } from '@/components/AsyncState.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { chartColors } from '@/components/chartColors.ts';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { GeoTrafficPanel } from '@/components/GeoTrafficPanel.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
@@ -30,7 +31,14 @@ import { percentile } from '@/utils/statistics.ts';
 import { fillTrafficSeries } from '@/utils/timeseries.ts';
 
 type Period = '24h' | '30d';
-const slicePalette = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#ec4899'];
+const slicePalette = [
+    chartColors.primary,
+    chartColors.secondary,
+    chartColors.tertiary,
+    chartColors.warning,
+    chartColors.danger,
+    chartColors.neutral,
+];
 
 function toSlices(items: DistributionItem[], offset = 0): DonutSlice[] {
     return items.slice(0, 6).map((item, index) => ({
@@ -43,7 +51,10 @@ function toSlices(items: DistributionItem[], offset = 0): DonutSlice[] {
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -51,7 +62,10 @@ function formatBandwidth(bytesPerSecond: number) {
     const bits = bytesPerSecond * 8;
     const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
     if (!Number.isFinite(bits) || bits <= 0) return '0 bps';
-    const unit = Math.min(Math.floor(Math.log(bits) / Math.log(1000)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bits) / Math.log(1000)), units.length - 1)
+    );
     return `${(bits / 1000 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -120,7 +134,9 @@ function StatCell({
     return (
         <div className='min-w-0 rounded-xl border border-border/70 bg-surface p-3.5 shadow-sm'>
             <div className='text-xs font-medium text-muted'>{label}</div>
-            <div className={`mt-1 text-lg font-semibold tracking-tight ${toneClass}`}>{value}</div>
+            <div className={`tabular mt-1 text-lg font-semibold tracking-tight ${toneClass}`}>
+                {value}
+            </div>
             {footer && <div className='mt-1 truncate text-xs text-muted'>{footer}</div>}
         </div>
     );
@@ -324,7 +340,7 @@ export default function Dashboard() {
                         variant='secondary'
                         onPress={() => void refreshState.retry()}
                     >
-                        <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                        <RefreshCw aria-hidden='true' className='mr-1.5 h-3.5 w-3.5' />
                         Refresh
                     </Button>
                 </div>
@@ -333,21 +349,23 @@ export default function Dashboard() {
             <div className='flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl bg-surface px-4 py-2.5 text-sm'>
                 <span className='flex items-center gap-2'>
                     <span className='text-xs text-muted'>Nodes</span>
-                    <span>{nodes.length}</span>
+                    <span className='tabular'>{nodes.length}</span>
                 </span>
                 <span className='flex items-center gap-2'>
                     <span className='text-xs text-muted'>Online</span>
-                    <span className={onlineNodes > 0 ? 'text-success' : 'text-danger'}>
+                    <span className={`tabular ${onlineNodes > 0 ? 'text-success' : 'text-danger'}`}>
                         {onlineNodes}
                     </span>
                 </span>
                 <span className='flex items-center gap-2'>
                     <span className='text-xs text-muted'>Sites</span>
-                    <span>{sites.length}</span>
+                    <span className='tabular'>{sites.length}</span>
                 </span>
                 <span className='flex items-center gap-2'>
                     <span className='text-xs text-muted'>Domains</span>
-                    <span>{sites.reduce((sum, site) => sum + (site.domains?.length ?? 0), 0)}</span>
+                    <span className='tabular'>
+                        {sites.reduce((sum, site) => sum + (site.domains?.length ?? 0), 0)}
+                    </span>
                 </span>
                 <button
                     className='flex items-center gap-2 rounded-md px-1.5 py-0.5 transition-colors hover:bg-surface-secondary'
@@ -360,11 +378,16 @@ export default function Dashboard() {
                             !
                         </span>
                     ) : alertOverviewLoading && firingAlerts === null ? (
-                        <LoaderCircle className='h-3.5 w-3.5 animate-spin text-muted' />
+                        <LoaderCircle
+                            aria-hidden='true'
+                            className='h-3.5 w-3.5 animate-spin text-muted'
+                        />
                     ) : firingAlerts === null ? (
                         <span className='text-muted'>-</span>
                     ) : (
-                        <span className={firingAlerts > 0 ? 'text-danger' : 'text-success'}>
+                        <span
+                            className={`tabular ${firingAlerts > 0 ? 'text-danger' : 'text-success'}`}
+                        >
                             {firingAlerts}
                         </span>
                     )}
@@ -404,7 +427,7 @@ export default function Dashboard() {
                                             : 'bg-surface-secondary text-muted'
                                     }`}
                                 >
-                                    <Server className='h-4 w-4' />
+                                    <Server aria-hidden='true' className='h-4 w-4' />
                                 </span>
                                 <span className='min-w-0 flex-1'>
                                     <span className='block truncate text-sm font-medium'>
@@ -494,14 +517,20 @@ export default function Dashboard() {
                         height={220}
                         referenceLines={
                             bandwidthP95 > 0
-                                ? [{ value: bandwidthP95, label: 'P95', color: '#f59e0b' }]
+                                ? [
+                                      {
+                                          value: bandwidthP95,
+                                          label: 'P95',
+                                          color: chartColors.warning,
+                                      },
+                                  ]
                                 : []
                         }
                         series={[
                             {
                                 key: 'bandwidth',
                                 label: 'Bandwidth',
-                                color: '#2563eb',
+                                color: chartColors.primary,
                             },
                         ]}
                         valueFormatter={formatBandwidth}
@@ -518,8 +547,8 @@ export default function Dashboard() {
                         data={trafficChart}
                         height={220}
                         series={[
-                            { key: 'traffic', label: 'Traffic', color: '#2563eb' },
-                            { key: 'cache', label: 'Cache traffic', color: '#059669' },
+                            { key: 'traffic', label: 'Traffic', color: chartColors.primary },
+                            { key: 'cache', label: 'Cache traffic', color: chartColors.secondary },
                         ]}
                         valueFormatter={formatBytes}
                     />
@@ -534,7 +563,9 @@ export default function Dashboard() {
                         ariaLabel={`${period} cluster requests`}
                         data={requestChart}
                         height={220}
-                        series={[{ key: 'requests', label: 'Requests', color: '#2563eb' }]}
+                        series={[
+                            { key: 'requests', label: 'Requests', color: chartColors.primary },
+                        ]}
                     />
                 </ContentCard>
                 <ContentCard
@@ -547,7 +578,7 @@ export default function Dashboard() {
                         ariaLabel={`${period} cluster WAF hits`}
                         data={wafChart}
                         height={220}
-                        series={[{ key: 'hits', label: 'WAF hits', color: '#dc2626' }]}
+                        series={[{ key: 'hits', label: 'WAF hits', color: chartColors.danger }]}
                     />
                 </ContentCard>
                 <ContentCard
@@ -562,8 +593,8 @@ export default function Dashboard() {
                         height={220}
                         includeZero={false}
                         series={[
-                            { key: 'cpu', label: 'CPU', color: '#f59e0b' },
-                            { key: 'memory', label: 'Memory', color: '#3b82f6' },
+                            { key: 'cpu', label: 'CPU', color: chartColors.warning },
+                            { key: 'memory', label: 'Memory', color: chartColors.secondary },
                         ]}
                         valueFormatter={(value) => `${value.toFixed(1)}%`}
                     />
@@ -580,9 +611,9 @@ export default function Dashboard() {
                         height={220}
                         includeZero={false}
                         series={[
-                            { key: 'load1', label: '1m', color: '#ef4444' },
-                            { key: 'load5', label: '5m', color: '#f59e0b' },
-                            { key: 'load15', label: '15m', color: '#10b981' },
+                            { key: 'load1', label: '1m', color: chartColors.danger },
+                            { key: 'load5', label: '5m', color: chartColors.warning },
+                            { key: 'load15', label: '15m', color: chartColors.secondary },
                         ]}
                     />
                 </ContentCard>
@@ -597,7 +628,7 @@ export default function Dashboard() {
                         data={cacheChart}
                         height={220}
                         includeZero={false}
-                        series={[{ key: 'used', label: 'Used', color: '#8b5cf6' }]}
+                        series={[{ key: 'used', label: 'Used', color: chartColors.tertiary }]}
                         valueFormatter={formatBytes}
                     />
                 </ContentCard>

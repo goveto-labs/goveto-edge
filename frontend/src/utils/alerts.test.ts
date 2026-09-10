@@ -19,7 +19,7 @@ test('severity helpers map known values and fall back gracefully', () => {
     expect(severityLabel('CRITICAL')).toBe('Critical');
     expect(severityLabel('warning')).toBe('Warning');
     expect(severityLabel('')).toBe('');
-    expect(severityBadgeClass('CRITICAL')).toBe('bg-danger/15 text-danger');
+    expect(severityBadgeClass('CRITICAL')).toBe('bg-danger-soft text-danger-soft-foreground');
     expect(severityBadgeClass('UNKNOWN')).toBe('bg-default text-muted');
 });
 

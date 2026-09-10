@@ -113,7 +113,7 @@ export default function Login() {
                 <div className='mx-auto w-full max-w-[380px]'>
                     <div className='mb-10 flex items-center gap-2.5 lg:hidden'>
                         <div className='flex h-9 w-9 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
-                            <Globe className='h-4 w-4' />
+                            <Globe aria-hidden='true' className='h-4 w-4' />
                         </div>
                         <span className='text-lg font-semibold tracking-tight'>Goveto Edge</span>
                     </div>
@@ -147,6 +147,7 @@ export default function Login() {
                                     id='login-email'
                                     placeholder='you@company.com'
                                     required
+                                    spellCheck={false}
                                     type='email'
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
@@ -167,7 +168,10 @@ export default function Login() {
                             <Button fullWidth isDisabled={loading} type='submit' variant='primary'>
                                 {loading && !otpModal.isOpen ? (
                                     <span className='flex items-center justify-center gap-2'>
-                                        <Loader2 className='h-4 w-4 animate-spin' />
+                                        <Loader2
+                                            aria-hidden='true'
+                                            className='h-4 w-4 animate-spin'
+                                        />
                                         Signing in…
                                     </span>
                                 ) : (
@@ -194,7 +198,7 @@ export default function Login() {
                                         variant='secondary'
                                         onPress={() => window.location.assign(provider.start_url)}
                                     >
-                                        <KeyRound className='h-4 w-4' />
+                                        <KeyRound aria-hidden='true' className='h-4 w-4' />
                                         Continue with {provider.provider_name}
                                     </Button>
                                 ))}
@@ -221,7 +225,7 @@ export default function Login() {
             </main>
 
             <DialogShell
-                icon={<ShieldCheck className='h-5 w-5' />}
+                icon={<ShieldCheck aria-hidden='true' className='h-5 w-5' />}
                 isOpen={otpModal.isOpen}
                 size='sm'
                 subtitle='Enter the 6-digit code from your authenticator app.'
@@ -271,7 +275,7 @@ export default function Login() {
                         >
                             {loading ? (
                                 <span className='flex items-center justify-center gap-2'>
-                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
                                     Verifying…
                                 </span>
                             ) : (

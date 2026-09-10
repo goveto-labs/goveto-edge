@@ -234,7 +234,7 @@ export default function Nodes() {
             <PageHeader subtitle='Manage edge nodes and their configuration.' title='Nodes'>
                 {canManage && (
                     <Button onPress={() => navigate('/nodes/create')}>
-                        <Plus className='mr-2 h-4 w-4' />
+                        <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                         Create node
                     </Button>
                 )}
@@ -296,7 +296,7 @@ export default function Nodes() {
                 emptyAction={
                     canManage && nodes.length === 0 ? (
                         <Button onPress={() => navigate('/nodes/create')}>
-                            <Plus className='mr-2 h-4 w-4' />
+                            <Plus aria-hidden='true' className='mr-2 h-4 w-4' />
                             Create node
                         </Button>
                     ) : undefined
@@ -373,7 +373,7 @@ export default function Nodes() {
                                         {canManage && (
                                             <button
                                                 aria-label={`Edit DNS lines for ${node.name}`}
-                                                className='shrink-0 font-mono text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40'
+                                                className='shrink-0 font-mono text-xs font-semibold text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
                                                 type='button'
                                                 onClick={() => openDnsLineEditor(node)}
                                             >
@@ -389,13 +389,22 @@ export default function Nodes() {
                                             .join(', ') || '—'}
                                     </span>
                                 </td>
-                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
+                                <td
+                                    className='whitespace-nowrap text-sm tabular'
+                                    title={runtimeTitle}
+                                >
                                     {runtime ? formatPercent(runtime.cpu_usage_percent) : '—'}
                                 </td>
-                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
+                                <td
+                                    className='whitespace-nowrap text-sm tabular'
+                                    title={runtimeTitle}
+                                >
                                     {formatMemory(runtime)}
                                 </td>
-                                <td className='whitespace-nowrap text-sm' title={runtimeTitle}>
+                                <td
+                                    className='whitespace-nowrap text-sm tabular'
+                                    title={runtimeTitle}
+                                >
                                     {runtime
                                         ? formatRate(
                                               runtime.ingress_bytes_per_second +
@@ -403,7 +412,7 @@ export default function Nodes() {
                                           )
                                         : '—'}
                                 </td>
-                                <td className='text-sm' title={runtimeTitle}>
+                                <td className='text-sm tabular' title={runtimeTitle}>
                                     {runtime?.requests_per_minute.toLocaleString() ?? '—'}
                                 </td>
                                 <td>
@@ -413,7 +422,10 @@ export default function Nodes() {
                                             variant='secondary'
                                             onPress={() => navigate(`/nodes/${node.id}/overview`)}
                                         >
-                                            <Eye className='mr-1.5 h-3.5 w-3.5' />
+                                            <Eye
+                                                aria-hidden='true'
+                                                className='mr-1.5 h-3.5 w-3.5'
+                                            />
                                             View
                                         </Button>
                                         {canManage && node.status === 'DISABLED' && (
@@ -423,7 +435,10 @@ export default function Nodes() {
                                                 variant='secondary'
                                                 onPress={() => void handleToggleStatus(node)}
                                             >
-                                                <Power className='mr-1.5 h-3.5 w-3.5' />
+                                                <Power
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-3.5 w-3.5'
+                                                />
                                                 {statusUpdatingNodeId === node.id
                                                     ? 'Enabling…'
                                                     : 'Enable'}
@@ -439,7 +454,10 @@ export default function Nodes() {
                                                     variant='secondary'
                                                     onPress={() => setPendingDisable(node)}
                                                 >
-                                                    <PowerOff className='mr-1.5 h-3.5 w-3.5' />
+                                                    <PowerOff
+                                                        aria-hidden='true'
+                                                        className='mr-1.5 h-3.5 w-3.5'
+                                                    />
                                                     Disable
                                                 </Button>
                                             )}
@@ -449,7 +467,10 @@ export default function Nodes() {
                                                 variant='danger'
                                                 onPress={() => setPendingDelete(node)}
                                             >
-                                                <Trash2 className='mr-1.5 h-3.5 w-3.5' />
+                                                <Trash2
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-3.5 w-3.5'
+                                                />
                                                 Delete
                                             </Button>
                                         )}
@@ -484,7 +505,10 @@ export default function Nodes() {
                     )}
 
                     <div className='relative'>
-                        <Search className='pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted' />
+                        <Search
+                            aria-hidden='true'
+                            className='pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted'
+                        />
                         <Input
                             autoFocus
                             aria-label='Search DNS lines'
@@ -519,11 +543,13 @@ export default function Nodes() {
                                         <span
                                             className={`flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
                                                 selected
-                                                    ? 'border-primary bg-primary text-primary-foreground'
+                                                    ? 'border-accent bg-accent text-accent-foreground'
                                                     : 'border-border bg-surface'
                                             }`}
                                         >
-                                            {selected && <Check className='h-3.5 w-3.5' />}
+                                            {selected && (
+                                                <Check aria-hidden='true' className='h-3.5 w-3.5' />
+                                            )}
                                         </span>
                                         <span className='min-w-0 flex-1'>
                                             <span className='block truncate text-sm font-medium text-foreground'>
@@ -534,7 +560,7 @@ export default function Nodes() {
                                             </span>
                                         </span>
                                         {selected && (
-                                            <span className='text-xs font-medium text-primary'>
+                                            <span className='text-xs font-medium text-accent'>
                                                 Selected
                                             </span>
                                         )}
@@ -549,7 +575,7 @@ export default function Nodes() {
                     </p>
                 </div>
                 <DialogFooter>
-                    <div className='mr-auto self-center text-sm text-muted'>
+                    <div className='mr-auto self-center text-sm text-muted tabular'>
                         {dnsLineDraft.size} selected
                     </div>
                     <Button

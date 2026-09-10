@@ -19,6 +19,7 @@ import {
 
 import { ApiError } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { chartColors } from '@/components/chartColors.ts';
 import { countryOptions } from '@/data/countries.ts';
 
 export type DetailTab = 'overview' | 'audience' | 'logs' | 'settings';
@@ -128,13 +129,23 @@ export const settingsNav: SettingsNavEntry[] = [
     },
     { kind: 'page', id: 'compression' },
 ];
-export const palette = ['#2563eb', '#0891b2', '#059669', '#d97706', '#dc2626', '#64748b'];
+export const palette = [
+    chartColors.primary,
+    chartColors.secondary,
+    chartColors.tertiary,
+    chartColors.warning,
+    chartColors.danger,
+    chartColors.neutral,
+];
 export const countryNames = new Map(countryOptions.map((country) => [country.id, country.name]));
 
 export function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -142,7 +153,10 @@ export function formatBandwidth(bytesPerSecond: number) {
     const bits = bytesPerSecond * 8;
     const units = ['bps', 'Kbps', 'Mbps', 'Gbps', 'Tbps'];
     if (bits <= 0) return '0 bps';
-    const unit = Math.min(Math.floor(Math.log(bits) / Math.log(1000)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bits) / Math.log(1000)), units.length - 1)
+    );
     return `${(bits / 1000 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -171,7 +185,9 @@ export function Metric({ label, value, note }: { label: string; value: string; n
     return (
         <div className='min-w-0 border-b border-border px-4 py-4 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0'>
             <div className='text-xs font-medium text-muted'>{label}</div>
-            <div className='mt-1 font-mono text-xl font-semibold tracking-tight'>{value}</div>
+            <div className='tabular mt-1 font-mono text-xl font-semibold tracking-tight'>
+                {value}
+            </div>
             {note && <div className='mt-1 truncate text-xs text-muted'>{note}</div>}
         </div>
     );
@@ -218,10 +234,10 @@ export function RankingTable({
                                 >
                                     {formatValue(item.value)}
                                 </td>
-                                <td className='px-4 py-2.5 text-right font-mono'>
+                                <td className='tabular px-4 py-2.5 text-right font-mono'>
                                     {item.requests.toLocaleString()}
                                 </td>
-                                <td className='px-4 py-2.5 text-right text-muted'>
+                                <td className='tabular px-4 py-2.5 text-right text-muted'>
                                     {formatBytes(trafficOf(item))}
                                 </td>
                             </tr>

@@ -72,9 +72,10 @@ function InitializationErrorPage({
                             onPress={() => void onRetry()}
                         >
                             <RefreshCw
+                                aria-hidden='true'
                                 className={`h-4 w-4 ${isRetrying ? 'animate-spin motion-reduce:animate-none' : ''}`}
                             />
-                            {isRetrying ? 'Checking status...' : 'Try again'}
+                            {isRetrying ? 'Checking status…' : 'Try again'}
                         </Button>
                     </div>
                 </section>

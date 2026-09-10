@@ -137,21 +137,21 @@ export function DomainAddField({
                             !value.includes(`*.${domain}`) && (
                                 <button
                                     aria-label={`Add wildcard for ${domain}`}
-                                    className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                                    className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                                     title='Add matching wildcard'
                                     type='button'
                                     onClick={() => addWildcardPair(domain)}
                                 >
-                                    <Sparkles className='h-3.5 w-3.5' />
+                                    <Sparkles aria-hidden='true' className='h-3.5 w-3.5' />
                                 </button>
                             )}
                         <button
                             aria-label={`Remove ${domain}`}
-                            className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                            className='shrink-0 rounded-full text-muted transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                             type='button'
                             onClick={() => onChange(value.filter((item) => item !== domain))}
                         >
-                            <X className='h-3.5 w-3.5' />
+                            <X aria-hidden='true' className='h-3.5 w-3.5' />
                         </button>
                     </span>
                 ))}
@@ -161,7 +161,7 @@ export function DomainAddField({
                     variant='secondary'
                     onPress={() => handleOpenChange(true)}
                 >
-                    <Plus className='mr-1.5 h-4 w-4' />
+                    <Plus aria-hidden='true' className='mr-1.5 h-4 w-4' />
                     {addLabel}
                 </Button>
             </div>
@@ -278,7 +278,7 @@ export function DomainAddField({
                     {error && <FormError message={error} />}
                 </div>
                 <DialogFooter>
-                    <div className='mr-auto self-center text-sm text-muted'>
+                    <div className='mr-auto self-center text-sm tabular text-muted'>
                         {candidates.length > 0
                             ? `${candidates.length} ${candidates.length === 1 ? 'domain' : 'domains'} ready`
                             : 'No domains ready'}

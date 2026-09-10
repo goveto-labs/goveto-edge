@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
 
-import { Avatar, Button, Tooltip } from '@heroui/react';
 import {
     BarChart3,
     BellRing,
@@ -11,7 +10,6 @@ import {
     KeyRound,
     LayoutDashboard,
     ListTodo,
-    LogOut,
     Server,
     Settings,
     ShieldCheck,
@@ -23,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
+import AnimalStepIcon from './icons/AnimalStep';
 import { NavItem } from '@/components/NavItem.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
 import { useAuth } from '@/hooks/useAuth.ts';
@@ -95,39 +94,25 @@ export function navigationFor(isPlatformAdmin = false, canManageAPIKeys = false)
 interface SidebarProps {
     collapsed?: boolean;
     onNavigate?: () => void;
-    onLogout: () => void;
 }
 
-function SidebarProfile({ collapsed }: { collapsed?: boolean }) {
-    const { user } = useAuth();
-    const label = user?.name || user?.email || user?.id || 'User';
-    const role = user?.role || 'Admin';
-    const initial = label.slice(0, 1).toUpperCase();
-
+function SidebarBrand({ collapsed }: { collapsed?: boolean }) {
     if (collapsed) {
         return (
-            <div className='flex justify-center px-3 py-4'>
-                <Tooltip>
-                    <Tooltip.Trigger>
-                        <Avatar className='h-10 w-10 text-xs'>
-                            <Avatar.Fallback>{initial}</Avatar.Fallback>
-                        </Avatar>
-                    </Tooltip.Trigger>
-                    <Tooltip.Content>{`${label} · ${role}`}</Tooltip.Content>
-                </Tooltip>
+            <div className='flex justify-center px-3 pb-1 pt-4'>
+                <div className='flex h-8 w-8 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
+                    <span className='text-xs font-bold'>G</span>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className='flex items-center gap-3 px-3 py-4'>
-            <Avatar className='h-10 w-10 text-xs'>
-                <Avatar.Fallback>{initial}</Avatar.Fallback>
-            </Avatar>
-            <div className='min-w-0'>
-                <div className='truncate text-sm font-semibold'>{label}</div>
-                <div className='truncate text-xs text-muted'>{role}</div>
-            </div>
+        <div className='flex items-center gap-2.5 px-4 pb-1 pt-4'>
+            <AnimalStepIcon className='h-8 w-8' />
+            <span className='truncate text-sm font-semibold tracking-tight' translate='no'>
+                Goveto Edge
+            </span>
         </div>
     );
 }
@@ -140,7 +125,10 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
     const visibleNav = navigationFor(user?.role === 'ADMIN', canManageCluster(clusterRole));
 
     return (
-        <nav className={`flex-1 space-y-1 overflow-y-auto p-3 pt-0 ${collapsed ? 'px-2' : ''}`}>
+        <nav
+            aria-label='Primary'
+            className={`flex-1 space-y-1 overflow-y-auto p-3 pt-2 ${collapsed ? 'px-2' : ''}`}
+        >
             {visibleNav.map((item) => {
                 const activeChild =
                     item.children?.find((child) => location.pathname === child.path) ??
@@ -185,47 +173,11 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate
     );
 }
 
-function SidebarFooter({ collapsed, onLogout }: { collapsed?: boolean; onLogout: () => void }) {
-    if (collapsed) {
-        return (
-            <div className='space-y-1 border-t border-border p-2'>
-                <Tooltip>
-                    <Tooltip.Trigger>
-                        <Button
-                            className='w-full justify-center px-2 text-muted'
-                            isIconOnly
-                            variant='ghost'
-                            onPress={onLogout}
-                        >
-                            <LogOut className='h-[18px] w-[18px]' />
-                        </Button>
-                    </Tooltip.Trigger>
-                    <Tooltip.Content>Log out</Tooltip.Content>
-                </Tooltip>
-            </div>
-        );
-    }
-
-    return (
-        <div className='space-y-1 border-t border-border p-3'>
-            <Button
-                className='w-full justify-start gap-3 text-sm font-medium text-muted'
-                variant='ghost'
-                onPress={onLogout}
-            >
-                <LogOut className='h-[18px] w-[18px]' />
-                Log out
-            </Button>
-        </div>
-    );
-}
-
-export function Sidebar({ collapsed, onNavigate, onLogout }: SidebarProps) {
+export function Sidebar({ collapsed, onNavigate }: SidebarProps) {
     return (
         <div className='flex h-full flex-col'>
-            <SidebarProfile collapsed={collapsed} />
+            <SidebarBrand collapsed={collapsed} />
             <SidebarNav collapsed={collapsed} onNavigate={onNavigate} />
-            <SidebarFooter collapsed={collapsed} onLogout={onLogout} />
         </div>
     );
 }

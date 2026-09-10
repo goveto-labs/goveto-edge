@@ -37,7 +37,7 @@ type CreationMode = 'single' | 'batch';
 function SectionHeader({ number, title }: { number: number; title: string }) {
     return (
         <div className='flex items-center gap-3 border-b border-border bg-surface-secondary/30 px-6 py-3'>
-            <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground'>
+            <span className='flex h-6 w-6 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground tabular'>
                 {number}
             </span>
             <span className='text-sm font-semibold'>{title}</span>
@@ -55,6 +55,7 @@ function ModeTabs({
     return (
         <div className='flex flex-col gap-1'>
             <button
+                aria-pressed={mode === 'single'}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
                     mode === 'single'
                         ? 'bg-surface-secondary text-foreground'
@@ -63,10 +64,11 @@ function ModeTabs({
                 onClick={() => onChange('single')}
                 type='button'
             >
-                <Server className='h-4 w-4' />
+                <Server aria-hidden='true' className='h-4 w-4' />
                 Single node
             </button>
             <button
+                aria-pressed={mode === 'batch'}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-left text-sm font-medium transition-colors cursor-pointer ${
                     mode === 'batch'
                         ? 'bg-surface-secondary text-foreground'
@@ -75,7 +77,7 @@ function ModeTabs({
                 onClick={() => onChange('batch')}
                 type='button'
             >
-                <Users className='h-4 w-4' />
+                <Users aria-hidden='true' className='h-4 w-4' />
                 Batch create
             </button>
         </div>
@@ -293,7 +295,7 @@ export default function CreateNode() {
             <PageHeader
                 actions={
                     <Button variant='ghost' onPress={() => navigate('/nodes')}>
-                        <ArrowLeft className='mr-1.5 h-4 w-4' />
+                        <ArrowLeft aria-hidden='true' className='mr-1.5 h-4 w-4' />
                         Back to nodes
                     </Button>
                 }
@@ -306,7 +308,7 @@ export default function CreateNode() {
             {mode === 'batch' ? (
                 <ContentCard className='p-8 text-center'>
                     <div className='space-y-3'>
-                        <Users className='mx-auto h-10 w-10 text-muted' />
+                        <Users aria-hidden='true' className='mx-auto h-10 w-10 text-muted' />
                         <div className='text-sm font-medium'>Batch creation is coming soon</div>
                         <p className='text-xs text-muted'>Use single-node creation for now.</p>
                         <Button size='sm' variant='primary' onPress={() => setMode('single')}>
@@ -334,9 +336,11 @@ export default function CreateNode() {
 
                                     <FormRow htmlFor='node-name' label='Node name' required>
                                         <Input
+                                            autoComplete='off'
                                             autoFocus
                                             id='node-name'
                                             required
+                                            spellCheck={false}
                                             variant='secondary'
                                             value={name}
                                             onChange={(e) => setName(e.target.value)}
@@ -352,8 +356,10 @@ export default function CreateNode() {
                                                 >
                                                     <Input
                                                         aria-label={`IP address ${index + 1}`}
+                                                        autoComplete='off'
                                                         className='flex-1'
                                                         required={index === 0}
+                                                        spellCheck={false}
                                                         variant='secondary'
                                                         value={item.value}
                                                         onChange={(e) =>
@@ -374,7 +380,10 @@ export default function CreateNode() {
                                                                 handleRemoveAddress(item.id)
                                                             }
                                                         >
-                                                            <Trash2 className='h-4 w-4' />
+                                                            <Trash2
+                                                                aria-hidden='true'
+                                                                className='h-4 w-4'
+                                                            />
                                                         </Button>
                                                     )}
                                                 </div>
@@ -385,7 +394,7 @@ export default function CreateNode() {
                                                 variant='ghost'
                                                 onPress={handleAddAddress}
                                             >
-                                                <Plus className='h-4 w-4' />
+                                                <Plus aria-hidden='true' className='h-4 w-4' />
                                                 Add address
                                             </Button>
                                         </div>
@@ -442,20 +451,27 @@ export default function CreateNode() {
 
                             <ContentCard className='overflow-visible p-0' noPadding>
                                 <button
+                                    aria-expanded={sshExpanded}
                                     className='flex w-full items-center justify-between border-b border-border bg-surface-secondary/30 px-6 py-3 text-left'
                                     onClick={() => setSshExpanded((v) => !v)}
                                     type='button'
                                 >
                                     <div className='flex items-center gap-3'>
-                                        <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground'>
+                                        <span className='flex h-6 w-6 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground tabular'>
                                             2
                                         </span>
                                         <span className='text-sm font-semibold'>SSH access</span>
                                     </div>
                                     {sshExpanded ? (
-                                        <ChevronDown className='h-4 w-4 text-muted' />
+                                        <ChevronDown
+                                            aria-hidden='true'
+                                            className='h-4 w-4 text-muted'
+                                        />
                                     ) : (
-                                        <ChevronRight className='h-4 w-4 text-muted' />
+                                        <ChevronRight
+                                            aria-hidden='true'
+                                            className='h-4 w-4 text-muted'
+                                        />
                                     )}
                                 </button>
 
@@ -468,9 +484,11 @@ export default function CreateNode() {
                                             required
                                         >
                                             <Input
+                                                autoComplete='off'
                                                 id='node-ssh-ip'
                                                 required
                                                 className='w-full'
+                                                spellCheck={false}
                                                 variant='secondary'
                                                 value={sshIp}
                                                 onChange={(e) => setSshIp(e.target.value)}
@@ -533,7 +551,10 @@ export default function CreateNode() {
                                                 </Button>
                                                 {sshConnectionVerified && (
                                                     <span className='inline-flex items-center gap-1.5 text-sm text-success'>
-                                                        <Check className='h-4 w-4' />
+                                                        <Check
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                         {sshTestMessage}
                                                     </span>
                                                 )}

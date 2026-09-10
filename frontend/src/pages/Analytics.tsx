@@ -22,6 +22,7 @@ import { useCallback, useMemo, useState } from 'react';
 
 import { ApiError, analyticsApi, clusterApi, nodesApi } from '@/api';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { chartColors } from '@/components/chartColors.ts';
 import { DataTable } from '@/components/DataTable.tsx';
 import { PageHeader } from '@/components/PageHeader.tsx';
 import { SelectField } from '@/components/SelectField.tsx';
@@ -142,8 +143,10 @@ function RankingTable({
                         <td className='max-w-sm truncate font-mono text-xs' title={item.value}>
                             {item.value || '(empty)'}
                         </td>
-                        <td className='text-sm'>{item.requests.toLocaleString()}</td>
-                        <td className='text-sm text-muted'>{formatBytes(trafficOf(item))}</td>
+                        <td className='tabular text-sm'>{item.requests.toLocaleString()}</td>
+                        <td className='tabular text-sm text-muted'>
+                            {formatBytes(trafficOf(item))}
+                        </td>
                     </tr>
                 ))}
             </tbody>
@@ -162,16 +165,16 @@ function Breakdown({ title, items }: { title: string; items: DistributionItem[] 
                     {items.slice(0, 10).map((item) => (
                         <div className='space-y-1.5' key={item.value}>
                             <div className='flex items-center justify-between gap-4 text-xs'>
-                                <span className='truncate font-mono' title={item.value}>
+                                <span className='min-w-0 truncate font-mono' title={item.value}>
                                     {item.value || '(empty)'}
                                 </span>
-                                <span className='shrink-0 text-muted'>
+                                <span className='tabular shrink-0 text-muted'>
                                     {item.requests.toLocaleString()} requests
                                 </span>
                             </div>
                             <div className='h-2 overflow-hidden rounded-full bg-surface-secondary'>
                                 <div
-                                    className='h-full rounded-full bg-primary'
+                                    className='h-full rounded-full bg-accent'
                                     style={{
                                         width: `${Math.max(2, (item.requests / max) * 100)}%`,
                                     }}
@@ -460,11 +463,11 @@ export default function Analytics() {
                         variant='secondary'
                         onPress={exportUsage}
                     >
-                        <Download className='mr-2 h-4 w-4' />
+                        <Download aria-hidden='true' className='mr-2 h-4 w-4' />
                         Export CSV
                     </Button>
                     <Button isDisabled={loading} onPress={() => void load()}>
-                        <RefreshCw className='mr-2 h-4 w-4' />
+                        <RefreshCw aria-hidden='true' className='mr-2 h-4 w-4' />
                         {loading ? 'Refreshing…' : 'Refresh'}
                     </Button>
                 </div>
@@ -483,6 +486,7 @@ export default function Analytics() {
                         <Input
                             className='w-72'
                             id='analytics-site-id'
+                            spellCheck={false}
                             value={siteId}
                             variant='secondary'
                             onChange={(event) => setSiteId(event.target.value)}
@@ -563,8 +567,8 @@ export default function Analytics() {
                         ariaLabel={`${period} total and cache traffic trend`}
                         data={trafficData}
                         series={[
-                            { key: 'traffic', label: 'Traffic', color: '#3b82f6' },
-                            { key: 'cache', label: 'Cache traffic', color: '#10b981' },
+                            { key: 'traffic', label: 'Traffic', color: chartColors.primary },
+                            { key: 'cache', label: 'Cache traffic', color: chartColors.secondary },
                         ]}
                         valueFormatter={formatBytes}
                     />
@@ -573,7 +577,9 @@ export default function Analytics() {
                     <TimeSeriesChart
                         ariaLabel={`${period} request trend`}
                         data={requestData}
-                        series={[{ key: 'requests', label: 'Requests', color: '#8b5cf6' }]}
+                        series={[
+                            { key: 'requests', label: 'Requests', color: chartColors.tertiary },
+                        ]}
                     />
                 </ContentCard>
             </div>
@@ -599,8 +605,8 @@ export default function Analytics() {
                             ariaLabel='Node CPU and memory trend over 12 hours'
                             data={cpuMemoryData}
                             series={[
-                                { key: 'cpu', label: 'CPU', color: '#f59e0b' },
-                                { key: 'memory', label: 'Memory', color: '#3b82f6' },
+                                { key: 'cpu', label: 'CPU', color: chartColors.warning },
+                                { key: 'memory', label: 'Memory', color: chartColors.secondary },
                             ]}
                             valueFormatter={(value) => `${value.toFixed(1)}%`}
                         />
@@ -611,20 +617,21 @@ export default function Analytics() {
                             ariaLabel='Node load average trend over 12 hours'
                             data={loadData}
                             series={[
-                                { key: 'load1', label: '1m', color: '#ef4444' },
-                                { key: 'load5', label: '5m', color: '#f59e0b' },
-                                { key: 'load15', label: '15m', color: '#10b981' },
+                                { key: 'load1', label: '1m', color: chartColors.danger },
+                                { key: 'load5', label: '5m', color: chartColors.warning },
+                                { key: 'load15', label: '15m', color: chartColors.secondary },
                             ]}
                         />
                     </div>
                     <div className='xl:col-span-2'>
                         <div className='mb-3 flex items-center gap-2 text-sm font-medium'>
-                            <HardDrive className='h-4 w-4' /> Cache directory usage
+                            <HardDrive aria-hidden='true' className='h-4 w-4' /> Cache directory
+                            usage
                         </div>
                         <TimeSeriesChart
                             ariaLabel='Cache directory usage trend over 12 hours'
                             data={cacheData}
-                            series={[{ key: 'used', label: 'Used', color: '#8b5cf6' }]}
+                            series={[{ key: 'used', label: 'Used', color: chartColors.tertiary }]}
                             valueFormatter={formatBytes}
                         />
                     </div>
@@ -691,11 +698,11 @@ export default function Analytics() {
                 <ContentCard title='Traffic definition'>
                     <div className='space-y-3 text-sm text-muted'>
                         <div className='flex items-center gap-2'>
-                            <Activity className='h-4 w-4 text-primary' />
+                            <Activity aria-hidden='true' className='h-4 w-4 text-accent' />
                             Traffic is all request bytes received plus response bytes sent.
                         </div>
                         <div className='flex items-center gap-2'>
-                            <HardDrive className='h-4 w-4 text-success' />
+                            <HardDrive aria-hidden='true' className='h-4 w-4 text-success' />
                             Cache traffic is response bytes served directly from edge cache.
                         </div>
                     </div>

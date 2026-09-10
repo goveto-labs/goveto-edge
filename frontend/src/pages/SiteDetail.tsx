@@ -41,6 +41,7 @@ import {
 } from '@/api';
 import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { chartColors } from '@/components/chartColors.ts';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { GeoTrafficPanel } from '@/components/GeoTrafficPanel.tsx';
@@ -661,7 +662,7 @@ export default function SiteDetail() {
             <PageHeader
                 actions={
                     <Button variant='ghost' onPress={() => requestAction(() => navigate('/sites'))}>
-                        <ArrowLeft className='mr-1.5 h-4 w-4' />
+                        <ArrowLeft aria-hidden='true' className='mr-1.5 h-4 w-4' />
                         Back to sites
                     </Button>
                 }
@@ -670,8 +671,8 @@ export default function SiteDetail() {
             >
                 {canOperate && (
                     <Button isDisabled={publishingSite} onPress={() => setPublishSiteOpen(true)}>
-                        <Rocket className='mr-2 h-4 w-4' />
-                        {publishingSite ? 'Publishing...' : 'Publish'}
+                        <Rocket aria-hidden='true' className='mr-2 h-4 w-4' />
+                        {publishingSite ? 'Publishing…' : 'Publish'}
                     </Button>
                 )}
             </PageHeader>
@@ -683,7 +684,7 @@ export default function SiteDetail() {
             )}
             {loading || !ready ? (
                 <ContentCard className='p-10 text-center text-sm text-muted'>
-                    Loading site...
+                    Loading site…
                 </ContentCard>
             ) : (
                 site && (
@@ -703,7 +704,7 @@ export default function SiteDetail() {
                                             )
                                         }
                                     >
-                                        <Icon className='h-4 w-4' />
+                                        <Icon aria-hidden='true' className='h-4 w-4' />
                                         {item.label}
                                     </button>
                                 );
@@ -785,7 +786,7 @@ export default function SiteDetail() {
                                                     {
                                                         key: 'bandwidth',
                                                         label: 'Bandwidth',
-                                                        color: '#2563eb',
+                                                        color: chartColors.primary,
                                                     },
                                                 ]}
                                                 referenceLines={
@@ -794,7 +795,7 @@ export default function SiteDetail() {
                                                               {
                                                                   value: bandwidthP95,
                                                                   label: 'P95',
-                                                                  color: '#f59e0b',
+                                                                  color: chartColors.warning,
                                                               },
                                                           ]
                                                         : []
@@ -810,12 +811,12 @@ export default function SiteDetail() {
                                                     {
                                                         key: 'traffic',
                                                         label: 'Traffic',
-                                                        color: '#2563eb',
+                                                        color: chartColors.primary,
                                                     },
                                                     {
                                                         key: 'cache',
                                                         label: 'Cache traffic',
-                                                        color: '#059669',
+                                                        color: chartColors.secondary,
                                                     },
                                                 ]}
                                                 valueFormatter={formatBytes}
@@ -829,7 +830,7 @@ export default function SiteDetail() {
                                                     {
                                                         key: 'requests',
                                                         label: 'Requests',
-                                                        color: '#2563eb',
+                                                        color: chartColors.primary,
                                                     },
                                                 ]}
                                             />
@@ -929,7 +930,10 @@ export default function SiteDetail() {
                                             limit={500}
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <Globe2 className='h-4 w-4 text-primary' />
+                                                    <Globe2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-accent'
+                                                    />
                                                     Countries by requests
                                                 </span>
                                             }
@@ -949,7 +953,10 @@ export default function SiteDetail() {
                                             limit={500}
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <Globe2 className='h-4 w-4 text-primary' />
+                                                    <Globe2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-accent'
+                                                    />
                                                     Countries by traffic
                                                 </span>
                                             }
@@ -962,7 +969,10 @@ export default function SiteDetail() {
                                             limit={500}
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <RadioTower className='h-4 w-4 text-primary' />
+                                                    <RadioTower
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-accent'
+                                                    />
                                                     ISPs by requests
                                                 </span>
                                             }
@@ -975,7 +985,10 @@ export default function SiteDetail() {
                                             limit={500}
                                             title={
                                                 <span className='flex items-center gap-2'>
-                                                    <RadioTower className='h-4 w-4 text-primary' />
+                                                    <RadioTower
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-accent'
+                                                    />
                                                     ISPs by traffic
                                                 </span>
                                             }
@@ -1017,7 +1030,10 @@ export default function SiteDetail() {
                                                                 navigateTo('settings', entry.id)
                                                             }
                                                         >
-                                                            <Icon className='h-4 w-4' />
+                                                            <Icon
+                                                                aria-hidden='true'
+                                                                className='h-4 w-4'
+                                                            />
                                                             {item.label}
                                                         </button>
                                                         <div className='ml-5 mt-1 space-y-1 border-l border-border pl-2'>
@@ -1051,7 +1067,7 @@ export default function SiteDetail() {
                                                     type='button'
                                                     onClick={() => navigateTo('settings', item.id)}
                                                 >
-                                                    <Icon className='h-4 w-4' />
+                                                    <Icon aria-hidden='true' className='h-4 w-4' />
                                                     {item.label}
                                                 </button>
                                             );
@@ -1130,7 +1146,10 @@ export default function SiteDetail() {
                                                                     setDeleteSiteOpen(true)
                                                                 }
                                                             >
-                                                                <Trash2 className='mr-1.5 h-4 w-4' />
+                                                                <Trash2
+                                                                    aria-hidden='true'
+                                                                    className='mr-1.5 h-4 w-4'
+                                                                />
                                                                 Delete site
                                                             </Button>
                                                         </div>
@@ -1166,7 +1185,10 @@ export default function SiteDetail() {
                                                         }
                                                         onPress={() => void saveBasic()}
                                                     >
-                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        <Save
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         Save basic settings
                                                     </Button>
                                                 </SettingsActionBar>
@@ -1240,7 +1262,10 @@ export default function SiteDetail() {
                                                             )
                                                         }
                                                     >
-                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        <Save
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         Save domains
                                                     </Button>
                                                 </SettingsActionBar>
@@ -1337,7 +1362,10 @@ export default function SiteDetail() {
                                                         isDisabled={saving}
                                                         onPress={() => void saveListener()}
                                                     >
-                                                        <Save className='mr-1.5 h-4 w-4' />
+                                                        <Save
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         Save HTTP settings
                                                     </Button>
                                                 </SettingsActionBar>
@@ -1529,7 +1557,10 @@ export default function SiteDetail() {
                                                         isDisabled={saving}
                                                         onPress={() => void saveHTTPS()}
                                                     >
-                                                        <ShieldCheck className='mr-1.5 h-4 w-4' />
+                                                        <ShieldCheck
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         Save HTTPS settings
                                                     </Button>
                                                 </SettingsActionBar>
@@ -1677,7 +1708,10 @@ export default function SiteDetail() {
                                                                         )
                                                                     }
                                                                 >
-                                                                    <Trash2 className='h-4 w-4 text-danger' />
+                                                                    <Trash2
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4 text-danger'
+                                                                    />
                                                                 </Button>
                                                             </div>
                                                         ))}
@@ -1696,7 +1730,10 @@ export default function SiteDetail() {
                                                                 ])
                                                             }
                                                         >
-                                                            <Plus className='mr-1.5 h-4 w-4' />
+                                                            <Plus
+                                                                aria-hidden='true'
+                                                                className='mr-1.5 h-4 w-4'
+                                                            />
                                                             Add origin
                                                         </Button>
                                                     </div>
@@ -1728,7 +1765,10 @@ export default function SiteDetail() {
                                                             )
                                                         }
                                                     >
-                                                        <Cloud className='mr-1.5 h-4 w-4' />
+                                                        <Cloud
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         Save origins
                                                     </Button>
                                                 </SettingsActionBar>

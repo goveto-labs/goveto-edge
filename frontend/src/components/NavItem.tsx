@@ -29,11 +29,12 @@ export function NavItem({
     const { requestAction } = useUnsavedChanges();
     const link = (
         <Link
+            aria-current={active ? 'page' : undefined}
             className={`group relative flex items-center rounded-lg text-sm font-medium transition-colors cursor-pointer ${
                 collapsed ? 'justify-center px-2 py-2.5' : 'gap-3 px-3 py-2.5'
             } ${
                 active
-                    ? 'bg-surface-secondary text-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-foreground'
+                    ? 'bg-accent-soft text-accent-soft-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-0.5 before:-translate-y-1/2 before:rounded-r-full before:bg-accent'
                     : 'text-muted hover:bg-surface-secondary hover:text-foreground'
             }`}
             to={to}
@@ -51,10 +52,10 @@ export function NavItem({
             onFocus={() => preloadRoute(to)}
             onMouseEnter={() => preloadRoute(to)}
         >
-            <Icon className='h-[18px] w-[18px] shrink-0' />
+            <Icon aria-hidden='true' className='h-[18px] w-[18px] shrink-0' />
             {!collapsed && <span className='flex-1 truncate'>{label}</span>}
             {!collapsed && badge ? (
-                <Badge className='ml-auto' color='danger' size='sm' variant='soft'>
+                <Badge className='ml-auto tabular' color='danger' size='sm' variant='soft'>
                     {badge}
                 </Badge>
             ) : null}

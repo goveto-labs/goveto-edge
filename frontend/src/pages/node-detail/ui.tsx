@@ -13,6 +13,8 @@ import {
     Terminal,
 } from 'lucide-react';
 
+import { chartColors } from '@/components/chartColors.ts';
+
 export type DetailTab = 'overview' | 'details' | 'logs' | 'installation' | 'settings';
 export type SettingsPage = 'network' | 'cache';
 
@@ -60,22 +62,26 @@ export function InstallationProgress({ status }: { status: string }) {
                             complete
                                 ? 'border-success/25 bg-success/10'
                                 : active
-                                  ? 'border-primary/30 bg-primary/10'
+                                  ? 'border-accent/30 bg-accent/10'
                                   : 'border-border bg-surface-secondary/25'
                         }`}
                         key={step}
                     >
                         <div className='flex items-center gap-2'>
                             <span
-                                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold ${
+                                className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-semibold tabular ${
                                     complete
                                         ? 'bg-success text-success-foreground'
                                         : active
-                                          ? 'bg-primary text-primary-foreground'
+                                          ? 'bg-accent text-accent-foreground'
                                           : 'bg-surface-secondary text-muted'
                                 }`}
                             >
-                                {complete ? <Check className='h-3.5 w-3.5' /> : index + 1}
+                                {complete ? (
+                                    <Check aria-hidden='true' className='h-3.5 w-3.5' />
+                                ) : (
+                                    index + 1
+                                )}
                             </span>
                             <span className='text-xs font-medium'>{step}</span>
                         </div>
@@ -98,7 +104,7 @@ export function SectionTitle({
     return (
         <div className='flex items-start gap-3 border-b border-border px-5 py-4'>
             <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-secondary text-muted'>
-                <Icon className='h-4 w-4' />
+                <Icon aria-hidden='true' className='h-4 w-4' />
             </span>
             <div>
                 <h2 className='text-sm font-semibold'>{title}</h2>
@@ -123,7 +129,9 @@ export function StatCell({
     return (
         <div className='min-w-0 rounded-xl border border-border/70 bg-surface p-3.5 shadow-sm'>
             <div className='text-xs font-medium text-muted'>{label}</div>
-            <div className={`mt-1 text-lg font-semibold tracking-tight ${toneClass}`}>{value}</div>
+            <div className={`mt-1 text-lg font-semibold tracking-tight tabular ${toneClass}`}>
+                {value}
+            </div>
             {footer && <div className='mt-1 truncate text-xs text-muted'>{footer}</div>}
         </div>
     );
@@ -170,7 +178,7 @@ export function SettingsNavigation({
                         type='button'
                         onClick={() => onChange(item.id)}
                     >
-                        <Icon className='h-4 w-4' />
+                        <Icon aria-hidden='true' className='h-4 w-4' />
                         {item.label}
                     </button>
                 );
@@ -180,33 +188,30 @@ export function SettingsNavigation({
 }
 
 export const slicePalette = [
-    '#3b82f6',
-    '#10b981',
-    '#f59e0b',
-    '#8b5cf6',
-    '#06b6d4',
-    '#ec4899',
-    '#84cc16',
-    '#f97316',
-    '#64748b',
+    chartColors.primary,
+    chartColors.secondary,
+    chartColors.warning,
+    chartColors.tertiary,
+    chartColors.danger,
+    chartColors.neutral,
 ];
 
 export const methodColors: Record<string, string> = {
-    GET: '#3b82f6',
-    POST: '#10b981',
-    PUT: '#f59e0b',
-    DELETE: '#ef4444',
-    PATCH: '#8b5cf6',
-    HEAD: '#64748b',
-    OPTIONS: '#06b6d4',
+    GET: chartColors.secondary,
+    POST: chartColors.primary,
+    PUT: chartColors.warning,
+    DELETE: chartColors.danger,
+    PATCH: chartColors.tertiary,
+    HEAD: chartColors.neutral,
+    OPTIONS: chartColors.primary,
 };
 
 export function statusColor(value: string) {
-    if (value.startsWith('2')) return '#10b981';
-    if (value.startsWith('3')) return '#3b82f6';
-    if (value.startsWith('4')) return '#f59e0b';
-    if (value.startsWith('5')) return '#ef4444';
-    return '#64748b';
+    if (value.startsWith('2')) return chartColors.primary;
+    if (value.startsWith('3')) return chartColors.secondary;
+    if (value.startsWith('4')) return chartColors.warning;
+    if (value.startsWith('5')) return chartColors.danger;
+    return chartColors.neutral;
 }
 
 export function toSlices(
@@ -226,7 +231,7 @@ export function toSlices(
         {
             label: 'Other',
             value: rest.reduce((sum, slice) => sum + slice.value, 0),
-            color: '#94a3b8',
+            color: chartColors.neutral,
         },
     ];
 }

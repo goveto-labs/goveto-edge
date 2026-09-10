@@ -36,7 +36,7 @@ export function SiteClientIPSettings({
         <ContentCard noPadding>
             <div className='flex flex-col gap-3 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
                 <div className='flex items-center gap-2'>
-                    <Network className='h-4 w-4 text-primary' />
+                    <Network className='h-4 w-4 text-accent' />
                     <h2 className='text-sm font-semibold'>Client IP resolution</h2>
                 </div>
                 <ToggleSwitch

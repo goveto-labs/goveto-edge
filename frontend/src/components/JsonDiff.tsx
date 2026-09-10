@@ -184,7 +184,7 @@ export function JsonDiff({ before, after }: JsonDiffProps) {
         <div className='overflow-hidden rounded-lg border border-border bg-surface-secondary text-xs'>
             <div className='flex items-center justify-between gap-2 border-b border-border px-3 py-2'>
                 <span className='font-semibold'>Changes</span>
-                <span className='flex items-center gap-3 font-mono text-muted'>
+                <span className='flex items-center gap-3 font-mono tabular text-muted'>
                     <span className='text-success'>+{added}</span>
                     <span className='text-danger'>-{removed}</span>
                 </span>

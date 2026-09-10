@@ -47,14 +47,14 @@ export function AsyncState({
     if (status === 'error' && !children) {
         return (
             <Alert status='danger'>
-                <AlertTriangle className='h-4 w-4' />
+                <AlertTriangle aria-hidden='true' className='h-4 w-4' />
                 <Alert.Content>
                     <Alert.Title>Unable to load data</Alert.Title>
                     <Alert.Description>{error || 'The request failed.'}</Alert.Description>
                 </Alert.Content>
                 {onRetry && (
                     <Button isDisabled={retrying} size='sm' variant='secondary' onPress={onRetry}>
-                        <RefreshCw className='h-4 w-4' />
+                        <RefreshCw aria-hidden='true' className='h-4 w-4' />
                         Retry
                     </Button>
                 )}
@@ -85,7 +85,7 @@ export function AsyncState({
                             variant='secondary'
                             onPress={onRetry}
                         >
-                            <RefreshCw className='h-4 w-4' />
+                            <RefreshCw aria-hidden='true' className='h-4 w-4' />
                             Retry
                         </Button>
                     )}

@@ -1,6 +1,6 @@
 import type { ApiKeyPermission, ClusterApiKey, ClusterApiKeyCreated } from '@/api';
 
-import { Button, Input } from '@heroui/react';
+import { Alert, Button, Input } from '@heroui/react';
 import {
     Check,
     Copy,
@@ -80,7 +80,7 @@ function CopyField({ value }: { value: string }) {
     return (
         <div className='space-y-1.5'>
             <div className='flex items-center gap-2'>
-                <Input readOnly className='font-mono text-xs' value={value} />
+                <Input aria-label='Token' readOnly className='font-mono text-xs' value={value} />
                 <Button
                     aria-label='Copy token'
                     variant='ghost'
@@ -99,9 +99,9 @@ function CopyField({ value }: { value: string }) {
                     }}
                 >
                     {copied ? (
-                        <Check className='h-4 w-4 text-success' />
+                        <Check aria-hidden='true' className='h-4 w-4 text-success' />
                     ) : (
-                        <Copy className='h-4 w-4' />
+                        <Copy aria-hidden='true' className='h-4 w-4' />
                     )}
                     {copied ? 'Copied' : 'Copy'}
                 </Button>
@@ -314,7 +314,7 @@ export default function ApiKeys() {
                             setCreateOpen(true);
                         }}
                     >
-                        <Plus className='h-4 w-4' /> Create API key
+                        <Plus aria-hidden='true' className='h-4 w-4' /> Create API key
                     </Button>
                 }
                 subtitle='Automate cluster operations with scoped API keys.'
@@ -328,9 +328,13 @@ export default function ApiKeys() {
                 !revokeTarget &&
                 !disableTarget && <FormError message={error} />}
             {success && !issued && (
-                <div className='rounded-lg border border-success/20 bg-success/10 px-4 py-3 text-sm text-success'>
-                    {success}
-                </div>
+                <Alert status='success'>
+                    <Alert.Indicator />
+                    <Alert.Content>
+                        <Alert.Title>API keys updated</Alert.Title>
+                        <Alert.Description>{success}</Alert.Description>
+                    </Alert.Content>
+                </Alert>
             )}
             {!clusterId ? (
                 <div className='py-12 text-center text-sm text-muted'>
@@ -409,9 +413,15 @@ export default function ApiKeys() {
                                                         }}
                                                     >
                                                         {key.status === 'ACTIVE' ? (
-                                                            <PowerOff className='h-4 w-4' />
+                                                            <PowerOff
+                                                                aria-hidden='true'
+                                                                className='h-4 w-4'
+                                                            />
                                                         ) : (
-                                                            <Power className='h-4 w-4' />
+                                                            <Power
+                                                                aria-hidden='true'
+                                                                className='h-4 w-4'
+                                                            />
                                                         )}
                                                     </Button>
                                                 )}
@@ -428,7 +438,10 @@ export default function ApiKeys() {
                                                         setError('');
                                                     }}
                                                 >
-                                                    <Pencil className='h-4 w-4' />
+                                                    <Pencil
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4'
+                                                    />
                                                 </Button>
                                                 {displayStatus === 'ACTIVE' && (
                                                     <Button
@@ -442,7 +455,10 @@ export default function ApiKeys() {
                                                             setRotateTarget(key);
                                                         }}
                                                     >
-                                                        <RefreshCcw className='h-4 w-4' />
+                                                        <RefreshCcw
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                     </Button>
                                                 )}
                                                 <Button
@@ -456,7 +472,10 @@ export default function ApiKeys() {
                                                         setRevokeTarget(key);
                                                     }}
                                                 >
-                                                    <Trash2 className='h-4 w-4 text-danger' />
+                                                    <Trash2
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-danger'
+                                                    />
                                                 </Button>
                                             </div>
                                         )}
@@ -554,7 +573,9 @@ export default function ApiKeys() {
                             }
                             type='submit'
                         >
-                            {busy === 'create' && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy === 'create' && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Create key
                         </Button>
                     </DialogFooter>
@@ -627,7 +648,9 @@ export default function ApiKeys() {
                             }
                             type='submit'
                         >
-                            {busy === 'update' && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy === 'update' && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Save changes
                         </Button>
                     </DialogFooter>

@@ -26,7 +26,10 @@ const countryNames =
 function formatBytes(bytes: number) {
     if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
-    const unit = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+    const unit = Math.max(
+        0,
+        Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1)
+    );
     return `${(bytes / 1024 ** unit).toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
@@ -110,7 +113,7 @@ function DetailValue({
     return (
         <div className={wide ? 'sm:col-span-2' : undefined}>
             <dt className='text-xs text-muted'>{label}</dt>
-            <dd className={`mt-1 break-words text-sm ${mono ? 'font-mono text-xs' : ''}`}>
+            <dd className={`mt-1 break-words text-sm tabular ${mono ? 'font-mono text-xs' : ''}`}>
                 {value === '' || value === undefined || value === null ? '-' : value}
             </dd>
         </div>
@@ -321,6 +324,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         <Input
                             id='access-log-search'
                             placeholder='Path, IP, request ID, status, user agent'
+                            spellCheck={false}
                             value={searchInput}
                             variant='secondary'
                             onChange={(event) => setSearchInput(event.target.value)}
@@ -344,7 +348,10 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                         variant='secondary'
                         onPress={() => void loadLogs()}
                     >
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                         Refresh
                     </Button>
                 </div>
@@ -457,7 +464,7 @@ export function SiteAccessLogsView({ embeddedSiteId }: SitesAccessLogsProps) {
                                                 variant='ghost'
                                                 onPress={() => setSelected(entry)}
                                             >
-                                                <Eye className='h-4 w-4' />
+                                                <Eye aria-hidden='true' className='h-4 w-4' />
                                             </Button>
                                         </Tooltip.Trigger>
                                         <Tooltip.Content>View request details</Tooltip.Content>

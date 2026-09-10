@@ -5,9 +5,9 @@ import type { AlertSeverity } from '@/api';
 export type { AlertSeverity } from '@/api';
 
 const severityStyles: Record<AlertSeverity, string> = {
-    CRITICAL: 'bg-danger/15 text-danger',
-    WARNING: 'bg-warning/15 text-warning',
-    INFO: 'bg-primary/15 text-primary',
+    CRITICAL: 'bg-danger-soft text-danger-soft-foreground',
+    WARNING: 'bg-warning-soft text-warning-soft-foreground',
+    INFO: 'bg-accent-soft text-accent-soft-foreground',
 };
 
 export function severityBadgeClass(severity: string): string {
@@ -17,7 +17,7 @@ export function severityBadgeClass(severity: string): string {
 export function severityDotClass(severity: string): string {
     if (severity === 'CRITICAL') return 'bg-danger';
     if (severity === 'WARNING') return 'bg-warning';
-    return 'bg-primary';
+    return 'bg-accent';
 }
 
 export function severityLabel(severity: string): string {

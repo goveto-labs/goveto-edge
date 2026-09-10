@@ -34,14 +34,14 @@ function StepNavigation() {
                 className='flex items-center gap-2 rounded-lg bg-surface-secondary px-3 py-2 text-sm font-medium text-foreground'
                 href='#site-information'
             >
-                <Globe2 className='h-4 w-4' />
+                <Globe2 aria-hidden='true' className='h-4 w-4' />
                 Site information
             </a>
             <a
                 className='flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-secondary hover:text-foreground'
                 href='#site-origins'
             >
-                <Server className='h-4 w-4' />
+                <Server aria-hidden='true' className='h-4 w-4' />
                 Origins
             </a>
         </div>
@@ -51,7 +51,7 @@ function StepNavigation() {
 function SectionHeader({ number, title }: { number: number; title: string }) {
     return (
         <div className='flex items-center gap-3 border-b border-border bg-surface-secondary/30 px-6 py-3'>
-            <span className='flex h-6 w-6 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground'>
+            <span className='flex h-6 w-6 items-center justify-center rounded-full bg-accent text-xs font-semibold text-accent-foreground'>
                 {number}
             </span>
             <span className='text-sm font-semibold'>{title}</span>
@@ -152,7 +152,7 @@ export default function CreateSite() {
             <PageHeader
                 actions={
                     <Button variant='ghost' onPress={() => navigate('/sites')}>
-                        <ArrowLeft className='mr-1.5 h-4 w-4' />
+                        <ArrowLeft aria-hidden='true' className='mr-1.5 h-4 w-4' />
                         Back to sites
                     </Button>
                 }
@@ -281,7 +281,10 @@ export default function CreateSite() {
                                                             )
                                                         }
                                                     >
-                                                        <Trash2 className='h-4 w-4 text-muted' />
+                                                        <Trash2
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4 text-muted'
+                                                        />
                                                     </Button>
                                                 )}
                                             </div>
@@ -353,7 +356,7 @@ export default function CreateSite() {
                                             setOrigins((current) => [...current, createOrigin()])
                                         }
                                     >
-                                        <Plus className='mr-1.5 h-4 w-4' />
+                                        <Plus aria-hidden='true' className='mr-1.5 h-4 w-4' />
                                         Add origin
                                     </Button>
                                 </div>
@@ -369,7 +372,7 @@ export default function CreateSite() {
                                 Cancel
                             </Button>
                             <Button isDisabled={submitting} type='submit'>
-                                <ShieldCheck className='mr-1.5 h-4 w-4' />
+                                <ShieldCheck aria-hidden='true' className='mr-1.5 h-4 w-4' />
                                 {submitting ? 'Creating…' : 'Create site'}
                             </Button>
                         </div>

@@ -301,13 +301,12 @@ export function CacheOperations({
             )}
 
             {embedded && (
-                <div className='flex w-fit gap-1 rounded-xl bg-surface p-1' role='tablist'>
+                <div className='flex w-fit gap-1 rounded-xl bg-surface p-1'>
                     {operationTabs.map((tab) => (
                         <button
-                            aria-selected={mode === tab.id}
-                            className={`rounded-lg px-4 py-1.5 text-sm font-medium ${mode === tab.id ? 'bg-surface-secondary shadow-sm' : 'text-muted'}`}
+                            aria-pressed={mode === tab.id}
+                            className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${mode === tab.id ? 'bg-surface-secondary shadow-sm' : 'text-muted'}`}
                             key={tab.id}
-                            role='tab'
                             type='button'
                             onClick={() => setMode(tab.id as OperationMode)}
                         >
@@ -344,6 +343,7 @@ export function CacheOperations({
                                         'https://www.example.com/assets/app.css\nhttps://shop.example.net/products/42'
                                     }
                                     rows={8}
+                                    spellCheck={false}
                                     value={urls}
                                     variant='secondary'
                                     onChange={(event) => {
@@ -367,7 +367,7 @@ export function CacheOperations({
                         <div className='flex flex-col gap-3 border-t border-border bg-surface-secondary/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between'>
                             <div className='text-xs text-muted'>
                                 {!sitesReady
-                                    ? 'Loading site domains...'
+                                    ? 'Loading site domains…'
                                     : lineCount === 0
                                       ? 'Enter at least one URL.'
                                       : `${parsedURLs.matched.length} URL(s) matched across ${matchedSiteCount} site(s).`}
@@ -382,14 +382,14 @@ export function CacheOperations({
                                 type='submit'
                             >
                                 {mode === 'refresh' ? (
-                                    <RefreshCw className='h-4 w-4' />
+                                    <RefreshCw aria-hidden='true' className='h-4 w-4' />
                                 ) : (
-                                    <Flame className='h-4 w-4' />
+                                    <Flame aria-hidden='true' className='h-4 w-4' />
                                 )}
                                 {submitting
                                     ? mode === 'refresh'
-                                        ? 'Queuing...'
-                                        : 'Prewarming...'
+                                        ? 'Queuing…'
+                                        : 'Prewarming…'
                                     : mode === 'refresh'
                                       ? `Refresh ${parsedURLs.matched.length || ''}`.trim()
                                       : `Prewarm ${parsedURLs.matched.length || ''}`.trim()}
@@ -410,7 +410,7 @@ export function CacheOperations({
                                             {result.url}
                                         </span>
                                         <span
-                                            className={`shrink-0 font-medium ${result.success ? 'text-success' : 'text-danger'}`}
+                                            className={`shrink-0 tabular font-medium ${result.success ? 'text-success' : 'text-danger'}`}
                                         >
                                             {result.success
                                                 ? `HTTP ${result.status_code}`
@@ -432,7 +432,7 @@ export function CacheOperations({
                 aria-label='Cache refresh jobs'
                 action={
                     <Button isDisabled={loading} size='sm' variant='secondary' onPress={loadJobs}>
-                        <RefreshCw className='h-3.5 w-3.5' />
+                        <RefreshCw aria-hidden='true' className='h-3.5 w-3.5' />
                         Refresh
                     </Button>
                 }

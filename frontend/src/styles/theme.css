@@ -1,0 +1,129 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+@theme {
+    --font-sans:
+        "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+        Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    --font-mono:
+        "JetBrains Mono Variable", ui-monospace, SFMono-Regular, Menlo, Consolas,
+        monospace;
+}
+
+/*
+ * Goveto console theme — refined ops aesthetic, neutral grayscale surfaces
+ * with a teal accent. Overrides HeroUI default theme primitives; calculated
+ * colors (hovers, softs, borders) derive automatically via color-mix.
+ */
+@layer theme {
+    :root,
+    .light,
+    .default,
+    [data-theme="light"],
+    [data-theme="default"] {
+        color-scheme: light;
+
+        /* Base — pure neutrals, no hue */
+        --background: oklch(0.968 0 0);
+        --foreground: oklch(0.21 0 0);
+
+        --surface: oklch(1 0 0);
+        --surface-foreground: var(--foreground);
+        --surface-secondary: oklch(0.955 0 0);
+        --surface-secondary-foreground: var(--foreground);
+        --surface-tertiary: oklch(0.94 0 0);
+        --surface-tertiary-foreground: var(--foreground);
+
+        --overlay: oklch(1 0 0);
+        --overlay-foreground: var(--foreground);
+
+        --muted: oklch(0.545 0 0);
+
+        /* Accent — teal */
+        --accent: oklch(0.63 0.118 178);
+        --accent-foreground: oklch(0.99 0 0);
+
+        /* Status */
+        --success: oklch(0.72 0.16 158);
+        --success-foreground: oklch(0.21 0 0);
+        --warning: oklch(0.78 0.15 75);
+        --warning-foreground: oklch(0.21 0 0);
+        --danger: oklch(0.63 0.21 25);
+        --danger-foreground: oklch(0.99 0 0);
+
+        /* Lines */
+        --border: oklch(0.908 0 0);
+        --separator: oklch(0.928 0 0);
+        --focus: var(--accent);
+
+        /* Chart palette — semantic series colors, consumed via chartColors.ts */
+        --chart-1: var(--accent);
+        --chart-2: oklch(0.58 0.14 245);
+        --chart-3: oklch(0.56 0.17 300);
+        --chart-4: oklch(0.72 0.15 70);
+        --chart-5: oklch(0.63 0.21 25);
+        --chart-6: oklch(0.6 0 0);
+
+        /* Shape & elevation */
+        --radius: 0.5rem;
+        --surface-shadow:
+            0 1px 2px 0 rgb(0 0 0 / 0.05),
+            0 0 1px 0 rgb(0 0 0 / 0.06);
+        --overlay-shadow:
+            0 2px 8px 0 rgb(0 0 0 / 0.07),
+            0 12px 28px 0 rgb(0 0 0 / 0.1);
+        --field-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+
+        --backdrop: rgb(0 0 0 / 0.45);
+    }
+
+    .dark,
+    [data-theme="dark"] {
+        color-scheme: dark;
+
+        /* Base — pure neutrals, no hue */
+        --background: oklch(0.145 0 0);
+        --foreground: oklch(0.955 0 0);
+
+        --surface: oklch(0.2 0 0);
+        --surface-foreground: var(--foreground);
+        --surface-secondary: oklch(0.24 0 0);
+        --surface-tertiary: oklch(0.27 0 0);
+
+        --overlay: oklch(0.22 0 0);
+        --overlay-foreground: var(--foreground);
+
+        --muted: oklch(0.7 0 0);
+
+        /* Accent — brighter teal for dark surfaces */
+        --accent: oklch(0.79 0.125 175);
+        --accent-foreground: oklch(0.16 0 0);
+
+        /* Status */
+        --success: oklch(0.8 0.155 158);
+        --success-foreground: oklch(0.16 0 0);
+        --warning: oklch(0.83 0.135 78);
+        --warning-foreground: oklch(0.16 0 0);
+        --danger: oklch(0.68 0.19 24);
+        --danger-foreground: oklch(0.16 0 0);
+
+        /* Lines */
+        --border: oklch(0.295 0 0);
+        --separator: oklch(0.26 0 0);
+        --focus: var(--accent);
+
+        /* Chart palette — lifted for dark surfaces */
+        --chart-1: var(--accent);
+        --chart-2: oklch(0.72 0.12 245);
+        --chart-3: oklch(0.7 0.15 300);
+        --chart-4: oklch(0.8 0.13 78);
+        --chart-5: oklch(0.7 0.17 25);
+        --chart-6: oklch(0.68 0 0);
+
+        --surface-shadow: 0 0 0 0 transparent inset;
+        --overlay-shadow: 0 0 1px 0 rgb(255 255 255 / 0.25) inset;
+        --field-shadow: 0 0 0 0 transparent inset;
+
+        --backdrop: rgb(0 0 0 / 0.6);
+    }
+}

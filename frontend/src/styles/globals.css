@@ -5,6 +5,7 @@
 @import "@heroui/styles/themes/default" layer(theme);
 @import "@heroui/styles/utilities";
 @import "@heroui/styles/variants";
+@import "./theme.css";
 
 @layer base {
     html,
@@ -13,23 +14,90 @@
         @apply h-full;
     }
 
+    /* Dense console baseline: 14.4px — deliberate, applies uniformly via rem */
     html {
         font-size: 90%;
+        font-family: var(--font-sans);
+        -webkit-tap-highlight-color: transparent;
     }
 
     body {
         @apply bg-background text-foreground antialiased;
     }
 
+    code,
+    kbd,
+    pre,
+    samp {
+        font-family: var(--font-mono);
+    }
+
     button:not(:disabled),
     [role="button"]:not([aria-disabled="true"]),
     a[href] {
         cursor: pointer !important;
+        touch-action: manipulation;
     }
 
     button:disabled,
     [role="button"][aria-disabled="true"] {
         cursor: not-allowed !important;
+    }
+
+    /* Global focus-visible fallback; components may override with their own ring */
+    :focus-visible {
+        outline: 2px solid var(--focus);
+        outline-offset: 2px;
+    }
+
+    h1,
+    h2,
+    h3,
+    h4 {
+        text-wrap: balance;
+    }
+
+    p,
+    li {
+        text-wrap: pretty;
+    }
+
+    /* Skip link — visible on keyboard focus only */
+    .skip-link {
+        position: fixed;
+        top: 0.5rem;
+        left: 0.5rem;
+        z-index: 100;
+        padding: 0.5rem 0.875rem;
+        border-radius: var(--radius);
+        background: var(--overlay);
+        color: var(--foreground);
+        box-shadow: var(--overlay-shadow);
+        font-size: 0.875rem;
+        font-weight: 500;
+        transform: translateY(-200%);
+        transition: transform 150ms ease;
+    }
+
+    .skip-link:focus-visible {
+        transform: translateY(0);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+            animation-duration: 0.01ms !important;
+            animation-iteration-count: 1 !important;
+            transition-duration: 0.01ms !important;
+        }
+    }
+}
+
+@layer utilities {
+    /* Numeric columns and comparisons */
+    .tabular {
+        font-variant-numeric: tabular-nums;
     }
 }
 

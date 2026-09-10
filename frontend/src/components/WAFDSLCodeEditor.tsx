@@ -209,7 +209,7 @@ export const WAFDSLCodeEditor = forwardRef<
                 wafLanguage,
                 syntaxHighlighting(
                     HighlightStyle.define([
-                        { tag: tags.keyword, color: 'var(--color-primary)', fontWeight: '600' },
+                        { tag: tags.keyword, color: 'var(--color-accent)', fontWeight: '600' },
                         { tag: tags.string, color: 'var(--color-success)' },
                         { tag: tags.number, color: 'var(--color-warning)' },
                         { tag: tags.variableName, color: 'var(--color-foreground)' },
@@ -245,14 +245,13 @@ export const WAFDSLCodeEditor = forwardRef<
                         borderRight: '1px solid var(--color-border)',
                     },
                     '.cm-activeLine, .cm-activeLineGutter': {
-                        backgroundColor: 'color-mix(in srgb, var(--color-primary) 7%, transparent)',
+                        backgroundColor: 'color-mix(in srgb, var(--color-accent) 7%, transparent)',
                     },
                     '.cm-content': { padding: '12px 0' },
                     '&.cm-focused': { outline: 'none' },
                     '&.cm-focused .cm-cursor': { borderLeftColor: 'var(--color-foreground)' },
                     '&.cm-focused .cm-selectionBackground, ::selection': {
-                        backgroundColor:
-                            'color-mix(in srgb, var(--color-primary) 24%, transparent)',
+                        backgroundColor: 'color-mix(in srgb, var(--color-accent) 24%, transparent)',
                     },
                 }),
             ],

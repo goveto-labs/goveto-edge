@@ -219,7 +219,7 @@ export default function Settings() {
                                     variant='secondary'
                                     onPress={() => openVerification('recovery')}
                                 >
-                                    <RefreshCw className='h-4 w-4' />
+                                    <RefreshCw aria-hidden='true' className='h-4 w-4' />
                                     Recovery codes
                                 </Button>
                                 <Button
@@ -228,7 +228,7 @@ export default function Settings() {
                                     variant='danger'
                                     onPress={() => openVerification('disable')}
                                 >
-                                    <ShieldOff className='h-4 w-4' />
+                                    <ShieldOff aria-hidden='true' className='h-4 w-4' />
                                     Disable
                                 </Button>
                             </>
@@ -240,9 +240,9 @@ export default function Settings() {
                                 onPress={() => void beginEnable()}
                             >
                                 {busy ? (
-                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                    <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
                                 ) : (
-                                    <ShieldCheck className='h-4 w-4' />
+                                    <ShieldCheck aria-hidden='true' className='h-4 w-4' />
                                 )}
                                 Enable 2FA
                             </Button>
@@ -279,9 +279,12 @@ export default function Settings() {
                                         onPress={() => void linkExternalProvider(provider.id)}
                                     >
                                         {linkingProvider === provider.id ? (
-                                            <Loader2 className='h-4 w-4 animate-spin' />
+                                            <Loader2
+                                                aria-hidden='true'
+                                                className='h-4 w-4 animate-spin'
+                                            />
                                         ) : (
-                                            <KeyRound className='h-4 w-4' />
+                                            <KeyRound aria-hidden='true' className='h-4 w-4' />
                                         )}
                                         Link
                                     </Button>
@@ -321,7 +324,7 @@ export default function Settings() {
                                         variant='ghost'
                                         onPress={() => void copySetupKey()}
                                     >
-                                        <Copy className='h-4 w-4' />
+                                        <Copy aria-hidden='true' className='h-4 w-4' />
                                     </Button>
                                 </div>
                                 <a className='text-xs text-accent hover:underline' href={setup.uri}>
@@ -372,7 +375,9 @@ export default function Settings() {
                             type='submit'
                             variant='primary'
                         >
-                            {busy && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             Enable 2FA
                         </Button>
                     </DialogFooter>
@@ -413,6 +418,7 @@ export default function Settings() {
                                 id='totp-verify-code'
                                 placeholder='Authenticator or recovery code'
                                 required
+                                spellCheck={false}
                                 value={code}
                                 onChange={(event) => setCode(event.target.value)}
                             />
@@ -427,7 +433,9 @@ export default function Settings() {
                             type='submit'
                             variant={verificationAction === 'disable' ? 'danger' : 'primary'}
                         >
-                            {busy && <Loader2 className='h-4 w-4 animate-spin' />}
+                            {busy && (
+                                <Loader2 aria-hidden='true' className='h-4 w-4 animate-spin' />
+                            )}
                             {verificationAction === 'disable' ? 'Disable 2FA' : 'Generate codes'}
                         </Button>
                     </DialogFooter>
@@ -457,7 +465,7 @@ export default function Settings() {
                         variant='secondary'
                         onPress={() => void copyRecoveryCodes()}
                     >
-                        <Copy className='h-4 w-4' />
+                        <Copy aria-hidden='true' className='h-4 w-4' />
                         {copied ? 'Copied' : 'Copy codes'}
                     </Button>
                     <Button type='button' variant='primary' onPress={recoveryDialog.close}>

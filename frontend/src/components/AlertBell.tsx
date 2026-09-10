@@ -22,17 +22,17 @@ export function AlertBell() {
             <Tooltip.Trigger>
                 <button
                     aria-label={status}
-                    className='relative inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary'
+                    className='relative inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent'
                     type='button'
                     onClick={() => navigate('/alerts')}
                 >
                     {loading && !overview ? (
-                        <LoaderCircle className='h-4 w-4 animate-spin' />
+                        <LoaderCircle aria-hidden='true' className='h-4 w-4 animate-spin' />
                     ) : (
-                        <Bell className='h-4 w-4' />
+                        <Bell aria-hidden='true' className='h-4 w-4' />
                     )}
                     {firing > 0 && (
-                        <span className='pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none text-danger-foreground'>
+                        <span className='pointer-events-none absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-bold leading-none tabular text-danger-foreground'>
                             {firing > 99 ? '99+' : firing}
                         </span>
                     )}

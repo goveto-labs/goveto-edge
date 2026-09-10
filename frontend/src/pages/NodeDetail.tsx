@@ -51,6 +51,7 @@ import {
 import { ByteSizeInput } from '@/components/ByteSizeInput.tsx';
 import { ConfirmDialog } from '@/components/ConfirmDialog.tsx';
 import { ContentCard } from '@/components/ContentCard.tsx';
+import { chartColors } from '@/components/chartColors.ts';
 import { DonutChart } from '@/components/DonutChart.tsx';
 import { FormError, FormField } from '@/components/FormField.tsx';
 import { FormRow } from '@/components/FormRow.tsx';
@@ -826,7 +827,9 @@ export default function NodeDetail() {
                 >
                     Nodes
                 </button>
-                <span className='text-muted'>/</span>
+                <span aria-hidden='true' className='text-muted'>
+                    /
+                </span>
                 <button
                     className='text-muted transition-colors hover:text-foreground'
                     type='button'
@@ -834,11 +837,15 @@ export default function NodeDetail() {
                 >
                     {node?.name || nodeId}
                 </button>
-                <span className='text-muted'>/</span>
+                <span aria-hidden='true' className='text-muted'>
+                    /
+                </span>
                 <span className='font-medium'>{tabs.find((item) => item.id === tab)?.label}</span>
                 {tab === 'settings' && (
                     <>
-                        <span className='text-muted'>/</span>
+                        <span aria-hidden='true' className='text-muted'>
+                            /
+                        </span>
                         <span className='font-medium'>
                             {settingsPage === 'network' ? 'Network & DNS' : 'Cache'}
                         </span>
@@ -848,7 +855,7 @@ export default function NodeDetail() {
             <PageHeader
                 actions={
                     <Button variant='ghost' onPress={() => navigate('/nodes')}>
-                        <ArrowLeft className='mr-1.5 h-4 w-4' />
+                        <ArrowLeft aria-hidden='true' className='mr-1.5 h-4 w-4' />
                         Back to nodes
                     </Button>
                 }
@@ -879,7 +886,7 @@ export default function NodeDetail() {
                         <ContentCard className='overflow-hidden p-0' noPadding>
                             <div className='border-t border-warning/30 bg-warning/10 px-5 py-3 text-warning'>
                                 <div className='flex items-center gap-2 text-sm font-medium'>
-                                    <Fingerprint className='h-4 w-4' />
+                                    <Fingerprint aria-hidden='true' className='h-4 w-4' />
                                     SSH host key trust required
                                 </div>
                                 <p className='mt-1 text-xs leading-5'>
@@ -936,7 +943,7 @@ export default function NodeDetail() {
                                         )
                                     }
                                 >
-                                    <Icon className='h-4 w-4' />
+                                    <Icon aria-hidden='true' className='h-4 w-4' />
                                     {item.label}
                                 </button>
                             );
@@ -947,7 +954,7 @@ export default function NodeDetail() {
                         key={canonicalDetailPath}
                         className='min-h-40'
                         isLoading={tabContentLoading}
-                        label={`Loading ${tab}`}
+                        label={`Loading ${tab}…`}
                     >
                         {tab === 'overview' && (
                             <div className='space-y-4'>
@@ -984,7 +991,10 @@ export default function NodeDetail() {
                                             variant='secondary'
                                             onPress={() => void loadMonitoring()}
                                         >
-                                            <RefreshCw className='mr-1.5 h-3.5 w-3.5' />
+                                            <RefreshCw
+                                                aria-hidden='true'
+                                                className='mr-1.5 h-3.5 w-3.5'
+                                            />
                                             Refresh
                                         </Button>
                                     </div>
@@ -997,7 +1007,9 @@ export default function NodeDetail() {
                                     </span>
                                     <span className='flex items-center gap-2'>
                                         <span className='text-xs text-muted'>DNS lines</span>
-                                        <span>{dnsLineIds.size || 'Default'}</span>
+                                        <span className='tabular'>
+                                            {dnsLineIds.size || 'Default'}
+                                        </span>
                                     </span>
                                     <span className='flex items-center gap-2'>
                                         <span className='text-xs text-muted'>DNS priority</span>
@@ -1009,7 +1021,9 @@ export default function NodeDetail() {
                                     </span>
                                     <span className='flex items-center gap-2'>
                                         <span className='text-xs text-muted'>Site configs</span>
-                                        <span>{node.siteConfigVersions?.length || 0}</span>
+                                        <span className='tabular'>
+                                            {node.siteConfigVersions?.length || 0}
+                                        </span>
                                     </span>
                                 </div>
 
@@ -1128,12 +1142,12 @@ export default function NodeDetail() {
                                                 {
                                                     key: 'traffic',
                                                     label: 'Traffic',
-                                                    color: '#3b82f6',
+                                                    color: chartColors.primary,
                                                 },
                                                 {
                                                     key: 'cache',
                                                     label: 'Cache traffic',
-                                                    color: '#10b981',
+                                                    color: chartColors.secondary,
                                                 },
                                             ]}
                                             valueFormatter={formatBytes}
@@ -1152,7 +1166,7 @@ export default function NodeDetail() {
                                                 {
                                                     key: 'requests',
                                                     label: 'Requests',
-                                                    color: '#8b5cf6',
+                                                    color: chartColors.tertiary,
                                                 },
                                             ]}
                                         />
@@ -1167,11 +1181,15 @@ export default function NodeDetail() {
                                             data={cpuMemoryChart}
                                             height={220}
                                             series={[
-                                                { key: 'cpu', label: 'CPU', color: '#f59e0b' },
+                                                {
+                                                    key: 'cpu',
+                                                    label: 'CPU',
+                                                    color: chartColors.warning,
+                                                },
                                                 {
                                                     key: 'memory',
                                                     label: 'Memory',
-                                                    color: '#3b82f6',
+                                                    color: chartColors.secondary,
                                                 },
                                             ]}
                                             valueFormatter={(value) => `${value.toFixed(1)}%`}
@@ -1187,9 +1205,21 @@ export default function NodeDetail() {
                                             data={loadChart}
                                             height={220}
                                             series={[
-                                                { key: 'load1', label: '1m', color: '#ef4444' },
-                                                { key: 'load5', label: '5m', color: '#f59e0b' },
-                                                { key: 'load15', label: '15m', color: '#10b981' },
+                                                {
+                                                    key: 'load1',
+                                                    label: '1m',
+                                                    color: chartColors.danger,
+                                                },
+                                                {
+                                                    key: 'load5',
+                                                    label: '5m',
+                                                    color: chartColors.warning,
+                                                },
+                                                {
+                                                    key: 'load15',
+                                                    label: '15m',
+                                                    color: chartColors.secondary,
+                                                },
                                             ]}
                                         />
                                     </ContentCard>
@@ -1203,7 +1233,11 @@ export default function NodeDetail() {
                                             data={cacheChart}
                                             height={220}
                                             series={[
-                                                { key: 'used', label: 'Used', color: '#8b5cf6' },
+                                                {
+                                                    key: 'used',
+                                                    label: 'Used',
+                                                    color: chartColors.tertiary,
+                                                },
                                             ]}
                                             valueFormatter={formatBytes}
                                         />
@@ -1307,7 +1341,7 @@ export default function NodeDetail() {
                                                     />
                                                 </FormField>
                                                 <FormField label='Attempts'>
-                                                    <span className='text-sm'>
+                                                    <span className='text-sm tabular'>
                                                         {node.agentUpgrade.attempts} /{' '}
                                                         {node.agentUpgrade.max_attempts}
                                                     </span>
@@ -1351,6 +1385,7 @@ export default function NodeDetail() {
                                                         onPress={() => void retryAgentUpgrade()}
                                                     >
                                                         <RefreshCw
+                                                            aria-hidden='true'
                                                             className={`h-4 w-4 ${upgradeRetrying ? 'animate-spin' : ''}`}
                                                         />
                                                     </Button>
@@ -1390,7 +1425,7 @@ export default function NodeDetail() {
                                                     {version.site_id}
                                                 </span>
                                                 <div className='flex items-center gap-2'>
-                                                    <span className='text-sm text-muted'>
+                                                    <span className='text-sm text-muted tabular'>
                                                         v{version.version}
                                                     </span>
                                                     <StatusBadge status={version.status} />
@@ -1424,7 +1459,7 @@ export default function NodeDetail() {
                                         variant='secondary'
                                         onPress={() => void loadLogs()}
                                     >
-                                        <RefreshCw className='mr-1.5 h-4 w-4' />
+                                        <RefreshCw aria-hidden='true' className='mr-1.5 h-4 w-4' />
                                         Refresh
                                     </Button>
                                 </div>
@@ -1448,7 +1483,7 @@ export default function NodeDetail() {
                                         <tbody className='divide-y divide-border'>
                                             {logs.map((entry) => (
                                                 <tr key={`${entry.event_time}-${entry.request_id}`}>
-                                                    <td className='whitespace-nowrap px-4 py-3 text-muted'>
+                                                    <td className='whitespace-nowrap px-4 py-3 text-muted tabular'>
                                                         {new Date(
                                                             entry.event_time
                                                         ).toLocaleString()}
@@ -1461,7 +1496,7 @@ export default function NodeDetail() {
                                                             {entry.path}
                                                         </div>
                                                     </td>
-                                                    <td className='px-4 py-3'>
+                                                    <td className='px-4 py-3 tabular'>
                                                         {entry.status_code}
                                                     </td>
                                                     <td className='px-4 py-3'>
@@ -1470,7 +1505,7 @@ export default function NodeDetail() {
                                                     <td className='px-4 py-3 font-mono text-xs'>
                                                         {entry.upstream_address || '-'}
                                                     </td>
-                                                    <td className='px-4 py-3'>
+                                                    <td className='px-4 py-3 tabular'>
                                                         {(entry.duration_us / 1000).toFixed(1)} ms
                                                     </td>
                                                 </tr>
@@ -1520,7 +1555,10 @@ export default function NodeDetail() {
                                                     isDisabled={dnsSaving}
                                                     onPress={() => void saveDNSLines()}
                                                 >
-                                                    <Save className='mr-1.5 h-4 w-4' />
+                                                    <Save
+                                                        aria-hidden='true'
+                                                        className='mr-1.5 h-4 w-4'
+                                                    />
                                                     {dnsSaving
                                                         ? 'Saving…'
                                                         : 'Save DNS configuration'}
@@ -1569,7 +1607,10 @@ export default function NodeDetail() {
                                                     }
                                                     onPress={() => void saveDNSPriority()}
                                                 >
-                                                    <Save className='mr-1.5 h-4 w-4' />
+                                                    <Save
+                                                        aria-hidden='true'
+                                                        className='mr-1.5 h-4 w-4'
+                                                    />
                                                     {dnsSaving ? 'Saving…' : 'Save priority'}
                                                 </Button>
                                             </div>
@@ -1621,7 +1662,10 @@ export default function NodeDetail() {
                                                                         void saveAddress(address.id)
                                                                     }
                                                                 >
-                                                                    <Check className='h-4 w-4' />
+                                                                    <Check
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4'
+                                                                    />
                                                                 </Button>
                                                                 <Button
                                                                     isIconOnly
@@ -1632,7 +1676,10 @@ export default function NodeDetail() {
                                                                         setEditingAddressId('')
                                                                     }
                                                                 >
-                                                                    <X className='h-4 w-4' />
+                                                                    <X
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4'
+                                                                    />
                                                                 </Button>
                                                             </>
                                                         ) : (
@@ -1651,7 +1698,10 @@ export default function NodeDetail() {
                                                                         );
                                                                     }}
                                                                 >
-                                                                    <Pencil className='h-4 w-4' />
+                                                                    <Pencil
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4'
+                                                                    />
                                                                 </Button>
                                                                 <Button
                                                                     isIconOnly
@@ -1669,7 +1719,10 @@ export default function NodeDetail() {
                                                                         })
                                                                     }
                                                                 >
-                                                                    <Trash2 className='h-4 w-4 text-danger' />
+                                                                    <Trash2
+                                                                        aria-hidden='true'
+                                                                        className='h-4 w-4 text-danger'
+                                                                    />
                                                                 </Button>
                                                             </>
                                                         )}
@@ -1700,7 +1753,10 @@ export default function NodeDetail() {
                                                     isDisabled={!newAddress.trim() || addressAdding}
                                                     onPress={() => void addAddress()}
                                                 >
-                                                    <Plus className='mr-1.5 h-4 w-4' />
+                                                    <Plus
+                                                        aria-hidden='true'
+                                                        className='mr-1.5 h-4 w-4'
+                                                    />
                                                     {addressAdding ? 'Adding…' : 'Add'}
                                                 </Button>
                                             </div>
@@ -1798,7 +1854,10 @@ export default function NodeDetail() {
                                         <div className='flex items-start justify-between gap-5 rounded-xl border border-border bg-surface-secondary/30 px-4 py-3'>
                                             <div className='min-w-0'>
                                                 <div className='flex items-center gap-2 text-sm font-medium'>
-                                                    <Bug className='h-4 w-4 text-muted' />
+                                                    <Bug
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4 text-muted'
+                                                    />
                                                     Debug mode
                                                 </div>
                                                 <p className='mt-1 max-w-2xl text-xs leading-5 text-muted'>
@@ -1825,7 +1884,10 @@ export default function NodeDetail() {
                                                 isDisabled={cacheSaving || !cacheIsValid}
                                                 onPress={() => void saveCache()}
                                             >
-                                                <Save className='mr-1.5 h-4 w-4' />
+                                                <Save
+                                                    aria-hidden='true'
+                                                    className='mr-1.5 h-4 w-4'
+                                                />
                                                 {cacheSaving ? 'Saving…' : 'Save and synchronize'}
                                             </Button>
                                         </div>
@@ -1873,8 +1935,8 @@ export default function NodeDetail() {
                                 <ContentCard className='overflow-visible p-0' noPadding>
                                     <div className='flex flex-col gap-3 border-b border-border bg-surface-secondary/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6'>
                                         <div className='flex items-start gap-3'>
-                                            <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground'>
-                                                <RefreshCw className='h-4 w-4' />
+                                            <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-accent text-accent-foreground'>
+                                                <RefreshCw aria-hidden='true' className='h-4 w-4' />
                                             </span>
                                             <div>
                                                 <div className='text-sm font-semibold'>
@@ -1962,7 +2024,10 @@ export default function NodeDetail() {
                                                 </Button>
                                                 {connectionVerified && (
                                                     <span className='inline-flex items-center gap-1.5 text-sm text-success'>
-                                                        <Check className='h-4 w-4' />
+                                                        <Check
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />
                                                         {testMessage}
                                                     </span>
                                                 )}
@@ -1985,7 +2050,10 @@ export default function NodeDetail() {
                                             <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
                                                 <div className='min-w-0'>
                                                     <div className='flex items-center gap-2 text-sm font-medium'>
-                                                        <Fingerprint className='h-4 w-4 text-muted' />
+                                                        <Fingerprint
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4 text-muted'
+                                                        />
                                                         {node.sshHostKey
                                                             ? 'Pinned SSH host key'
                                                             : 'SSH host key not trusted yet'}
@@ -2055,7 +2123,10 @@ export default function NodeDetail() {
 
                                         <div className='border-t border-border py-4'>
                                             <div className='flex items-center gap-2 text-sm font-medium'>
-                                                <Database className='h-4 w-4 text-muted' />
+                                                <Database
+                                                    aria-hidden='true'
+                                                    className='h-4 w-4 text-muted'
+                                                />
                                                 Distributed state (Redis)
                                                 <span
                                                     className={`text-xs font-normal ${
@@ -2120,7 +2191,10 @@ export default function NodeDetail() {
                                         <summary className='flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 transition-colors hover:bg-surface-secondary/50 sm:px-6'>
                                             <div className='flex items-start gap-3'>
                                                 <span className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-surface-secondary text-muted'>
-                                                    <Terminal className='h-4 w-4' />
+                                                    <Terminal
+                                                        aria-hidden='true'
+                                                        className='h-4 w-4'
+                                                    />
                                                 </span>
                                                 <div>
                                                     <div className='text-sm font-semibold'>
@@ -2161,7 +2235,10 @@ export default function NodeDetail() {
                                                                 )}
                                                                 key={architecture}
                                                             >
-                                                                <Download className='h-4 w-4' />
+                                                                <Download
+                                                                    aria-hidden='true'
+                                                                    className='h-4 w-4'
+                                                                />
                                                                 Linux {architecture}
                                                             </a>
                                                         )
@@ -2174,7 +2251,11 @@ export default function NodeDetail() {
                                                             'identity'
                                                         )}
                                                     >
-                                                        <Download className='h-4 w-4' /> Identity
+                                                        <Download
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />{' '}
+                                                        Identity
                                                     </a>
                                                     <a
                                                         className='button button--secondary justify-center w-full'
@@ -2184,8 +2265,11 @@ export default function NodeDetail() {
                                                             'service'
                                                         )}
                                                     >
-                                                        <Download className='h-4 w-4' /> systemd
-                                                        unit
+                                                        <Download
+                                                            aria-hidden='true'
+                                                            className='h-4 w-4'
+                                                        />{' '}
+                                                        systemd unit
                                                     </a>
                                                 </div>
                                             </div>
@@ -2240,7 +2324,10 @@ systemctl status goveto-edge-agent`}
                                                             void initializeManualInstallation()
                                                         }
                                                     >
-                                                        <RefreshCw className='mr-1.5 h-4 w-4' />
+                                                        <RefreshCw
+                                                            aria-hidden='true'
+                                                            className='mr-1.5 h-4 w-4'
+                                                        />
                                                         {manualInitializing
                                                             ? 'Initializing…'
                                                             : 'Verify and initialize'}

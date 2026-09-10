@@ -87,7 +87,10 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
             <PageHeader
                 actions={
                     <Button isIconOnly aria-label='Refresh users' variant='ghost' onPress={load}>
-                        <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+                        <RefreshCw
+                            aria-hidden='true'
+                            className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`}
+                        />
                     </Button>
                 }
                 embedded={embedded}
@@ -102,6 +105,8 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
                         <Input
                             aria-label='Search users'
                             placeholder='Search name or email'
+                            spellCheck={false}
+                            type='search'
                             value={search}
                             variant='secondary'
                             onChange={(event) => {
@@ -195,9 +200,15 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
                                     onPress={() => setTarget(item)}
                                 >
                                     {item.status === 'ACTIVE' ? (
-                                        <ShieldOff className='h-4 w-4 text-danger' />
+                                        <ShieldOff
+                                            aria-hidden='true'
+                                            className='h-4 w-4 text-danger'
+                                        />
                                     ) : (
-                                        <ShieldCheck className='h-4 w-4 text-success' />
+                                        <ShieldCheck
+                                            aria-hidden='true'
+                                            className='h-4 w-4 text-success'
+                                        />
                                     )}
                                 </Button>
                             </td>
@@ -208,7 +219,9 @@ export default function Users({ embedded = false }: { embedded?: boolean }) {
             {total > 0 && (
                 <Pagination className='justify-between' size='sm'>
                     <Pagination.Summary>
-                        Showing {rangeStart}-{rangeEnd} of {total.toLocaleString()}
+                        <span className='tabular'>
+                            Showing {rangeStart}-{rangeEnd} of {total.toLocaleString()}
+                        </span>
                     </Pagination.Summary>
                     <Pagination.Content>
                         <Pagination.Item>

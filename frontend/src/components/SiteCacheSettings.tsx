@@ -460,7 +460,7 @@ function AddBypassDirectiveDialog({
                             );
                             return (
                                 <button
-                                    className='flex w-full items-center justify-between gap-4 px-1 py-3 text-left transition-colors hover:bg-surface-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-45'
+                                    className='flex w-full items-center justify-between gap-4 px-1 py-3 text-left transition-colors hover:bg-surface-secondary/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-45'
                                     disabled={included}
                                     key={preset.value}
                                     type='button'
@@ -1027,7 +1027,7 @@ export function SiteCacheSettings({
                 >
                     <Button isDisabled={saving || !policyValid} onPress={onSave}>
                         <Save className='mr-1.5 h-4 w-4' />
-                        {saving ? 'Saving...' : 'Save cache settings'}
+                        {saving ? 'Saving…' : 'Save cache settings'}
                     </Button>
                 </SettingsActionBar>
             </div>

@@ -136,7 +136,7 @@ export function SiteCachePurge({
             <ContentCard noPadding>
                 <div className='flex flex-col gap-4 px-5 py-5 sm:flex-row sm:items-center sm:justify-between lg:px-6'>
                     <div className='flex items-center gap-3'>
-                        <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground'>
+                        <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent text-accent-foreground'>
                             <Eraser className='h-5 w-5' />
                         </span>
                         <div>
@@ -212,9 +212,9 @@ export function SiteCachePurge({
                             return (
                                 <button
                                     aria-pressed={selected}
-                                    className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-all ${
+                                    className={`flex items-start gap-3 rounded-xl border px-4 py-3.5 text-left transition-[background-color,border-color,box-shadow] ${
                                         selected
-                                            ? 'border-primary bg-primary/10 shadow-sm ring-2 ring-primary/40'
+                                            ? 'border-accent bg-accent/10 shadow-sm ring-2 ring-accent/40'
                                             : 'border-border/70 hover:border-border hover:bg-surface-secondary/50'
                                     }`}
                                     key={option.id}
@@ -224,7 +224,7 @@ export function SiteCachePurge({
                                     <span
                                         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
                                             selected
-                                                ? 'bg-primary text-primary-foreground'
+                                                ? 'bg-accent text-accent-foreground'
                                                 : 'bg-surface-secondary text-muted'
                                         }`}
                                     >
@@ -275,7 +275,7 @@ export function SiteCachePurge({
                         onPress={() => void purgeCustom()}
                     >
                         <Eraser className='mr-1.5 h-4 w-4' />
-                        {submitting ? 'Queuing...' : `Purge ${values.length || ''}`.trim()}
+                        {submitting ? 'Queuing…' : `Purge ${values.length || ''}`.trim()}
                     </Button>
                 </DialogFooter>
             </DialogShell>

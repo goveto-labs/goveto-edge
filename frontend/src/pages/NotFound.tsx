@@ -16,11 +16,11 @@ export default function NotFound() {
                 </p>
                 <div className='mt-6 flex flex-wrap justify-center gap-2'>
                     <Button variant='secondary' onPress={() => navigate(-1)}>
-                        <ArrowLeft className='h-4 w-4' />
+                        <ArrowLeft aria-hidden='true' className='h-4 w-4' />
                         Go back
                     </Button>
                     <Button onPress={() => navigate('/')}>
-                        <Home className='h-4 w-4' />
+                        <Home aria-hidden='true' className='h-4 w-4' />
                         Dashboard
                     </Button>
                 </div>

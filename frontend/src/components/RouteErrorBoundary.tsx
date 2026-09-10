@@ -70,11 +70,11 @@ export class RouteErrorBoundary extends Component<Props, State> {
                     </dl>
                     <div className='mt-6 flex flex-wrap gap-2'>
                         <Button onPress={this.retry}>
-                            <RefreshCw className='h-4 w-4' />
+                            <RefreshCw aria-hidden='true' className='h-4 w-4' />
                             Retry
                         </Button>
                         <Button variant='secondary' onPress={() => window.location.assign('/')}>
-                            <Home className='h-4 w-4' />
+                            <Home aria-hidden='true' className='h-4 w-4' />
                             Return to dashboard
                         </Button>
                     </div>
