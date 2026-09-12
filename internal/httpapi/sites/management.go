@@ -84,6 +84,7 @@ func exportSite(db *client.Client) echo.HandlerFunc {
 		if err != nil {
 			return err
 		}
+		bundle = redactBundleOriginPolicy(bundle)
 		c.Response().Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.goveto.json"`, safeFilename(bundle.Name)))
 		return types.JSON(c, http.StatusOK, bundle)
 	}
@@ -178,6 +179,9 @@ func createTemplate(db *client.Client) echo.HandlerFunc {
 				return echo.NewHTTPError(http.StatusNotFound, "site not found")
 			}
 			bundle, err = loadSiteBundle(c.Request().Context(), db, input.SiteID)
+			// Never persist origin mTLS credentials into a template; they could
+			// only ever be read back through the redacted template API anyway.
+			bundle = redactBundleOriginPolicy(bundle)
 		} else if input.Config != nil {
 			bundle = *input.Config
 		} else {
@@ -185,6 +189,10 @@ func createTemplate(db *client.Client) echo.HandlerFunc {
 		}
 		if err != nil {
 			return err
+		}
+		bundle.OriginPolicy, err = normalizeAndValidateOriginPolicy(bundle.OriginPolicy)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
 		if err = normalizeSiteBundlePolicies(&bundle); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
@@ -219,6 +227,7 @@ func getTemplate(db *client.Client) echo.HandlerFunc {
 		if err = json.Unmarshal(item.ConfigJson, &bundle); err != nil {
 			return err
 		}
+		bundle = redactBundleOriginPolicy(bundle)
 		return types.JSON(c, http.StatusOK, templateResponse{ID: item.Id, Name: item.Name, Config: &bundle, UpdatedAt: item.UpdatedAt})
 	}
 }
@@ -308,6 +317,24 @@ func applyBulkSite(ctx context.Context, db *client.Client, publishService *publi
 	return err
 }
 
+// redactBundleOriginPolicy strips origin mTLS credentials from an exported or
+// templated bundle. Unlike redactOriginPolicy it also clears MTLSConfigured:
+// bundles are re-imported through createSiteBundle, whose validation rejects
+// MTLSConfigured without credentials.
+func redactBundleOriginPolicy(bundle siteBundle) siteBundle {
+	bundle.OriginPolicy = redactOriginPolicy(bundle.OriginPolicy)
+	bundle.OriginPolicy.Transport.MTLSConfigured = false
+	return bundle
+}
+
+func normalizeAndValidateOriginPolicy(policy edgeprotocol.OriginPolicyConfig) (edgeprotocol.OriginPolicyConfig, error) {
+	policy = edgeprotocol.NormalizeOriginPolicy(policy)
+	if err := edgeprotocol.ValidateOriginPolicy(policy); err != nil {
+		return edgeprotocol.OriginPolicyConfig{}, err
+	}
+	return policy, nil
+}
+
 func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (siteBundle, error) {
 	site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(siteID))
 	if err != nil || site == nil {
@@ -393,8 +420,8 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 			return "", fmt.Errorf("origin priority must not be negative")
 		}
 	}
-	bundle.OriginPolicy = edgeprotocol.NormalizeOriginPolicy(bundle.OriginPolicy)
-	if err = edgeprotocol.ValidateOriginPolicy(bundle.OriginPolicy); err != nil {
+	bundle.OriginPolicy, err = normalizeAndValidateOriginPolicy(bundle.OriginPolicy)
+	if err != nil {
 		return "", err
 	}
 	if err = normalizeSiteBundlePolicies(&bundle); err != nil {

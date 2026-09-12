@@ -88,7 +88,9 @@ paths:
             tags:
                 - admin-settings
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -132,7 +134,9 @@ paths:
             tags:
                 - admin-settings
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -209,7 +213,9 @@ paths:
             tags:
                 - alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -252,7 +258,9 @@ paths:
             tags:
                 - audit
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -454,7 +462,9 @@ paths:
             tags:
                 - auth
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -485,7 +495,9 @@ paths:
             tags:
                 - auth
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -572,7 +584,9 @@ paths:
             tags:
                 - auth-password
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -653,7 +667,9 @@ paths:
             tags:
                 - auth-password-reset
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -730,7 +746,9 @@ paths:
             tags:
                 - auth-providers
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1025,7 +1043,9 @@ paths:
             tags:
                 - auth-security-policy
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1055,7 +1075,9 @@ paths:
             tags:
                 - auth-security-policy
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1104,7 +1126,9 @@ paths:
             tags:
                 - auth-sessions
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1134,7 +1158,9 @@ paths:
             tags:
                 - auth-sessions
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1170,7 +1196,9 @@ paths:
             tags:
                 - auth-sessions
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1189,7 +1217,9 @@ paths:
             tags:
                 - auth-totp
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1255,7 +1285,9 @@ paths:
             tags:
                 - auth-totp
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1324,7 +1356,9 @@ paths:
             tags:
                 - auth-totp
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1404,7 +1438,9 @@ paths:
             tags:
                 - auth-totp
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1484,7 +1520,9 @@ paths:
             tags:
                 - auth-totp
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1529,7 +1567,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1566,7 +1606,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1644,7 +1686,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1683,7 +1727,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1802,7 +1848,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -1890,7 +1938,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2024,7 +2074,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2069,7 +2121,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2135,7 +2189,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2201,7 +2257,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2266,7 +2324,9 @@ paths:
             tags:
                 - clusters-alerts
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2333,7 +2393,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2407,7 +2469,9 @@ paths:
             tags:
                 - clusters-analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2445,7 +2509,9 @@ paths:
             tags:
                 - clusters-analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2504,7 +2570,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2555,7 +2623,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2597,7 +2667,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2637,7 +2709,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2711,7 +2785,9 @@ paths:
             tags:
                 - clusters-analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2776,7 +2852,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2839,7 +2917,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2909,7 +2989,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -2979,7 +3061,9 @@ paths:
             tags:
                 - analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3035,7 +3119,9 @@ paths:
             tags:
                 - clusters-analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3105,7 +3191,9 @@ paths:
             tags:
                 - clusters-analytics
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3158,7 +3246,9 @@ paths:
             tags:
                 - clusters-api-keys
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3230,7 +3320,9 @@ paths:
             tags:
                 - clusters-api-keys
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3345,7 +3437,9 @@ paths:
             tags:
                 - clusters-api-keys
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3474,7 +3568,9 @@ paths:
             tags:
                 - clusters-api-keys
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3559,7 +3655,9 @@ paths:
             tags:
                 - clusters-api-keys
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3669,7 +3767,9 @@ paths:
             tags:
                 - certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3706,7 +3806,9 @@ paths:
             tags:
                 - certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -3882,7 +3984,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4034,7 +4138,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4217,7 +4323,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4259,7 +4367,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4301,7 +4411,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4489,7 +4601,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4582,7 +4696,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4675,7 +4791,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4769,7 +4887,9 @@ paths:
             tags:
                 - certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -4882,7 +5002,9 @@ paths:
             tags:
                 - clusters-certificates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5121,7 +5243,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5156,7 +5280,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5243,7 +5369,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5288,7 +5416,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5326,7 +5456,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5405,7 +5537,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5443,7 +5577,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5513,7 +5649,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5552,7 +5690,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5590,7 +5730,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5648,7 +5790,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5706,7 +5850,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5751,7 +5897,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5788,7 +5936,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5888,7 +6038,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -5992,7 +6144,9 @@ paths:
             tags:
                 - dns
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6042,7 +6196,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6079,7 +6235,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6142,7 +6300,9 @@ paths:
             tags:
                 - clusters-jobs
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6224,7 +6384,9 @@ paths:
             tags:
                 - clusters-jobs
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6282,7 +6444,9 @@ paths:
             tags:
                 - clusters-jobs
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6387,7 +6551,9 @@ paths:
             tags:
                 - clusters-jobs
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6445,7 +6611,9 @@ paths:
             tags:
                 - clusters-jobs
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6551,7 +6719,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6588,7 +6758,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6702,7 +6874,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6820,7 +6994,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6853,7 +7029,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -6913,7 +7091,9 @@ paths:
             tags:
                 - clusters-logpush
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7001,7 +7181,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7049,7 +7231,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7132,7 +7316,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7204,7 +7390,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7259,7 +7447,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7296,7 +7486,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7403,7 +7595,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7454,7 +7648,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7504,7 +7700,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7580,7 +7778,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7661,7 +7861,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7698,7 +7900,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7785,7 +7989,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7825,7 +8031,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7914,7 +8122,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -7964,7 +8174,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8023,7 +8235,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8093,7 +8307,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8161,7 +8377,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8221,7 +8439,9 @@ paths:
             tags:
                 - clusters-nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8285,7 +8505,9 @@ paths:
             tags:
                 - clusters-nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8337,7 +8559,9 @@ paths:
             tags:
                 - clusters-nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8374,7 +8598,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8443,7 +8669,9 @@ paths:
             tags:
                 - clusters-nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8479,7 +8707,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8586,7 +8816,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8638,7 +8870,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8694,7 +8928,9 @@ paths:
             tags:
                 - nodes
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8770,7 +9006,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8807,7 +9045,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8891,7 +9131,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -8979,7 +9221,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9012,7 +9256,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9061,7 +9307,9 @@ paths:
             tags:
                 - clusters-notifications
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9127,7 +9375,9 @@ paths:
             tags:
                 - publish
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9178,7 +9428,9 @@ paths:
             tags:
                 - publish
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9234,7 +9486,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9271,7 +9525,9 @@ paths:
             tags:
                 - clusters
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9334,7 +9590,9 @@ paths:
             tags:
                 - clusters-site-templates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9370,7 +9628,9 @@ paths:
             tags:
                 - clusters-site-templates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9453,7 +9713,9 @@ paths:
             tags:
                 - clusters-site-templates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9516,7 +9778,9 @@ paths:
             tags:
                 - clusters-site-templates
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9559,7 +9823,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9596,7 +9862,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9686,7 +9954,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9762,7 +10032,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9906,7 +10178,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9938,7 +10212,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -9978,7 +10254,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10085,7 +10363,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10162,7 +10442,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10228,7 +10510,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10321,7 +10605,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10435,7 +10721,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10538,7 +10826,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10570,39 +10860,7 @@ paths:
                                     code:
                                         type: string
                                     data:
-                                        type: object
-                                        properties:
-                                            cache:
-                                                type: object
-                                            certificate_ids:
-                                                type: array
-                                                items:
-                                                    type: string
-                                            compression:
-                                                type: object
-                                            delivery:
-                                                type: object
-                                            domains:
-                                                type: array
-                                                items:
-                                                    type: string
-                                            listener:
-                                                $ref: '#/components/schemas/edgeprotocol_ListenerConfig'
-                                            name:
-                                                type: string
-                                            origin_policy:
-                                                $ref: '#/components/schemas/edgeprotocol_OriginPolicyConfig'
-                                            origins:
-                                                type: array
-                                                items:
-                                                    $ref: '#/components/schemas/sites_originInput'
-                                            schema_version:
-                                                type: integer
-                                                format: int32
-                                            status:
-                                                $ref: '#/components/schemas/model_SiteStatus'
-                                            waf:
-                                                type: object
+                                        $ref: '#/components/schemas/sites_siteBundle'
     /api/v1/clusters/{cluster_id}/sites/{site_id}/listener:
         get:
             operationId: getListener
@@ -10611,7 +10869,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10681,7 +10941,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10833,7 +11095,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10900,7 +11164,9 @@ paths:
             tags:
                 - publish
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -10942,7 +11208,9 @@ paths:
             tags:
                 - publish
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11020,7 +11288,9 @@ paths:
             tags:
                 - publish
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11066,7 +11336,9 @@ paths:
             tags:
                 - purge
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11108,7 +11380,9 @@ paths:
             tags:
                 - purge
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11245,7 +11519,9 @@ paths:
             tags:
                 - purge
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11348,7 +11624,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11409,7 +11687,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11485,7 +11765,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11555,7 +11837,9 @@ paths:
             tags:
                 - sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11630,7 +11914,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11697,7 +11983,9 @@ paths:
             tags:
                 - clusters-sites
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11758,7 +12046,9 @@ paths:
             tags:
                 - clusters-ssh-credentials
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11794,7 +12084,9 @@ paths:
             tags:
                 - clusters-ssh-credentials
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11879,7 +12171,9 @@ paths:
             tags:
                 - clusters-ssh-credentials
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -11971,7 +12265,9 @@ paths:
             tags:
                 - clusters-ssh-credentials
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12029,7 +12325,9 @@ paths:
             tags:
                 - clusters-ssh-credentials
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12169,7 +12467,9 @@ paths:
             tags:
                 - session
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12232,7 +12532,9 @@ paths:
             tags:
                 - users
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12303,7 +12605,9 @@ paths:
             tags:
                 - users
             security:
+                - bearer_api_key: []
                 - cookie_goveto_session: []
+                - x_api_key: []
             x-middlewares:
                 - httpsecurity.Middleware
                 - sessions.Session
@@ -12405,6 +12709,8 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            startedAt:
+                                                type: string
                                             status:
                                                 type: string
                                             version:
@@ -12436,6 +12742,8 @@ paths:
                                     data:
                                         type: object
                                         properties:
+                                            startedAt:
+                                                type: string
                                             status:
                                                 type: string
                                             version:
@@ -17721,7 +18029,15 @@ components:
         wafdsl_token:
             type: object
     securitySchemes:
+        bearer_api_key:
+            type: http
+            scheme: bearer
+            bearerFormat: API key
         cookie_goveto_session:
             type: apiKey
             in: cookie
             name: goveto_session
+        x_api_key:
+            type: apiKey
+            in: header
+            name: X-API-Key

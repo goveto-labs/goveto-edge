@@ -90,6 +90,80 @@ func TestCreateSiteBundleRejectsInvalidImportedPolicyBeforeDatabaseWrite(t *test
 	}
 }
 
+func TestRedactedSiteBundleHidesMTLSAndStaysImportable(t *testing.T) {
+	bundle := validManagementBundle()
+	bundle.OriginPolicy.Transport.TLSClientCertificatePEM = "certificate"
+	bundle.OriginPolicy.Transport.TLSClientPrivateKeyPEM = "private key"
+
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored siteBundle
+	if err = json.Unmarshal(encoded, &stored); err != nil {
+		t.Fatal(err)
+	}
+	stored = redactBundleOriginPolicy(stored)
+
+	redacted, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(redacted), "private key") || strings.Contains(string(redacted), `"certificate"`) {
+		t.Fatal("redacted bundle still contains mTLS credential material")
+	}
+
+	var reimport siteBundle
+	if err = json.Unmarshal(redacted, &reimport); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = normalizeAndValidateOriginPolicy(reimport.OriginPolicy); err != nil {
+		t.Fatalf("redacted bundle is not re-importable: %v", err)
+	}
+}
+
+func TestNormalizeAndValidateOriginPolicyRejectsInvalidConfig(t *testing.T) {
+	policy := edgeprotocol.DefaultOriginPolicy()
+	policy.Transport.MTLSConfigured = true
+	if _, err := normalizeAndValidateOriginPolicy(policy); err == nil || !strings.Contains(err.Error(), "mTLS") {
+		t.Fatalf("mtls_configured without credentials error = %v", err)
+	}
+
+	policy = edgeprotocol.DefaultOriginPolicy()
+	policy.TimeoutMS = -1
+	if _, err := normalizeAndValidateOriginPolicy(policy); err == nil {
+		t.Fatal("negative timeout was accepted")
+	}
+
+	policy = edgeprotocol.DefaultOriginPolicy()
+	policy.Transport.TLSClientCertificatePEM = "certificate"
+	policy.Transport.TLSClientPrivateKeyPEM = "private key"
+	normalized, err := normalizeAndValidateOriginPolicy(policy)
+	if err != nil || normalized.Transport.TLSClientPrivateKeyPEM != "private key" {
+		t.Fatalf("valid mTLS policy rejected or mutated: %v", err)
+	}
+}
+
+func TestTemplateStoreFlowRedactsMTLSBeforeValidation(t *testing.T) {
+	// Mirrors createTemplate's site_id branch: the loaded bundle keeps no mTLS
+	// credential in the stored template, and the redacted policy still passes
+	// the same validation every bundle import goes through.
+	bundle := validManagementBundle()
+	bundle.OriginPolicy.Transport.TLSClientCertificatePEM = "certificate"
+	bundle.OriginPolicy.Transport.TLSClientPrivateKeyPEM = "private key"
+	bundle = redactBundleOriginPolicy(bundle)
+	encoded, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private key") {
+		t.Fatal("stored template config contains the mTLS private key")
+	}
+	if _, err = normalizeAndValidateOriginPolicy(bundle.OriginPolicy); err != nil {
+		t.Fatalf("stored template config fails origin policy validation: %v", err)
+	}
+}
+
 func validManagementBundle() siteBundle {
 	return siteBundle{
 		Name: "site", Domains: []string{"site.example.com"},
