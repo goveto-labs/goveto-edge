@@ -58,6 +58,8 @@ type Config struct {
 	NodeCredentialPreviousKeys     []string
 	CertificateMasterKey           string
 	CertificatePreviousKeys        []string
+	ConfigSecretMasterKey          string
+	ConfigSecretPreviousKeys       []string
 	DNSCredentialMasterKey         string
 	DNSCredentialPreviousKeys      []string
 	NotificationMasterKey          string
@@ -323,6 +325,12 @@ func Load() (Config, error) {
 	if cfg.CertificatePreviousKeys, err = purposePreviousKeys("CERTIFICATE_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/certificate/v1"); err != nil {
 		return Config{}, err
 	}
+	if cfg.ConfigSecretMasterKey, err = purposeMasterKey(cfg.DataDir, "CONFIG_SECRET_MASTER_KEY", "config-secret-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/config/v1", persistPurposeKeys); err != nil {
+		return Config{}, err
+	}
+	if cfg.ConfigSecretPreviousKeys, err = purposePreviousKeys("CONFIG_SECRET_PREVIOUS_KEYS", cfg.NodeCredentialPreviousKeys, "goveto-edge/secrets/config/v1"); err != nil {
+		return Config{}, err
+	}
 	if cfg.DNSCredentialMasterKey, err = purposeMasterKey(cfg.DataDir, "DNS_CREDENTIAL_MASTER_KEY", "dns-credential-master.key", cfg.NodeCredentialMasterKey, "goveto-edge/secrets/dns/v1", persistPurposeKeys); err != nil {
 		return Config{}, err
 	}
@@ -496,7 +504,7 @@ func loadOrCreateNamedMasterKey(dataDir, fileName, initialValue string) (string,
 
 // loadOrMigrateNamedMasterKey persists a purpose-specific master key that is a
 // deterministic function of rootKey (the certificate, DNS, notification,
-// TOTP and agent CA purpose keys). Unlike the shared root key these values must be
+// TOTP, agent CA, and config-secret purpose keys). Unlike the shared root key these values must be
 // re-derived and overwritten when the root key rotates; otherwise callers keep
 // reading the value derived from the previous root and Rewrap becomes a no-op
 // (defeating the purpose of NODE_CREDENTIAL_PREVIOUS_KEYS). The companion

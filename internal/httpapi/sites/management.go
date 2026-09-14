@@ -14,6 +14,7 @@ import (
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	deliverypolicy "goveto-edge/internal/policy"
@@ -75,12 +76,12 @@ type bulkResult struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func exportSite(db *client.Client) echo.HandlerFunc {
+func exportSite(db *client.Client, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
 		}
-		bundle, err := loadSiteBundle(c.Request().Context(), db, c.Param("site_id"))
+		bundle, err := loadSiteBundle(c.Request().Context(), db, configSecrets, c.Param("site_id"))
 		if err != nil {
 			return err
 		}
@@ -90,7 +91,7 @@ func exportSite(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func cloneSite(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func cloneSite(db *client.Client, publishService *publisher.Service, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		if err := ensureSiteInCluster(c, db); err != nil {
 			return err
@@ -99,7 +100,7 @@ func cloneSite(db *client.Client, publishService *publisher.Service) echo.Handle
 		if err := c.Bind(&input); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, "invalid request body")
 		}
-		bundle, err := loadSiteBundle(c.Request().Context(), db, c.Param("site_id"))
+		bundle, err := loadSiteBundle(c.Request().Context(), db, configSecrets, c.Param("site_id"))
 		if err != nil {
 			return err
 		}
@@ -107,7 +108,7 @@ func cloneSite(db *client.Client, publishService *publisher.Service) echo.Handle
 		if bundle.Name == "" || len(bundle.Domains) == 0 {
 			return echo.NewHTTPError(http.StatusBadRequest, "name and domains are required")
 		}
-		id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
+		id, err := createSiteBundle(c.Request().Context(), db, configSecrets, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
 		if err != nil {
 			return err
 		}
@@ -124,7 +125,7 @@ func cloneSite(db *client.Client, publishService *publisher.Service) echo.Handle
 	}
 }
 
-func importSites(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func importSites(db *client.Client, publishService *publisher.Service, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input importRequest
 		if err := c.Bind(&input); err != nil || len(input.Sites) == 0 || len(input.Sites) > 100 {
@@ -132,7 +133,7 @@ func importSites(db *client.Client, publishService *publisher.Service) echo.Hand
 		}
 		results := make([]bulkResult, 0, len(input.Sites))
 		for _, bundle := range input.Sites {
-			id, err := createSiteBundle(c.Request().Context(), db, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
+			id, err := createSiteBundle(c.Request().Context(), db, configSecrets, c.Param("cluster_id"), auth.CurrentResourceOwnerUserID(c), bundle)
 			if err == nil {
 				_, err = publishService.Enqueue(c.Request().Context(), id)
 			}
@@ -161,7 +162,7 @@ func listTemplates(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func createTemplate(db *client.Client) echo.HandlerFunc {
+func createTemplate(db *client.Client, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input templateInput
 		if err := c.Bind(&input); err != nil {
@@ -178,7 +179,7 @@ func createTemplate(db *client.Client) echo.HandlerFunc {
 			if findErr != nil || site == nil || site.ClusterId != c.Param("cluster_id") {
 				return echo.NewHTTPError(http.StatusNotFound, "site not found")
 			}
-			bundle, err = loadSiteBundle(c.Request().Context(), db, input.SiteID)
+			bundle, err = loadSiteBundle(c.Request().Context(), db, configSecrets, input.SiteID)
 			// Never persist origin mTLS credentials into a template; they could
 			// only ever be read back through the redacted template API anyway.
 			bundle = redactBundleOriginPolicy(bundle)
@@ -335,7 +336,7 @@ func normalizeAndValidateOriginPolicy(policy edgeprotocol.OriginPolicyConfig) (e
 	return policy, nil
 }
 
-func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (siteBundle, error) {
+func loadSiteBundle(ctx context.Context, db *client.Client, configSecrets *configseal.Sealer, siteID string) (siteBundle, error) {
 	site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(siteID))
 	if err != nil || site == nil {
 		return siteBundle{}, err
@@ -344,7 +345,7 @@ func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (site
 	if err != nil || pool == nil {
 		return siteBundle{}, err
 	}
-	policy, err := edgeprotocol.ParseOriginPolicy(pool.Governance)
+	policy, err := unmarshalGovernancePolicy(configSecrets, pool.ClusterId, pool.Id, pool.Governance)
 	if err != nil {
 		return siteBundle{}, err
 	}
@@ -391,7 +392,7 @@ func loadSiteBundle(ctx context.Context, db *client.Client, siteID string) (site
 	return bundle, nil
 }
 
-func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creatorID string, bundle siteBundle) (string, error) {
+func createSiteBundle(ctx context.Context, db *client.Client, configSecrets *configseal.Sealer, clusterID, creatorID string, bundle siteBundle) (string, error) {
 	if bundle.SchemaVersion != 0 && bundle.SchemaVersion != siteBundleSchemaVersion {
 		return "", fmt.Errorf("unsupported site bundle schema_version %d", bundle.SchemaVersion)
 	}
@@ -428,7 +429,10 @@ func createSiteBundle(ctx context.Context, db *client.Client, clusterID, creator
 		return "", err
 	}
 	siteID, poolID, policyID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	governance, _ := json.Marshal(bundle.OriginPolicy)
+	governance, err := sealedGovernanceJSON(configSecrets, clusterID, poolID, bundle.OriginPolicy)
+	if err != nil {
+		return "", err
+	}
 	status := bundle.Status
 	if status == "" {
 		status = model.SiteStatusACTIVE

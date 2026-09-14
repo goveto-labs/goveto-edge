@@ -11,12 +11,14 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"goveto-edge/internal/audit"
 	"goveto-edge/internal/certmanager"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/jobqueue"
@@ -31,6 +33,7 @@ type Service struct {
 	db                *client.Client
 	certificateCipher *node.CredentialCipher
 	derivationCipher  *node.CredentialCipher
+	configSecrets     *configseal.Sealer
 	gateway           *edgecontrol.Gateway
 	jobs              *jobqueue.Manager
 	concurrency       int
@@ -52,11 +55,118 @@ type EnqueueResult struct {
 }
 
 func New(db *client.Client, cipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
-	return NewWithCiphers(db, cipher, cipher, gateway)
+	return NewWithCiphers(db, cipher, cipher, cipher, gateway)
 }
 
-func NewWithCiphers(db *client.Client, certificateCipher, derivationCipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
-	return &Service{db: db, certificateCipher: certificateCipher, derivationCipher: derivationCipher, gateway: gateway, jobs: jobqueue.New(db), concurrency: 8}
+// NewWithCiphers wires independent ciphers for certificates, WAF derivation,
+// and config-snapshot sealing. A nil configSecretCipher panics: publishing
+// must not persist plaintext secrets.
+func NewWithCiphers(db *client.Client, certificateCipher, derivationCipher, configSecretCipher *node.CredentialCipher, gateway *edgecontrol.Gateway) *Service {
+	if configSecretCipher == nil {
+		panic("publisher: config secret cipher is required")
+	}
+	return &Service{
+		db: db, certificateCipher: certificateCipher, derivationCipher: derivationCipher,
+		configSecrets: configseal.New(configSecretCipher),
+		gateway:       gateway, jobs: jobqueue.New(db), concurrency: 8,
+	}
+}
+
+// ConfigRewrapFailure identifies a snapshot that could not be migrated.
+type ConfigRewrapFailure struct {
+	VersionID string
+	SiteID    string
+	Version   int64
+	Err       error
+}
+
+// ConfigRewrapResult reports corrupt or unreadable snapshots skipped during
+// startup rewrap so one bad row cannot take the control plane down.
+type ConfigRewrapResult struct {
+	Skipped []ConfigRewrapFailure
+}
+
+// RewrapSecrets reseals config_versions snapshots onto the current primary
+// key, including leftover plaintext from the pre-sealing migration window.
+// Historical snapshots are pruned first so a large pre-sealing history cannot
+// exhaust the startup deadline; remaining rows that outlive the context are
+// skipped like corrupt snapshots so one timeout cannot refuse boot.
+func (s *Service) RewrapSecrets(ctx context.Context) (ConfigRewrapResult, error) {
+	if err := s.PruneSnapshots(ctx); err != nil {
+		if ctx.Err() != nil {
+			return ConfigRewrapResult{}, nil
+		}
+		return ConfigRewrapResult{}, fmt.Errorf("prune config snapshots before rewrap: %w", err)
+	}
+	versions, err := s.db.ConfigVersion.Query().Do(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ConfigRewrapResult{}, nil
+		}
+		return ConfigRewrapResult{}, err
+	}
+	return rewrapConfigVersionRows(ctx, versions, s.configSecrets.RewrapSiteConfigSecrets, func(id string, encoded []byte) error {
+		_, err := s.db.ConfigVersion.Update().
+			Where(query.ConfigVersion.Id.Equals(id)).
+			Set(query.ConfigVersion.ConfigJson.Set(encoded)).
+			Do(ctx)
+		return err
+	})
+}
+
+func rewrapConfigVersionRows(
+	ctx context.Context,
+	versions []model.ConfigVersion,
+	rewrap func(siteID string, version uint64, config *edgeprotocol.SiteConfig) (bool, error),
+	persist func(id string, encoded []byte) error,
+) (ConfigRewrapResult, error) {
+	result := ConfigRewrapResult{}
+	skipRemaining := func(from int, err error) {
+		for index := from; index < len(versions); index++ {
+			row := &versions[index]
+			result.Skipped = append(result.Skipped, ConfigRewrapFailure{
+				VersionID: row.Id, SiteID: row.SiteId, Version: row.Version, Err: err,
+			})
+		}
+	}
+	for index := range versions {
+		if err := ctx.Err(); err != nil {
+			skipRemaining(index, err)
+			return result, nil
+		}
+		row := &versions[index]
+		skip := func(err error) {
+			result.Skipped = append(result.Skipped, ConfigRewrapFailure{
+				VersionID: row.Id, SiteID: row.SiteId, Version: row.Version, Err: err,
+			})
+		}
+		var config edgeprotocol.SiteConfig
+		if err := json.Unmarshal(row.ConfigJson, &config); err != nil {
+			skip(err)
+			continue
+		}
+		changed, rewrapErr := rewrap(row.SiteId, uint64(row.Version), &config)
+		if rewrapErr != nil {
+			skip(rewrapErr)
+			continue
+		}
+		if !changed {
+			continue
+		}
+		encoded, marshalErr := json.Marshal(config)
+		if marshalErr != nil {
+			skip(marshalErr)
+			continue
+		}
+		if err := persist(row.Id, encoded); err != nil {
+			if ctx.Err() != nil {
+				skipRemaining(index, ctx.Err())
+				return result, nil
+			}
+			return result, fmt.Errorf("persist rewrapped config version %s: %w", row.Id, err)
+		}
+	}
+	return result, nil
 }
 
 // EnqueueCluster republishes every site after the cluster's available node set
@@ -184,7 +294,7 @@ func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempot
 			return err
 		}
 
-		configJSON, err := json.Marshal(config)
+		configJSON, err := s.sealedConfigJSON(config)
 		if err != nil {
 			return err
 		}
@@ -203,7 +313,7 @@ func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempot
 			if loadErr != nil {
 				return loadErr
 			}
-			if runningConfig != nil && samePublishRequest(config, targets, runningConfig.ConfigJson, running.Targets) {
+			if runningConfig != nil && s.samePublishRequest(config, targets, runningConfig.ConfigJson, running.Targets) {
 				if idempotencyKey != "" && running.IdempotencyKey == nil {
 					running, err = tx.PublishJob.Update().
 						Where(query.PublishJob.Id.Equals(running.Id)).
@@ -236,7 +346,7 @@ func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempot
 				return loadErr
 			}
 			if currentConfig != nil && currentJob != nil &&
-				samePublishRequest(config, targets, currentConfig.ConfigJson, currentJob.Targets) {
+				s.samePublishRequest(config, targets, currentConfig.ConfigJson, currentJob.Targets) {
 				job = currentJob
 				mode = EnqueueCurrentReused
 				return nil
@@ -301,6 +411,25 @@ func (s *Service) EnqueueIdempotentDetailed(ctx context.Context, siteID, idempot
 	return EnqueueResult{Job: job, Mode: mode}, err
 }
 
+// sealedConfigJSON marshals a storage copy of the config with sensitive
+// fields sealed to the config's own site and version. The plaintext argument
+// is left untouched so semantic hashing and coalescing comparisons keep
+// operating on plaintext.
+func (s *Service) sealedConfigJSON(config edgeprotocol.SiteConfig) ([]byte, error) {
+	plain, err := json.Marshal(config)
+	if err != nil {
+		return nil, err
+	}
+	var stored edgeprotocol.SiteConfig
+	if err = json.Unmarshal(plain, &stored); err != nil {
+		return nil, err
+	}
+	if err = s.configSecrets.SealSiteConfigSecrets(stored.SiteID, stored.Version, &stored); err != nil {
+		return nil, fmt.Errorf("seal site config snapshot: %w", err)
+	}
+	return json.Marshal(stored)
+}
+
 func semanticConfigHash(config edgeprotocol.SiteConfig) [sha256.Size]byte {
 	config.Version = 0
 	encoded, _ := json.Marshal(config)
@@ -311,7 +440,7 @@ func canCoalesceIdempotencyKey(job *model.PublishJob, key string) bool {
 	return key == "" || job.IdempotencyKey == nil || *job.IdempotencyKey == key
 }
 
-func samePublishRequest(
+func (s *Service) samePublishRequest(
 	config edgeprotocol.SiteConfig,
 	targets []target,
 	existingConfigJSON, existingTargetsJSON []byte,
@@ -321,6 +450,14 @@ func samePublishRequest(
 	if json.Unmarshal(existingConfigJSON, &existingConfig) != nil ||
 		json.Unmarshal(existingTargetsJSON, &existingTargets) != nil {
 		return false
+	}
+	// Stored snapshots carry sealed secrets; compare the unsealed semantic
+	// form. Envelope nonces differ per encryption, so comparing ciphertext
+	// would make every publish look unique and defeat coalescing.
+	if s.configSecrets != nil {
+		if s.configSecrets.UnsealSiteConfigSecrets(existingConfig.SiteID, existingConfig.Version, &existingConfig) != nil {
+			return false
+		}
 	}
 	config.Version = 0
 	existingConfig.Version = 0
@@ -360,15 +497,117 @@ func nextPublishVersion(siteVersion int64, pending *model.PublishJob, latest *mo
 
 func (s *Service) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
+	pruneTicker := time.NewTicker(snapshotPruneInterval)
 	defer ticker.Stop()
+	defer pruneTicker.Stop()
+	if err := s.PruneSnapshots(ctx); err != nil && ctx.Err() == nil {
+		slog.Warn("prune config snapshots", "error", err)
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			s.runOne(ctx)
+		case <-pruneTicker.C:
+			if err := s.PruneSnapshots(ctx); err != nil && ctx.Err() == nil {
+				slog.Warn("prune config snapshots", "error", err)
+			}
 		}
 	}
+}
+
+// snapshotRetentionPerSite bounds how many recent config snapshots each site
+// keeps. Sealed snapshots carry credential material; bounding their lifetime
+// shrinks the blast radius of a database disclosure.
+const (
+	snapshotRetentionPerSite = 20
+	snapshotPruneInterval    = time.Hour
+)
+
+// PruneSnapshots deletes superseded config snapshots beyond the retention
+// window. It always keeps the site's live version and the newest published or
+// rolled-back baseline, so rollback and the publish baseline view keep
+// working after pruning.
+func (s *Service) PruneSnapshots(ctx context.Context) error {
+	sites, err := s.db.Site.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	versions, err := s.db.ConfigVersion.Query().Do(ctx)
+	if err != nil {
+		return err
+	}
+	ids := pruneConfigVersionIDs(sites, versions, snapshotRetentionPerSite)
+	if len(ids) == 0 {
+		return nil
+	}
+	if _, err = s.db.ConfigVersion.Delete().Where(query.ConfigVersion.Id.In(ids...)).DoMany(ctx); err != nil {
+		return fmt.Errorf("delete pruned config snapshots: %w", err)
+	}
+	return nil
+}
+
+// pruneConfigVersionIDs picks superseded snapshot IDs: per site, keep the
+// newest `keep` terminal versions, the site's live version, and the newest
+// published or rolled-back baseline. Draft rows are never pruned because a
+// pending publish job may still be about to execute them; everything else is
+// deletable.
+func pruneConfigVersionIDs(sites []model.Site, versions []model.ConfigVersion, keep int) []string {
+	if keep < 1 {
+		keep = 1
+	}
+	terminal := func(status model.ConfigStatus) bool {
+		return status == model.ConfigStatusPUBLISHED || status == model.ConfigStatusFAILED ||
+			status == model.ConfigStatusROLLED_BACK
+	}
+	type siteState struct {
+		live        int64
+		kept        int
+		baselineSet bool
+	}
+	states := make(map[string]*siteState, len(sites))
+	for index := range sites {
+		states[sites[index].Id] = &siteState{live: sites[index].Version}
+	}
+	sort.Slice(versions, func(i, j int) bool {
+		if versions[i].SiteId != versions[j].SiteId {
+			return versions[i].SiteId < versions[j].SiteId
+		}
+		return versions[i].Version > versions[j].Version
+	})
+	var pruned []string
+	for index := range versions {
+		row := &versions[index]
+		state, known := states[row.SiteId]
+		if !known {
+			// Orphaned rows (site deleted mid-flight) are always deletable,
+			// including drafts: nothing can publish them any more.
+			pruned = append(pruned, row.Id)
+			continue
+		}
+		if !terminal(row.Status) {
+			continue
+		}
+		isBaseline := restorableConfigStatus(row.Status)
+		if state.kept < keep || row.Version == state.live {
+			if isBaseline {
+				state.baselineSet = true
+			}
+			state.kept++
+			continue
+		}
+		if isBaseline && !state.baselineSet {
+			state.baselineSet = true
+			continue
+		}
+		pruned = append(pruned, row.Id)
+	}
+	return pruned
+}
+
+func restorableConfigStatus(status model.ConfigStatus) bool {
+	return status == model.ConfigStatusPUBLISHED || status == model.ConfigStatusROLLED_BACK
 }
 
 func (s *Service) runOne(ctx context.Context) {
@@ -421,11 +660,11 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
 
-	var config edgeprotocol.SiteConfig
-	var targets []target
-	if err = json.Unmarshal(version.ConfigJson, &config); err != nil {
+	config, err := s.decodeStoredConfig(version.ConfigJson)
+	if err != nil {
 		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
+	var targets []target
 	if err = json.Unmarshal(job.Targets, &targets); err != nil {
 		return publishOutcome(model.JobStatusFAILED, nil, err, false)
 	}
@@ -477,22 +716,21 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 	}
 
 	rollbackVersion := job.Version + 1
-	rollback := edgeprotocol.SiteConfig{
-		SiteID:   site.Id,
-		Version:  uint64(rollbackVersion),
-		Disabled: true,
-	}
+	// Match prune and the jobs baseline view: after compensation the live
+	// snapshot is ROLLED_BACK, and the original PUBLISHED row may already
+	// have been pruned. Looking only at PUBLISHED would tombstone the site.
 	previous, previousErr := s.db.ConfigVersion.Query().
 		Where(
 			query.ConfigVersion.SiteId.Equals(site.Id),
-			query.ConfigVersion.Status.Equals(model.ConfigStatusPUBLISHED),
+			query.ConfigVersion.Status.In(model.ConfigStatusPUBLISHED, model.ConfigStatusROLLED_BACK),
+			query.ConfigVersion.Version.Lt(job.Version),
 		).
 		OrderBy(query.ConfigVersion.Version.Desc()).
 		First(ctx)
-	if previousErr == nil {
-		_ = json.Unmarshal(previous.ConfigJson, &rollback)
-		rollback.Version = uint64(rollbackVersion)
+	if previousErr != nil {
+		return publishOutcome(model.JobStatusFAILED, results, previousErr, true)
 	}
+	rollback := s.rollbackSnapshot(site.Id, rollbackVersion, previous)
 
 	rollbackResults := s.fanout(ctx, rollback, succeeded)
 	for index := range results {
@@ -506,7 +744,7 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 		}
 	}
 
-	rollbackJSON, _ := json.Marshal(rollback)
+	rollbackJSON := s.persistableRollbackJSON(rollback)
 	rollbackHash := sha256.Sum256(rollbackJSON)
 	rollbackComplete := allSucceeded(rollbackResults)
 	if _, err = s.db.ConfigVersion.Update().
@@ -569,6 +807,58 @@ func (s *Service) execute(ctx context.Context, job *model.PublishJob) jobqueue.O
 	// An agent rejection is a business failure. Retrying the same immutable
 	// version would repeat side effects and collide with the rollback version.
 	return publishOutcome(model.JobStatusFAILED, results, publishErr, false)
+}
+
+// decodeStoredConfig unseals a persisted snapshot so fan-out never pushes
+// envelope strings to a node as TLS keys. Dispatch reseals the copy it
+// writes to agent_tasks.
+func (s *Service) decodeStoredConfig(raw []byte) (edgeprotocol.SiteConfig, error) {
+	var config edgeprotocol.SiteConfig
+	if err := json.Unmarshal(raw, &config); err != nil {
+		return edgeprotocol.SiteConfig{}, err
+	}
+	if err := s.configSecrets.UnsealSiteConfigSecrets(config.SiteID, config.Version, &config); err != nil {
+		return edgeprotocol.SiteConfig{}, fmt.Errorf("unseal site config: %w", err)
+	}
+	return config, nil
+}
+
+// rollbackSnapshot builds the plaintext config fanned out after a partial
+// publish failure. Missing history, unreadable JSON, and unseal failures
+// collapse to a disable tombstone so a first publish cannot panic and a
+// sealed envelope is never delivered as a credential.
+func (s *Service) rollbackSnapshot(siteID string, rollbackVersion int64, previous *model.ConfigVersion) edgeprotocol.SiteConfig {
+	tombstone := edgeprotocol.SiteConfig{
+		SiteID: siteID, Version: uint64(rollbackVersion), Disabled: true,
+	}
+	if previous == nil {
+		return tombstone
+	}
+	var rollback edgeprotocol.SiteConfig
+	if err := json.Unmarshal(previous.ConfigJson, &rollback); err != nil {
+		slog.Warn("rollback snapshot could not be decoded; disabling the site instead",
+			"site_id", siteID, "version", previous.Version, "error", err)
+		return tombstone
+	}
+	if err := s.configSecrets.UnsealSiteConfigSecrets(previous.SiteId, uint64(previous.Version), &rollback); err != nil {
+		slog.Warn("rollback snapshot could not be unsealed; disabling the site instead",
+			"site_id", siteID, "version", previous.Version, "error", err)
+		return tombstone
+	}
+	rollback.SiteID = siteID
+	rollback.Version = uint64(rollbackVersion)
+	return rollback
+}
+
+// persistableRollbackJSON seals the rollback snapshot for its new version
+// row. Seal failure persists a tombstone rather than plaintext secrets.
+func (s *Service) persistableRollbackJSON(rollback edgeprotocol.SiteConfig) []byte {
+	if err := s.configSecrets.SealSiteConfigSecrets(rollback.SiteID, rollback.Version, &rollback); err != nil {
+		slog.Error("seal rollback snapshot", "site_id", rollback.SiteID, "version", rollback.Version, "error", err)
+		rollback = edgeprotocol.SiteConfig{SiteID: rollback.SiteID, Version: rollback.Version, Disabled: true}
+	}
+	encoded, _ := json.Marshal(rollback)
+	return encoded
 }
 
 func allTargetsRejectedError(results []targetResult) error {
@@ -745,6 +1035,10 @@ func (s *Service) buildWith(db *client.Client, ctx context.Context, site *model.
 	}
 	config.OriginPolicy, err = edgeprotocol.ParseOriginPolicy(pool.Governance)
 	if err != nil {
+		return edgeprotocol.SiteConfig{}, nil, fmt.Errorf("origin pool %s: %w", pool.Id, err)
+	}
+	// Governance stores the mTLS client key sealed; fan-out needs plaintext.
+	if err = s.configSecrets.UnsealOriginPolicySecrets(pool.ClusterId, pool.Id, &config.OriginPolicy); err != nil {
 		return edgeprotocol.SiteConfig{}, nil, fmt.Errorf("origin pool %s: %w", pool.Id, err)
 	}
 	for _, item := range domains {

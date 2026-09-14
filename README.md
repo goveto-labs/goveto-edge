@@ -112,7 +112,7 @@ Ports and data:
 | ------------ | ------------------------------------------------------------------------ |
 | `pgdata`     | PostgreSQL data — back this up                                           |
 | `redisdata`  | Redis AOF                                                                |
-| `goveto-data` | Generated master keys (`/var/lib/goveto-edge/secrets/`). Losing it loses node, certificate, DNS, notification, TOTP and Agent CA secrets — back this up |
+| `goveto-data` | Generated master keys (`/var/lib/goveto-edge/secrets/`). Losing it loses node, certificate, DNS, notification, TOTP, Agent CA and config-secret secrets — back this up |
 
 The bundled stack targets a single host. For high availability, run multiple
 `control-api` replicas behind a load balancer with the same

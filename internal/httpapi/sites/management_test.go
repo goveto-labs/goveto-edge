@@ -50,7 +50,7 @@ func TestPrepareCloneBundleDropsDomainBoundTLS(t *testing.T) {
 func TestCreateSiteBundleRejectsInvalidStatusBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
 	bundle.Status = model.SiteStatus("DELETED")
-	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	_, err := createSiteBundle(context.Background(), nil, nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "invalid site status") {
 		t.Fatalf("invalid status error = %v", err)
 	}
@@ -59,7 +59,7 @@ func TestCreateSiteBundleRejectsInvalidStatusBeforeDatabaseWrite(t *testing.T) {
 func TestCreateSiteBundleRejectsNegativeOriginPriorityBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
 	bundle.Origins[0].Priority = -1
-	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	_, err := createSiteBundle(context.Background(), nil, nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "priority") {
 		t.Fatalf("negative priority error = %v", err)
 	}
@@ -68,7 +68,7 @@ func TestCreateSiteBundleRejectsNegativeOriginPriorityBeforeDatabaseWrite(t *tes
 func TestCreateSiteBundleRejectsInvalidHostHeaderBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
 	bundle.Origins[0].HostHeader = "origin.example.com\r\nX-Injected: true"
-	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	_, err := createSiteBundle(context.Background(), nil, nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "host_header") {
 		t.Fatalf("invalid host_header error = %v", err)
 	}
@@ -77,14 +77,14 @@ func TestCreateSiteBundleRejectsInvalidHostHeaderBeforeDatabaseWrite(t *testing.
 func TestCreateSiteBundleRejectsInvalidImportedPolicyBeforeDatabaseWrite(t *testing.T) {
 	bundle := validManagementBundle()
 	bundle.Cache = json.RawMessage(`{"ttl":{"default_seconds":-1}}`)
-	_, err := createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	_, err := createSiteBundle(context.Background(), nil, nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "invalid cache policy") {
 		t.Fatalf("invalid cache policy error = %v", err)
 	}
 
 	bundle = validManagementBundle()
 	bundle.WAF = json.RawMessage(`{"enabled":true,"rule_sets":[{"id":"bad","enabled":true,"rules":[{"id":"bad-rule","enabled":true,"type":"MATCH","conditions":{"operator":"AND","groups":[{"id":"bad-group","operator":"AND","conditions":[{"id":"bad-condition","field":"PATH","operator":"REGEX","value":"["}]}]},"action":{"type":"BLOCK"}}]}]}`)
-	_, err = createSiteBundle(context.Background(), nil, "cluster", "creator", bundle)
+	_, err = createSiteBundle(context.Background(), nil, nil, "cluster", "creator", bundle)
 	if err == nil || !strings.Contains(err.Error(), "invalid WAF policy") {
 		t.Fatalf("invalid WAF policy error = %v", err)
 	}

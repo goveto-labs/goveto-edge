@@ -1,7 +1,6 @@
 package sites
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
@@ -46,7 +46,7 @@ type updateDetailsRequest struct {
 	OriginPolicy   *edgeprotocol.OriginPolicyConfig `json:"origin_policy"`
 }
 
-func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
+func loadDetails(c *echo.Context, db *client.Client, configSecrets *configseal.Sealer) (siteDetails, error) {
 	ctx := c.Request().Context()
 	site, err := db.Site.FindUnique(ctx, query.Site.Id.Equals(c.Param("site_id")))
 	if err != nil {
@@ -70,7 +70,7 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 	if pool == nil {
 		return siteDetails{}, echo.NewHTTPError(http.StatusInternalServerError, "origin pool not found")
 	}
-	originPolicy, err := edgeprotocol.ParseOriginPolicy(pool.Governance)
+	originPolicy, err := unmarshalGovernancePolicy(configSecrets, pool.ClusterId, pool.Id, pool.Governance)
 	if err != nil {
 		return siteDetails{}, err
 	}
@@ -100,9 +100,9 @@ func loadDetails(c *echo.Context, db *client.Client) (siteDetails, error) {
 	return result, nil
 }
 
-func getDetails(db *client.Client) echo.HandlerFunc {
+func getDetails(db *client.Client, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		result, err := loadDetails(c, db)
+		result, err := loadDetails(c, db, configSecrets)
 		if err != nil {
 			return err
 		}
@@ -111,9 +111,9 @@ func getDetails(db *client.Client) echo.HandlerFunc {
 	}
 }
 
-func updateDetails(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func updateDetails(db *client.Client, publishService *publisher.Service, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		current, err := loadDetails(c, db)
+		current, err := loadDetails(c, db, configSecrets)
 		if err != nil {
 			return err
 		}
@@ -237,8 +237,14 @@ func updateDetails(db *client.Client, publishService *publisher.Service) echo.Ha
 				return updateErr
 			}
 			poolSets := []query.OriginPoolSetClause{query.OriginPool.Name.Set(name), query.OriginPool.ClusterId.Set(targetCluster)}
-			if input.OriginPolicy != nil {
-				governance, _ := json.Marshal(originPolicy)
+			// Origin mTLS AAD includes cluster id. A transfer that rewrites
+			// ClusterId without resealing leaves ciphertext bound to the old
+			// cluster, and later unseal/rewrap with the new id fail closed.
+			if input.OriginPolicy != nil || targetCluster != current.ClusterID {
+				governance, governanceErr := sealedGovernanceJSON(configSecrets, targetCluster, siteModel.OriginPoolId, originPolicy)
+				if governanceErr != nil {
+					return governanceErr
+				}
 				poolSets = append(poolSets,
 					query.OriginPool.Governance.Set(governance),
 				)
@@ -331,7 +337,7 @@ func preserveOriginMTLS(candidate, current edgeprotocol.OriginPolicyConfig) edge
 
 func deleteSite(db *client.Client) echo.HandlerFunc {
 	return func(c *echo.Context) error {
-		current, err := loadDetails(c, db)
+		current, err := loadDetails(c, db, nil)
 		if err != nil {
 			return err
 		}

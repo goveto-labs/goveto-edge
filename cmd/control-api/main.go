@@ -22,11 +22,13 @@ import (
 	"goveto-edge/internal/buildinfo"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/config"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi"
 	clusterapi "goveto-edge/internal/httpapi/clusters"
+	sitesapi "goveto-edge/internal/httpapi/sites"
 	"goveto-edge/internal/httpsecurity"
 	"goveto-edge/internal/jobretention"
 	"goveto-edge/internal/logpush"
@@ -145,6 +147,13 @@ func main() {
 	certificateCipher, err := node.NewCredentialCipherKeyring(cfg.CertificateMasterKey, certificatePreviousKeys...)
 	if err != nil {
 		slog.Error("initialize certificate encryption", "error", err)
+		os.Exit(1)
+	}
+	configSecretPreviousKeys := append(append([]string(nil), cfg.ConfigSecretPreviousKeys...), cfg.NodeCredentialMasterKey)
+	configSecretPreviousKeys = append(configSecretPreviousKeys, cfg.NodeCredentialPreviousKeys...)
+	configSecretCipher, err := node.NewCredentialCipherKeyring(cfg.ConfigSecretMasterKey, configSecretPreviousKeys...)
+	if err != nil {
+		slog.Error("initialize site config secret encryption", "error", err)
 		os.Exit(1)
 	}
 	dnsPreviousKeys := append(append([]string(nil), cfg.DNSCredentialPreviousKeys...), cfg.NodeCredentialMasterKey)
@@ -270,7 +279,8 @@ func main() {
 		consumeAgentLogs,
 		onNodeStatusChange,
 	)
-	publishService = publisher.NewWithCiphers(orm, certificateCipher, credentialCipher, gateway)
+	gateway.ConfigureConfigSealer(configseal.New(configSecretCipher))
+	publishService = publisher.NewWithCiphers(orm, certificateCipher, credentialCipher, configSecretCipher, gateway)
 	gateway.ConfigureGeoIP(cfg.GeoIPDatabasePath, cfg.GeoIPDatabasePollInterval, func(callbackCtx context.Context) error {
 		if publishService != nil {
 			return publishService.EnqueueAll(context.WithoutCancel(callbackCtx))
@@ -303,12 +313,44 @@ func main() {
 			err = certificateService.RewrapSecrets(rewrapCtx)
 		}
 		if err == nil {
+			var configRewrap publisher.ConfigRewrapResult
+			configRewrap, err = publishService.RewrapSecrets(rewrapCtx)
+			for _, failure := range configRewrap.Skipped {
+				slog.Warn("skip config snapshot during startup rewrap",
+					"config_version_id", failure.VersionID, "site_id", failure.SiteID,
+					"version", failure.Version, "error", failure.Err)
+			}
+			err = skipRewrapAfterDeadline(rewrapCtx, err)
+		}
+		if err == nil && rewrapCtx.Err() == nil {
+			var taskRewrap edgecontrol.TaskRewrapResult
+			taskRewrap, err = gateway.RewrapApplySiteConfigPayloads(rewrapCtx)
+			for _, failure := range taskRewrap.Skipped {
+				slog.Warn("skip unavailable apply-site-config task during startup rewrap",
+					"task_id", failure.TaskID, "error", failure.Err)
+			}
+			err = skipRewrapAfterDeadline(rewrapCtx, err)
+		}
+		if err == nil && rewrapCtx.Err() == nil {
+			var governanceRewrap sitesapi.GovernanceRewrapResult
+			governanceRewrap, err = sitesapi.RewrapOriginGovernanceSecrets(rewrapCtx, orm, configseal.New(configSecretCipher))
+			for _, failure := range governanceRewrap.Skipped {
+				slog.Warn("skip unavailable origin governance during startup rewrap",
+					"origin_pool_id", failure.PoolID, "cluster_id", failure.ClusterID, "error", failure.Err)
+			}
+			err = skipRewrapAfterDeadline(rewrapCtx, err)
+		}
+		if err == nil && rewrapCtx.Err() == nil {
 			var totpRewrap auth.TOTPRewrapResult
 			totpRewrap, err = auth.RewrapTOTPSecrets(rewrapCtx, orm, totpCipher)
 			for _, failure := range totpRewrap.Skipped {
 				slog.Warn("skip unavailable TOTP secret during startup rewrap", "user_id", failure.UserID, "error", failure.Err)
 			}
+			err = skipRewrapAfterDeadline(rewrapCtx, err)
 		}
+	}
+	if !rewrapSkip && err == nil && rewrapCtx.Err() != nil {
+		slog.Warn("startup secret rewrap reached deadline; remaining secrets will be retried on next boot", "error", rewrapCtx.Err())
 	}
 	cancelRewrap()
 	if err != nil {
@@ -385,7 +427,7 @@ func main() {
 			db,
 			orm,
 			sessions,
-			httpapi.SecretCiphers{General: credentialCipher, DNS: dnsCipher, Notification: notificationCipher, TOTP: totpCipher},
+			httpapi.SecretCiphers{General: credentialCipher, DNS: dnsCipher, Notification: notificationCipher, TOTP: totpCipher, Config: configSecretCipher},
 			authority,
 			gateway,
 			installQueue,
@@ -436,4 +478,13 @@ func main() {
 	case <-engineTimer.C:
 		slog.Warn("timed out waiting for alert engine shutdown")
 	}
+}
+
+// skipRewrapAfterDeadline turns a deadline/cancel from a later rewrap step
+// into a soft skip so one shared startup budget cannot refuse boot.
+func skipRewrapAfterDeadline(ctx context.Context, err error) error {
+	if err != nil && ctx.Err() != nil {
+		return nil
+	}
+	return err
 }

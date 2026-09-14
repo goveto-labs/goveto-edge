@@ -22,6 +22,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/settings"
 	"goveto-edge/internal/storage/gen/client"
@@ -94,6 +95,7 @@ type Gateway struct {
 	instanceID     string
 	consumeLogs    LogConsumer
 	onStatusChange func(context.Context, string)
+	configSecrets  *configseal.Sealer
 	mu             sync.Mutex
 	sessions       map[string]*session
 	geoIP          *geoIPAsset
@@ -132,6 +134,88 @@ func NewGateway(
 		sqlDB: sqlDB, db: db, authority: authority, instanceID: uuid.NewString(), consumeLogs: consumeLogs,
 		onStatusChange: onStatusChange, sessions: map[string]*session{},
 	}
+}
+
+func (g *Gateway) ConfigureConfigSealer(sealer *configseal.Sealer) {
+	g.configSecrets = sealer
+}
+
+// TaskRewrapFailure identifies an in-flight task payload that could not be migrated.
+type TaskRewrapFailure struct {
+	TaskID string
+	Err    error
+}
+
+// TaskRewrapResult reports corrupt or unreadable APPLY_SITE_CONFIG payloads
+// skipped during startup rewrap so one bad row cannot take the control plane down.
+type TaskRewrapResult struct {
+	Skipped []TaskRewrapFailure
+}
+
+type applySiteConfigTaskRow struct {
+	ID      string          `db:"id"`
+	Payload json.RawMessage `db:"payload"`
+}
+
+// RewrapApplySiteConfigPayloads reseals APPLY_SITE_CONFIG tasks onto the
+// current primary key so a later drop of previous keys cannot strand a
+// pending publish. It covers every status: completed rows linger until the
+// TTL cleanup deletes them, and resealing closes their plaintext window.
+func (g *Gateway) RewrapApplySiteConfigPayloads(ctx context.Context) (TaskRewrapResult, error) {
+	if g.configSecrets == nil {
+		return TaskRewrapResult{}, nil
+	}
+	rows, err := client.Raw[applySiteConfigTaskRow](ctx, g.db,
+		`SELECT id, payload FROM agent_tasks WHERE kind = $1`,
+		edgeprotocol.TaskApplySiteConfig)
+	if err != nil {
+		if ctx.Err() != nil {
+			return TaskRewrapResult{}, nil
+		}
+		return TaskRewrapResult{}, err
+	}
+	return rewrapApplySiteConfigRows(ctx, rows, g.rewrapApplySiteConfigPayload, func(id string, encoded []byte) error {
+		_, err := g.db.RawExec(ctx,
+			`UPDATE agent_tasks SET payload = $2, updated_at = NOW() WHERE id = $1`,
+			id, encoded)
+		return err
+	})
+}
+
+func rewrapApplySiteConfigRows(
+	ctx context.Context,
+	rows []applySiteConfigTaskRow,
+	rewrap func(payload []byte) ([]byte, bool, error),
+	persist func(id string, encoded []byte) error,
+) (TaskRewrapResult, error) {
+	result := TaskRewrapResult{}
+	skipRemaining := func(from int, err error) {
+		for index := from; index < len(rows); index++ {
+			result.Skipped = append(result.Skipped, TaskRewrapFailure{TaskID: rows[index].ID, Err: err})
+		}
+	}
+	for index, row := range rows {
+		if err := ctx.Err(); err != nil {
+			skipRemaining(index, err)
+			return result, nil
+		}
+		encoded, changed, rewrapErr := rewrap(row.Payload)
+		if rewrapErr != nil {
+			result.Skipped = append(result.Skipped, TaskRewrapFailure{TaskID: row.ID, Err: rewrapErr})
+			continue
+		}
+		if !changed {
+			continue
+		}
+		if err := persist(row.ID, encoded); err != nil {
+			if ctx.Err() != nil {
+				skipRemaining(index, ctx.Err())
+				return result, nil
+			}
+			return result, fmt.Errorf("persist rewrapped apply-site-config task %s: %w", row.ID, err)
+		}
+	}
+	return result, nil
 }
 
 func (g *Gateway) Run(ctx context.Context) {
@@ -664,6 +748,10 @@ func (g *Gateway) Dispatch(ctx context.Context, nodeID, kind string, payload, re
 	if err != nil {
 		return err
 	}
+	encoded, err = g.persistableApplySiteConfigPayload(kind, encoded)
+	if err != nil {
+		return err
+	}
 	taskID := uuid.NewString()
 	err = g.db.Tx(ctx, func(tx *client.Client) error {
 		type dispatchTarget struct {
@@ -743,9 +831,72 @@ func (g *Gateway) claimTasks(ctx context.Context, nodeID, owner string, limit in
 	}
 	tasks := make([]edgeprotocol.AgentTask, 0, len(rows))
 	for _, row := range rows {
-		tasks = append(tasks, edgeprotocol.AgentTask{ID: row.ID, Kind: row.Kind, Payload: row.Payload})
+		payload, unsealErr := g.deliverableApplySiteConfigPayload(row.Kind, row.Payload)
+		if unsealErr != nil {
+			slog.Error("unseal apply-site-config payload", "task_id", row.ID, "node_id", nodeID, "error", unsealErr)
+			if completeErr := g.completeTask(ctx, nodeID, owner, edgeprotocol.AgentTaskResult{
+				TaskID: row.ID, Success: false, Error: unsealErr.Error(),
+			}); completeErr != nil {
+				slog.Error("fail apply-site-config task after unseal error", "task_id", row.ID, "error", completeErr)
+			}
+			continue
+		}
+		tasks = append(tasks, edgeprotocol.AgentTask{ID: row.ID, Kind: row.Kind, Payload: payload})
 	}
 	return tasks, nil
+}
+
+func (g *Gateway) persistableApplySiteConfigPayload(kind string, encoded []byte) ([]byte, error) {
+	if kind != edgeprotocol.TaskApplySiteConfig {
+		return encoded, nil
+	}
+	var config edgeprotocol.SiteConfig
+	if err := json.Unmarshal(encoded, &config); err != nil {
+		return nil, fmt.Errorf("decode apply-site-config payload: %w", err)
+	}
+	if g.configSecrets == nil {
+		if (*configseal.Sealer)(nil).HasSecrets(&config) {
+			return nil, fmt.Errorf("seal apply-site-config payload: %w", configseal.ErrSealerUnavailable)
+		}
+		return encoded, nil
+	}
+	if g.configSecrets.Sealed(&config) {
+		return encoded, nil
+	}
+	if err := g.configSecrets.SealSiteConfigSecrets(config.SiteID, config.Version, &config); err != nil {
+		return nil, fmt.Errorf("seal apply-site-config payload: %w", err)
+	}
+	return json.Marshal(config)
+}
+
+func (g *Gateway) deliverableApplySiteConfigPayload(kind string, encoded json.RawMessage) (json.RawMessage, error) {
+	if kind != edgeprotocol.TaskApplySiteConfig || g.configSecrets == nil {
+		return encoded, nil
+	}
+	var config edgeprotocol.SiteConfig
+	if err := json.Unmarshal(encoded, &config); err != nil {
+		return nil, fmt.Errorf("decode apply-site-config payload: %w", err)
+	}
+	if err := g.configSecrets.UnsealSiteConfigSecrets(config.SiteID, config.Version, &config); err != nil {
+		return nil, fmt.Errorf("unseal apply-site-config payload: %w", err)
+	}
+	return json.Marshal(config)
+}
+
+func (g *Gateway) rewrapApplySiteConfigPayload(encoded []byte) ([]byte, bool, error) {
+	if g.configSecrets == nil {
+		return encoded, false, nil
+	}
+	var config edgeprotocol.SiteConfig
+	if err := json.Unmarshal(encoded, &config); err != nil {
+		return nil, false, err
+	}
+	changed, err := g.configSecrets.RewrapSiteConfigSecrets(config.SiteID, config.Version, &config)
+	if err != nil || !changed {
+		return encoded, changed, err
+	}
+	rewrapped, err := json.Marshal(config)
+	return rewrapped, true, err
 }
 
 func (g *Gateway) completeTask(ctx context.Context, nodeID, owner string, result edgeprotocol.AgentTaskResult) error {

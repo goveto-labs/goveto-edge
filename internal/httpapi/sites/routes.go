@@ -2,7 +2,6 @@
 package sites
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -18,6 +17,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/certmanager"
 	"goveto-edge/internal/clusteraccess"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/edgeprotocol"
 	"goveto-edge/internal/httpapi/types"
 	"goveto-edge/internal/publisher"
@@ -61,21 +61,21 @@ type siteSummary struct {
 	UpdatedAt        time.Time        `json:"updated_at"`
 }
 
-func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store) {
+func Register(e *echo.Echo, db *client.Client, publishService *publisher.Service, analyticsStore *analytics.Store, configSecrets *configseal.Sealer) {
 	read := clusteraccess.RequirePermission(db, rbac.PermissionClusterRead)
 	write := clusteraccess.RequirePermission(db, rbac.PermissionSiteWrite)
 	e.GET("/api/v1/clusters/:cluster_id/sites", list(db, analyticsStore), auth.RequireAuth, read)
-	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService), auth.RequireAuth, write)
-	e.POST("/api/v1/clusters/:cluster_id/sites/import", importSites(db, publishService), auth.RequireAuth, write)
+	e.POST("/api/v1/clusters/:cluster_id/sites", create(db, publishService, configSecrets), auth.RequireAuth, write)
+	e.POST("/api/v1/clusters/:cluster_id/sites/import", importSites(db, publishService, configSecrets), auth.RequireAuth, write)
 	e.POST("/api/v1/clusters/:cluster_id/sites/bulk", bulkSites(db, publishService), auth.RequireAuth, write)
 	e.GET("/api/v1/clusters/:cluster_id/site-templates", listTemplates(db), auth.RequireAuth, read)
-	e.POST("/api/v1/clusters/:cluster_id/site-templates", createTemplate(db), auth.RequireAuth, write)
+	e.POST("/api/v1/clusters/:cluster_id/site-templates", createTemplate(db, configSecrets), auth.RequireAuth, write)
 	e.GET("/api/v1/clusters/:cluster_id/site-templates/:template_id", getTemplate(db), auth.RequireAuth, read)
 	e.DELETE("/api/v1/clusters/:cluster_id/site-templates/:template_id", deleteTemplate(db), auth.RequireAuth, write)
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db), auth.RequireAuth, read)
-	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/export", exportSite(db), auth.RequireAuth, read)
-	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/clone", cloneSite(db, publishService), auth.RequireAuth, write)
-	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService), auth.RequireAuth, write)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id", getDetails(db, configSecrets), auth.RequireAuth, read)
+	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/export", exportSite(db, configSecrets), auth.RequireAuth, read)
+	e.POST("/api/v1/clusters/:cluster_id/sites/:site_id/clone", cloneSite(db, publishService, configSecrets), auth.RequireAuth, write)
+	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id", updateDetails(db, publishService, configSecrets), auth.RequireAuth, write)
 	e.DELETE("/api/v1/clusters/:cluster_id/sites/:site_id", deleteSite(db), auth.RequireAuth, clusteraccess.RequirePermission(db, rbac.PermissionSiteDelete))
 	e.GET("/api/v1/clusters/:cluster_id/sites/:site_id/listener", getListener(db), auth.RequireAuth, read)
 	e.PATCH("/api/v1/clusters/:cluster_id/sites/:site_id/listener", updateListener(db, publishService), auth.RequireAuth, write)
@@ -162,7 +162,7 @@ func list(db *client.Client, analyticsStore *analytics.Store) echo.HandlerFunc {
 // @summary Create site
 // @description Create a site with domains, origins and certificates; enqueues publish.
 // @Tags sites
-func create(db *client.Client, publishService *publisher.Service) echo.HandlerFunc {
+func create(db *client.Client, publishService *publisher.Service, configSecrets *configseal.Sealer) echo.HandlerFunc {
 	return func(c *echo.Context) error {
 		var input createRequest
 		if err := c.Bind(&input); err != nil {
@@ -202,7 +202,11 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 		if err := edgeprotocol.ValidateOriginPolicy(originPolicy); err != nil {
 			return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 		}
-		governance, _ := json.Marshal(originPolicy)
+		siteID, poolID := uuid.NewString(), uuid.NewString()
+		governance, err := sealedGovernanceJSON(configSecrets, c.Param("cluster_id"), poolID, originPolicy)
+		if err != nil {
+			return err
+		}
 
 		ctx := c.Request().Context()
 		for _, certificateID := range input.CertificateIDs {
@@ -225,7 +229,6 @@ func create(db *client.Client, publishService *publisher.Service) echo.HandlerFu
 			}
 		}
 
-		siteID, poolID := uuid.NewString(), uuid.NewString()
 		err = db.Tx(ctx, func(tx *client.Client) error {
 			cluster, clusterErr := tx.Cluster.FindUnique(
 				ctx,

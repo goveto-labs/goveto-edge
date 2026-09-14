@@ -52,11 +52,16 @@ func TestLoadSeparatesPurposeKeysAndAcceptsFileProvider(t *testing.T) {
 	if cfg.CertificateMasterKey != fileKey {
 		t.Fatal("certificate key file was not used")
 	}
-	if cfg.DNSCredentialMasterKey == root || cfg.NotificationMasterKey == root || cfg.TOTPMasterKey == root || cfg.AgentCAMasterKey == root {
+	if cfg.DNSCredentialMasterKey == root || cfg.NotificationMasterKey == root || cfg.TOTPMasterKey == root || cfg.AgentCAMasterKey == root || cfg.ConfigSecretMasterKey == root {
 		t.Fatal("purpose keys were not domain separated")
 	}
-	if cfg.TOTPMasterKey == cfg.CertificateMasterKey || cfg.TOTPMasterKey == cfg.DNSCredentialMasterKey || cfg.TOTPMasterKey == cfg.NotificationMasterKey {
-		t.Fatal("TOTP key was not isolated from other purposes")
+	if cfg.TOTPMasterKey == cfg.CertificateMasterKey || cfg.TOTPMasterKey == cfg.DNSCredentialMasterKey || cfg.TOTPMasterKey == cfg.NotificationMasterKey ||
+		cfg.ConfigSecretMasterKey == cfg.CertificateMasterKey || cfg.ConfigSecretMasterKey == cfg.DNSCredentialMasterKey {
+		t.Fatal("purpose keys were not isolated from each other")
+	}
+	wantPreviousConfigSecret := deriveEncodedMasterKey(previousRoot, "goveto-edge/secrets/config/v1")
+	if len(cfg.ConfigSecretPreviousKeys) != 1 || cfg.ConfigSecretPreviousKeys[0] != wantPreviousConfigSecret {
+		t.Fatalf("config secret previous keys = %#v, want derived previous root key", cfg.ConfigSecretPreviousKeys)
 	}
 	wantPreviousTOTP := deriveEncodedMasterKey(previousRoot, "goveto-edge/secrets/totp/v1")
 	if len(cfg.TOTPPreviousKeys) != 1 || cfg.TOTPPreviousKeys[0] != wantPreviousTOTP {

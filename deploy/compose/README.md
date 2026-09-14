@@ -49,7 +49,7 @@ volumes:
 
 Generated purpose keys are stored under `/var/lib/goveto-edge/secrets/` with
 mode `0600`. Losing these files makes the corresponding node, certificate,
-DNS, notification, TOTP, or Agent CA secrets unavailable.
+DNS, notification, TOTP, Agent CA, or config-secret secrets unavailable.
 
 For multiple replicas, provide the same keys to every replica instead of
 relying on local files. `NODE_CREDENTIAL_MASTER_KEY` remains the required root;
@@ -66,6 +66,23 @@ to its user ID. During rotation, configure the retired values in
 When upgrading from a version that stored plaintext seeds, stop or drain all
 old replicas before starting the new version so they cannot write plaintext
 after the startup migration has completed.
+
+Site configuration snapshots (`config_versions.config_json`), `APPLY_SITE_CONFIG`
+agent task payloads, and origin pool governance seal their sensitive fields —
+certificate private keys, origin mTLS keys, WAF challenge secrets, and ACME
+key authorizations — with the purpose-specific `CONFIG_SECRET_MASTER_KEY`,
+each ciphertext bound to its scope (site and version for snapshots, cluster
+and origin pool for governance). Rows written before sealing, or by a previous
+key, are resealed during startup rewrap; unmigratable rows are skipped with a
+warning instead of blocking startup. Rotate via `CONFIG_SECRET_PREVIOUS_KEYS`
+until that rewrap completes on every replica. Losing this key makes sealed
+snapshots unreadable, which blocks republishing those versions (and rolls
+such sites back to a disabled tombstone), so back it up together with
+`goveto-data`.
+
+Superseded snapshots are pruned hourly: each site keeps its live version, its
+newest published or rolled-back baseline, and the twenty most recent terminal
+versions. Draft snapshots pending publication are never pruned.
 
 Bootstrap identities contain an agent private key. They are available only to
 the cluster owner during installation and are removed from PostgreSQL when the

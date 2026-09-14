@@ -15,6 +15,7 @@ import (
 	"goveto-edge/internal/auth"
 	"goveto-edge/internal/captcha"
 	"goveto-edge/internal/certmanager"
+	"goveto-edge/internal/configseal"
 	"goveto-edge/internal/dnssync"
 	"goveto-edge/internal/edgecontrol"
 	"goveto-edge/internal/httpapi/adminsettings"
@@ -48,6 +49,7 @@ type SecretCiphers struct {
 	DNS          *node.CredentialCipher
 	Notification *node.CredentialCipher
 	TOTP         *node.CredentialCipher
+	Config       *node.CredentialCipher
 }
 
 func New(
@@ -118,7 +120,7 @@ func New(
 	publishapi.Register(e, orm, publishService)
 	purgeapi.Register(e, orm, purgeService)
 	jobsapi.Register(e, orm, publishService)
-	sites.Register(e, orm, publishService, analyticsData)
+	sites.Register(e, orm, publishService, analyticsData, configseal.New(secretCiphers.Config))
 	auditapi.Register(e, orm)
 	users.Register(e, orm, sessions)
 
