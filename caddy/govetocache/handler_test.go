@@ -513,11 +513,15 @@ func (w *failAfterWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func newTestCache(t *testing.T) (*simplefs.Storage, string) {
+func newTestCache(t *testing.T, stale ...time.Duration) (*simplefs.Storage, string) {
 	t.Helper()
 	dir := t.TempDir()
 	t.Cleanup(simplefs.OverrideDiskUsageForTesting(dir, 1<<40, 0))
-	storage, err := simplefs.Acquire(simplefs.Config{Path: dir, MaxSizeBytes: 1 << 20}, zap.NewNop().Sugar())
+	config := simplefs.Config{Path: dir, MaxSizeBytes: 1 << 20}
+	if len(stale) > 0 {
+		config.Stale = stale[0]
+	}
+	storage, err := simplefs.Acquire(config, zap.NewNop().Sugar())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -823,5 +827,295 @@ func TestFetchAndServeCachesUnknownLengthViaOriginTemp(t *testing.T) {
 	}
 	if string(body) != "chunked" {
 		t.Fatalf("cached body=%q", body)
+	}
+}
+
+func expireTestEntry(t *testing.T, handler *Handler, request *http.Request) {
+	t.Helper()
+	baseKey := handler.storageKey(handler.cacheKey(request, nil))
+	// Move freshness into the past while retaining the configured stale window.
+	if !handler.storage.Refresh(baseKey, request, -time.Second, nil) {
+		t.Fatal("could not expire cached entry")
+	}
+	fresh, stale, _ := handler.storage.LookupEntry(baseKey, request)
+	if fresh != nil {
+		_ = fresh.Body.Close()
+	}
+	if stale != nil {
+		_ = stale.Body.Close()
+	}
+	if fresh != nil || stale == nil {
+		t.Fatalf("expected stale entry: fresh=%t stale=%t", fresh != nil, stale != nil)
+	}
+}
+
+func assertNoCacheEntry(t *testing.T, storage *simplefs.Storage, baseKey string, request *http.Request) {
+	t.Helper()
+	fresh, stale, _ := storage.LookupEntry(baseKey, request)
+	if fresh != nil {
+		_ = fresh.Body.Close()
+	}
+	if stale != nil {
+		_ = stale.Body.Close()
+	}
+	if fresh != nil || stale != nil {
+		t.Fatalf("cache entry retained: fresh=%t stale=%t", fresh != nil, stale != nil)
+	}
+}
+
+func TestRevalidated304PrivateDropsEntry(t *testing.T) {
+	storage, _ := newTestCache(t, time.Minute)
+
+	var origin atomic.Int32
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		origin.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Content-Length", "4")
+		if r.Header.Get("If-None-Match") != "" {
+			w.Header().Set("Cache-Control", "private, no-store")
+			w.WriteHeader(http.StatusNotModified)
+			return nil
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("body"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60, XCache: true}
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+	req.Host = "example.test"
+
+	prime := httptest.NewRecorder()
+	if err := handler.ServeHTTP(prime, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if prime.Header().Get("X-Cache") != "MISS" || prime.Body.String() != "body" {
+		t.Fatalf("prime cache=%q body=%q", prime.Header().Get("X-Cache"), prime.Body.String())
+	}
+	expireTestEntry(t, handler, req)
+
+	revalidated := httptest.NewRecorder()
+	if err := handler.ServeHTTP(revalidated, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if revalidated.Header().Get("X-Cache") != "STALE" || revalidated.Body.String() != "body" {
+		t.Fatalf("revalidated cache=%q body=%q", revalidated.Header().Get("X-Cache"), revalidated.Body.String())
+	}
+	baseKey := handler.storageKey(handler.cacheKey(req, nil))
+	assertNoCacheEntry(t, storage, baseKey, req)
+
+	other := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+	other.Host = "example.test"
+	other.Header.Set("Cookie", "session=other")
+	followup := httptest.NewRecorder()
+	if err := handler.ServeHTTP(followup, other, next); err != nil {
+		t.Fatal(err)
+	}
+	if followup.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("followup cache=%q, want MISS after origin marked entry private", followup.Header().Get("X-Cache"))
+	}
+	if origin.Load() != 3 {
+		t.Fatalf("origin calls=%d, want 3", origin.Load())
+	}
+}
+
+func TestRevalidated304VaryChangeDropsEntry(t *testing.T) {
+	storage, _ := newTestCache(t, time.Minute)
+
+	var origin atomic.Int32
+	next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+		origin.Add(1)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Header().Set("ETag", `"v1"`)
+		w.Header().Set("Content-Length", "4")
+		if r.Header.Get("If-None-Match") != "" {
+			w.Header().Set("Vary", "Cookie")
+			w.WriteHeader(http.StatusNotModified)
+			return nil
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("body"))
+		return nil
+	})
+	handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60, XCache: true}
+	req := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+	req.Host = "example.test"
+
+	prime := httptest.NewRecorder()
+	if err := handler.ServeHTTP(prime, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if prime.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("prime cache=%q", prime.Header().Get("X-Cache"))
+	}
+	expireTestEntry(t, handler, req)
+
+	revalidated := httptest.NewRecorder()
+	if err := handler.ServeHTTP(revalidated, req, next); err != nil {
+		t.Fatal(err)
+	}
+	if revalidated.Header().Get("X-Cache") != "STALE" {
+		t.Fatalf("revalidated cache=%q", revalidated.Header().Get("X-Cache"))
+	}
+	baseKey := handler.storageKey(handler.cacheKey(req, nil))
+	assertNoCacheEntry(t, storage, baseKey, req)
+
+	other := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+	other.Host = "example.test"
+	other.Header.Set("Cookie", "session=other")
+	followup := httptest.NewRecorder()
+	if err := handler.ServeHTTP(followup, other, next); err != nil {
+		t.Fatal(err)
+	}
+	if followup.Header().Get("X-Cache") != "MISS" {
+		t.Fatalf("followup cache=%q, want MISS after origin changed Vary", followup.Header().Get("X-Cache"))
+	}
+	if origin.Load() != 3 {
+		t.Fatalf("origin calls=%d, want 3", origin.Load())
+	}
+}
+
+func TestRefreshDropsEntryOnInadmissible304(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		header func(http.Header)
+	}{
+		{
+			name: "origin marked private",
+			header: func(h http.Header) {
+				h.Set("Cache-Control", "private, no-store")
+			},
+		},
+		{
+			name: "origin changed vary",
+			header: func(h http.Header) {
+				h.Set("Vary", "Cookie")
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			storage, _ := newTestCache(t, time.Minute)
+
+			var origin atomic.Int32
+			next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+				origin.Add(1)
+				w.Header().Set("Content-Type", "text/plain")
+				w.Header().Set("ETag", `"v1"`)
+				w.Header().Set("Content-Length", "4")
+				if r.Header.Get("If-None-Match") != "" {
+					test.header(w.Header())
+					w.WriteHeader(http.StatusNotModified)
+					return nil
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte("body"))
+				return nil
+			})
+			handler := &Handler{SiteID: "site", Path: t.TempDir(), storage: storage, DefaultTTL: 60}
+			req := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+			req.Host = "example.test"
+
+			prime := httptest.NewRecorder()
+			if err := handler.ServeHTTP(prime, req, next); err != nil {
+				t.Fatal(err)
+			}
+			expireTestEntry(t, handler, req)
+
+			baseRaw := handler.cacheKey(req, nil)
+			baseKey := handler.storageKey(baseRaw)
+			handler.refresh(req, next, baseRaw, baseKey)
+
+			if origin.Load() != 2 {
+				t.Fatalf("origin calls=%d, want 2", origin.Load())
+			}
+			assertNoCacheEntry(t, storage, baseKey, req)
+		})
+	}
+}
+
+func TestUncacheable200DropsStaleEntry(t *testing.T) {
+	for _, mode := range []string{"fetch", "refresh"} {
+		for _, test := range []struct {
+			name         string
+			header       http.Header
+			maxBodyBytes uint64
+		}{
+			{name: "private", header: http.Header{"Cache-Control": {"private"}}},
+			{name: "no-store", header: http.Header{"Cache-Control": {"no-store"}}},
+			{name: "no-cache", header: http.Header{"Cache-Control": {"no-cache"}}},
+			{name: "set-cookie", header: http.Header{"Set-Cookie": {"session=private"}}},
+			{name: "vary-star", header: http.Header{"Vary": {"*"}}},
+			{name: "oversized", maxBodyBytes: 4},
+		} {
+			t.Run(mode+"/"+test.name, func(t *testing.T) {
+				storage, dir := newTestCache(t, time.Minute)
+				handler := &Handler{
+					SiteID: "site", Path: t.TempDir(), storage: storage,
+					DefaultTTL: 60, StaleIfErrorTTL: 60, XCache: true, MaxBodyBytes: test.maxBodyBytes,
+				}
+				request := httptest.NewRequest(http.MethodGet, "http://example.test/asset", nil)
+				var origin atomic.Int32
+				next := caddyhttp.HandlerFunc(func(w http.ResponseWriter, r *http.Request) error {
+					switch origin.Add(1) {
+					case 1:
+						w.Header().Set("ETag", `"v1"`)
+						w.Header().Set("Content-Length", "4")
+						_, _ = io.WriteString(w, "body")
+					case 2:
+						if got := r.Header.Get("If-None-Match"); got != `"v1"` {
+							t.Fatalf("revalidation If-None-Match=%q", got)
+						}
+						transferHeader(w.Header(), test.header)
+						w.Header().Set("ETag", `"v2"`)
+						w.Header().Set("Content-Length", "7")
+						_, _ = io.WriteString(w, "updated")
+					default:
+						if got := r.Header.Get("If-None-Match"); got != "" {
+							t.Fatalf("followup reused removed entry's validator: %q", got)
+						}
+						w.WriteHeader(http.StatusServiceUnavailable)
+						_, _ = io.WriteString(w, "offline")
+					}
+					return nil
+				})
+
+				prime := httptest.NewRecorder()
+				if err := handler.ServeHTTP(prime, request, next); err != nil {
+					t.Fatal(err)
+				}
+				if prime.Header().Get("X-Cache") != "MISS" || prime.Body.String() != "body" {
+					t.Fatalf("prime cache=%q body=%q", prime.Header().Get("X-Cache"), prime.Body.String())
+				}
+				expireTestEntry(t, handler, request)
+				baseRaw := handler.cacheKey(request, nil)
+				baseKey := handler.storageKey(baseRaw)
+				if mode == "refresh" {
+					handler.refresh(request, next, baseRaw, baseKey)
+				} else {
+					response := httptest.NewRecorder()
+					if err := handler.ServeHTTP(response, request, next); err != nil {
+						t.Fatal(err)
+					}
+					if response.Code != http.StatusOK || response.Header().Get("X-Cache") != "BYPASS" || response.Body.String() != "updated" {
+						t.Fatalf("response status=%d cache=%q body=%q", response.Code, response.Header().Get("X-Cache"), response.Body.String())
+					}
+				}
+				if origin.Load() != 2 {
+					t.Fatalf("origin calls=%d, want 2", origin.Load())
+				}
+				assertNoCacheEntry(t, storage, baseKey, request)
+				assertNoBodyObjects(t, dir)
+
+				other := request.Clone(request.Context())
+				other.Header.Set("Cookie", "session=other")
+				followup := httptest.NewRecorder()
+				if err := handler.ServeHTTP(followup, other, next); err != nil {
+					t.Fatal(err)
+				}
+				if followup.Code != http.StatusServiceUnavailable || followup.Body.String() != "offline" || origin.Load() != 3 {
+					t.Fatalf("followup status=%d body=%q origin calls=%d", followup.Code, followup.Body.String(), origin.Load())
+				}
+			})
+		}
 	}
 }

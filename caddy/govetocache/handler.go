@@ -261,6 +261,9 @@ func (h *Handler) fetchAndServe(w http.ResponseWriter, request *http.Request, ne
 	h.prepareResponse(captured.Header(), status)
 	varied, varyOK := h.variedHeaders(request, captured.Header())
 	if !h.cacheable(request, status, captured.Header(), uint64(captured.Size())) || !varyOK {
+		if stale != nil {
+			h.storage.DeleteEntry(baseKey)
+		}
 		if !captured.isStreamed() {
 			h.setResultHeaders(captured.Header(), "BYPASS", baseRaw, 0)
 		}
@@ -360,16 +363,21 @@ func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw
 		return
 	}
 	if captured.Status() == http.StatusNotModified {
-		_ = h.storage.Refresh(baseKey, lookupRequest, time.Duration(h.ttl(stale.StatusCode))*time.Second, captured.Header())
+		if h.admitRevalidated(lookupRequest, stale, captured.Header()) {
+			_ = h.storage.Refresh(baseKey, lookupRequest, time.Duration(h.ttl(stale.StatusCode))*time.Second, captured.Header())
+		} else {
+			h.storage.DeleteEntry(baseKey)
+		}
 		return
 	}
 	h.prepareResponse(captured.Header(), captured.Status())
-	if !h.cacheable(request, captured.Status(), captured.Header(), uint64(captured.Size())) {
+	varied, varyOK := h.variedHeaders(request, captured.Header())
+	if !h.cacheable(request, captured.Status(), captured.Header(), uint64(captured.Size())) || !varyOK {
+		h.storage.DeleteEntry(baseKey)
 		return
 	}
 	headerBytes, err := serializedHeader(captured.Status(), h.cacheStorageHeader(captured.Header()), captured.Size(), request.Method)
-	varied, ok := h.variedHeaders(request, captured.Header())
-	if err == nil && ok {
+	if err == nil {
 		if _, err = captured.Seek(0, io.SeekStart); err == nil {
 			_ = h.storage.PutReader(baseKey, h.storageKey(h.cacheKey(request, varied)), io.MultiReader(bytes.NewReader(headerBytes), captured), uint64(len(headerBytes))+uint64(captured.Size()), surrogateGroups(captured.Header(), h.SurrogateKeyHeader), varied, captured.Header().Get("ETag"), time.Duration(h.ttl(captured.Status()))*time.Second, purgeKey(request))
 		}
@@ -377,12 +385,56 @@ func (h *Handler) refresh(request *http.Request, next caddyhttp.Handler, baseRaw
 }
 
 func (h *Handler) handleNotModified(w http.ResponseWriter, request *http.Request, stale *http.Response, update http.Header, baseRaw, baseKey string) error {
+	admissible := h.admitRevalidated(request, stale, update)
 	merge304Headers(stale.Header, update)
 	h.prepareResponse(stale.Header, stale.StatusCode)
 	ttl := h.ttl(stale.StatusCode)
-	_ = h.storage.Refresh(baseKey, request, time.Duration(ttl)*time.Second, update)
+	result := "HIT"
+	if admissible {
+		_ = h.storage.Refresh(baseKey, request, time.Duration(ttl)*time.Second, update)
+	} else {
+		// The origin tightened its caching policy or changed Vary; drop the
+		// stored entry so later requests revalidate or refetch instead of
+		// sharing content under stale rules.
+		h.storage.DeleteEntry(baseKey)
+		// The 304 validated this body for the current request. STALE records
+		// its reuse after eviction, so freshness-based stale metrics may overcount.
+		result = "STALE"
+	}
 	now := time.Now()
-	return h.serveCached(w, stale, "HIT", baseRaw, simplefs.LookupMetadata{StoredAt: now, FreshUntil: now.Add(time.Duration(ttl) * time.Second)})
+	return h.serveCached(w, stale, result, baseRaw, simplefs.LookupMetadata{StoredAt: now, FreshUntil: now.Add(time.Duration(ttl) * time.Second)})
+}
+
+// admitRevalidated reports whether an entry revalidated with a 304 may stay in
+// shared storage: the merged response headers must remain shareable and the
+// response's Vary must not change the variant index. stale.Header must not yet
+// have update merged into it.
+func (h *Handler) admitRevalidated(request *http.Request, stale *http.Response, update http.Header) bool {
+	merged := stale.Header.Clone()
+	merge304Headers(merged, update)
+	// A 304 preserves the already-admitted body; an unknown ContentLength
+	// is treated as zero instead of rereading the body to measure it.
+	if !h.cacheable(request, stale.StatusCode, merged, uint64(max(stale.ContentLength, 0))) {
+		return false
+	}
+	oldVaried, oldOK := h.variedHeaders(request, stale.Header)
+	newVaried, newOK := h.variedHeaders(request, merged)
+	if !oldOK || !newOK {
+		return false
+	}
+	return varyNamesEqual(oldVaried, newVaried)
+}
+
+func varyNamesEqual(a, b http.Header) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for name := range a {
+		if _, ok := b[name]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) serveCached(w http.ResponseWriter, response *http.Response, result, key string, metadata ...simplefs.LookupMetadata) error {

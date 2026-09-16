@@ -141,4 +141,13 @@ func (s *Storage) Refresh(baseKey string, request *http.Request, ttl time.Durati
 	return s != nil && s.provider != nil && s.provider.Refresh(baseKey, request, ttl, update)
 }
 
+// DeleteEntry removes the whole multi-level entry for baseKey: the mapping
+// record plus every variant body it references.
+func (s *Storage) DeleteEntry(baseKey string) {
+	if s == nil || s.provider == nil {
+		return
+	}
+	s.provider.DeleteEntry(baseKey)
+}
+
 func (s *Storage) Delete(key string) { s.provider.Delete(key) }

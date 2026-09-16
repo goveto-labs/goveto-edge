@@ -1186,6 +1186,54 @@ func (p *provider) Refresh(baseKey string, request *http.Request, duration time.
 	return true
 }
 
+// DeleteEntry removes the whole multi-level entry for baseKey: the mapping
+// record plus every variant body it references.
+func (p *provider) DeleteEntry(baseKey string) {
+	p.operationMu.RLock()
+	defer p.operationMu.RUnlock()
+	p.capacityMu.Lock()
+	defer p.capacityMu.Unlock()
+	p.mu.Lock()
+	state := newBatchState(p)
+	mappingKey := core.MappingKeyPrefix + baseKey
+	var recoveredVariants []string
+	if mappingItem, ok := p.items[mappingKey]; ok && !mappingItem.file {
+		if mapping, err := core.DecodeMapping(mappingItem.value); err == nil {
+			for variedKey := range mapping.GetMapping() {
+				state.deleteItem(p, variedKey)
+			}
+		} else {
+			// The reverse index survives a damaged encoded mapping, so its
+			// bodies can still be removed in the same transaction.
+			state.removeItemGroups(p, mappingKey)
+			for variedKey, mappings := range p.variantMappings {
+				if _, linked := mappings[mappingKey]; linked {
+					recoveredVariants = append(recoveredVariants, variedKey)
+					state.deleteItem(p, variedKey)
+				}
+			}
+		}
+	}
+	state.deleteItem(p, mappingKey)
+	committed := len(state.items) == 0
+	if len(state.items) > 0 && p.persistBatchLocked(state) == nil {
+		p.applyBatchLocked(state)
+		// A damaged mapping without a decoded copy cannot remove its own
+		// reverse links through applyBatchLocked. Clean them after commit.
+		for _, variedKey := range recoveredVariants {
+			delete(p.variantMappings[variedKey], mappingKey)
+			if len(p.variantMappings[variedKey]) == 0 {
+				delete(p.variantMappings, variedKey)
+			}
+		}
+		committed = true
+	}
+	p.mu.Unlock()
+	if committed {
+		removeFiles(state.obsoleteFiles)
+	}
+}
+
 func (p *provider) Set(key string, value []byte, duration time.Duration) error {
 	p.operationMu.RLock()
 	defer p.operationMu.RUnlock()

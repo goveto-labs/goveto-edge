@@ -1330,3 +1330,93 @@ func TestResetReplacesAndShrinksBoltIndex(t *testing.T) {
 		t.Fatal("reset retained cache index state")
 	}
 }
+
+func TestDeleteEntryRemovesMappingAndVariantBodies(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		corruptMapping bool
+		clearDecoded   bool
+	}{
+		{name: "valid mapping"},
+		{name: "corrupt mapping with decoded copy", corruptMapping: true},
+		{name: "corrupt mapping without decoded copy", corruptMapping: true, clearDecoded: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			provider := newTestProvider(t, t.TempDir(), time.Minute)
+			other := "GET-http-example.test-/other"
+			if err := provider.SetMultiLevel(other, other, cachedResponse("other"), nil, "", time.Minute, other); err != nil {
+				t.Fatal(err)
+			}
+			wantUsed, wantPhysical := provider.cacheUsed.Load(), provider.physicalUsed.Load()
+			base := "GET-http-example.test-/asset"
+			mappingKey := core.MappingKeyPrefix + base
+			variants := map[string]http.Header{
+				base + "-en": {"Accept-Language": []string{"en"}},
+				base + "-zh": {"Accept-Language": []string{"zh"}},
+			}
+			for variedKey, varied := range variants {
+				if err := provider.SetMultiLevel(base, variedKey, cachedResponse(strings.TrimPrefix(variedKey, base+"-")), varied, "", time.Minute, base); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			provider.mu.Lock()
+			bodyPaths := make(map[string]string, len(variants))
+			for variedKey := range variants {
+				bodyPaths[variedKey] = string(provider.items[variedKey].value)
+			}
+			if test.corruptMapping {
+				item := provider.items[mappingKey]
+				// Preserve size/accounting and the reverse index while corrupting JSON.
+				item.value = bytes.Repeat([]byte{'!'}, len(item.value))
+				if test.clearDecoded {
+					item.mapping = nil
+				}
+				provider.items[mappingKey] = item
+			}
+			provider.mu.Unlock()
+
+			provider.DeleteEntry(base)
+
+			for _, varied := range variants {
+				lookup := &http.Request{Method: http.MethodGet, Header: varied}
+				fresh, stale := provider.GetMultiLevel(base, lookup, &core.Revalidator{})
+				if fresh != nil {
+					_ = fresh.Body.Close()
+				}
+				if stale != nil {
+					_ = stale.Body.Close()
+				}
+				if fresh != nil || stale != nil {
+					t.Fatal("entry still served after DeleteEntry")
+				}
+			}
+			if remaining := provider.ListKeys(); len(remaining) != 2 {
+				t.Fatalf("expected only unrelated entry after DeleteEntry: %v", remaining)
+			}
+			for variedKey, path := range bodyPaths {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Fatalf("variant %s body file still present after DeleteEntry: %v", variedKey, err)
+				}
+				if len(provider.variantMappings[variedKey]) != 0 {
+					t.Fatalf("variant %s reverse mappings remain: %v", variedKey, provider.variantMappings[variedKey])
+				}
+			}
+			if got := provider.cacheUsed.Load(); got != wantUsed {
+				t.Fatalf("cache used bytes after DeleteEntry = %d, want %d", got, wantUsed)
+			}
+			if got := provider.physicalUsed.Load(); got != wantPhysical {
+				t.Fatalf("physical used bytes after DeleteEntry = %d, want %d", got, wantPhysical)
+			}
+			fresh, _ := provider.GetMultiLevel(other, &http.Request{Header: http.Header{}}, &core.Revalidator{})
+			if fresh == nil {
+				t.Fatal("DeleteEntry removed an unrelated entry")
+			}
+			_ = fresh.Body.Close()
+			provider.DeleteEntry(other)
+			if provider.cacheUsed.Load() != 0 || provider.physicalUsed.Load() != 0 || len(provider.variantMappings) != 0 || provider.expirationEntries.Load() != 0 {
+				t.Fatal("deleting all entries left accounting or index state")
+			}
+		})
+	}
+}
